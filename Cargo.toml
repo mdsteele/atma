@@ -1,0 +1,12 @@
+[package]
+name = "atma"
+version = "0.1.0"
+authors = ["Matthew D. Steele <mdsteele@alum.mit.edu>"]
+description = "Assembler Toolchain for Multiple (retro) Architectures"
+keywords = ["assembly"]
+license = "MIT"
+edition = "2024"
+
+[dependencies]
+byteorder = "1"
+clap = { version = "4.5", features = ["derive"] }
