@@ -1,8 +1,11 @@
-//! Facilities for simulating and debugging compiled binaries.
-
+use super::bus::Ram64k;
+use super::env::SimEnv;
+use super::proc::{Mos6502, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::io::{self, Read, Seek, SeekFrom, Write};
+
+//===========================================================================//
 
 macro_rules! invalid_data {
     ($e:expr) => {
@@ -15,79 +18,7 @@ macro_rules! invalid_data {
     };
 }
 
-/// A simulated processor.
-pub trait SimProc {
-    /// Returns a human-readable description of this simulated processor.
-    fn description(&self) -> String;
-
-    /// Advances this processor by one instruction.
-    fn step(&mut self);
-}
-
-/// A simulated MOS 6502 processor connected to 64k of RAM.
-#[allow(dead_code)] // TODO
-pub struct Mos6502 {
-    pc: u16,
-    reg_s: u8,
-    reg_p: u8,
-    reg_a: u8,
-    reg_x: u8,
-    reg_y: u8,
-    ram: Box<[u8; 0x10000]>,
-}
-
-impl Mos6502 {
-    /// Returns a new simulated MOS 6502 processor with the given RAM state.
-    pub fn new(ram: Box<[u8; 0x10000]>) -> Mos6502 {
-        let pc = ((ram[0xfffd] as u16) << 8) | (ram[0xfffc] as u16);
-        Mos6502 {
-            pc,
-            reg_s: 0,
-            reg_p: 0,
-            reg_a: 0,
-            reg_x: 0,
-            reg_y: 0,
-            ram,
-        }
-    }
-}
-
-impl SimProc for Mos6502 {
-    fn description(&self) -> String {
-        format!("MOS 6502")
-    }
-
-    fn step(&mut self) {
-        // TODO: implement this
-    }
-}
-
-/// A complete simulated environment, including one or more processors and
-/// memory address spaces.
-pub struct SimEnv {
-    selected_processor: String,
-    processors: HashMap<String, Box<dyn SimProc>>,
-}
-
-impl SimEnv {
-    /// Returns a human-readable, multi-line description of this simulated
-    /// environment.
-    pub fn description(&self) -> String {
-        self.processors
-            .iter()
-            .map(|(name, proc)| format!("{}: {}\n", name, proc.description()))
-            .collect::<Vec<String>>()
-            .join("\n")
-    }
-
-    /// Advances the currently selected processor by one instruction.
-    pub fn step(&mut self) {
-        self.processors
-            .get_mut(&self.selected_processor)
-            .unwrap()
-            .step()
-    }
-}
+//===========================================================================//
 
 /// Reads a compiled binary file, and returns a simulated environment that
 /// represents it.
@@ -134,12 +65,13 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         // Copy reset_addr into RAM at the reset vector.
         cursor.seek(SeekFrom::Start(0xfffc))?;
         cursor.write_u16::<LittleEndian>(reset_addr)?;
-        processors.insert("cpu".to_string(), Box::new(Mos6502::new(ram)));
+        let bus = Box::new(Ram64k::new(ram));
+        let cpu = Box::new(Mos6502::new(bus));
+        processors.insert("cpu".to_string(), cpu);
     } else {
         invalid_data!("unsupported binary file type");
     }
-    return Ok(SimEnv {
-        selected_processor: "cpu".to_string(),
-        processors,
-    });
+    return Ok(SimEnv { selected_processor: "cpu".to_string(), processors });
 }
+
+//===========================================================================//
