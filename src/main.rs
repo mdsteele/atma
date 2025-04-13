@@ -29,11 +29,20 @@ fn main() -> io::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Db { binary, .. } => {
-            let sim_env = {
+            let mut sim_env = {
                 let file = File::open(&binary)?;
                 atma::db::load_binary(io::BufReader::new(file))?
             };
             print!("{}", sim_env.description());
+            loop {
+                match sim_env.step() {
+                    Ok(()) => {}
+                    Err(atma::db::SimErr::InvalidOpcode(opcode)) => {
+                        println!("Invalid opcode: ${:02x}", opcode);
+                        break;
+                    }
+                }
+            }
         }
     }
     Ok(())

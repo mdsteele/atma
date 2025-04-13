@@ -1,4 +1,4 @@
-use super::proc::SimProc;
+use super::proc::{SimErr, SimProc};
 use std::collections::HashMap;
 
 //===========================================================================//
@@ -28,7 +28,7 @@ impl SimEnv {
     }
 
     /// Advances the currently selected processor by one instruction.
-    pub fn step(&mut self) {
+    pub fn step(&mut self) -> Result<(), SimErr> {
         self.processors.get_mut(&self.selected_processor).unwrap().step()
     }
 }
