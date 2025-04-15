@@ -1,3 +1,4 @@
+use atma::db::SimBreak;
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::io;
@@ -37,8 +38,15 @@ fn main() -> io::Result<()> {
             loop {
                 match sim_env.step() {
                     Ok(()) => {}
-                    Err(atma::db::SimErr::InvalidOpcode(opcode)) => {
-                        println!("Invalid opcode: ${:02x}", opcode);
+                    Err(SimBreak::Breakpoint(breakpoint)) => {
+                        println!("Breakpoint: {:?}", breakpoint);
+                        break;
+                    }
+                    Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
+                        println!(
+                            "Halted by {} opcode ${:02x}",
+                            mnemonic, opcode
+                        );
                         break;
                     }
                 }

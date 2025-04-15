@@ -4,12 +4,33 @@ pub use mos6502::Mos6502;
 
 //===========================================================================//
 
-/// An error that can occur during simulation.
+/// Specifies a condition under which the simulation should be paused.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum SimErr {
-    /// Tried to execute an invalid opcode.
-    InvalidOpcode(u8),
-    // TODO: support breakpoints
+pub enum Breakpoint {
+    /// Break if the processor tries execute an instruction with the given
+    /// opcode.
+    Opcode(u8),
+    /// Break when the program counter becomes equal to the given value.
+    Pc(u32),
+    /// Break when the processor tries to read from the given address on its
+    /// bus.
+    ReadAddr(u32),
+    /// Break when the processor tries to write to the given address on its
+    /// bus.
+    WriteAddr(u32),
+}
+
+//===========================================================================//
+
+/// A condition that pauses or halts the simulation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SimBreak {
+    /// A breakpoint was reached.
+    Breakpoint(Breakpoint),
+    /// The processor executed an instruction (with the given mnemonic and
+    /// opcode) that halts the processor, and now the processor cannot continue
+    /// until a reset and/or interrupt occurs.
+    HaltOpcode(&'static str, u8),
 }
 
 //===========================================================================//
@@ -23,7 +44,7 @@ pub trait SimProc {
     fn pc(&self) -> u32;
 
     /// Advances this processor by one instruction.
-    fn step(&mut self) -> Result<(), SimErr>;
+    fn step(&mut self) -> Result<(), SimBreak>;
 }
 
 //===========================================================================//

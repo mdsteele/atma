@@ -1,5 +1,5 @@
 use crate::db::bus::SimBus;
-use crate::db::proc::{SimErr, SimProc};
+use crate::db::proc::{SimBreak, SimProc};
 
 //===========================================================================//
 
@@ -59,24 +59,24 @@ impl Mos6502 {
         Mos6502 { pc, reg_s: 0, reg_p: 0, reg_a: 0, reg_x: 0, reg_y: 0, bus }
     }
 
-    fn op_sbc(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_sbc(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let rhs = 0u8.wrapping_sub(self.read_mode_data(mode)?);
         self.add_to(rhs)
     }
 
-    fn op_adc(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_adc(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let rhs = self.read_mode_data(mode)?;
         self.add_to(rhs)
     }
 
-    fn op_and(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_and(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let rhs: u8 = self.read_mode_data(mode)?;
         self.reg_a &= rhs;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_asl(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_asl(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         let lhs: u8 = self.bus.read_byte(addr as u32);
         let result: u8 = self.shift_left(lhs, false)?;
@@ -84,36 +84,36 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_asl_a(&mut self) -> Result<(), SimErr> {
+    fn op_asl_a(&mut self) -> Result<(), SimBreak> {
         self.reg_a = self.shift_left(self.reg_a, false)?;
         Ok(())
     }
 
-    fn op_bcc(&mut self) -> Result<(), SimErr> {
+    fn op_bcc(&mut self) -> Result<(), SimBreak> {
         self.branch_if(!self.get_flag(PROC_FLAG_C))
     }
 
-    fn op_bcs(&mut self) -> Result<(), SimErr> {
+    fn op_bcs(&mut self) -> Result<(), SimBreak> {
         self.branch_if(self.get_flag(PROC_FLAG_C))
     }
 
-    fn op_beq(&mut self) -> Result<(), SimErr> {
+    fn op_beq(&mut self) -> Result<(), SimBreak> {
         self.branch_if(self.get_flag(PROC_FLAG_Z))
     }
 
-    fn op_bmi(&mut self) -> Result<(), SimErr> {
+    fn op_bmi(&mut self) -> Result<(), SimBreak> {
         self.branch_if(self.get_flag(PROC_FLAG_N))
     }
 
-    fn op_bne(&mut self) -> Result<(), SimErr> {
+    fn op_bne(&mut self) -> Result<(), SimBreak> {
         self.branch_if(!self.get_flag(PROC_FLAG_Z))
     }
 
-    fn op_bpl(&mut self) -> Result<(), SimErr> {
+    fn op_bpl(&mut self) -> Result<(), SimBreak> {
         self.branch_if(!self.get_flag(PROC_FLAG_N))
     }
 
-    fn op_brk(&mut self) -> Result<(), SimErr> {
+    fn op_brk(&mut self) -> Result<(), SimBreak> {
         self.read_immediate_byte(); // the 6502 reads and ignores this byte
         self.push_word(self.pc)?;
         // Bits that don't actually exist in the P register are set to 1 on the
@@ -126,15 +126,15 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_bvc(&mut self) -> Result<(), SimErr> {
+    fn op_bvc(&mut self) -> Result<(), SimBreak> {
         self.branch_if(!self.get_flag(PROC_FLAG_V))
     }
 
-    fn op_bvs(&mut self) -> Result<(), SimErr> {
+    fn op_bvs(&mut self) -> Result<(), SimBreak> {
         self.branch_if(self.get_flag(PROC_FLAG_V))
     }
 
-    fn op_bit(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_bit(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let data: u8 = self.read_mode_data(mode)?;
         self.reg_p &= !(PROC_FLAG_N | PROC_FLAG_V | PROC_FLAG_Z);
         self.reg_p |= data & (PROC_FLAG_N | PROC_FLAG_V);
@@ -144,39 +144,39 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_clc(&mut self) -> Result<(), SimErr> {
+    fn op_clc(&mut self) -> Result<(), SimBreak> {
         self.reg_p &= !PROC_FLAG_C;
         Ok(())
     }
 
-    fn op_cld(&mut self) -> Result<(), SimErr> {
+    fn op_cld(&mut self) -> Result<(), SimBreak> {
         self.reg_p &= !PROC_FLAG_D;
         Ok(())
     }
 
-    fn op_cli(&mut self) -> Result<(), SimErr> {
+    fn op_cli(&mut self) -> Result<(), SimBreak> {
         self.reg_p &= !PROC_FLAG_I;
         Ok(())
     }
 
-    fn op_clv(&mut self) -> Result<(), SimErr> {
+    fn op_clv(&mut self) -> Result<(), SimBreak> {
         self.reg_p &= !PROC_FLAG_V;
         Ok(())
     }
 
-    fn op_cmp(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_cmp(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.compare_to(self.reg_a, mode)
     }
 
-    fn op_cpx(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_cpx(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.compare_to(self.reg_x, mode)
     }
 
-    fn op_cpy(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_cpy(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.compare_to(self.reg_y, mode)
     }
 
-    fn op_dec(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_dec(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         let mut data: u8 = self.bus.read_byte(addr as u32);
         data = data.wrapping_sub(1);
@@ -185,26 +185,26 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_dex(&mut self) -> Result<(), SimErr> {
+    fn op_dex(&mut self) -> Result<(), SimBreak> {
         self.reg_x = self.reg_x.wrapping_sub(1);
         self.set_nz_flags(self.reg_x);
         Ok(())
     }
 
-    fn op_dey(&mut self) -> Result<(), SimErr> {
+    fn op_dey(&mut self) -> Result<(), SimBreak> {
         self.reg_y = self.reg_y.wrapping_sub(1);
         self.set_nz_flags(self.reg_y);
         Ok(())
     }
 
-    fn op_eor(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_eor(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let rhs: u8 = self.read_mode_data(mode)?;
         self.reg_a ^= rhs;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_inc(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_inc(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         let mut data: u8 = self.bus.read_byte(addr as u32);
         data = data.wrapping_add(1);
@@ -213,24 +213,24 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_inx(&mut self) -> Result<(), SimErr> {
+    fn op_inx(&mut self) -> Result<(), SimBreak> {
         self.reg_x = self.reg_x.wrapping_add(1);
         self.set_nz_flags(self.reg_x);
         Ok(())
     }
 
-    fn op_iny(&mut self) -> Result<(), SimErr> {
+    fn op_iny(&mut self) -> Result<(), SimBreak> {
         self.reg_y = self.reg_y.wrapping_add(1);
         self.set_nz_flags(self.reg_y);
         Ok(())
     }
 
-    fn op_jmp(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_jmp(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.pc = self.read_mode_addr(mode)?;
         Ok(())
     }
 
-    fn op_jsr(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_jsr(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let dest: u16 = self.read_mode_addr(mode)?;
         let ret: u16 = self.pc.wrapping_sub(1);
         self.push_word(ret)?;
@@ -238,25 +238,25 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_lda(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_lda(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.reg_a = self.read_mode_data(mode)?;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_ldx(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_ldx(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.reg_x = self.read_mode_data(mode)?;
         self.set_nz_flags(self.reg_x);
         Ok(())
     }
 
-    fn op_ldy(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_ldy(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         self.reg_y = self.read_mode_data(mode)?;
         self.set_nz_flags(self.reg_y);
         Ok(())
     }
 
-    fn op_lsr(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_lsr(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         let lhs: u8 = self.bus.read_byte(addr as u32);
         let result: u8 = self.shift_right(lhs, false)?;
@@ -264,44 +264,44 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_lsr_a(&mut self) -> Result<(), SimErr> {
+    fn op_lsr_a(&mut self) -> Result<(), SimBreak> {
         self.reg_a = self.shift_right(self.reg_a, false)?;
         Ok(())
     }
 
-    fn op_nop(&mut self) -> Result<(), SimErr> {
+    fn op_nop(&mut self) -> Result<(), SimBreak> {
         Ok(())
     }
 
-    fn op_ora(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_ora(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let rhs: u8 = self.read_mode_data(mode)?;
         self.reg_a |= rhs;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_pla(&mut self) -> Result<(), SimErr> {
+    fn op_pla(&mut self) -> Result<(), SimBreak> {
         self.reg_a = self.pull_byte()?;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_plp(&mut self) -> Result<(), SimErr> {
+    fn op_plp(&mut self) -> Result<(), SimBreak> {
         self.reg_p = self.pull_byte()? & REG_P_MASK;
         Ok(())
     }
 
-    fn op_pha(&mut self) -> Result<(), SimErr> {
+    fn op_pha(&mut self) -> Result<(), SimBreak> {
         self.push_byte(self.reg_a)
     }
 
-    fn op_php(&mut self) -> Result<(), SimErr> {
+    fn op_php(&mut self) -> Result<(), SimBreak> {
         // Bits that don't actually exist in the P register are set to 1 on the
         // stack by the PHP instruction.
         self.push_byte(self.reg_p | !REG_P_MASK)
     }
 
-    fn op_rol(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_rol(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         let lhs: u8 = self.bus.read_byte(addr as u32);
         let carry_in = self.get_flag(PROC_FLAG_C);
@@ -310,13 +310,13 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_rol_a(&mut self) -> Result<(), SimErr> {
+    fn op_rol_a(&mut self) -> Result<(), SimBreak> {
         let carry_in = self.get_flag(PROC_FLAG_C);
         self.reg_a = self.shift_left(self.reg_a, carry_in)?;
         Ok(())
     }
 
-    fn op_ror(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_ror(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         let lhs: u8 = self.bus.read_byte(addr as u32);
         let carry_in = self.get_flag(PROC_FLAG_C);
@@ -325,93 +325,155 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn op_ror_a(&mut self) -> Result<(), SimErr> {
+    fn op_ror_a(&mut self) -> Result<(), SimBreak> {
         let carry_in = self.get_flag(PROC_FLAG_C);
         self.reg_a = self.shift_right(self.reg_a, carry_in)?;
         Ok(())
     }
 
-    fn op_rti(&mut self) -> Result<(), SimErr> {
+    fn op_rti(&mut self) -> Result<(), SimBreak> {
         self.reg_p = self.pull_byte()?;
         self.pc = self.pull_word()?;
         Ok(())
     }
 
-    fn op_rts(&mut self) -> Result<(), SimErr> {
+    fn op_rts(&mut self) -> Result<(), SimBreak> {
         let addr: u16 = self.pull_word()?;
         self.pc = addr.wrapping_add(1);
         Ok(())
     }
 
-    fn op_sec(&mut self) -> Result<(), SimErr> {
+    fn op_sec(&mut self) -> Result<(), SimBreak> {
         self.reg_p |= PROC_FLAG_C;
         Ok(())
     }
 
-    fn op_sed(&mut self) -> Result<(), SimErr> {
+    fn op_sed(&mut self) -> Result<(), SimBreak> {
         self.reg_p |= PROC_FLAG_D;
         Ok(())
     }
 
-    fn op_sei(&mut self) -> Result<(), SimErr> {
+    fn op_sei(&mut self) -> Result<(), SimBreak> {
         self.reg_p |= PROC_FLAG_I;
         Ok(())
     }
 
-    fn op_sta(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_sta(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         self.bus.write_byte(addr as u32, self.reg_a);
         Ok(())
     }
 
-    fn op_stx(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_stx(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         self.bus.write_byte(addr as u32, self.reg_x);
         Ok(())
     }
 
-    fn op_sty(&mut self, mode: AddrMode) -> Result<(), SimErr> {
+    fn op_sty(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
         let addr: u16 = self.read_mode_addr(mode)?;
         self.bus.write_byte(addr as u32, self.reg_y);
         Ok(())
     }
 
-    fn op_tax(&mut self) -> Result<(), SimErr> {
+    fn op_tax(&mut self) -> Result<(), SimBreak> {
         self.reg_x = self.reg_a;
         self.set_nz_flags(self.reg_x);
         Ok(())
     }
 
-    fn op_tay(&mut self) -> Result<(), SimErr> {
+    fn op_tay(&mut self) -> Result<(), SimBreak> {
         self.reg_y = self.reg_a;
         self.set_nz_flags(self.reg_y);
         Ok(())
     }
 
-    fn op_tsx(&mut self) -> Result<(), SimErr> {
+    fn op_tsx(&mut self) -> Result<(), SimBreak> {
         self.reg_x = self.reg_s;
         self.set_nz_flags(self.reg_x);
         Ok(())
     }
 
-    fn op_txa(&mut self) -> Result<(), SimErr> {
+    fn op_txa(&mut self) -> Result<(), SimBreak> {
         self.reg_a = self.reg_x;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_txs(&mut self) -> Result<(), SimErr> {
+    fn op_txs(&mut self) -> Result<(), SimBreak> {
         self.reg_s = self.reg_x;
         Ok(()) // TXS does not update processor flags
     }
 
-    fn op_tya(&mut self) -> Result<(), SimErr> {
+    fn op_tya(&mut self) -> Result<(), SimBreak> {
         self.reg_a = self.reg_y;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn add_to(&mut self, rhs: u8) -> Result<(), SimErr> {
+    fn op_undocumented_alr(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
+        let rhs: u8 = self.read_mode_data(mode)?;
+        self.reg_a &= rhs;
+        self.reg_a = self.shift_right(self.reg_a, false)?;
+        Ok(())
+    }
+
+    fn op_undocumented_anc(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
+        let rhs: u8 = self.read_mode_data(mode)?;
+        self.reg_a &= rhs;
+        self.set_nz_flags(self.reg_a);
+        self.set_flag(PROC_FLAG_C, (self.reg_a & 0x80) != 0);
+        Ok(())
+    }
+
+    fn op_undocumented_arr(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
+        let rhs: u8 = self.read_mode_data(mode)?;
+        self.reg_a &= rhs;
+        let carry_in = self.get_flag(PROC_FLAG_C);
+        self.reg_a = self.shift_right(self.reg_a, carry_in)?;
+        Ok(())
+    }
+
+    fn op_undocumented_dcp(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
+        let addr: u16 = self.read_mode_addr(mode)?;
+        let mut data: u8 = self.bus.read_byte(addr as u32);
+        data = data.wrapping_sub(1);
+        self.set_nz_flags(data);
+        self.bus.write_byte(addr as u32, data);
+        self.set_flag(PROC_FLAG_C, self.reg_a >= data);
+        self.set_nz_flags(self.reg_a.wrapping_sub(data));
+        Ok(())
+    }
+
+    fn op_undocumented_jam(&mut self, opcode: u8) -> Result<(), SimBreak> {
+        self.pc = self.pc.wrapping_sub(1); // keep PC at JAM instruction
+        Err(SimBreak::HaltOpcode("JAM", opcode))
+    }
+
+    fn op_undocumented_nop(
+        &mut self,
+        opt_mode: Option<AddrMode>,
+    ) -> Result<(), SimBreak> {
+        if let Some(mode) = opt_mode {
+            self.read_mode_addr(mode)?; // ignore the result
+        }
+        Ok(())
+    }
+
+    fn op_undocumented_sbc(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
+        self.op_sbc(mode)
+    }
+
+    fn op_undocumented_sbx(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
+        let rhs: u8 = self.read_mode_data(mode)?;
+        let lhs: u8 = self.reg_a & self.reg_x;
+        self.reg_x = lhs.wrapping_sub(rhs);
+        self.set_flag(PROC_FLAG_C, lhs >= rhs);
+        self.set_nz_flags(self.reg_x);
+        Ok(())
+    }
+
+    fn add_to(&mut self, rhs: u8) -> Result<(), SimBreak> {
         let lhs: u8 = self.reg_a;
         let sum: u8 = if self.get_flag(PROC_FLAG_D) {
             0 // TODO: implement decimal mode
@@ -429,7 +491,7 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn branch_if(&mut self, condition: bool) -> Result<(), SimErr> {
+    fn branch_if(&mut self, condition: bool) -> Result<(), SimBreak> {
         let offset: i8 = self.read_immediate_byte() as i8;
         if condition {
             self.pc = self.pc.wrapping_add(offset as u16);
@@ -437,40 +499,40 @@ impl Mos6502 {
         Ok(())
     }
 
-    fn compare_to(&mut self, lhs: u8, mode: AddrMode) -> Result<(), SimErr> {
+    fn compare_to(&mut self, lhs: u8, mode: AddrMode) -> Result<(), SimBreak> {
         let rhs: u8 = self.read_mode_data(mode)?;
         self.set_flag(PROC_FLAG_C, lhs >= rhs);
         self.set_nz_flags(lhs.wrapping_sub(rhs));
         Ok(())
     }
 
-    fn pull_byte(&mut self) -> Result<u8, SimErr> {
+    fn pull_byte(&mut self) -> Result<u8, SimBreak> {
         self.reg_s = self.reg_s.wrapping_add(1);
         let addr: u16 = 0x0100 | (self.reg_s as u16);
         Ok(self.bus.read_byte(addr as u32))
     }
 
-    fn pull_word(&mut self) -> Result<u16, SimErr> {
+    fn pull_word(&mut self) -> Result<u16, SimBreak> {
         let lo: u8 = self.pull_byte()?;
         let hi: u8 = self.pull_byte()?;
         Ok(((hi as u16) << 8) | (lo as u16))
     }
 
-    fn push_byte(&mut self, data: u8) -> Result<(), SimErr> {
+    fn push_byte(&mut self, data: u8) -> Result<(), SimBreak> {
         let addr: u16 = 0x0100 | (self.reg_s as u16);
         self.bus.write_byte(addr as u32, data);
         self.reg_s = self.reg_s.wrapping_sub(1);
         Ok(())
     }
 
-    fn push_word(&mut self, data: u16) -> Result<(), SimErr> {
+    fn push_word(&mut self, data: u16) -> Result<(), SimBreak> {
         let lo: u8 = (data & 0xff) as u8;
         let hi: u8 = (data >> 8) as u8;
         self.push_byte(hi)?;
         self.push_byte(lo)
     }
 
-    fn shift_left(&mut self, lhs: u8, carry_in: bool) -> Result<u8, SimErr> {
+    fn shift_left(&mut self, lhs: u8, carry_in: bool) -> Result<u8, SimBreak> {
         self.set_flag(PROC_FLAG_C, (lhs & 0x80) != 0);
         let mut result: u8 = lhs << 1;
         if carry_in {
@@ -480,7 +542,11 @@ impl Mos6502 {
         Ok(result)
     }
 
-    fn shift_right(&mut self, lhs: u8, carry_in: bool) -> Result<u8, SimErr> {
+    fn shift_right(
+        &mut self,
+        lhs: u8,
+        carry_in: bool,
+    ) -> Result<u8, SimBreak> {
         self.set_flag(PROC_FLAG_C, (lhs & 0x01) != 0);
         let mut result: u8 = lhs >> 1;
         if carry_in {
@@ -510,7 +576,7 @@ impl Mos6502 {
         ((hi as u16) << 8) | (lo as u16)
     }
 
-    fn read_mode_addr(&mut self, mode: AddrMode) -> Result<u16, SimErr> {
+    fn read_mode_addr(&mut self, mode: AddrMode) -> Result<u16, SimBreak> {
         match mode {
             AddrMode::Immediate => {
                 let addr: u16 = self.pc;
@@ -570,7 +636,7 @@ impl Mos6502 {
         }
     }
 
-    fn read_mode_data(&mut self, mode: AddrMode) -> Result<u8, SimErr> {
+    fn read_mode_data(&mut self, mode: AddrMode) -> Result<u8, SimBreak> {
         let addr = self.read_mode_addr(mode)?;
         Ok(self.bus.read_byte(addr as u32))
     }
@@ -607,25 +673,41 @@ impl SimProc for Mos6502 {
         self.pc as u32
     }
 
-    fn step(&mut self) -> Result<(), SimErr> {
+    fn step(&mut self) -> Result<(), SimBreak> {
         let opcode = self.bus.read_byte(self.pc as u32);
         self.pc = self.pc.wrapping_add(1);
         match opcode {
             0x00 => self.op_brk(),
             0x01 => self.op_ora(AddrMode::XIndexedZeroPageIndirect),
+            0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92
+            | 0xb2 | 0xd2 | 0xf2 => self.op_undocumented_jam(opcode),
+            0x04 | 0x44 | 0x64 => {
+                self.op_undocumented_nop(Some(AddrMode::ZeroPage))
+            }
             0x05 => self.op_ora(AddrMode::ZeroPage),
             0x06 => self.op_asl(AddrMode::ZeroPage),
             0x08 => self.op_php(),
             0x09 => self.op_ora(AddrMode::Immediate),
             0x0a => self.op_asl_a(),
+            0x0b | 0x2b => self.op_undocumented_anc(AddrMode::Immediate),
+            0x0c => self.op_undocumented_nop(Some(AddrMode::Absolute)),
             0x0d => self.op_ora(AddrMode::Absolute),
             0x0e => self.op_asl(AddrMode::Absolute),
             0x10 => self.op_bpl(),
             0x11 => self.op_ora(AddrMode::ZeroPageIndirectYIndexed),
+            0x14 | 0x34 | 0x54 | 0x74 | 0xd4 | 0xf4 => {
+                self.op_undocumented_nop(Some(AddrMode::XIndexedZeroPage))
+            }
             0x15 => self.op_ora(AddrMode::XIndexedZeroPage),
             0x16 => self.op_asl(AddrMode::XIndexedZeroPage),
             0x18 => self.op_clc(),
             0x19 => self.op_ora(AddrMode::YIndexedAbsolute),
+            0x1a | 0x3a | 0x5a | 0x7a | 0xda | 0xfa => {
+                self.op_undocumented_nop(None)
+            }
+            0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => {
+                self.op_undocumented_nop(Some(AddrMode::XIndexedAbsolute))
+            }
             0x1d => self.op_ora(AddrMode::XIndexedAbsolute),
             0x1e => self.op_asl(AddrMode::XIndexedAbsolute),
             0x20 => self.op_jsr(AddrMode::Absolute),
@@ -654,6 +736,7 @@ impl SimProc for Mos6502 {
             0x48 => self.op_pha(),
             0x49 => self.op_eor(AddrMode::Immediate),
             0x4a => self.op_lsr_a(),
+            0x4b => self.op_undocumented_alr(AddrMode::Immediate),
             0x4c => self.op_jmp(AddrMode::Absolute),
             0x4d => self.op_eor(AddrMode::Absolute),
             0x4e => self.op_lsr(AddrMode::Absolute),
@@ -672,6 +755,7 @@ impl SimProc for Mos6502 {
             0x68 => self.op_pla(),
             0x69 => self.op_adc(AddrMode::Immediate),
             0x6a => self.op_ror_a(),
+            0x6b => self.op_undocumented_arr(AddrMode::Immediate),
             0x6c => self.op_jmp(AddrMode::AbsoluteIndirect),
             0x6d => self.op_adc(AddrMode::Absolute),
             0x6e => self.op_ror(AddrMode::Absolute),
@@ -683,6 +767,9 @@ impl SimProc for Mos6502 {
             0x79 => self.op_adc(AddrMode::YIndexedAbsolute),
             0x7d => self.op_adc(AddrMode::XIndexedAbsolute),
             0x7e => self.op_ror(AddrMode::XIndexedAbsolute),
+            0x80 | 0x82 | 0x89 | 0xc2 | 0xe2 => {
+                self.op_undocumented_nop(Some(AddrMode::Immediate))
+            }
             0x81 => self.op_sta(AddrMode::XIndexedZeroPageIndirect),
             0x84 => self.op_sty(AddrMode::ZeroPage),
             0x85 => self.op_sta(AddrMode::ZeroPage),
@@ -726,23 +813,35 @@ impl SimProc for Mos6502 {
             0xbe => self.op_ldx(AddrMode::YIndexedAbsolute),
             0xc0 => self.op_cpy(AddrMode::Immediate),
             0xc1 => self.op_cmp(AddrMode::XIndexedZeroPageIndirect),
+            0xc3 => {
+                self.op_undocumented_dcp(AddrMode::XIndexedZeroPageIndirect)
+            }
             0xc4 => self.op_cpy(AddrMode::ZeroPage),
             0xc5 => self.op_cmp(AddrMode::ZeroPage),
             0xc6 => self.op_dec(AddrMode::ZeroPage),
+            0xc7 => self.op_undocumented_dcp(AddrMode::ZeroPage),
             0xc8 => self.op_iny(),
             0xc9 => self.op_cmp(AddrMode::Immediate),
             0xca => self.op_dex(),
+            0xcb => self.op_undocumented_sbx(AddrMode::Immediate),
             0xcc => self.op_cpy(AddrMode::Absolute),
             0xcd => self.op_cmp(AddrMode::Absolute),
             0xce => self.op_dec(AddrMode::Absolute),
+            0xcf => self.op_undocumented_dcp(AddrMode::Absolute),
             0xd0 => self.op_bne(),
             0xd1 => self.op_cmp(AddrMode::ZeroPageIndirectYIndexed),
+            0xd3 => {
+                self.op_undocumented_dcp(AddrMode::ZeroPageIndirectYIndexed)
+            }
             0xd5 => self.op_cmp(AddrMode::XIndexedZeroPage),
             0xd6 => self.op_dec(AddrMode::XIndexedZeroPage),
+            0xd7 => self.op_undocumented_dcp(AddrMode::XIndexedZeroPage),
             0xd8 => self.op_cld(),
             0xd9 => self.op_cmp(AddrMode::YIndexedAbsolute),
+            0xdb => self.op_undocumented_dcp(AddrMode::YIndexedAbsolute),
             0xdd => self.op_cmp(AddrMode::XIndexedAbsolute),
             0xde => self.op_dec(AddrMode::XIndexedAbsolute),
+            0xdf => self.op_undocumented_dcp(AddrMode::XIndexedAbsolute),
             0xe0 => self.op_cpx(AddrMode::Immediate),
             0xe1 => self.op_sbc(AddrMode::XIndexedZeroPageIndirect),
             0xe4 => self.op_cpx(AddrMode::ZeroPage),
@@ -751,6 +850,7 @@ impl SimProc for Mos6502 {
             0xe8 => self.op_inx(),
             0xe9 => self.op_sbc(AddrMode::Immediate),
             0xea => self.op_nop(),
+            0xeb => self.op_undocumented_sbc(AddrMode::Immediate),
             0xec => self.op_cpx(AddrMode::Absolute),
             0xed => self.op_sbc(AddrMode::Absolute),
             0xee => self.op_inc(AddrMode::Absolute),
@@ -762,7 +862,8 @@ impl SimProc for Mos6502 {
             0xf9 => self.op_sbc(AddrMode::YIndexedAbsolute),
             0xfd => self.op_sbc(AddrMode::XIndexedAbsolute),
             0xfe => self.op_inc(AddrMode::XIndexedAbsolute),
-            _ => Err(SimErr::InvalidOpcode(opcode)),
+            // TODO: implement remaining undocumented opcodes
+            _ => Err(SimBreak::HaltOpcode("unimplemented", opcode)),
         }
     }
 }

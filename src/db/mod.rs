@@ -8,6 +8,6 @@ mod proc;
 pub use bus::{Ram64k, SimBus};
 pub use env::SimEnv;
 pub use load::load_binary;
-pub use proc::{Mos6502, SimErr, SimProc};
+pub use proc::{Breakpoint, Mos6502, SimBreak, SimProc};
 
 //===========================================================================//
