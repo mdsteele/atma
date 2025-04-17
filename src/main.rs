@@ -1,4 +1,4 @@
-use atma::db::SimBreak;
+use atma::db::{Breakpoint, SimBreak};
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::io;
@@ -35,6 +35,7 @@ fn main() -> io::Result<()> {
                 atma::db::load_binary(io::BufReader::new(file))?
             };
             print!("{}", sim_env.description());
+            sim_env.add_breakpoint(Breakpoint::Pc(0xfff9));
             loop {
                 match sim_env.step() {
                     Ok(()) => {}

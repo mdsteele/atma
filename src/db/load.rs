@@ -2,7 +2,6 @@ use super::bus::Ram64k;
 use super::env::SimEnv;
 use super::proc::{Mos6502, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::collections::HashMap;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 //===========================================================================//
@@ -34,7 +33,7 @@ macro_rules! invalid_data {
 /// * SFC/SMC
 /// * SPC
 pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
-    let mut processors = HashMap::<String, Box<dyn SimProc>>::new();
+    let mut processors = Vec::<(String, Box<dyn SimProc>)>::new();
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
     if &header[..4] == b"NES\x1a" {
@@ -67,11 +66,11 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         cursor.write_u16::<LittleEndian>(reset_addr)?;
         let bus = Box::new(Ram64k::new(ram));
         let cpu = Box::new(Mos6502::new(bus));
-        processors.insert("cpu".to_string(), cpu);
+        processors.push(("cpu".to_string(), cpu));
     } else {
         invalid_data!("unsupported binary file type");
     }
-    return Ok(SimEnv { selected_processor: "cpu".to_string(), processors });
+    return Ok(SimEnv::new(processors));
 }
 
 //===========================================================================//
