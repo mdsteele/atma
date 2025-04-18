@@ -1,6 +1,6 @@
 use super::bus::Ram64k;
 use super::env::SimEnv;
-use super::proc::{Mos6502, SimProc};
+use super::proc::{Mos6502, SharpSm83, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -19,14 +19,23 @@ macro_rules! invalid_data {
 
 //===========================================================================//
 
+const GB_HEADER_LOGO: &[u8; 0x30] = &[
+    0xce, 0xed, 0x66, 0x66, 0xcc, 0x0d, 0x00, 0x0b, 0x03, 0x73, 0x00, 0x83,
+    0x00, 0x0c, 0x00, 0x0d, 0x00, 0x08, 0x11, 0x1f, 0x88, 0x89, 0x00, 0x0e,
+    0xdc, 0xcc, 0x6e, 0xe6, 0xdd, 0xdd, 0xd9, 0x99, 0xbb, 0xbb, 0x67, 0x63,
+    0x6e, 0x0e, 0xec, 0xcc, 0xdd, 0xdc, 0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e,
+];
+
+//===========================================================================//
+
 /// Reads a compiled binary file, and returns a simulated environment that
 /// represents it.
 ///
 /// The following binary formats are currently supported:
+/// * GB/GBC
 /// * sim65 (6502 mode only)
 ///
 /// The following binary formats will be supported in the future:
-/// * GB/GBC
 /// * iNES
 /// * NES 2.0
 /// * sim65 (65C02 mode)
@@ -68,7 +77,18 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         let cpu = Box::new(Mos6502::new(bus));
         processors.push(("cpu".to_string(), cpu));
     } else {
-        invalid_data!("unsupported binary file type");
+        reader.seek(SeekFrom::Start(0x0104))?;
+        let mut logo = [0u8; 0x30];
+        reader.read_exact(&mut logo)?;
+        if &logo == GB_HEADER_LOGO {
+            // TODO: Emulate memory bus based on mapper byte.
+            let ram = Box::new([0u8; 0x10000]);
+            let bus = Box::new(Ram64k::new(ram));
+            let cpu = Box::new(SharpSm83::new(bus));
+            processors.push(("cpu".to_string(), cpu));
+        } else {
+            invalid_data!("unsupported binary file type");
+        }
     }
     return Ok(SimEnv::new(processors));
 }
