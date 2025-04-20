@@ -13,8 +13,16 @@ impl EnvProc {
         EnvProc { core, pc_breakpoints: HashSet::new() }
     }
 
+    fn pc(&self) -> u32 {
+        self.core.pc()
+    }
+
     fn add_pc_breakpoint(&mut self, addr: u32) {
         self.pc_breakpoints.insert(addr);
+    }
+
+    fn disassemble(&self, addr: u32) -> (usize, String) {
+        self.core.disassemble(addr)
     }
 
     fn step(&mut self) -> Result<(), SimBreak> {
@@ -71,8 +79,26 @@ impl SimEnv {
         )
     }
 
+    fn current_processor(&self) -> &EnvProc {
+        self.processors.get(&self.selected_processor).unwrap()
+    }
+
     fn current_processor_mut(&mut self) -> &mut EnvProc {
         self.processors.get_mut(&self.selected_processor).unwrap()
+    }
+
+    /// Returns the current address of the currently selected processor's
+    /// program counter.
+    pub fn pc(&self) -> u32 {
+        self.current_processor().pc()
+    }
+
+    /// Disassembles the instruction starting at the given address for the
+    /// currently selected processor, returning the length of the instruction
+    /// in bytes, and a human-readable string with the assembly code for that
+    /// instruction.
+    pub fn disassemble(&self, addr: u32) -> (usize, String) {
+        self.current_processor().disassemble(addr)
     }
 
     /// Advances the currently selected processor by one instruction.

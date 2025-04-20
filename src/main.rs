@@ -35,8 +35,10 @@ fn main() -> io::Result<()> {
                 atma::db::load_binary(io::BufReader::new(file))?
             };
             print!("{}", sim_env.description());
+            sim_env.add_breakpoint(Breakpoint::Pc(0xfff7));
             sim_env.add_breakpoint(Breakpoint::Pc(0xfff9));
             loop {
+                println!("    {}", sim_env.disassemble(sim_env.pc()).1);
                 match sim_env.step() {
                     Ok(()) => {}
                     Err(SimBreak::Breakpoint(breakpoint)) => {

@@ -330,6 +330,10 @@ impl SimProc for SharpSm83 {
         format!("Sharp SM83 with {}", self.bus.description())
     }
 
+    fn disassemble(&self, _addr: u32) -> (usize, String) {
+        (0, String::new()) // TODO
+    }
+
     fn pc(&self) -> u32 {
         self.pc as u32
     }

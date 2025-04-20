@@ -20,8 +20,12 @@ impl SimBus for Ram64k {
         format!("64k RAM")
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
+    fn peek_byte(&self, addr: u32) -> u8 {
         self.ram[(addr & 0xffff) as usize]
+    }
+
+    fn read_byte(&mut self, addr: u32) -> u8 {
+        self.peek_byte(addr)
     }
 
     fn write_byte(&mut self, addr: u32, data: u8) {

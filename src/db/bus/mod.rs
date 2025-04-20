@@ -1,3 +1,5 @@
+use std::io::{self, Read};
+
 mod ram;
 
 pub use ram::Ram64k;
@@ -16,6 +18,11 @@ pub trait SimBus {
     /// Returns a human-readable description of this simulated memory bus.
     fn description(&self) -> String;
 
+    /// Returns the value of a single byte in memory, if the processor were to
+    /// read it, but without triggering any breakpoints or performing any side
+    /// effects that would occur if the processor actually read the byte.
+    fn peek_byte(&self, addr: u32) -> u8;
+
     /// Reads a single byte from memory.
     ///
     /// Note that this is a `&mut self` method, since some hardware registers
@@ -24,6 +31,29 @@ pub trait SimBus {
 
     /// Writes a single byte to memory.
     fn write_byte(&mut self, addr: u32, data: u8);
+}
+
+//===========================================================================//
+
+pub struct BusPeeker<'a> {
+    bus: &'a Box<dyn SimBus>,
+    addr: u32,
+}
+
+impl<'a> BusPeeker<'a> {
+    pub fn new(bus: &Box<dyn SimBus>, start_addr: u32) -> BusPeeker {
+        BusPeeker { bus, addr: start_addr }
+    }
+}
+
+impl<'a> Read for BusPeeker<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        for byte in buf.iter_mut() {
+            *byte = self.bus.peek_byte(self.addr);
+            self.addr = self.addr.wrapping_add(1);
+        }
+        Ok(buf.len())
+    }
 }
 
 //===========================================================================//
