@@ -1,6 +1,6 @@
 # atma
 
-[![Build Status](https://github.com/mdsteele/rust-cfb/actions/workflows/tests.yml/badge.svg)](https://github.com/mdsteele/rust-cfb/actions/workflows/tests.yml)
+[![Build Status](https://github.com/mdsteele/atma/actions/workflows/tests.yml/badge.svg)](https://github.com/mdsteele/atma/actions/workflows/tests.yml)
 
 Assembler Toolchain for Multiple (retro) Architectures
 
