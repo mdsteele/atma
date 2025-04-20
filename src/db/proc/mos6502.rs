@@ -62,7 +62,7 @@ impl Mos6502 {
     }
 
     fn op_sbc(&mut self, mode: AddrMode) -> Result<(), SimBreak> {
-        let rhs = 0u8.wrapping_sub(self.read_mode_data(mode)?);
+        let rhs = !self.read_mode_data(mode)?;
         self.add_to(rhs)
     }
 
@@ -683,6 +683,16 @@ impl SimProc for Mos6502 {
 
     fn pc(&self) -> u32 {
         self.pc as u32
+    }
+
+    fn registers(&self) -> Vec<(&'static str, u32)> {
+        vec![
+            ("A", self.reg_a as u32),
+            ("X", self.reg_x as u32),
+            ("Y", self.reg_y as u32),
+            ("P", self.reg_p as u32),
+            ("S", self.reg_s as u32),
+        ]
     }
 
     fn step(&mut self) -> Result<(), SimBreak> {

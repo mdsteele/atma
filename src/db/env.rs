@@ -17,6 +17,10 @@ impl EnvProc {
         self.core.pc()
     }
 
+    pub fn registers(&self) -> Vec<(&'static str, u32)> {
+        self.core.registers()
+    }
+
     fn add_pc_breakpoint(&mut self, addr: u32) {
         self.pc_breakpoints.insert(addr);
     }
@@ -91,6 +95,12 @@ impl SimEnv {
     /// program counter.
     pub fn pc(&self) -> u32 {
         self.current_processor().pc()
+    }
+
+    /// Returns a list of the currently selected processor's register names and
+    /// current values.
+    pub fn registers(&self) -> Vec<(&'static str, u32)> {
+        self.current_processor().registers()
     }
 
     /// Disassembles the instruction starting at the given address for the

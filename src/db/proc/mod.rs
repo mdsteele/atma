@@ -50,6 +50,10 @@ pub trait SimProc {
     /// Returns the current address of the program counter.
     fn pc(&self) -> u32;
 
+    /// Returns a list of the this processor's register names and current
+    /// values.
+    fn registers(&self) -> Vec<(&'static str, u32)>;
+
     /// Advances this processor by one instruction.
     fn step(&mut self) -> Result<(), SimBreak>;
 }

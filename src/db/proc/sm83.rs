@@ -338,6 +338,19 @@ impl SimProc for SharpSm83 {
         self.pc as u32
     }
 
+    fn registers(&self) -> Vec<(&'static str, u32)> {
+        vec![
+            ("A", self.reg_a as u32),
+            ("F", self.reg_f as u32),
+            ("B", self.reg_b as u32),
+            ("C", self.reg_c as u32),
+            ("D", self.reg_d as u32),
+            ("E", self.reg_e as u32),
+            ("H", self.reg_h as u32),
+            ("L", self.reg_l as u32),
+        ]
+    }
+
     fn step(&mut self) -> Result<(), SimBreak> {
         let opcode = self.bus.read_byte(self.pc as u32);
         self.pc = self.pc.wrapping_add(1);

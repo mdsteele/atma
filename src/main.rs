@@ -1,4 +1,4 @@
-use atma::db::{Breakpoint, SimBreak};
+use atma::db::{Breakpoint, SimBreak, SimEnv};
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::io;
@@ -26,6 +26,15 @@ enum Command {
 
 //===========================================================================//
 
+fn format_registers(sim_env: &SimEnv) -> String {
+    sim_env
+        .registers()
+        .into_iter()
+        .map(|(name, value)| format!("{}=${:02x}", name, value))
+        .collect::<Vec<String>>()
+        .join(" ")
+}
+
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -38,8 +47,16 @@ fn main() -> io::Result<()> {
             sim_env.add_breakpoint(Breakpoint::Pc(0xfff7));
             sim_env.add_breakpoint(Breakpoint::Pc(0xfff9));
             loop {
-                println!("    {}", sim_env.disassemble(sim_env.pc()).1);
-                match sim_env.step() {
+                let pc = sim_env.pc();
+                let instruction = sim_env.disassemble(sim_env.pc()).1;
+                let result = sim_env.step();
+                println!(
+                    "${:04x} | {:16} {}",
+                    pc,
+                    instruction,
+                    format_registers(&sim_env)
+                );
+                match result {
                     Ok(()) => {}
                     Err(SimBreak::Breakpoint(breakpoint)) => {
                         println!("Breakpoint: {:?}", breakpoint);
