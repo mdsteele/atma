@@ -17,7 +17,7 @@ impl Ram64k {
 
 impl SimBus for Ram64k {
     fn description(&self) -> String {
-        format!("64k RAM")
+        "64k RAM".to_string()
     }
 
     fn peek_byte(&self, addr: u32) -> u8 {

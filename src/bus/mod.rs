@@ -41,17 +41,17 @@ pub trait SimBus {
 //===========================================================================//
 
 pub(crate) struct BusPeeker<'a> {
-    bus: &'a Box<dyn SimBus>,
+    bus: &'a dyn SimBus,
     addr: u32,
 }
 
-impl<'a> BusPeeker<'a> {
-    pub fn new(bus: &Box<dyn SimBus>, start_addr: u32) -> BusPeeker {
+impl BusPeeker<'_> {
+    pub fn new(bus: &dyn SimBus, start_addr: u32) -> BusPeeker {
         BusPeeker { bus, addr: start_addr }
     }
 }
 
-impl<'a> Read for BusPeeker<'a> {
+impl Read for BusPeeker<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         for byte in buf.iter_mut() {
             *byte = self.bus.peek_byte(self.addr);

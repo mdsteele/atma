@@ -258,7 +258,7 @@ pub enum Operand {
 
 impl Operand {
     /// The size of this operand, in bytes.
-    pub fn len(self) -> usize {
+    pub fn size(self) -> usize {
         match self {
             Operand::Implied => 0,
             Operand::Immediate(_) => 1,

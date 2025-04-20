@@ -1,6 +1,7 @@
 use crate::bus::{BusPeeker, SimBus};
 use crate::db::proc::{SimBreak, SimProc};
 use crate::dis::mos6502::{disassemble_instruction, format_instruction};
+use std::borrow::Borrow;
 
 //===========================================================================//
 
@@ -632,7 +633,7 @@ impl Mos6502 {
                 let ptr: u8 = self.read_immediate_byte();
                 let base: u16 = self.read_zeropage_word(ptr);
                 let addr: u16 = base.wrapping_add(self.reg_y as u16);
-                Ok(addr as u16)
+                Ok(addr)
             }
         }
     }
@@ -671,13 +672,13 @@ impl SimProc for Mos6502 {
     }
 
     fn disassemble(&self, addr: u32) -> (usize, String) {
-        let mut reader = BusPeeker::new(&self.bus, addr as u32);
+        let mut reader = BusPeeker::new(self.bus.borrow(), addr);
         let (_, operation, operand) =
             disassemble_instruction(&mut reader).unwrap();
-        let instruction_len = operand.len() + 1;
+        let instruction_size = operand.size() + 1;
         let instruction_string =
             format_instruction(operation, operand, (addr & 0xffff) as u16);
-        (instruction_len, instruction_string)
+        (instruction_size, instruction_string)
     }
 
     fn pc(&self) -> u32 {

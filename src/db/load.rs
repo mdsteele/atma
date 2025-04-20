@@ -90,7 +90,7 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
             invalid_data!("unsupported binary file type");
         }
     }
-    return Ok(SimEnv::new(processors));
+    Ok(SimEnv::new(processors))
 }
 
 //===========================================================================//
