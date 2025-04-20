@@ -1,6 +1,6 @@
-use super::bus::Ram64k;
 use super::env::SimEnv;
 use super::proc::{Mos6502, SharpSm83, SimProc};
+use crate::bus::Ram64k;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 

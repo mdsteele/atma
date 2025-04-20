@@ -1,4 +1,4 @@
-use crate::db::bus::SimBus;
+use crate::bus::SimBus;
 use crate::db::proc::{SimBreak, SimProc};
 
 //===========================================================================//

@@ -1,3 +1,5 @@
+//! Facilities for representing a memory mapping and simulating a memory bus.
+
 use std::io::{self, Read};
 
 mod ram;
@@ -30,12 +32,15 @@ pub trait SimBus {
     fn read_byte(&mut self, addr: u32) -> u8;
 
     /// Writes a single byte to memory.
+    ///
+    /// Depending on the implementation, the write may be ignored (e.g. if this
+    /// bus represents read-only memory).
     fn write_byte(&mut self, addr: u32, data: u8);
 }
 
 //===========================================================================//
 
-pub struct BusPeeker<'a> {
+pub(crate) struct BusPeeker<'a> {
     bus: &'a Box<dyn SimBus>,
     addr: u32,
 }
