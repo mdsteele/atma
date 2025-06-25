@@ -2,8 +2,12 @@
 
 use std::io::{self, Read};
 
+mod label;
+mod null;
 mod ram;
 
+pub use label::LabeledBus;
+pub use null::NullBus;
 pub use ram::Ram64k;
 
 //===========================================================================//
@@ -19,6 +23,9 @@ pub use ram::Ram64k;
 pub trait SimBus {
     /// Returns a human-readable description of this simulated memory bus.
     fn description(&self) -> String;
+
+    /// Returns a label for the given address, if there is one.
+    fn label_at(&self, addr: u32) -> Option<&str>;
 
     /// Returns the value of a single byte in memory, if the processor were to
     /// read it, but without triggering any breakpoints or performing any side

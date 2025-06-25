@@ -672,12 +672,17 @@ impl SimProc for Mos6502 {
     }
 
     fn disassemble(&self, addr: u32) -> (usize, String) {
-        let mut reader = BusPeeker::new(self.bus.borrow(), addr);
+        let bus = self.bus.borrow();
+        let mut reader = BusPeeker::new(bus, addr);
         let (_, operation, operand) =
             disassemble_instruction(&mut reader).unwrap();
         let instruction_size = operand.size() + 1;
-        let instruction_string =
-            format_instruction(operation, operand, (addr & 0xffff) as u16);
+        let instruction_string = format_instruction(
+            operation,
+            operand,
+            (addr & 0xffff) as u16,
+            bus,
+        );
         (instruction_size, instruction_string)
     }
 

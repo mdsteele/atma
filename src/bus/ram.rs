@@ -20,6 +20,10 @@ impl SimBus for Ram64k {
         "64k RAM".to_string()
     }
 
+    fn label_at(&self, _addr: u32) -> Option<&str> {
+        None
+    }
+
     fn peek_byte(&self, addr: u32) -> u8 {
         self.ram[(addr & 0xffff) as usize]
     }

@@ -1,5 +1,6 @@
 //! Facilities for disassembling 6502 machine code.
 
+use crate::bus::SimBus;
 use std::io::{self, Read};
 
 //===========================================================================//
@@ -275,30 +276,54 @@ impl Operand {
         }
     }
 
-    fn format(self, pc: u16) -> String {
+    /// Formats this operand.  `pc` gives the address of the start of the
+    /// instruction.
+    fn format(self, pc: u16, bus: &dyn SimBus) -> String {
         match self {
             Operand::Implied => String::new(),
             Operand::Immediate(byte) => format!(" #${:02x}", byte),
             Operand::Relative(offset) => {
-                format!(
-                    " ${:04x}",
-                    pc.wrapping_add(2).wrapping_add(offset as u16)
-                )
+                let dest = pc.wrapping_add(2).wrapping_add(offset as u16);
+                format!(" {}", format_abs(dest, bus))
             }
-            Operand::Absolute(abs) => format!(" ${:04x}", abs),
-            Operand::AbsoluteIndirect(abs) => format!(" (${:04x})", abs),
-            Operand::XIndexedAbsolute(abs) => format!(" ${:04x}, X", abs),
-            Operand::YIndexedAbsolute(abs) => format!(" ${:04x}, Y", abs),
-            Operand::ZeroPage(zp) => format!(" ${:02x}", zp),
-            Operand::XIndexedZeroPage(zp) => format!(" ${:02x}, X", zp),
-            Operand::YIndexedZeroPage(zp) => format!(" ${:02x}, Y", zp),
+            Operand::Absolute(abs) => format!(" {}", format_abs(abs, bus)),
+            Operand::AbsoluteIndirect(abs) => {
+                format!(" ({})", format_abs(abs, bus))
+            }
+            Operand::XIndexedAbsolute(abs) => {
+                format!(" {}, X", format_abs(abs, bus))
+            }
+            Operand::YIndexedAbsolute(abs) => {
+                format!(" {}, Y", format_abs(abs, bus))
+            }
+            Operand::ZeroPage(zp) => format!(" {}", format_zp(zp, bus)),
+            Operand::XIndexedZeroPage(zp) => {
+                format!(" {}, X", format_zp(zp, bus))
+            }
+            Operand::YIndexedZeroPage(zp) => {
+                format!(" {}, Y", format_zp(zp, bus))
+            }
             Operand::XIndexedZeroPageIndirect(zp) => {
-                format!(" (${:02x}, X)", zp)
+                format!(" ({}, X)", format_zp(zp, bus))
             }
             Operand::ZeroPageIndirectYIndexed(zp) => {
-                format!(" (${:02x}), Y", zp)
+                format!(" ({}), Y", format_zp(zp, bus))
             }
         }
+    }
+}
+
+fn format_zp(zp: u8, bus: &dyn SimBus) -> String {
+    match bus.label_at(zp as u32) {
+        Some(label) => label.to_string(),
+        None => format!("${:02x}", zp),
+    }
+}
+
+fn format_abs(abs: u16, bus: &dyn SimBus) -> String {
+    match bus.label_at(abs as u32) {
+        Some(label) => label.to_string(),
+        None => format!("${:04x}", abs),
     }
 }
 
@@ -500,13 +525,17 @@ pub fn disassemble_instruction<R: Read>(
     Ok((opcode, operation, operand))
 }
 
-/// Formats a disassembled 6502 instruction as a human-readable string.
+/// Formats a disassembled 6502 instruction as a human-readable string.  `addr`
+/// specifies the address of the start of the instruction.  `bus` is required
+/// for providing labels for addresses; if no labels are needed, a `NullBus`
+/// can be used.
 pub fn format_instruction(
     operation: Operation,
     operand: Operand,
     addr: u16,
+    bus: &dyn SimBus,
 ) -> String {
-    format!("{}{}", operation.mnemonic(), operand.format(addr))
+    format!("{}{}", operation.mnemonic(), operand.format(addr, bus))
 }
 
 fn read_byte<R: Read>(reader: &mut R) -> io::Result<u8> {
@@ -526,12 +555,24 @@ fn read_word<R: Read>(reader: &mut R) -> io::Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::{disassemble_instruction, format_instruction};
+    use crate::bus::{LabeledBus, NullBus, SimBus};
+    use std::collections::HashMap;
 
-    fn disassemble(mut code: &[u8]) -> String {
+    fn disassemble(code: &[u8]) -> String {
+        disassemble_with_bus(code, &NullBus::new())
+    }
+
+    fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
+        let labels = HashMap::from([(addr, label.to_string())]);
+        let bus = LabeledBus::new(Box::new(NullBus::new()), labels);
+        disassemble_with_bus(code, &bus)
+    }
+
+    fn disassemble_with_bus(mut code: &[u8], bus: &dyn SimBus) -> String {
         let (_opcode, operation, operand) =
             disassemble_instruction(&mut code).unwrap();
         assert!(code.is_empty());
-        format_instruction(operation, operand, 0x0000)
+        format_instruction(operation, operand, 0x0000, bus)
     }
 
     #[test]
@@ -595,6 +636,10 @@ mod tests {
         assert_eq!(disassemble(&[0x10, 0x7f]), "BPL $0081");
         assert_eq!(disassemble(&[0x50, 0xfe]), "BVC $0000");
         assert_eq!(disassemble(&[0x70, 0xfd]), "BVS $ffff");
+        assert_eq!(
+            disassemble_with_label(&[0x90, 0x10], 0x12, "foo"),
+            "BCC foo"
+        );
     }
 
     #[test]
@@ -622,11 +667,19 @@ mod tests {
         assert_eq!(disassemble(&[0x8d, 0x65, 0x87]), "STA $8765");
         assert_eq!(disassemble(&[0x8e, 0x21, 0x43]), "STX $4321");
         assert_eq!(disassemble(&[0x8c, 0xcd, 0xab]), "STY $abcd");
+        assert_eq!(
+            disassemble_with_label(&[0x8c, 0xcd, 0xab], 0xabcd, "foo"),
+            "STY foo"
+        );
     }
 
     #[test]
     fn disassemble_addr_mode_absolute_indirect() {
         assert_eq!(disassemble(&[0x6c, 0xef, 0xbe]), "JMP ($beef)");
+        assert_eq!(
+            disassemble_with_label(&[0x6c, 0xef, 0xbe], 0xbeef, "foo"),
+            "JMP (foo)"
+        );
     }
 
     #[test]
@@ -646,6 +699,10 @@ mod tests {
         assert_eq!(disassemble(&[0x7e, 0xed, 0x0f]), "ROR $0fed, X");
         assert_eq!(disassemble(&[0xfd, 0xa9, 0xbc]), "SBC $bca9, X");
         assert_eq!(disassemble(&[0x9d, 0x65, 0x87]), "STA $8765, X");
+        assert_eq!(
+            disassemble_with_label(&[0x9d, 0x65, 0x87], 0x8765, "foo"),
+            "STA foo, X"
+        );
     }
 
     #[test]
@@ -659,6 +716,10 @@ mod tests {
         assert_eq!(disassemble(&[0x19, 0xee, 0xdd]), "ORA $ddee, Y");
         assert_eq!(disassemble(&[0xf9, 0xa9, 0xbc]), "SBC $bca9, Y");
         assert_eq!(disassemble(&[0x99, 0x65, 0x87]), "STA $8765, Y");
+        assert_eq!(
+            disassemble_with_label(&[0x99, 0x65, 0x87], 0x8765, "foo"),
+            "STA foo, Y"
+        );
     }
 
     #[test]
@@ -684,6 +745,10 @@ mod tests {
         assert_eq!(disassemble(&[0x85, 0x22]), "STA $22");
         assert_eq!(disassemble(&[0x86, 0x33]), "STX $33");
         assert_eq!(disassemble(&[0x84, 0x44]), "STY $44");
+        assert_eq!(
+            disassemble_with_label(&[0x84, 0x44], 0x44, "foo"),
+            "STY foo"
+        );
     }
 
     #[test]
@@ -704,12 +769,20 @@ mod tests {
         assert_eq!(disassemble(&[0xf5, 0x16]), "SBC $16, X");
         assert_eq!(disassemble(&[0x95, 0x2a]), "STA $2a, X");
         assert_eq!(disassemble(&[0x94, 0x20]), "STY $20, X");
+        assert_eq!(
+            disassemble_with_label(&[0x94, 0x20], 0x20, "foo"),
+            "STY foo, X"
+        );
     }
 
     #[test]
     fn disassemble_addr_mode_y_indexed_zero_page() {
         assert_eq!(disassemble(&[0xb6, 0x1a]), "LDX $1a, Y");
         assert_eq!(disassemble(&[0x96, 0x2a]), "STX $2a, Y");
+        assert_eq!(
+            disassemble_with_label(&[0x96, 0x2a], 0x2a, "foo"),
+            "STX foo, Y"
+        );
     }
 
     #[test]
@@ -722,6 +795,10 @@ mod tests {
         assert_eq!(disassemble(&[0x01, 0xbc]), "ORA ($bc, X)");
         assert_eq!(disassemble(&[0xe1, 0xde]), "SBC ($de, X)");
         assert_eq!(disassemble(&[0x81, 0xf0]), "STA ($f0, X)");
+        assert_eq!(
+            disassemble_with_label(&[0x81, 0xf0], 0xf0, "foo"),
+            "STA (foo, X)"
+        );
     }
 
     #[test]
@@ -734,6 +811,10 @@ mod tests {
         assert_eq!(disassemble(&[0x11, 0xbc]), "ORA ($bc), Y");
         assert_eq!(disassemble(&[0xf1, 0xde]), "SBC ($de), Y");
         assert_eq!(disassemble(&[0x91, 0xf0]), "STA ($f0), Y");
+        assert_eq!(
+            disassemble_with_label(&[0x91, 0xf0], 0xf0, "foo"),
+            "STA (foo), Y"
+        );
     }
 }
 
