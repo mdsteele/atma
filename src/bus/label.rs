@@ -49,16 +49,15 @@ impl SimBus for LabeledBus {
 #[cfg(test)]
 mod tests {
     use super::LabeledBus;
-    use crate::bus::{NullBus, SimBus};
+    use crate::bus::{SimBus, null_bus};
     use std::collections::HashMap;
 
     #[test]
     fn labels() {
-        let bus = Box::new(NullBus::new());
         let mut labels = HashMap::new();
         labels.insert(0x100, "foo".to_string());
         labels.insert(0x200, "bar".to_string());
-        let bus = LabeledBus::new(bus, labels);
+        let bus = LabeledBus::new(null_bus(), labels);
         assert_eq!(bus.label_at(0x100), Some("foo"));
         assert_eq!(bus.label_at(0x200), Some("bar"));
         assert_eq!(bus.label_at(0x300), None);
@@ -66,11 +65,10 @@ mod tests {
 
     #[test]
     fn delegate_labels() {
-        let bus = Box::new(NullBus::new());
         let mut labels = HashMap::new();
         labels.insert(0x100, "foo".to_string());
         labels.insert(0x200, "bar".to_string());
-        let bus = Box::new(LabeledBus::new(bus, labels));
+        let bus = Box::new(LabeledBus::new(null_bus(), labels));
         let mut labels = HashMap::new();
         labels.insert(0x200, "quux".to_string());
         labels.insert(0x300, "baz".to_string());

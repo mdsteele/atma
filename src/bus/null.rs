@@ -2,18 +2,13 @@ use super::SimBus;
 
 //===========================================================================//
 
-/// A simulated bus that's not connected to anything.  All writes are ignored,
-/// and all reads return zero.
-pub struct NullBus {
-    _null: (),
+/// Returns a simulated bus that's not connected to anything.  All writes will
+/// be ignored, and all reads will return zero.
+pub fn null_bus() -> Box<dyn SimBus> {
+    Box::new(NullBus {})
 }
 
-impl NullBus {
-    /// Wraps the given bus by applying the given set of labels to it.
-    pub fn new() -> NullBus {
-        NullBus { _null: () }
-    }
-}
+struct NullBus {}
 
 impl SimBus for NullBus {
     fn description(&self) -> String {
@@ -39,11 +34,11 @@ impl SimBus for NullBus {
 
 #[cfg(test)]
 mod tests {
-    use super::{NullBus, SimBus};
+    use super::null_bus;
 
     #[test]
     fn description() {
-        assert_eq!(NullBus::new().description(), "null bus");
+        assert_eq!(null_bus().description(), "null bus");
     }
 }
 

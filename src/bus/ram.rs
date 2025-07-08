@@ -2,22 +2,31 @@ use super::SimBus;
 
 //===========================================================================//
 
-/// A simulated 16-bit memory bus connected to 64 KiB of RAM.
-pub struct Ram64k {
-    ram: Box<[u8; 0x10000]>,
+/// A simulated RAM bus.  Reads beyond the RAM size will be mirrored.
+pub struct RamBus {
+    ram: Box<[u8]>,
 }
 
-impl Ram64k {
-    /// Returns a new simulated 64K RAM bus using the given initial RAM
-    /// contents.
-    pub fn new(ram: Box<[u8; 0x10000]>) -> Ram64k {
-        Ram64k { ram }
+impl RamBus {
+    /// Returns a new simulated RAM bus using the given byte array as the
+    /// contents of RAM.  Panics if the length of the byte array is not a power
+    /// of 2.
+    pub fn new(ram: Box<[u8]>) -> RamBus {
+        assert!(ram.len().is_power_of_two());
+        RamBus { ram }
     }
 }
 
-impl SimBus for Ram64k {
+impl SimBus for RamBus {
     fn description(&self) -> String {
-        "64k RAM".to_string()
+        let size = self.ram.len();
+        if size < 1024 {
+            format!("{}B RAM", size)
+        } else if size < 1024 * 1024 {
+            format!("{}kB RAM", size >> 10)
+        } else {
+            format!("{}MB RAM", size >> 20)
+        }
     }
 
     fn label_at(&self, _addr: u32) -> Option<&str> {
@@ -25,7 +34,7 @@ impl SimBus for Ram64k {
     }
 
     fn peek_byte(&self, addr: u32) -> u8 {
-        self.ram[(addr & 0xffff) as usize]
+        self.ram[(addr as usize) & (self.ram.len() - 1)]
     }
 
     fn read_byte(&mut self, addr: u32) -> u8 {
@@ -33,7 +42,7 @@ impl SimBus for Ram64k {
     }
 
     fn write_byte(&mut self, addr: u32, data: u8) {
-        self.ram[(addr & 0xffff) as usize] = data;
+        self.ram[(addr as usize) & (self.ram.len() - 1)] = data;
     }
 }
 
@@ -41,11 +50,22 @@ impl SimBus for Ram64k {
 
 #[cfg(test)]
 mod tests {
-    use super::{Ram64k, SimBus};
+    use super::RamBus;
+    use crate::bus::SimBus;
+
+    #[test]
+    fn description() {
+        let bus = RamBus::new(Box::new([0u8; 0x10]));
+        assert_eq!(bus.description(), "16B RAM");
+        let bus = RamBus::new(Box::new([0u8; 0x1000]));
+        assert_eq!(bus.description(), "4kB RAM");
+        let bus = RamBus::new(Box::new([0u8; 0x100000]));
+        assert_eq!(bus.description(), "1MB RAM");
+    }
 
     #[test]
     fn address_mirroring() {
-        let mut bus = Ram64k::new(Box::new([0u8; 0x10000]));
+        let mut bus = RamBus::new(Box::new([0u8; 0x10000]));
         assert_eq!(bus.read_byte(0x01234), 0x00);
         assert_eq!(bus.read_byte(0x11234), 0x00);
         assert_eq!(bus.read_byte(0x21234), 0x00);

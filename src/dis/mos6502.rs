@@ -527,7 +527,7 @@ pub fn disassemble_instruction<R: Read>(
 
 /// Formats a disassembled 6502 instruction as a human-readable string.  `addr`
 /// specifies the address of the start of the instruction.  `bus` is required
-/// for providing labels for addresses; if no labels are needed, a `NullBus`
+/// for providing labels for addresses; if no labels are needed, a `null_bus()`
 /// can be used.
 pub fn format_instruction(
     operation: Operation,
@@ -555,16 +555,17 @@ fn read_word<R: Read>(reader: &mut R) -> io::Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::{disassemble_instruction, format_instruction};
-    use crate::bus::{LabeledBus, NullBus, SimBus};
+    use crate::bus::{LabeledBus, SimBus, null_bus};
+    use std::borrow::Borrow;
     use std::collections::HashMap;
 
     fn disassemble(code: &[u8]) -> String {
-        disassemble_with_bus(code, &NullBus::new())
+        disassemble_with_bus(code, null_bus().borrow())
     }
 
     fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
         let labels = HashMap::from([(addr, label.to_string())]);
-        let bus = LabeledBus::new(Box::new(NullBus::new()), labels);
+        let bus = LabeledBus::new(null_bus(), labels);
         disassemble_with_bus(code, &bus)
     }
 

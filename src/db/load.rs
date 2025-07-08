@@ -1,6 +1,6 @@
 use super::env::SimEnv;
 use super::proc::{Mos6502, SharpSm83, SimProc};
-use crate::bus::Ram64k;
+use crate::bus::{NesBus, RamBus, RomBus, SimBus};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -46,7 +46,8 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
     if &header[..4] == b"NES\x1a" {
-        invalid_data!("iNES binaries are not yet supported");
+        reader.rewind()?;
+        return load_nes_binary(reader);
     } else if &header[..5] == b"sim65" {
         // Read rest of sim65 header.
         let version = header[5];
@@ -73,7 +74,7 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         // Copy reset_addr into RAM at the reset vector.
         cursor.seek(SeekFrom::Start(0xfffc))?;
         cursor.write_u16::<LittleEndian>(reset_addr)?;
-        let bus = Box::new(Ram64k::new(ram));
+        let bus = Box::new(RamBus::new(ram));
         let cpu = Box::new(Mos6502::new(bus));
         processors.push(("cpu".to_string(), cpu));
     } else {
@@ -83,13 +84,79 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         if &logo == GB_HEADER_LOGO {
             // TODO: Emulate memory bus based on mapper byte.
             let ram = Box::new([0u8; 0x10000]);
-            let bus = Box::new(Ram64k::new(ram));
+            let bus = Box::new(RamBus::new(ram));
             let cpu = Box::new(SharpSm83::new(bus));
             processors.push(("cpu".to_string(), cpu));
         } else {
             invalid_data!("unsupported binary file type");
         }
     }
+    Ok(SimEnv::new(processors))
+}
+
+//===========================================================================//
+
+/// NES mappers that are currently supported by this crate.
+enum NesMapper {
+    Nrom,
+    Mmc3,
+}
+
+impl NesMapper {
+    fn from_mapper_number(mapper_number: u16) -> Option<NesMapper> {
+        match mapper_number {
+            0 => Some(NesMapper::Nrom),
+            4 => Some(NesMapper::Mmc3),
+            _ => None,
+        }
+    }
+
+    fn make_cpu_bus(&self, rom: Box<[u8]>) -> Box<dyn SimBus> {
+        let cart = match *self {
+            NesMapper::Nrom => Box::new(RomBus::new(rom)),
+            NesMapper::Mmc3 => panic!("MMC3 bus is not yet supported"),
+        };
+        Box::new(NesBus::with_cartridge(cart))
+    }
+}
+
+pub fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+    let mut header = [0u8; 16];
+    reader.read_exact(&mut header)?;
+    if &header[..4] != b"NES\x1a" {
+        invalid_data!("incorrect magic number in iNES header");
+    }
+    let version = (header[7] >> 2) & 0x3;
+
+    let has_trainer = (header[6] & 0x04) != 0;
+    if has_trainer {
+        invalid_data!("iNES trainers are not yet supported");
+    }
+
+    let mapper_number: u16 = {
+        let lo_nibble = (header[6] >> 4) as u16;
+        let md_nibble = (header[7] >> 4) as u16;
+        let hi_nibble =
+            if version == 2 { (header[8] & 0x0f) as u16 } else { 0 };
+        (hi_nibble << 8) | (md_nibble << 4) | lo_nibble
+    };
+    let mapper = match NesMapper::from_mapper_number(mapper_number) {
+        Some(mapper) => mapper,
+        None => invalid_data!("unsupported mapper number: {}", mapper_number),
+    };
+
+    let prg_rom_size: usize = {
+        let lo_byte = header[4];
+        let hi_byte = if version == 2 { header[4] & 0x0f } else { 0 };
+        0x4000 * (((hi_byte as usize) << 8) | (lo_byte as usize))
+    };
+
+    let mut prg_rom = vec![0u8; prg_rom_size];
+    reader.read_exact(&mut prg_rom)?;
+
+    let cpu_bus = mapper.make_cpu_bus(prg_rom.into_boxed_slice());
+    let cpu: Box<dyn SimProc> = Box::new(Mos6502::new(cpu_bus));
+    let processors = vec![("cpu".to_string(), cpu)];
     Ok(SimEnv::new(processors))
 }
 

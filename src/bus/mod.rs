@@ -3,12 +3,16 @@
 use std::io::{self, Read};
 
 mod label;
+mod nes;
 mod null;
 mod ram;
+mod rom;
 
 pub use label::LabeledBus;
-pub use null::NullBus;
-pub use ram::Ram64k;
+pub use nes::NesBus;
+pub use null::null_bus;
+pub use ram::RamBus;
+pub use rom::RomBus;
 
 //===========================================================================//
 
