@@ -22,7 +22,7 @@ impl SimBus for RomBus {
     fn description(&self) -> String {
         let size = self.rom.len();
         if size < 1024 {
-            format!("{}B ROM", size)
+            format!("{size}B ROM")
         } else if size < 1024 * 1024 {
             format!("{}kB ROM", size >> 10)
         } else {

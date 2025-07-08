@@ -122,7 +122,7 @@ impl SimEnv {
             Breakpoint::Pc(addr) => {
                 self.current_processor_mut().add_pc_breakpoint(addr)
             }
-            _ => panic!("{:?} not supported yet", breakpoint),
+            _ => panic!("{breakpoint:?} not supported yet"),
         }
     }
 }

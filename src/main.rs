@@ -30,7 +30,7 @@ fn format_registers(sim_env: &SimEnv) -> String {
     sim_env
         .registers()
         .into_iter()
-        .map(|(name, value)| format!("{}=${:02x}", name, value))
+        .map(|(name, value)| format!("{name}=${value:02x}"))
         .collect::<Vec<String>>()
         .join(" ")
 }
@@ -59,14 +59,11 @@ fn main() -> io::Result<()> {
                 match result {
                     Ok(()) => {}
                     Err(SimBreak::Breakpoint(breakpoint)) => {
-                        println!("Breakpoint: {:?}", breakpoint);
+                        println!("Breakpoint: {breakpoint:?}");
                         break;
                     }
                     Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
-                        println!(
-                            "Halted by {} opcode ${:02x}",
-                            mnemonic, opcode
-                        );
+                        println!("Halted by {mnemonic} opcode ${opcode:02x}");
                         break;
                     }
                 }

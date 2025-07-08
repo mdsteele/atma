@@ -281,7 +281,7 @@ impl Operand {
     fn format(self, pc: u16, bus: &dyn SimBus) -> String {
         match self {
             Operand::Implied => String::new(),
-            Operand::Immediate(byte) => format!(" #${:02x}", byte),
+            Operand::Immediate(byte) => format!(" #${byte:02x}"),
             Operand::Relative(offset) => {
                 let dest = pc.wrapping_add(2).wrapping_add(offset as u16);
                 format!(" {}", format_abs(dest, bus))
@@ -316,14 +316,14 @@ impl Operand {
 fn format_zp(zp: u8, bus: &dyn SimBus) -> String {
     match bus.label_at(zp as u32) {
         Some(label) => label.to_string(),
-        None => format!("${:02x}", zp),
+        None => format!("${zp:02x}"),
     }
 }
 
 fn format_abs(abs: u16, bus: &dyn SimBus) -> String {
     match bus.label_at(abs as u32) {
         Some(label) => label.to_string(),
-        None => format!("${:04x}", abs),
+        None => format!("${abs:04x}"),
     }
 }
 
@@ -484,7 +484,7 @@ pub fn decode_opcode(opcode: u8) -> (Operation, AddrMode) {
         0xfd => (Operation::Sbc, AddrMode::XIndexedAbsolute),
         0xfe => (Operation::Inc, AddrMode::XIndexedAbsolute),
         // TODO: implement remaining opcodes
-        _ => panic!("unimplemented opcode: ${:02x}", opcode),
+        _ => panic!("unimplemented opcode: ${opcode:02x}"),
     }
 }
 

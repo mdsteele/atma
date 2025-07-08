@@ -21,7 +21,7 @@ impl SimBus for RamBus {
     fn description(&self) -> String {
         let size = self.ram.len();
         if size < 1024 {
-            format!("{}B RAM", size)
+            format!("{size}B RAM")
         } else if size < 1024 * 1024 {
             format!("{}kB RAM", size >> 10)
         } else {
