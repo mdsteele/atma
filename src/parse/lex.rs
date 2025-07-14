@@ -18,6 +18,19 @@ pub enum TokenValue {
     Linebreak,
 }
 
+impl TokenValue {
+    /// Returns the human-readable name for this kind of token.
+    pub fn name(&self) -> &str {
+        match &self {
+            TokenValue::Colon => "colon",
+            TokenValue::Comma => "comma",
+            TokenValue::Identifier(_) => "identifier",
+            TokenValue::IntLiteral(_) => "int literal",
+            TokenValue::Linebreak => "linebreak",
+        }
+    }
+}
+
 //===========================================================================//
 
 /// A single lexical token, including location information.
@@ -38,6 +51,7 @@ pub struct LexError {
     pub message: String,
 }
 
+/// A partial result from a stream of lexer tokens.
 pub type LexResult = StreamResult<Token, LexError>;
 
 //===========================================================================//
@@ -221,7 +235,7 @@ impl TokenLexer {
         if let Some(location) = self.backslash {
             self.error_at(
                 location,
-                format!("backslash before {value:?} token"),
+                format!("unexpected backslash before {}", value.name()),
             )
         } else {
             (offset, LexResult::Yield(Token { start, value }))
@@ -375,7 +389,7 @@ mod tests {
     fn backslash_before_identifier() {
         assert_eq!(
             expect_error(b"  \\ foo"),
-            error(1, 2, "backslash before Identifier(\"foo\") token")
+            error(1, 2, "unexpected backslash before identifier")
         );
     }
 }
