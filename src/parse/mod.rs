@@ -4,8 +4,8 @@ mod ads;
 mod lex;
 mod stream;
 
-pub use ads::{AdsLineParser, AdsStatement, ParseError, ParseResult};
-pub use lex::{LexError, LexResult, Token, TokenLexer, TokenValue};
-pub use stream::{SrcLoc, StreamResult};
+pub use ads::{AdsLineParser, AdsStatement};
+pub use lex::{Token, TokenLexer, TokenValue};
+pub use stream::{ParseError, SrcLoc};
 
 //===========================================================================//

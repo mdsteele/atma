@@ -1,8 +1,6 @@
 //! Facilities for parsing Atma Debugger Script.
 
-use crate::parse::{
-    LexResult, SrcLoc, StreamResult, Token, TokenLexer, TokenValue,
-};
+use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
 
 //===========================================================================//
 
@@ -27,23 +25,6 @@ impl AdsStatement {
 
 //===========================================================================//
 
-/// An error encountered while parsing a source code file.
-#[derive(Debug, Eq, PartialEq)]
-pub struct ParseError {
-    /// The location in the file where the error occurred.
-    pub location: SrcLoc,
-    /// The error message to report to the user.
-    pub message: String,
-    /// False if parsing can continue past the error, or true if parsing must
-    /// terminate.
-    pub is_fatal: bool,
-}
-
-/// A partial result from a stream of parsed statements.
-pub type ParseResult = StreamResult<AdsStatement, ParseError>;
-
-//===========================================================================//
-
 enum ParseState {
     Nothing,
     Error,
@@ -52,70 +33,28 @@ enum ParseState {
 
 /// A parser for extracting a sequence of statements from an Atma Debugger
 /// Script source file.
-pub struct AdsLineParser {
-    lexer: TokenLexer,
+pub struct AdsLineParser<'a> {
+    lexer: TokenLexer<'a>,
     state: ParseState,
 }
 
-impl AdsLineParser {
+impl<'a> AdsLineParser<'a> {
     /// Constructs a ADS line parser in its initial state.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> AdsLineParser {
-        AdsLineParser { lexer: TokenLexer::new(), state: ParseState::Nothing }
-    }
-
-    /// Given the next chunk of input bytes, returns the number of bytes
-    /// consumed and the next statement in the stream (if any).  Pass an empty
-    /// buffer to indicate the end of input.
-    pub fn read_from(&mut self, mut buffer: &[u8]) -> (usize, ParseResult) {
-        let mut total_consumed: usize = 0;
-        loop {
-            let (consumed, lexer_result) = self.lexer.read_from(buffer);
-            total_consumed += consumed;
-            match lexer_result {
-                LexResult::NeedMoreInput => {
-                    return (total_consumed, ParseResult::NeedMoreInput);
-                }
-                LexResult::Yield(token) => {
-                    let result = if let TokenValue::Linebreak = token.value {
-                        self.on_end_of_line()
-                    } else {
-                        self.on_token(token)
-                    };
-                    if let ParseResult::NeedMoreInput = result {
-                        buffer = &buffer[consumed..];
-                        if !buffer.is_empty() {
-                            continue;
-                        }
-                    }
-                    return (total_consumed, result);
-                }
-                LexResult::NoMoreOutput => {
-                    return (total_consumed, self.on_no_more_tokens());
-                }
-                LexResult::Error(lex_error) => {
-                    self.state = ParseState::Error;
-                    return (
-                        total_consumed,
-                        ParseResult::Error(ParseError {
-                            location: lex_error.location,
-                            message: format!(
-                                "lexical error: {}",
-                                lex_error.message
-                            ),
-                            is_fatal: true,
-                        }),
-                    );
-                }
-            };
+    pub fn new(input: &[u8]) -> AdsLineParser {
+        AdsLineParser {
+            lexer: TokenLexer::new(input),
+            state: ParseState::Nothing,
         }
     }
 
-    fn on_token(&mut self, token: Token) -> ParseResult {
+    fn on_token(
+        &mut self,
+        token: Token,
+    ) -> Option<Result<AdsStatement, ParseError>> {
         match &mut self.state {
             // If the line parser is in an error state, ignore all subsequent
             // tokens until a linebreak is reached.
-            ParseState::Error => ParseResult::NeedMoreInput,
+            ParseState::Error => None,
             ParseState::CompleteStatement(stmt) => {
                 let message = format!(
                     "unexpected {} after {} statement",
@@ -129,12 +68,12 @@ impl AdsLineParser {
                     "exit" => {
                         self.state =
                             ParseState::CompleteStatement(AdsStatement::Exit);
-                        ParseResult::NeedMoreInput
+                        None
                     }
                     "relax" => {
                         self.state =
                             ParseState::CompleteStatement(AdsStatement::Relax);
-                        ParseResult::NeedMoreInput
+                        None
                     }
                     _ => {
                         let message = format!("invalid command: {id}");
@@ -153,30 +92,56 @@ impl AdsLineParser {
         }
     }
 
-    fn on_end_of_line(&mut self) -> ParseResult {
+    fn on_end_of_line(&mut self) -> Option<Result<AdsStatement, ParseError>> {
         match std::mem::replace(&mut self.state, ParseState::Nothing) {
             // If the line parser is in an error state, quietly put it back
             // into the `Nothing` state once the linebreak is reached so it can
             // try to parse the next line.
-            ParseState::Error => ParseResult::NeedMoreInput,
-            ParseState::Nothing => ParseResult::NeedMoreInput,
-            ParseState::CompleteStatement(stmt) => ParseResult::Yield(stmt),
+            ParseState::Error => None,
+            ParseState::Nothing => None,
+            ParseState::CompleteStatement(stmt) => Some(Ok(stmt)),
         }
     }
 
-    fn on_no_more_tokens(&mut self) -> ParseResult {
-        if let ParseState::Nothing = self.state {
-            ParseResult::NoMoreOutput
-        } else {
-            self.on_end_of_line()
-        }
+    fn on_no_more_tokens(
+        &mut self,
+    ) -> Option<Result<AdsStatement, ParseError>> {
+        self.on_end_of_line()
     }
 
-    fn token_error(&mut self, token: Token, message: String) -> ParseResult {
+    fn token_error(
+        &mut self,
+        token: Token,
+        message: String,
+    ) -> Option<Result<AdsStatement, ParseError>> {
         self.state = ParseState::Error;
-        let error =
-            ParseError { location: token.start, message, is_fatal: false };
-        ParseResult::Error(error)
+        Some(Err(ParseError { location: token.start, message }))
+    }
+}
+
+impl<'a> Iterator for AdsLineParser<'a> {
+    type Item = Result<AdsStatement, ParseError>;
+
+    fn next(&mut self) -> Option<Result<AdsStatement, ParseError>> {
+        loop {
+            match self.lexer.next() {
+                Some(Ok(token)) => {
+                    let option = if let TokenValue::Linebreak = token.value {
+                        self.on_end_of_line()
+                    } else {
+                        self.on_token(token)
+                    };
+                    if let Some(result) = option {
+                        return Some(result);
+                    }
+                }
+                Some(Err(error)) => {
+                    self.state = ParseState::Error;
+                    return Some(Err(error));
+                }
+                None => return self.on_no_more_tokens(),
+            };
+        }
     }
 }
 
@@ -184,26 +149,10 @@ impl AdsLineParser {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsLineParser, AdsStatement, ParseResult};
+    use super::{AdsLineParser, AdsStatement};
 
-    fn read_all(mut input: &[u8]) -> Vec<AdsStatement> {
-        let mut parser = AdsLineParser::new();
-        let mut statements = Vec::<AdsStatement>::new();
-        loop {
-            let (consumed, result) = parser.read_from(input);
-            match result {
-                ParseResult::NeedMoreInput => {
-                    if input.is_empty() {
-                        panic!("NeedMoreInput");
-                    }
-                }
-                ParseResult::Yield(stmt) => statements.push(stmt),
-                ParseResult::NoMoreOutput => break,
-                ParseResult::Error(error) => panic!("Error({error:?})"),
-            }
-            input = &input[consumed..];
-        }
-        statements
+    fn read_all(input: &[u8]) -> Vec<AdsStatement> {
+        AdsLineParser::new(input).collect::<Result<_, _>>().unwrap()
     }
 
     #[test]

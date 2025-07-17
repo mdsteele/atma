@@ -1,10 +1,141 @@
-use crate::parse::{SrcLoc, StreamResult};
+use crate::parse::{ParseError, SrcLoc};
+use logos::{self, Logos};
 use num_bigint::{BigInt, Sign};
 
 //===========================================================================//
 
+#[derive(Clone, Debug, Default, PartialEq)]
+enum LexerError {
+    #[default]
+    InvalidToken,
+    ParseError(ParseError),
+}
+
+impl std::convert::From<ParseError> for LexerError {
+    fn from(value: ParseError) -> LexerError {
+        LexerError::ParseError(value)
+    }
+}
+
+//===========================================================================//
+
+struct LexerState {
+    line: u32,
+    start_of_line: usize,
+    backslash: Option<SrcLoc>,
+}
+
+impl Default for LexerState {
+    fn default() -> LexerState {
+        LexerState { line: 1, start_of_line: 0, backslash: None }
+    }
+}
+
+//===========================================================================//
+
+fn backslash_callback(
+    lexer: &mut logos::Lexer<TokenKind>,
+) -> Result<logos::Skip, ParseError> {
+    if let Some(location) = lexer.extras.backslash {
+        let message = "unexpected backslash before backslash".to_string();
+        Err(ParseError { location, message })
+    } else {
+        lexer.extras.backslash = Some(TokenKind::Backslash.location(lexer));
+        Ok(logos::Skip)
+    }
+}
+
+fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
+    let digits: Vec<u8> = lex.slice().iter().map(|&chr| chr - b'0').collect();
+    BigInt::from_radix_be(Sign::Plus, &digits, 2).unwrap()
+}
+
+fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
+    let digits: Vec<u8> = lex.slice().iter().map(|&chr| chr - b'0').collect();
+    BigInt::from_radix_be(Sign::Plus, &digits, 10).unwrap()
+}
+
+fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
+    lexer.extras.line += 1;
+    lexer.extras.start_of_line = lexer.span().end;
+    if lexer.extras.backslash.is_some() {
+        lexer.extras.backslash = None;
+        logos::Filter::Skip
+    } else {
+        logos::Filter::Emit(())
+    }
+}
+
+#[derive(Debug, Eq, Logos, PartialEq)]
+#[logos(error = LexerError)]
+#[logos(extras = LexerState)]
+#[logos(skip r"[ \t]+")] // whitespace
+#[logos(skip r";[^\n]+")] // comments
+#[logos(source = [u8])]
+enum TokenKind {
+    #[token("\\", backslash_callback)]
+    Backslash,
+    #[token(":")]
+    Colon,
+    #[token(",")]
+    Comma,
+    #[regex(r"[_A-Za-z][_A-Za-z0-9]*")]
+    Identifier,
+    #[regex(r"%[01]+", binary_literal_callback)]
+    #[regex(r"[0-9]+", decimal_literal_callback)]
+    IntLiteral(BigInt),
+    #[regex(r"\n", newline_callback)]
+    Linebreak,
+}
+
+impl TokenKind {
+    fn lexer_location(lexer: &logos::Lexer<TokenKind>) -> SrcLoc {
+        SrcLoc {
+            line: lexer.extras.line,
+            column: lexer.span().start - lexer.extras.start_of_line,
+        }
+    }
+
+    fn location(&self, lexer: &logos::Lexer<TokenKind>) -> SrcLoc {
+        if let &TokenKind::Linebreak = self {
+            SrcLoc {
+                line: lexer.extras.line - 1,
+                column: lexer.extras.start_of_line - 1,
+            }
+        } else {
+            TokenKind::lexer_location(lexer)
+        }
+    }
+
+    fn into_token(
+        self,
+        lexer: &logos::Lexer<TokenKind>,
+    ) -> Result<Token, ParseError> {
+        let start = self.location(lexer);
+        let value = match self {
+            TokenKind::Backslash => unreachable!(),
+            TokenKind::Colon => TokenValue::Colon,
+            TokenKind::Comma => TokenValue::Comma,
+            TokenKind::Identifier => {
+                let id = String::from_utf8(lexer.slice().to_vec()).unwrap();
+                TokenValue::Identifier(id)
+            }
+            TokenKind::IntLiteral(int) => TokenValue::IntLiteral(int),
+            TokenKind::Linebreak => TokenValue::Linebreak,
+        };
+        if let Some(location) = lexer.extras.backslash {
+            let message =
+                format!("unexpected backslash before {}", value.name());
+            return Err(ParseError { location, message });
+        }
+        Ok(Token { start, value })
+    }
+}
+
+//===========================================================================//
+
 /// The contents of a single lexical token.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenValue {
     /// A "`:`" symbol.
     Colon,
@@ -34,7 +165,7 @@ impl TokenValue {
 //===========================================================================//
 
 /// A single lexical token, including location information.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     /// The locaiton in the file of the start of the token.
     pub start: SrcLoc,
@@ -42,228 +173,46 @@ pub struct Token {
     pub value: TokenValue,
 }
 
-/// A fatal error encountered while tokenizing a source code file.
-#[derive(Debug, Eq, PartialEq)]
-pub struct LexError {
-    /// The location in the file where the error occurred.
-    pub location: SrcLoc,
-    /// The error message to report to the user.
-    pub message: String,
-}
-
-/// A partial result from a stream of lexer tokens.
-pub type LexResult = StreamResult<Token, LexError>;
-
 //===========================================================================//
 
-enum LexState {
-    /// The lexer is in the middle of a source code comment.
-    Comment,
-    /// The lexer is in the middle of a decimal integer literal.
-    DecimalLiteral { start: SrcLoc, digits: Vec<u8> },
-    /// The lexer is in the middle of an identifier token.
-    Identifier { start: SrcLoc, chars: Vec<u8> },
-    /// The lexer is consuming whitespace between tokens.
-    Whitespace,
-    /// The lexer already reported an error, and cannot yield any more tokens.
-    Error,
-}
-
 /// A lexer for tokenizing an input file.
-pub struct TokenLexer {
-    loc: SrcLoc,
-    state: LexState,
-    backslash: Option<SrcLoc>,
+pub struct TokenLexer<'a> {
+    lexer: logos::Lexer<'a, TokenKind>,
 }
 
-impl TokenLexer {
+impl<'a> TokenLexer<'a> {
     /// Constructs a new lexer in its initial state.
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> TokenLexer {
-        TokenLexer {
-            loc: SrcLoc::start(),
-            state: LexState::Whitespace,
-            backslash: None,
-        }
+    pub fn new(input: &[u8]) -> TokenLexer {
+        TokenLexer { lexer: TokenKind::lexer(input) }
     }
+}
 
-    /// Given the next chunk of input bytes, returns the number of bytes
-    /// consumed and the next token in the stream (if any).  Pass an empty
-    /// buffer to indicate the end of input.
-    pub fn read_from(&mut self, buffer: &[u8]) -> (usize, LexResult) {
-        if buffer.is_empty() { self.eof() } else { self.consume_input(buffer) }
-    }
+impl<'a> Iterator for TokenLexer<'a> {
+    type Item = Result<Token, ParseError>;
 
-    fn consume_input(&mut self, buffer: &[u8]) -> (usize, LexResult) {
-        for (offset, &byte) in buffer.iter().enumerate() {
-            match &mut self.state {
-                LexState::Error => {
-                    return self.already_in_error_state();
-                }
-                LexState::Whitespace => match byte {
-                    b' ' | b'\t' => {}
-                    b'\n' => {
-                        if self.backslash.is_some() {
-                            self.backslash = None;
-                            self.loc.newline();
-                            continue;
-                        }
-                        let start = self.loc;
-                        let value = TokenValue::Linebreak;
-                        self.loc.newline();
-                        return self.token_at(offset + 1, start, value);
-                    }
-                    b'\\' => {
-                        self.backslash = Some(self.loc);
-                    }
-                    b';' => {
-                        self.state = LexState::Comment;
-                    }
-                    b':' => {
-                        let start = self.loc;
-                        let value = TokenValue::Colon;
-                        self.loc.column += 1;
-                        return self.token_at(offset + 1, start, value);
-                    }
-                    b',' => {
-                        let start = self.loc;
-                        let value = TokenValue::Comma;
-                        self.loc.column += 1;
-                        return self.token_at(offset + 1, start, value);
-                    }
-                    b'0'..=b'9' => {
-                        self.state = LexState::DecimalLiteral {
-                            start: self.loc,
-                            digits: vec![byte - b'0'],
-                        };
-                    }
-                    b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
-                        self.state = LexState::Identifier {
-                            start: self.loc,
-                            chars: vec![byte],
-                        };
-                    }
-                    _ => {
-                        return self
-                            .error(format!("unexpected byte: {byte:?}"));
-                    }
-                },
-                LexState::Comment => {
-                    if byte == b'\n' {
-                        self.state = LexState::Whitespace;
-                        if self.backslash.is_some() {
-                            self.backslash = None;
-                            self.loc.newline();
-                            continue;
-                        }
-                        let start = self.loc;
-                        let value = TokenValue::Linebreak;
-                        self.loc.newline();
-                        return self.token_at(offset + 1, start, value);
-                    }
-                }
-                LexState::DecimalLiteral { start, digits } => match byte {
-                    b'0'..=b'9' => {
-                        digits.push(byte - b'0');
-                    }
-                    _ => {
-                        let start = *start;
-                        let integer =
-                            BigInt::from_radix_be(Sign::Plus, digits, 10)
-                                .unwrap();
-                        let value = TokenValue::IntLiteral(integer);
-                        self.state = LexState::Whitespace;
-                        return self.token_at(offset, start, value);
-                    }
-                },
-                LexState::Identifier { start, chars } => match byte {
-                    b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => {
-                        chars.push(byte);
-                    }
-                    _ => {
-                        let start = *start;
-                        let id =
-                            String::from_utf8(std::mem::take(chars)).unwrap();
-                        let value = TokenValue::Identifier(id);
-                        self.state = LexState::Whitespace;
-                        return self.token_at(offset, start, value);
-                    }
-                },
-            }
-            self.loc.column += 1;
-        }
-        // At this point, we've consumed the whole (non-empty) buffer without
-        // producing a token, so more input is needed.
-        (buffer.len(), LexResult::NeedMoreInput)
-    }
-
-    fn eof(&mut self) -> (usize, LexResult) {
-        match std::mem::replace(&mut self.state, LexState::Whitespace) {
-            LexState::Error => self.already_in_error_state(),
-            LexState::Whitespace | LexState::Comment => {
-                if let Some(location) = self.backslash {
-                    self.error_at(
-                        location,
-                        "hanging backslash before EOF".to_string(),
-                    )
+    fn next(&mut self) -> Option<Result<Token, ParseError>> {
+        match self.lexer.next() {
+            None => {
+                if let Some(location) = self.lexer.extras.backslash {
+                    self.lexer.extras.backslash = None;
+                    let message =
+                        "unexpected backslash before EOF".to_string();
+                    Some(Err(ParseError { location, message }))
                 } else {
-                    (0, LexResult::NoMoreOutput)
+                    None
                 }
             }
-            LexState::DecimalLiteral { start, digits } => {
-                let integer =
-                    BigInt::from_radix_be(Sign::Plus, &digits, 10).unwrap();
-                let value = TokenValue::IntLiteral(integer);
-                self.state = LexState::Whitespace;
-                self.token_at(0, start, value)
+            Some(Err(LexerError::ParseError(error))) => Some(Err(error)),
+            Some(Err(LexerError::InvalidToken)) => {
+                let location = TokenKind::lexer_location(&self.lexer);
+                let message = format!(
+                    "invalid character: {}",
+                    self.lexer.slice().escape_ascii()
+                );
+                Some(Err(ParseError { location, message }))
             }
-            LexState::Identifier { start, chars } => {
-                let id = String::from_utf8(chars).unwrap();
-                let value = TokenValue::Identifier(id);
-                self.state = LexState::Whitespace;
-                self.token_at(0, start, value)
-            }
+            Some(Ok(kind)) => Some(kind.into_token(&self.lexer)),
         }
-    }
-
-    fn token_at(
-        &mut self,
-        offset: usize,
-        start: SrcLoc,
-        value: TokenValue,
-    ) -> (usize, LexResult) {
-        if let Some(location) = self.backslash {
-            self.error_at(
-                location,
-                format!("unexpected backslash before {}", value.name()),
-            )
-        } else {
-            (offset, LexResult::Yield(Token { start, value }))
-        }
-    }
-
-    /// Puts the [`TokenLexer`] into a fatal error state, and returns an error
-    /// result at the current location (without consuming any input).
-    fn error(&mut self, message: String) -> (usize, LexResult) {
-        self.error_at(self.loc, message)
-    }
-
-    /// Puts the [`TokenLexer`] into a fatal error state, and returns an error
-    /// result at the specified location (without consuming any input).
-    fn error_at(
-        &mut self,
-        location: SrcLoc,
-        message: String,
-    ) -> (usize, LexResult) {
-        self.state = LexState::Error;
-        self.backslash = None;
-        (0, LexResult::Error(LexError { location, message }))
-    }
-
-    /// Returns an error result indicating that the [`TokenLexer`] was already
-    /// in a fatal error state.
-    fn already_in_error_state(&mut self) -> (usize, LexResult) {
-        self.error("cannot yield more tokens after an error".to_string())
     }
 }
 
@@ -271,7 +220,7 @@ impl TokenLexer {
 
 #[cfg(test)]
 mod tests {
-    use super::{LexError, LexResult, Token, TokenLexer, TokenValue};
+    use super::{ParseError, Token, TokenLexer, TokenValue};
     use crate::parse::SrcLoc;
     use num_bigint::BigInt;
 
@@ -279,49 +228,24 @@ mod tests {
         Token { start: SrcLoc { line, column }, value }
     }
 
-    fn error(line: u32, column: usize, message: &str) -> LexError {
-        LexError {
+    fn error(line: u32, column: usize, message: &str) -> ParseError {
+        ParseError {
             location: SrcLoc { line, column },
             message: message.to_string(),
         }
     }
 
-    fn read_all(mut input: &[u8]) -> Vec<Token> {
-        let mut lexer = TokenLexer::new();
-        let mut tokens = Vec::<Token>::new();
-        loop {
-            let (consumed, result) = lexer.read_from(input);
-            match result {
-                LexResult::NeedMoreInput => {
-                    if input.is_empty() {
-                        panic!("NeedMoreInput");
-                    }
-                }
-                LexResult::Yield(token) => tokens.push(token),
-                LexResult::NoMoreOutput => break,
-                LexResult::Error(error) => panic!("Error({error:?})"),
-            }
-            input = &input[consumed..];
-        }
-        tokens
+    fn read_all(input: &[u8]) -> Vec<Token> {
+        TokenLexer::new(input).collect::<Result<_, _>>().unwrap()
     }
 
-    fn expect_error(mut input: &[u8]) -> LexError {
-        let mut lexer = TokenLexer::new();
-        loop {
-            let (consumed, result) = lexer.read_from(input);
-            match result {
-                LexResult::NeedMoreInput => {
-                    if input.is_empty() {
-                        panic!("NeedMoreInput");
-                    }
-                }
-                LexResult::Yield(_) => {}
-                LexResult::NoMoreOutput => panic!("NoMoreOutput"),
-                LexResult::Error(error) => return error,
+    fn expect_error(input: &[u8]) -> ParseError {
+        for result in TokenLexer::new(input) {
+            if let Err(error) = result {
+                return error;
             }
-            input = &input[consumed..];
         }
+        panic!("no error occurred");
     }
 
     #[test]
@@ -378,10 +302,18 @@ mod tests {
     }
 
     #[test]
+    fn backslash_before_backslash() {
+        assert_eq!(
+            expect_error(b"\\ \\ \n"),
+            error(1, 0, "unexpected backslash before backslash")
+        );
+    }
+
+    #[test]
     fn backslash_before_eof() {
         assert_eq!(
             expect_error(b"  \\ "),
-            error(1, 2, "hanging backslash before EOF")
+            error(1, 2, "unexpected backslash before EOF")
         );
     }
 
@@ -390,6 +322,14 @@ mod tests {
         assert_eq!(
             expect_error(b"  \\ foo"),
             error(1, 2, "unexpected backslash before identifier")
+        );
+    }
+
+    #[test]
+    fn invalid_token() {
+        assert_eq!(
+            expect_error(b" `foo\n"),
+            error(1, 1, "invalid character: `")
         );
     }
 }

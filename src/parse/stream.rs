@@ -2,21 +2,6 @@ use std::fmt;
 
 //===========================================================================//
 
-/// A partial result from a stream of parser output values.
-#[derive(Debug, Eq, PartialEq)]
-pub enum StreamResult<T, E> {
-    /// More input is needed before another value can be yielded.
-    NeedMoreInput,
-    /// The next value in the output stream.
-    Yield(T),
-    /// No more values will be yielded.
-    NoMoreOutput,
-    /// An error was encountered.
-    Error(E),
-}
-
-//===========================================================================//
-
 /// A location within a source code file.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SrcLoc {
@@ -44,6 +29,17 @@ impl fmt::Display for SrcLoc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.line, self.column)
     }
+}
+
+//===========================================================================//
+
+/// An error encountered while parsing a source code file.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ParseError {
+    /// The location in the file where the error occurred.
+    pub location: SrcLoc,
+    /// The error message to report to the user.
+    pub message: String,
 }
 
 //===========================================================================//
