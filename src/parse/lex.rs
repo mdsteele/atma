@@ -86,6 +86,12 @@ enum TokenKind {
     IntLiteral(BigInt),
     #[regex(r"\n", newline_callback)]
     Linebreak,
+    #[token(")")]
+    ParenClose,
+    #[token("(")]
+    ParenOpen,
+    #[token("+")]
+    Plus,
 }
 
 impl TokenKind {
@@ -122,6 +128,9 @@ impl TokenKind {
             }
             TokenKind::IntLiteral(int) => TokenValue::IntLiteral(int),
             TokenKind::Linebreak => TokenValue::Linebreak,
+            TokenKind::ParenClose => TokenValue::ParenClose,
+            TokenKind::ParenOpen => TokenValue::ParenOpen,
+            TokenKind::Plus => TokenValue::Plus,
         };
         if let Some(location) = lexer.extras.backslash {
             let message =
@@ -147,17 +156,26 @@ pub enum TokenValue {
     IntLiteral(BigInt),
     /// A linebreak (that wasn't suppressed, e.g. by a backslash).
     Linebreak,
+    /// A "`)`" symbol.
+    ParenClose,
+    /// A "`(`" symbol.
+    ParenOpen,
+    /// A "`+`" symbol.
+    Plus,
 }
 
 impl TokenValue {
     /// Returns the human-readable name for this kind of token.
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &'static str {
         match &self {
             TokenValue::Colon => "colon",
             TokenValue::Comma => "comma",
             TokenValue::Identifier(_) => "identifier",
             TokenValue::IntLiteral(_) => "int literal",
             TokenValue::Linebreak => "linebreak",
+            TokenValue::ParenClose => "close parenthesis",
+            TokenValue::ParenOpen => "open parenthesis",
+            TokenValue::Plus => "plus sign",
         }
     }
 }
