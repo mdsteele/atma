@@ -79,6 +79,8 @@ enum TokenKind {
     Colon,
     #[token(",")]
     Comma,
+    #[token("=")]
+    Equals,
     #[regex(r"[_A-Za-z][_A-Za-z0-9]*")]
     Identifier,
     #[regex(r"%[01]+", binary_literal_callback)]
@@ -122,6 +124,7 @@ impl TokenKind {
             TokenKind::Backslash => unreachable!(),
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
+            TokenKind::Equals => TokenValue::Equals,
             TokenKind::Identifier => {
                 let id = String::from_utf8(lexer.slice().to_vec()).unwrap();
                 TokenValue::Identifier(id)
@@ -150,6 +153,8 @@ pub enum TokenValue {
     Colon,
     /// A "`,`" symbol.
     Comma,
+    /// A "`=`" symbol.
+    Equals,
     /// An identifier or keyword.
     Identifier(String),
     /// An integer literal.
@@ -170,6 +175,7 @@ impl TokenValue {
         match &self {
             TokenValue::Colon => "colon",
             TokenValue::Comma => "comma",
+            TokenValue::Equals => "equals sign",
             TokenValue::Identifier(_) => "identifier",
             TokenValue::IntLiteral(_) => "int literal",
             TokenValue::Linebreak => "linebreak",

@@ -3,11 +3,11 @@
 mod ads;
 mod expr;
 mod lex;
-mod stream;
+mod types;
 
-pub use ads::{AdsLineParser, AdsStatement};
+pub use ads::{AdsModuleAst, AdsStmtAst};
 pub use expr::{ExprAst, parse_expr};
 pub use lex::{Token, TokenLexer, TokenValue};
-pub use stream::{ParseError, SrcLoc};
+pub use types::{ParseError, SrcLoc};
 
 //===========================================================================//

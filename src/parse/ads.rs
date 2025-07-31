@@ -1,185 +1,181 @@
 //! Facilities for parsing Atma Debugger Script.
 
-use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
+use super::expr::{ExprAst, IdentifierAst, PError, symbol};
+use crate::parse::{ParseError, Token, TokenValue};
+use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
 
-/// One statement in an Atma Debugger Script source file.
-#[derive(Debug, Eq, PartialEq)]
-pub enum AdsStatement {
+/// The abstract syntax tree for an entire Atma Debugger Script module.
+pub struct AdsModuleAst {
+    statements: Vec<AdsStmtAst>,
+}
+
+impl AdsModuleAst {
+    /// Parses a sequence of tokens into an Atma Debugger Script module.
+    pub fn parse(tokens: &[Token]) -> Result<AdsModuleAst, Vec<ParseError>> {
+        AdsModuleAst::parser().parse(tokens).into_result().map_err(|errors| {
+            errors
+                .into_iter()
+                .map(|error| {
+                    let index = error.span().start;
+                    let location = if index < tokens.len() {
+                        tokens[index].start
+                    } else {
+                        tokens[tokens.len() - 1].start
+                    };
+                    let message = format!("{error:?}");
+                    ParseError { location, message }
+                })
+                .collect()
+        })
+    }
+
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AdsModuleAst, PError<'a>> + Clone {
+        symbol(TokenValue::Linebreak).repeated().ignore_then(
+            AdsStmtAst::parser()
+                .repeated()
+                .collect::<Vec<_>>()
+                .map(|statements| AdsModuleAst { statements }),
+        )
+    }
+
+    /// Returns the list of top-level statements in this module.
+    pub fn statements(&self) -> &[AdsStmtAst] {
+        &self.statements
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for one statement in an Atma Debugger Script
+/// module.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AdsStmtAst {
     /// Exits the script.
     Exit,
+    /// Defines a constant.
+    Let(IdentifierAst, ExprAst),
     /// A no-op statement.
     Relax,
 }
 
-impl AdsStatement {
-    /// Returns the human-readable name for this kind of statement.
-    pub fn name(&self) -> &str {
-        match &self {
-            AdsStatement::Exit => "exit",
-            AdsStatement::Relax => "relax",
-        }
+impl AdsStmtAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+        chumsky::prelude::choice((
+            exit_statement(),
+            let_statement(),
+            relax_statement(),
+        ))
     }
 }
 
 //===========================================================================//
 
-enum ParseState {
-    Nothing,
-    Error,
-    CompleteStatement(AdsStatement),
-}
-
-/// A parser for extracting a sequence of statements from an Atma Debugger
-/// Script source file.
-pub struct AdsLineParser<'a> {
-    lexer: TokenLexer<'a>,
-    state: ParseState,
-}
-
-impl<'a> AdsLineParser<'a> {
-    /// Constructs a ADS line parser in its initial state.
-    pub fn new(input: &[u8]) -> AdsLineParser {
-        AdsLineParser {
-            lexer: TokenLexer::new(input),
-            state: ParseState::Nothing,
-        }
-    }
-
-    fn on_token(
-        &mut self,
-        token: Token,
-    ) -> Option<Result<AdsStatement, ParseError>> {
-        match &mut self.state {
-            // If the line parser is in an error state, ignore all subsequent
-            // tokens until a linebreak is reached.
-            ParseState::Error => None,
-            ParseState::CompleteStatement(stmt) => {
-                let message = format!(
-                    "unexpected {} after {} statement",
-                    token.value.name(),
-                    stmt.name()
-                );
-                self.token_error(token, message)
+fn keyword<'a>(
+    word: &'static str,
+) -> impl Parser<'a, &'a [Token], (), PError<'a>> + Clone {
+    chumsky::prelude::any()
+        .filter(move |token: &Token| {
+            if let TokenValue::Identifier(id) = &token.value {
+                id == word
+            } else {
+                false
             }
-            ParseState::Nothing => match &token.value {
-                TokenValue::Identifier(id) => match id.as_str() {
-                    "exit" => {
-                        self.state =
-                            ParseState::CompleteStatement(AdsStatement::Exit);
-                        None
-                    }
-                    "relax" => {
-                        self.state =
-                            ParseState::CompleteStatement(AdsStatement::Relax);
-                        None
-                    }
-                    _ => {
-                        let message = format!("invalid command: {id}");
-                        self.token_error(token, message)
-                    }
-                },
-                TokenValue::Linebreak => unreachable!(),
-                value => {
-                    let message = format!(
-                        "cannot start a statement with {}",
-                        value.name()
-                    );
-                    self.token_error(token, message)
-                }
-            },
-        }
-    }
-
-    fn on_end_of_line(&mut self) -> Option<Result<AdsStatement, ParseError>> {
-        match std::mem::replace(&mut self.state, ParseState::Nothing) {
-            // If the line parser is in an error state, quietly put it back
-            // into the `Nothing` state once the linebreak is reached so it can
-            // try to parse the next line.
-            ParseState::Error => None,
-            ParseState::Nothing => None,
-            ParseState::CompleteStatement(stmt) => Some(Ok(stmt)),
-        }
-    }
-
-    fn on_no_more_tokens(
-        &mut self,
-    ) -> Option<Result<AdsStatement, ParseError>> {
-        self.on_end_of_line()
-    }
-
-    fn token_error(
-        &mut self,
-        token: Token,
-        message: String,
-    ) -> Option<Result<AdsStatement, ParseError>> {
-        self.state = ParseState::Error;
-        Some(Err(ParseError { location: token.start, message }))
-    }
+        })
+        .ignored()
+        .labelled(word)
 }
 
-impl<'a> Iterator for AdsLineParser<'a> {
-    type Item = Result<AdsStatement, ParseError>;
+fn linebreak<'a>() -> impl Parser<'a, &'a [Token], (), PError<'a>> + Clone {
+    symbol(TokenValue::Linebreak).repeated().at_least(1)
+}
 
-    fn next(&mut self) -> Option<Result<AdsStatement, ParseError>> {
-        loop {
-            match self.lexer.next() {
-                Some(Ok(token)) => {
-                    let option = if let TokenValue::Linebreak = token.value {
-                        self.on_end_of_line()
-                    } else {
-                        self.on_token(token)
-                    };
-                    if let Some(result) = option {
-                        return Some(result);
-                    }
-                }
-                Some(Err(error)) => {
-                    self.state = ParseState::Error;
-                    return Some(Err(error));
-                }
-                None => return self.on_no_more_tokens(),
-            };
-        }
-    }
+fn exit_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("exit").then_ignore(linebreak()).to(AdsStmtAst::Exit)
+}
+
+fn let_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("let")
+        .ignore_then(IdentifierAst::parser())
+        .then_ignore(symbol(TokenValue::Equals))
+        .then(ExprAst::parser())
+        .then_ignore(linebreak())
+        .map(|(id, expr)| AdsStmtAst::Let(id, expr))
+}
+
+fn relax_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("relax").then_ignore(linebreak()).to(AdsStmtAst::Relax)
 }
 
 //===========================================================================//
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsLineParser, AdsStatement};
+    use super::{AdsModuleAst, AdsStmtAst, ExprAst, IdentifierAst};
+    use crate::parse::{ParseError, SrcLoc, Token, TokenLexer};
+    use num_bigint::BigInt;
 
-    fn read_all(input: &[u8]) -> Vec<AdsStatement> {
-        AdsLineParser::new(input).collect::<Result<_, _>>().unwrap()
+    fn read_statements(input: &str) -> Vec<AdsStmtAst> {
+        AdsModuleAst::parse(
+            &TokenLexer::new(input.as_bytes())
+                .collect::<Result<Vec<Token>, ParseError>>()
+                .unwrap(),
+        )
+        .unwrap()
+        .statements()
+        .to_vec()
     }
 
     #[test]
     fn empty_input() {
-        assert_eq!(read_all(b""), vec![]);
+        assert_eq!(read_statements(""), vec![]);
     }
 
     #[test]
     fn extra_linebreaks() {
         assert_eq!(
-            read_all(
-                b"relax  ; just rest\n\
+            read_statements(
+                "relax  ; just rest\n\
                   \n\n\
                   exit  ; OK, all done!\n"
             ),
-            vec![AdsStatement::Relax, AdsStatement::Exit]
+            vec![AdsStmtAst::Relax, AdsStmtAst::Exit]
         );
     }
 
     #[test]
+    fn leading_linebreak() {
+        assert_eq!(read_statements("\nrelax\n"), vec![AdsStmtAst::Relax]);
+    }
+
+    #[test]
     fn exit_statement() {
-        assert_eq!(read_all(b"exit\n"), vec![AdsStatement::Exit]);
+        assert_eq!(read_statements("exit\n"), vec![AdsStmtAst::Exit]);
+    }
+
+    #[test]
+    fn let_statement() {
+        assert_eq!(
+            read_statements("let foo = 42\n"),
+            vec![AdsStmtAst::Let(
+                IdentifierAst {
+                    id: "foo".to_string(),
+                    start: SrcLoc { line: 1, column: 4 }
+                },
+                ExprAst::IntLiteral(BigInt::from(42))
+            )]
+        );
     }
 
     #[test]
     fn relax_statement() {
-        assert_eq!(read_all(b"relax\n"), vec![AdsStatement::Relax]);
+        assert_eq!(read_statements("relax\n"), vec![AdsStmtAst::Relax]);
     }
 }
 
