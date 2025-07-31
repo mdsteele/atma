@@ -57,6 +57,8 @@ pub enum AdsStmtAst {
     Exit,
     /// Defines a constant.
     Let(IdentifierAst, ExprAst),
+    /// Prints the value of an expression.
+    Print(ExprAst),
     /// A no-op statement.
     Relax,
 }
@@ -67,6 +69,7 @@ impl AdsStmtAst {
         chumsky::prelude::choice((
             exit_statement(),
             let_statement(),
+            print_statement(),
             relax_statement(),
         ))
     }
@@ -106,6 +109,14 @@ fn let_statement<'a>()
         .then(ExprAst::parser())
         .then_ignore(linebreak())
         .map(|(id, expr)| AdsStmtAst::Let(id, expr))
+}
+
+fn print_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("print")
+        .ignore_then(ExprAst::parser())
+        .then_ignore(linebreak())
+        .map(AdsStmtAst::Print)
 }
 
 fn relax_statement<'a>()
@@ -170,6 +181,14 @@ mod tests {
                 },
                 ExprAst::IntLiteral(BigInt::from(42))
             )]
+        );
+    }
+
+    #[test]
+    fn print_statement() {
+        assert_eq!(
+            read_statements("print 42\n"),
+            vec![AdsStmtAst::Print(ExprAst::IntLiteral(BigInt::from(42)))]
         );
     }
 
