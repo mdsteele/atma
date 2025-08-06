@@ -1,4 +1,4 @@
-use super::proc::{Breakpoint, SimBreak, SimProc};
+use crate::proc::{Breakpoint, SimBreak, SimProc};
 use std::collections::{HashMap, HashSet};
 
 //===========================================================================//

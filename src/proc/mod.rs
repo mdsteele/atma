@@ -1,3 +1,5 @@
+//! Facilities for simulating a processor.
+
 mod mos6502;
 mod sm83;
 

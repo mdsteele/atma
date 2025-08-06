@@ -1,6 +1,6 @@
 use crate::bus::{BusPeeker, SimBus};
-use crate::db::proc::{SimBreak, SimProc};
 use crate::dis::mos6502::{disassemble_instruction, format_instruction};
+use crate::proc::{SimBreak, SimProc};
 use std::borrow::Borrow;
 
 //===========================================================================//

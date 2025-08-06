@@ -1,4 +1,5 @@
-use atma::db::{Breakpoint, SimBreak, SimEnv};
+use atma::db::SimEnv;
+use atma::proc::{Breakpoint, SimBreak};
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::io;
