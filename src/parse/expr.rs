@@ -15,7 +15,10 @@ pub(crate) type PError<'a> =
 /// An identifier in an expression or lvalue.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdentifierAst {
-    pub id: String,
+    /// The name of the identifier.
+    pub name: String,
+    /// The location in the source code where this instance of the identifier
+    /// appears.
     pub start: SrcLoc,
 }
 
@@ -24,8 +27,8 @@ impl IdentifierAst {
     -> impl Parser<'a, &'a [Token], IdentifierAst, PError<'a>> + Clone {
         chumsky::prelude::any()
             .try_map(|token: Token, span| {
-                if let TokenValue::Identifier(id) = token.value {
-                    Ok(IdentifierAst { id, start: token.start })
+                if let TokenValue::Identifier(name) = token.value {
+                    Ok(IdentifierAst { name, start: token.start })
                 } else {
                     Err(chumsky::error::Rich::custom(span, ""))
                 }
@@ -39,12 +42,14 @@ impl IdentifierAst {
 /// An abstract syntax tree for an expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExprAst {
+    /// An boolean literal.
+    BoolLiteral(bool),
     /// An identifier.
     Identifier(IdentifierAst),
     /// An integer literal.
     IntLiteral(BigInt),
     /// An addition operation between two subexpressions.
-    Plus(Box<ExprAst>, Box<ExprAst>),
+    Plus(SrcLoc, Box<ExprAst>, Box<ExprAst>),
 }
 
 impl ExprAst {
@@ -57,6 +62,7 @@ impl ExprAst {
                     symbol(TokenValue::ParenClose),
                 ),
                 IdentifierAst::parser().map(ExprAst::Identifier),
+                // TODO: bool_literal(),
                 int_literal(),
             ))
             .labelled("subexpression");
@@ -64,8 +70,10 @@ impl ExprAst {
             expr_atom
                 .clone()
                 .foldl(
-                    symbol(TokenValue::Plus).ignore_then(expr_atom).repeated(),
-                    |lhs, rhs| ExprAst::Plus(Box::new(lhs), Box::new(rhs)),
+                    symbol(TokenValue::Plus).then(expr_atom).repeated(),
+                    |lhs, (plus, rhs)| {
+                        ExprAst::Plus(plus.start, Box::new(lhs), Box::new(rhs))
+                    },
                 )
                 .labelled("expression")
         })
@@ -89,11 +97,10 @@ fn int_literal<'a>()
 
 pub(crate) fn symbol<'a>(
     value: TokenValue,
-) -> impl Parser<'a, &'a [Token], (), PError<'a>> + Clone {
+) -> impl Parser<'a, &'a [Token], Token, PError<'a>> + Clone {
     let name = value.name();
     chumsky::prelude::any()
         .filter(move |token: &Token| token.value == value)
-        .ignored()
         .labelled(name)
 }
 
@@ -139,7 +146,7 @@ mod tests {
         assert_eq!(
             parse("foo"),
             Ok(ExprAst::Identifier(IdentifierAst {
-                id: "foo".to_string(),
+                name: "foo".to_string(),
                 start: SrcLoc { line: 1, column: 0 }
             }))
         );
@@ -155,11 +162,14 @@ mod tests {
         assert_eq!(
             parse("1 + 2 + (3 + 4)"),
             Ok(ExprAst::Plus(
+                SrcLoc { line: 1, column: 6 },
                 Box::new(ExprAst::Plus(
+                    SrcLoc { line: 1, column: 2 },
                     Box::new(ExprAst::IntLiteral(BigInt::from(1))),
                     Box::new(ExprAst::IntLiteral(BigInt::from(2))),
                 )),
                 Box::new(ExprAst::Plus(
+                    SrcLoc { line: 1, column: 11 },
                     Box::new(ExprAst::IntLiteral(BigInt::from(3))),
                     Box::new(ExprAst::IntLiteral(BigInt::from(4))),
                 )),

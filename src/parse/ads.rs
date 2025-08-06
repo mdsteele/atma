@@ -8,7 +8,8 @@ use chumsky::{self, IterParser, Parser};
 
 /// The abstract syntax tree for an entire Atma Debugger Script module.
 pub struct AdsModuleAst {
-    statements: Vec<AdsStmtAst>,
+    /// The statements in this module.
+    pub statements: Vec<AdsStmtAst>,
 }
 
 impl AdsModuleAst {
@@ -40,11 +41,6 @@ impl AdsModuleAst {
                 .map(|statements| AdsModuleAst { statements }),
         )
     }
-
-    /// Returns the list of top-level statements in this module.
-    pub fn statements(&self) -> &[AdsStmtAst] {
-        &self.statements
-    }
 }
 
 //===========================================================================//
@@ -55,6 +51,9 @@ impl AdsModuleAst {
 pub enum AdsStmtAst {
     /// Exits the script.
     Exit,
+    /// Executes the first block if the expression is true, the second block
+    /// otherwise.
+    If(ExprAst, Vec<AdsStmtAst>, Vec<AdsStmtAst>),
     /// Defines a constant.
     Let(IdentifierAst, ExprAst),
     /// Prints the value of an expression.
@@ -68,6 +67,7 @@ impl AdsStmtAst {
     -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
         chumsky::prelude::choice((
             exit_statement(),
+            // TODO: if_statement(),
             let_statement(),
             print_statement(),
             relax_statement(),
@@ -139,8 +139,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap()
-        .statements()
-        .to_vec()
+        .statements
     }
 
     #[test]
@@ -176,7 +175,7 @@ mod tests {
             read_statements("let foo = 42\n"),
             vec![AdsStmtAst::Let(
                 IdentifierAst {
-                    id: "foo".to_string(),
+                    name: "foo".to_string(),
                     start: SrcLoc { line: 1, column: 4 }
                 },
                 ExprAst::IntLiteral(BigInt::from(42))
