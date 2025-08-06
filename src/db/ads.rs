@@ -2,6 +2,7 @@ use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
 use crate::parse::{AdsModuleAst, AdsStmtAst, ExprAst, ParseError, SrcLoc};
 use std::collections::HashMap;
+use std::io::Read;
 
 //===========================================================================//
 
@@ -229,6 +230,13 @@ pub struct AdsProgram {
 }
 
 impl AdsProgram {
+    /// Reads an Atma Debugger Script program from a file.
+    pub fn read_from<R: Read>(
+        reader: R,
+    ) -> Result<AdsProgram, Vec<ParseError>> {
+        AdsProgram::typecheck(AdsModuleAst::read_from(reader)?)
+    }
+
     /// Distills the abstract syntax tree for an Atma Debugger Script module
     /// into a program that can be executed.
     pub fn typecheck(
@@ -248,6 +256,7 @@ impl AdsProgram {
 
 //===========================================================================//
 
+#[derive(Debug)]
 pub struct AdsRuntimeError {}
 
 //===========================================================================//

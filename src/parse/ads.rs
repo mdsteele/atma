@@ -1,8 +1,9 @@
 //! Facilities for parsing Atma Debugger Script.
 
 use super::expr::{ExprAst, IdentifierAst, PError, symbol};
-use crate::parse::{ParseError, Token, TokenValue};
+use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
 use chumsky::{self, IterParser, Parser};
+use std::io::Read;
 
 //===========================================================================//
 
@@ -13,6 +14,19 @@ pub struct AdsModuleAst {
 }
 
 impl AdsModuleAst {
+    /// Reads the abstract syntax tree for an Atma Debugger Script module from
+    /// a file.
+    pub fn read_from<R: Read>(
+        mut reader: R,
+    ) -> Result<AdsModuleAst, Vec<ParseError>> {
+        let mut data = Vec::<u8>::new();
+        reader.read_to_end(&mut data).unwrap(); // TODO handle error
+        let lexer = TokenLexer::new(&data);
+        let tokens: Vec<Token> =
+            lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
+        AdsModuleAst::parse(&tokens)
+    }
+
     /// Parses a sequence of tokens into an Atma Debugger Script module.
     pub fn parse(tokens: &[Token]) -> Result<AdsModuleAst, Vec<ParseError>> {
         AdsModuleAst::parser().parse(tokens).into_result().map_err(|errors| {

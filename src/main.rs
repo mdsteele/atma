@@ -1,4 +1,4 @@
-use atma::db::SimEnv;
+use atma::db::{AdsEnvironment, AdsProgram, SimEnv};
 use atma::proc::{Breakpoint, SimBreak};
 use clap::{Parser, Subcommand};
 use std::fs::File;
@@ -39,33 +39,50 @@ fn format_registers(sim_env: &SimEnv) -> String {
 fn main() -> io::Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Db { binary, .. } => {
+        Command::Db { binary, script } => {
             let mut sim_env = {
                 let file = File::open(&binary)?;
                 atma::db::load_binary(io::BufReader::new(file))?
             };
             print!("{}", sim_env.description());
-            sim_env.add_breakpoint(Breakpoint::Pc(0xfff7));
-            sim_env.add_breakpoint(Breakpoint::Pc(0xfff9));
-            loop {
-                let pc = sim_env.pc();
-                let instruction = sim_env.disassemble(sim_env.pc()).1;
-                let result = sim_env.step();
-                println!(
-                    "${:04x} | {:16} {}",
-                    pc,
-                    instruction,
-                    format_registers(&sim_env)
-                );
-                match result {
-                    Ok(()) => {}
-                    Err(SimBreak::Breakpoint(breakpoint)) => {
-                        println!("Breakpoint: {breakpoint:?}");
-                        break;
+            if let Some(ads_path) = script {
+                let program = {
+                    let file = File::open(ads_path)?;
+                    AdsProgram::read_from(file).unwrap() // TODO handle error
+                };
+                let mut ads_env = AdsEnvironment::new(sim_env, program);
+                loop {
+                    match ads_env.step() {
+                        Ok(true) => break,
+                        Ok(false) => {}
+                        Err(error) => panic!("{error:?}"),
                     }
-                    Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
-                        println!("Halted by {mnemonic} opcode ${opcode:02x}");
-                        break;
+                }
+            } else {
+                sim_env.add_breakpoint(Breakpoint::Pc(0xfff7));
+                sim_env.add_breakpoint(Breakpoint::Pc(0xfff9));
+                loop {
+                    let pc = sim_env.pc();
+                    let instruction = sim_env.disassemble(sim_env.pc()).1;
+                    let result = sim_env.step();
+                    println!(
+                        "${:04x} | {:16} {}",
+                        pc,
+                        instruction,
+                        format_registers(&sim_env)
+                    );
+                    match result {
+                        Ok(()) => {}
+                        Err(SimBreak::Breakpoint(breakpoint)) => {
+                            println!("Breakpoint: {breakpoint:?}");
+                            break;
+                        }
+                        Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
+                            println!(
+                                "Halted by {mnemonic} opcode ${opcode:02x}"
+                            );
+                            break;
+                        }
                     }
                 }
             }
