@@ -1,6 +1,6 @@
 //! Facilities for parsing expressions.
 
-use crate::parse::{ParseError, SrcLoc, Token, TokenValue};
+use crate::parse::{ParseError, SrcSpan, Token, TokenValue};
 use chumsky::{self, Parser};
 use num_bigint::BigInt;
 
@@ -19,7 +19,7 @@ pub struct IdentifierAst {
     pub name: String,
     /// The location in the source code where this instance of the identifier
     /// appears.
-    pub start: SrcLoc,
+    pub span: SrcSpan,
 }
 
 impl IdentifierAst {
@@ -28,7 +28,7 @@ impl IdentifierAst {
         chumsky::prelude::any()
             .try_map(|token: Token, span| {
                 if let TokenValue::Identifier(name) = token.value {
-                    Ok(IdentifierAst { name, start: token.start })
+                    Ok(IdentifierAst { name, span: token.span })
                 } else {
                     Err(chumsky::error::Rich::custom(span, ""))
                 }
@@ -49,7 +49,7 @@ pub enum ExprAst {
     /// An integer literal.
     IntLiteral(BigInt),
     /// An addition operation between two subexpressions.
-    Plus(SrcLoc, Box<ExprAst>, Box<ExprAst>),
+    Plus(SrcSpan, Box<ExprAst>, Box<ExprAst>),
 }
 
 impl ExprAst {
@@ -72,7 +72,7 @@ impl ExprAst {
                 .foldl(
                     symbol(TokenValue::Plus).then(expr_atom).repeated(),
                     |lhs, (plus, rhs)| {
-                        ExprAst::Plus(plus.start, Box::new(lhs), Box::new(rhs))
+                        ExprAst::Plus(plus.span, Box::new(lhs), Box::new(rhs))
                     },
                 )
                 .labelled("expression")
@@ -108,18 +108,19 @@ pub(crate) fn symbol<'a>(
 
 /// Parses a sequence of tokens into an abstract syntax tree for an expression.
 pub fn parse_expr(tokens: &[Token]) -> Result<ExprAst, Vec<ParseError>> {
+    assert!(!tokens.is_empty());
     ExprAst::parser().parse(tokens).into_result().map_err(|errors| {
         errors
             .into_iter()
             .map(|error| {
                 let index = error.span().start;
-                let location = if index < tokens.len() {
-                    tokens[index].start
+                let span = if index < tokens.len() {
+                    tokens[index].span
                 } else {
-                    tokens[tokens.len() - 1].start
+                    tokens[tokens.len() - 1].span.end_span()
                 };
                 let message = format!("{error:?}");
-                ParseError { location, message }
+                ParseError { span, message }
             })
             .collect()
     })
@@ -130,7 +131,7 @@ pub fn parse_expr(tokens: &[Token]) -> Result<ExprAst, Vec<ParseError>> {
 #[cfg(test)]
 mod tests {
     use super::{ExprAst, IdentifierAst, parse_expr};
-    use crate::parse::{ParseError, SrcLoc, Token, TokenLexer};
+    use crate::parse::{ParseError, SrcSpan, Token, TokenLexer};
     use num_bigint::BigInt;
 
     fn parse(input: &str) -> Result<ExprAst, Vec<ParseError>> {
@@ -147,7 +148,7 @@ mod tests {
             parse("foo"),
             Ok(ExprAst::Identifier(IdentifierAst {
                 name: "foo".to_string(),
-                start: SrcLoc { line: 1, column: 0 }
+                span: SrcSpan::from_byte_range(0..3),
             }))
         );
     }
@@ -162,14 +163,14 @@ mod tests {
         assert_eq!(
             parse("1 + 2 + (3 + 4)"),
             Ok(ExprAst::Plus(
-                SrcLoc { line: 1, column: 6 },
+                SrcSpan::from_byte_range(6..7),
                 Box::new(ExprAst::Plus(
-                    SrcLoc { line: 1, column: 2 },
+                    SrcSpan::from_byte_range(2..3),
                     Box::new(ExprAst::IntLiteral(BigInt::from(1))),
                     Box::new(ExprAst::IntLiteral(BigInt::from(2))),
                 )),
                 Box::new(ExprAst::Plus(
-                    SrcLoc { line: 1, column: 11 },
+                    SrcSpan::from_byte_range(11..12),
                     Box::new(ExprAst::IntLiteral(BigInt::from(3))),
                     Box::new(ExprAst::IntLiteral(BigInt::from(4))),
                 )),

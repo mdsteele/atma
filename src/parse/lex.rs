@@ -1,4 +1,4 @@
-use crate::parse::{ParseError, SrcLoc};
+use crate::parse::{ParseError, SrcSpan};
 use logos::{self, Logos};
 use num_bigint::{BigInt, Sign};
 
@@ -22,7 +22,7 @@ impl std::convert::From<ParseError> for LexerError {
 struct LexerState {
     line: u32,
     start_of_line: usize,
-    backslash: Option<SrcLoc>,
+    backslash: Option<SrcSpan>,
 }
 
 impl Default for LexerState {
@@ -36,11 +36,11 @@ impl Default for LexerState {
 fn backslash_callback(
     lexer: &mut logos::Lexer<TokenKind>,
 ) -> Result<logos::Skip, ParseError> {
-    if let Some(location) = lexer.extras.backslash {
+    if let Some(span) = lexer.extras.backslash {
         let message = "unexpected backslash before backslash".to_string();
-        Err(ParseError { location, message })
+        Err(ParseError { span, message })
     } else {
-        lexer.extras.backslash = Some(TokenKind::Backslash.location(lexer));
+        lexer.extras.backslash = Some(SrcSpan::from_byte_range(lexer.span()));
         Ok(logos::Skip)
     }
 }
@@ -97,29 +97,11 @@ enum TokenKind {
 }
 
 impl TokenKind {
-    fn lexer_location(lexer: &logos::Lexer<TokenKind>) -> SrcLoc {
-        SrcLoc {
-            line: lexer.extras.line,
-            column: lexer.span().start - lexer.extras.start_of_line,
-        }
-    }
-
-    fn location(&self, lexer: &logos::Lexer<TokenKind>) -> SrcLoc {
-        if let &TokenKind::Linebreak = self {
-            SrcLoc {
-                line: lexer.extras.line - 1,
-                column: lexer.extras.start_of_line - 1,
-            }
-        } else {
-            TokenKind::lexer_location(lexer)
-        }
-    }
-
     fn into_token(
         self,
         lexer: &logos::Lexer<TokenKind>,
     ) -> Result<Token, ParseError> {
-        let start = self.location(lexer);
+        let span = SrcSpan::from_byte_range(lexer.span());
         let value = match self {
             TokenKind::Backslash => unreachable!(),
             TokenKind::Colon => TokenValue::Colon,
@@ -135,12 +117,12 @@ impl TokenKind {
             TokenKind::ParenOpen => TokenValue::ParenOpen,
             TokenKind::Plus => TokenValue::Plus,
         };
-        if let Some(location) = lexer.extras.backslash {
+        if let Some(span) = lexer.extras.backslash {
             let message =
                 format!("unexpected backslash before {}", value.name());
-            return Err(ParseError { location, message });
+            return Err(ParseError { span, message });
         }
-        Ok(Token { start, value })
+        Ok(Token { span, value })
     }
 }
 
@@ -192,7 +174,7 @@ impl TokenValue {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     /// The locaiton in the file of the start of the token.
-    pub start: SrcLoc,
+    pub span: SrcSpan,
     /// The contents of the token.
     pub value: TokenValue,
 }
@@ -217,23 +199,23 @@ impl<'a> Iterator for TokenLexer<'a> {
     fn next(&mut self) -> Option<Result<Token, ParseError>> {
         match self.lexer.next() {
             None => {
-                if let Some(location) = self.lexer.extras.backslash {
+                if let Some(span) = self.lexer.extras.backslash {
                     self.lexer.extras.backslash = None;
                     let message =
                         "unexpected backslash before EOF".to_string();
-                    Some(Err(ParseError { location, message }))
+                    Some(Err(ParseError { span, message }))
                 } else {
                     None
                 }
             }
             Some(Err(LexerError::ParseError(error))) => Some(Err(error)),
             Some(Err(LexerError::InvalidToken)) => {
-                let location = TokenKind::lexer_location(&self.lexer);
+                let span = SrcSpan::from_byte_range(self.lexer.span());
                 let message = format!(
                     "invalid character: {}",
                     self.lexer.slice().escape_ascii()
                 );
-                Some(Err(ParseError { location, message }))
+                Some(Err(ParseError { span, message }))
             }
             Some(Ok(kind)) => Some(kind.into_token(&self.lexer)),
         }
@@ -245,16 +227,17 @@ impl<'a> Iterator for TokenLexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::{ParseError, Token, TokenLexer, TokenValue};
-    use crate::parse::SrcLoc;
+    use crate::parse::SrcSpan;
     use num_bigint::BigInt;
+    use std::ops::Range;
 
-    fn token(line: u32, column: usize, value: TokenValue) -> Token {
-        Token { start: SrcLoc { line, column }, value }
+    fn token(range: Range<usize>, value: TokenValue) -> Token {
+        Token { span: SrcSpan::from_byte_range(range), value }
     }
 
-    fn error(line: u32, column: usize, message: &str) -> ParseError {
+    fn error(range: Range<usize>, message: &str) -> ParseError {
         ParseError {
-            location: SrcLoc { line, column },
+            span: SrcSpan::from_byte_range(range),
             message: message.to_string(),
         }
     }
@@ -284,14 +267,14 @@ mod tests {
 
     #[test]
     fn linebreak() {
-        assert_eq!(read_all(b"\n"), vec![token(1, 0, TokenValue::Linebreak)]);
+        assert_eq!(read_all(b"\n"), vec![token(0..1, TokenValue::Linebreak)]);
     }
 
     #[test]
     fn decimal_literal() {
         assert_eq!(
             read_all(b"12345"),
-            vec![token(1, 0, TokenValue::IntLiteral(BigInt::from(12345)))]
+            vec![token(0..5, TokenValue::IntLiteral(BigInt::from(12345)))]
         );
     }
 
@@ -300,11 +283,11 @@ mod tests {
         assert_eq!(
             read_all(b"1, 2, 3"),
             vec![
-                token(1, 0, TokenValue::IntLiteral(BigInt::from(1))),
-                token(1, 1, TokenValue::Comma),
-                token(1, 3, TokenValue::IntLiteral(BigInt::from(2))),
-                token(1, 4, TokenValue::Comma),
-                token(1, 6, TokenValue::IntLiteral(BigInt::from(3))),
+                token(0..1, TokenValue::IntLiteral(BigInt::from(1))),
+                token(1..2, TokenValue::Comma),
+                token(3..4, TokenValue::IntLiteral(BigInt::from(2))),
+                token(4..5, TokenValue::Comma),
+                token(6..7, TokenValue::IntLiteral(BigInt::from(3))),
             ]
         );
     }
@@ -313,7 +296,7 @@ mod tests {
     fn backslash_before_linebreak() {
         assert_eq!(
             read_all(b"  \\  \n42"),
-            vec![token(2, 0, TokenValue::IntLiteral(BigInt::from(42)))]
+            vec![token(6..8, TokenValue::IntLiteral(BigInt::from(42)))]
         );
     }
 
@@ -321,7 +304,7 @@ mod tests {
     fn backslash_before_comment() {
         assert_eq!(
             read_all(b"  \\ ; 123 \n:"),
-            vec![token(2, 0, TokenValue::Colon)]
+            vec![token(11..12, TokenValue::Colon)]
         );
     }
 
@@ -329,7 +312,7 @@ mod tests {
     fn backslash_before_backslash() {
         assert_eq!(
             expect_error(b"\\ \\ \n"),
-            error(1, 0, "unexpected backslash before backslash")
+            error(0..1, "unexpected backslash before backslash")
         );
     }
 
@@ -337,7 +320,7 @@ mod tests {
     fn backslash_before_eof() {
         assert_eq!(
             expect_error(b"  \\ "),
-            error(1, 2, "unexpected backslash before EOF")
+            error(2..3, "unexpected backslash before EOF")
         );
     }
 
@@ -345,7 +328,7 @@ mod tests {
     fn backslash_before_identifier() {
         assert_eq!(
             expect_error(b"  \\ foo"),
-            error(1, 2, "unexpected backslash before identifier")
+            error(2..3, "unexpected backslash before identifier")
         );
     }
 
@@ -353,7 +336,7 @@ mod tests {
     fn invalid_token() {
         assert_eq!(
             expect_error(b" `foo\n"),
-            error(1, 1, "invalid character: `")
+            error(1..2, "invalid character: `")
         );
     }
 }

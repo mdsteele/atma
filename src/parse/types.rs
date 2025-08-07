@@ -1,33 +1,36 @@
-use std::fmt;
+use std::ops::Range;
 
 //===========================================================================//
 
-/// A location within a source code file.
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SrcLoc {
-    /// The line number within the file.  The file starts on line 1.
-    pub line: u32,
-    /// The column number within the line.  Each line starts at column 0.
-    pub column: usize,
+/// A span of byte offsets within a source code file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SrcSpan {
+    start: usize,
+    end: usize,
 }
 
-impl SrcLoc {
-    /// Constructs the location for the start of a source code file.
-    pub fn start() -> SrcLoc {
-        SrcLoc { line: 1, column: 0 }
+impl SrcSpan {
+    /// Constructs a span from the given the byte range.
+    pub fn from_byte_range(range: Range<usize>) -> SrcSpan {
+        assert!(range.start <= range.end);
+        SrcSpan { start: range.start, end: range.end }
     }
 
-    /// Advances this location to the start of the next line.  Calling this
-    /// increments `self.line`, and sets `self.column` to zero.
-    pub fn newline(&mut self) {
-        self.line += 1;
-        self.column = 0;
+    /// Returns the byte range represented by this span.
+    pub fn byte_range(&self) -> Range<usize> {
+        self.start..self.end
     }
-}
 
-impl fmt::Display for SrcLoc {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.line, self.column)
+    /// Merges two spans, returning the smallest span that covers both.
+    pub fn merged_with(&self, other: &SrcSpan) -> SrcSpan {
+        SrcSpan {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
+
+    pub(crate) fn end_span(&self) -> SrcSpan {
+        SrcSpan { start: self.end, end: self.end }
     }
 }
 
@@ -37,7 +40,7 @@ impl fmt::Display for SrcLoc {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     /// The location in the file where the error occurred.
-    pub location: SrcLoc,
+    pub span: SrcSpan,
     /// The error message to report to the user.
     pub message: String,
 }

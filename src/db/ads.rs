@@ -1,6 +1,6 @@
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
-use crate::parse::{AdsModuleAst, AdsStmtAst, ExprAst, ParseError, SrcLoc};
+use crate::parse::{AdsModuleAst, AdsStmtAst, ExprAst, ParseError, SrcSpan};
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -63,8 +63,7 @@ impl AdsExpr {
                     } else {
                         let message =
                             format!("No such identifier: {}", id.name);
-                        errors
-                            .push(ParseError { location: id.start, message });
+                        errors.push(ParseError { span: id.span, message });
                         types.push(AdsType::Bottom);
                     }
                 }
@@ -74,7 +73,7 @@ impl AdsExpr {
                     )));
                     types.push(AdsType::Integer);
                 }
-                &ExprAst::Plus(location, _, _) => {
+                &ExprAst::Plus(span, _, _) => {
                     debug_assert!(types.len() >= 2);
                     let rhs = types.pop().unwrap();
                     let lhs = types.pop().unwrap();
@@ -89,7 +88,7 @@ impl AdsExpr {
                         (type1, type2) => {
                             let message =
                                 format!("Cannot add {type1} and {type2}");
-                            errors.push(ParseError { location, message });
+                            errors.push(ParseError { span, message });
                             types.push(AdsType::Bottom);
                         }
                     }
@@ -178,17 +177,19 @@ impl AdsCompiler {
                 if let Some((expr, ty)) = self.typecheck_expr(expr) {
                     self.env.bind(id.name.clone(), ty);
                     instructions_out.push(AdsInstruction::Let(id.name, expr));
+                } else {
+                    self.env.bind(id.name.clone(), AdsType::Bottom);
                 }
             }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
                 let pred_expr = match self.typecheck_expr(pred_ast) {
                     Some((expr, AdsType::Boolean)) => expr,
                     Some((_, ty)) => {
-                        let location = SrcLoc::start(); // TODO
+                        let span = SrcSpan::from_byte_range(0..0); // TODO
                         let message = format!(
                             "predicate must be of type bool, not {ty}"
                         );
-                        self.errors.push(ParseError { location, message });
+                        self.errors.push(ParseError { span, message });
                         AdsExpr::constant(false)
                     }
                     None => AdsExpr::constant(false),
@@ -360,17 +361,18 @@ impl AdsScope {
 #[cfg(test)]
 mod tests {
     use super::{AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue, ExprAst};
-    use crate::parse::{IdentifierAst, SrcLoc};
+    use crate::parse::{IdentifierAst, SrcSpan};
     use num_bigint::BigInt;
+    use std::ops::Range;
 
     fn expr(ops: Vec<AdsExprOp>) -> AdsExpr {
         AdsExpr { ops }
     }
 
-    fn id_ast(name: &str, line: u32, column: usize) -> ExprAst {
+    fn id_ast(name: &str, range: Range<usize>) -> ExprAst {
         ExprAst::Identifier(IdentifierAst {
             name: name.to_string(),
-            start: SrcLoc { line, column },
+            span: SrcSpan::from_byte_range(range),
         })
     }
 
@@ -387,7 +389,7 @@ mod tests {
         let mut env = AdsTypeEnv::empty();
         env.bind("foo".to_string(), AdsType::Boolean);
         assert_eq!(
-            AdsExpr::typecheck(&id_ast("foo", 1, 10), &env),
+            AdsExpr::typecheck(&id_ast("foo", 10..13), &env),
             Ok((
                 expr(vec![AdsExprOp::Id("foo".to_string())]),
                 AdsType::Boolean,

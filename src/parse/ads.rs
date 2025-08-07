@@ -34,13 +34,13 @@ impl AdsModuleAst {
                 .into_iter()
                 .map(|error| {
                     let index = error.span().start;
-                    let location = if index < tokens.len() {
-                        tokens[index].start
+                    let span = if index < tokens.len() {
+                        tokens[index].span
                     } else {
-                        tokens[tokens.len() - 1].start
+                        tokens[tokens.len() - 1].span.end_span()
                     };
                     let message = format!("{error:?}");
-                    ParseError { location, message }
+                    ParseError { span, message }
                 })
                 .collect()
         })
@@ -143,7 +143,7 @@ fn relax_statement<'a>()
 #[cfg(test)]
 mod tests {
     use super::{AdsModuleAst, AdsStmtAst, ExprAst, IdentifierAst};
-    use crate::parse::{ParseError, SrcLoc, Token, TokenLexer};
+    use crate::parse::{ParseError, SrcSpan, Token, TokenLexer};
     use num_bigint::BigInt;
 
     fn read_statements(input: &str) -> Vec<AdsStmtAst> {
@@ -190,7 +190,7 @@ mod tests {
             vec![AdsStmtAst::Let(
                 IdentifierAst {
                     name: "foo".to_string(),
-                    start: SrcLoc { line: 1, column: 4 }
+                    span: SrcSpan::from_byte_range(4..7),
                 },
                 ExprAst::IntLiteral(BigInt::from(42))
             )]

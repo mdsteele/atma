@@ -1,4 +1,6 @@
+use ariadne::{self, Label, ReportKind, Source};
 use atma::db::{AdsEnvironment, AdsProgram, SimEnv};
+use atma::parse::ParseError;
 use atma::proc::{Breakpoint, SimBreak};
 use clap::{Parser, Subcommand};
 use std::fs::File;
@@ -47,8 +49,16 @@ fn main() -> io::Result<()> {
             print!("{}", sim_env.description());
             if let Some(ads_path) = script {
                 let program = {
-                    let file = File::open(ads_path)?;
-                    AdsProgram::read_from(file).unwrap() // TODO handle error
+                    let file = File::open(&ads_path)?;
+                    match AdsProgram::read_from(file) {
+                        Ok(program) => program,
+                        Err(parse_errors) => {
+                            let source =
+                                io::read_to_string(File::open(&ads_path)?)?;
+                            report_parse_errors(&source, parse_errors)?;
+                            return Ok(()); // TODO exit failure
+                        }
+                    }
                 };
                 let mut ads_env = AdsEnvironment::new(sim_env, program);
                 loop {
@@ -89,6 +99,31 @@ fn main() -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn report_parse_errors(
+    source: &str,
+    errors: Vec<ParseError>,
+) -> io::Result<()> {
+    for error in errors {
+        report_parse_error(source, error)?;
+    }
+    Ok(())
+}
+
+fn report_parse_error(source: &str, error: ParseError) -> io::Result<()> {
+    let mut colors = ariadne::ColorGenerator::new();
+    let span = ("input", error.span.byte_range());
+    ariadne::Report::build(ReportKind::Error, span.clone())
+        .with_config(make_report_config())
+        .with_message(&error.message)
+        .with_label(Label::new(span.clone()).with_color(colors.next()))
+        .finish()
+        .print(("input", Source::from(source)))
+}
+
+fn make_report_config() -> ariadne::Config {
+    ariadne::Config::new().with_index_type(ariadne::IndexType::Byte)
 }
 
 //===========================================================================//
