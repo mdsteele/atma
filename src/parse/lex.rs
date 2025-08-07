@@ -188,7 +188,7 @@ pub struct TokenLexer<'a> {
 
 impl<'a> TokenLexer<'a> {
     /// Constructs a new lexer in its initial state.
-    pub fn new(input: &[u8]) -> TokenLexer {
+    pub fn new(input: &'a [u8]) -> TokenLexer<'a> {
         TokenLexer { lexer: TokenKind::lexer(input) }
     }
 }

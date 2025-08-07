@@ -56,8 +56,8 @@ pub(crate) struct BusPeeker<'a> {
     addr: u32,
 }
 
-impl BusPeeker<'_> {
-    pub fn new(bus: &dyn SimBus, start_addr: u32) -> BusPeeker {
+impl<'a> BusPeeker<'a> {
+    pub fn new(bus: &'a dyn SimBus, start_addr: u32) -> BusPeeker<'a> {
         BusPeeker { bus, addr: start_addr }
     }
 }
