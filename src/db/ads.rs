@@ -257,6 +257,7 @@ impl AdsProgram {
 
 //===========================================================================//
 
+/// An error that can occur while executing an Atma Debugger Script program.
 #[derive(Debug)]
 pub struct AdsRuntimeError {}
 
