@@ -62,7 +62,7 @@ impl ExprAst {
                     symbol(TokenValue::ParenClose),
                 ),
                 IdentifierAst::parser().map(ExprAst::Identifier),
-                // TODO: bool_literal(),
+                bool_literal(),
                 int_literal(),
             ))
             .labelled("subexpression");
@@ -82,6 +82,19 @@ impl ExprAst {
 
 //===========================================================================//
 
+fn bool_literal<'a>()
+-> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
+    chumsky::prelude::any()
+        .try_map(|token: Token, span| {
+            if let TokenValue::BoolLiteral(boolean) = token.value {
+                Ok(ExprAst::BoolLiteral(boolean))
+            } else {
+                Err(chumsky::error::Rich::custom(span, ""))
+            }
+        })
+        .labelled("boolean literal")
+}
+
 fn int_literal<'a>()
 -> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
     chumsky::prelude::any()
@@ -92,7 +105,7 @@ fn int_literal<'a>()
                 Err(chumsky::error::Rich::custom(span, ""))
             }
         })
-        .labelled("int literal")
+        .labelled("integer literal")
 }
 
 pub(crate) fn symbol<'a>(

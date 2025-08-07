@@ -75,6 +75,14 @@ fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
 enum TokenKind {
     #[token("\\", backslash_callback)]
     Backslash,
+    #[token("%false")]
+    BoolLiteralFalse,
+    #[token("%true")]
+    BoolLiteralTrue,
+    #[token("}")]
+    BraceClose,
+    #[token("{")]
+    BraceOpen,
     #[token(":")]
     Colon,
     #[token(",")]
@@ -104,6 +112,10 @@ impl TokenKind {
         let span = SrcSpan::from_byte_range(lexer.span());
         let value = match self {
             TokenKind::Backslash => unreachable!(),
+            TokenKind::BoolLiteralFalse => TokenValue::BoolLiteral(false),
+            TokenKind::BoolLiteralTrue => TokenValue::BoolLiteral(true),
+            TokenKind::BraceClose => TokenValue::BraceClose,
+            TokenKind::BraceOpen => TokenValue::BraceOpen,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
             TokenKind::Equals => TokenValue::Equals,
@@ -131,6 +143,12 @@ impl TokenKind {
 /// The contents of a single lexical token.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenValue {
+    /// An boolean literal.
+    BoolLiteral(bool),
+    /// A "`}`" symbol.
+    BraceClose,
+    /// A "`{`" symbol.
+    BraceOpen,
     /// A "`:`" symbol.
     Colon,
     /// A "`,`" symbol.
@@ -155,11 +173,14 @@ impl TokenValue {
     /// Returns the human-readable name for this kind of token.
     pub fn name(&self) -> &'static str {
         match &self {
+            TokenValue::BoolLiteral(_) => "boolean literal",
+            TokenValue::BraceClose => "close brace",
+            TokenValue::BraceOpen => "open brace",
             TokenValue::Colon => "colon",
             TokenValue::Comma => "comma",
             TokenValue::Equals => "equals sign",
             TokenValue::Identifier(_) => "identifier",
-            TokenValue::IntLiteral(_) => "int literal",
+            TokenValue::IntLiteral(_) => "integer literal",
             TokenValue::Linebreak => "linebreak",
             TokenValue::ParenClose => "close parenthesis",
             TokenValue::ParenOpen => "open parenthesis",

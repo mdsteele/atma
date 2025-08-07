@@ -79,13 +79,27 @@ pub enum AdsStmtAst {
 impl AdsStmtAst {
     fn parser<'a>()
     -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
-        chumsky::prelude::choice((
-            exit_statement(),
-            // TODO: if_statement(),
-            let_statement(),
-            print_statement(),
-            relax_statement(),
-        ))
+        chumsky::prelude::recursive(|statement| {
+            let stmt_block = symbol(TokenValue::BraceOpen)
+                .ignore_then(linebreak())
+                .ignore_then(statement.repeated().collect::<Vec<_>>())
+                .then_ignore(symbol(TokenValue::BraceClose));
+            let if_statement = keyword("if")
+                .ignore_then(ExprAst::parser())
+                .then(stmt_block.clone())
+                .then(keyword("else").ignore_then(stmt_block).or_not())
+                .then_ignore(linebreak())
+                .map(|((p, t), e)| {
+                    AdsStmtAst::If(p, t, e.unwrap_or_else(Vec::new))
+                });
+            chumsky::prelude::choice((
+                exit_statement(),
+                if_statement,
+                let_statement(),
+                print_statement(),
+                relax_statement(),
+            ))
+        })
     }
 }
 
