@@ -156,15 +156,22 @@ fn report_parse_errors(source: &str, errors: Vec<ParseError>) {
 }
 
 fn report_parse_error(source: &str, error: ParseError) {
+    let id = "input";
     let mut colors = ariadne::ColorGenerator::new();
-    let span = ("input", error.span.byte_range());
-    ariadne::Report::build(ReportKind::Error, span.clone())
-        .with_config(make_report_config())
-        .with_message(&error.message)
-        .with_label(Label::new(span.clone()).with_color(colors.next()))
-        .finish()
-        .print(("input", Source::from(source)))
-        .unwrap()
+    let mut builder = ariadne::Report::build(
+        ReportKind::Error,
+        (id, error.span.byte_range()),
+    )
+    .with_config(make_report_config())
+    .with_message(&error.message);
+    for label in error.labels {
+        builder = builder.with_label(
+            Label::new((id, label.span.byte_range()))
+                .with_message(label.message)
+                .with_color(colors.next()),
+        );
+    }
+    builder.finish().print((id, Source::from(source))).unwrap()
 }
 
 fn report_io_error(error: io::Error) {

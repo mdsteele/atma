@@ -39,8 +39,7 @@ impl AdsModuleAst {
                     } else {
                         tokens[tokens.len() - 1].span.end_span()
                     };
-                    let message = format!("{error:?}");
-                    ParseError { span, message }
+                    ParseError::new(span, format!("{error:?}"))
                 })
                 .collect()
         })
@@ -156,8 +155,10 @@ fn relax_statement<'a>()
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsModuleAst, AdsStmtAst, ExprAst, IdentifierAst};
-    use crate::parse::{ParseError, SrcSpan, Token, TokenLexer};
+    use super::{AdsModuleAst, AdsStmtAst, IdentifierAst};
+    use crate::parse::{
+        ExprAst, ExprAstNode, ParseError, SrcSpan, Token, TokenLexer,
+    };
     use num_bigint::BigInt;
 
     fn read_statements(input: &str) -> Vec<AdsStmtAst> {
@@ -203,10 +204,13 @@ mod tests {
             read_statements("let foo = 42\n"),
             vec![AdsStmtAst::Let(
                 IdentifierAst {
-                    name: "foo".to_string(),
                     span: SrcSpan::from_byte_range(4..7),
+                    name: "foo".to_string(),
                 },
-                ExprAst::IntLiteral(BigInt::from(42))
+                ExprAst {
+                    span: SrcSpan::from_byte_range(10..12),
+                    node: ExprAstNode::IntLiteral(BigInt::from(42)),
+                },
             )]
         );
     }
@@ -215,7 +219,10 @@ mod tests {
     fn print_statement() {
         assert_eq!(
             read_statements("print 42\n"),
-            vec![AdsStmtAst::Print(ExprAst::IntLiteral(BigInt::from(42)))]
+            vec![AdsStmtAst::Print(ExprAst {
+                span: SrcSpan::from_byte_range(6..8),
+                node: ExprAstNode::IntLiteral(BigInt::from(42))
+            })]
         );
     }
 

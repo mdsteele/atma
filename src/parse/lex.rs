@@ -38,7 +38,7 @@ fn backslash_callback(
 ) -> Result<logos::Skip, ParseError> {
     if let Some(span) = lexer.extras.backslash {
         let message = "unexpected backslash before backslash".to_string();
-        Err(ParseError { span, message })
+        Err(ParseError::new(span, message))
     } else {
         lexer.extras.backslash = Some(SrcSpan::from_byte_range(lexer.span()));
         Ok(logos::Skip)
@@ -132,7 +132,7 @@ impl TokenKind {
         if let Some(span) = lexer.extras.backslash {
             let message =
                 format!("unexpected backslash before {}", value.name());
-            return Err(ParseError { span, message });
+            return Err(ParseError::new(span, message));
         }
         Ok(Token { span, value })
     }
@@ -224,7 +224,7 @@ impl<'a> Iterator for TokenLexer<'a> {
                     self.lexer.extras.backslash = None;
                     let message =
                         "unexpected backslash before EOF".to_string();
-                    Some(Err(ParseError { span, message }))
+                    Some(Err(ParseError::new(span, message)))
                 } else {
                     None
                 }
@@ -236,7 +236,7 @@ impl<'a> Iterator for TokenLexer<'a> {
                     "invalid character: {}",
                     self.lexer.slice().escape_ascii()
                 );
-                Some(Err(ParseError { span, message }))
+                Some(Err(ParseError::new(span, message)))
             }
             Some(Ok(kind)) => Some(kind.into_token(&self.lexer)),
         }
@@ -257,10 +257,7 @@ mod tests {
     }
 
     fn error(range: Range<usize>, message: &str) -> ParseError {
-        ParseError {
-            span: SrcSpan::from_byte_range(range),
-            message: message.to_string(),
-        }
+        ParseError::new(SrcSpan::from_byte_range(range), message.to_string())
     }
 
     fn read_all(input: &[u8]) -> Vec<Token> {

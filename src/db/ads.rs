@@ -1,6 +1,8 @@
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
-use crate::parse::{AdsModuleAst, AdsStmtAst, ExprAst, ParseError, SrcSpan};
+use crate::parse::{
+    AdsModuleAst, AdsStmtAst, ExprAst, ExprAstNode, ParseError,
+};
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -35,13 +37,13 @@ impl AdsExpr {
             let mut subexprs = Vec::<&ExprAst>::new();
             while let Some(subexpr) = stack.pop() {
                 subexprs.push(subexpr);
-                match subexpr {
-                    ExprAst::BoolLiteral(_) => {}
-                    ExprAst::Identifier(_) => {}
-                    ExprAst::IntLiteral(_) => {}
-                    ExprAst::Plus(_, lhs, rhs) => {
-                        stack.push(rhs);
+                match &subexpr.node {
+                    ExprAstNode::BoolLiteral(_) => {}
+                    ExprAstNode::Identifier(_) => {}
+                    ExprAstNode::IntLiteral(_) => {}
+                    ExprAstNode::Plus(_, lhs, rhs) => {
                         stack.push(lhs);
+                        stack.push(rhs);
                     }
                 }
             }
@@ -51,33 +53,33 @@ impl AdsExpr {
         let mut ops = Vec::<AdsExprOp>::new();
         let mut errors = Vec::<ParseError>::new();
         for subexpr in subexpressions.into_iter().rev() {
-            match subexpr {
-                &ExprAst::BoolLiteral(value) => {
+            match &subexpr.node {
+                &ExprAstNode::BoolLiteral(value) => {
                     ops.push(AdsExprOp::Literal(AdsValue::Boolean(value)));
                     types.push(AdsType::Boolean);
                 }
-                ExprAst::Identifier(id) => {
-                    if let Some(ty) = env.get_type(&id.name) {
-                        ops.push(AdsExprOp::Id(id.name.clone()));
+                ExprAstNode::Identifier(id) => {
+                    if let Some(ty) = env.get_type(id) {
+                        ops.push(AdsExprOp::Id(id.clone()));
                         types.push(ty.clone());
                     } else {
-                        let message =
-                            format!("No such identifier: {}", id.name);
-                        errors.push(ParseError { span: id.span, message });
+                        let span = subexpr.span;
+                        let message = format!("No such identifier: {}", id);
+                        errors.push(ParseError::new(span, message));
                         types.push(AdsType::Bottom);
                     }
                 }
-                ExprAst::IntLiteral(value) => {
+                ExprAstNode::IntLiteral(value) => {
                     ops.push(AdsExprOp::Literal(AdsValue::Integer(
                         value.clone(),
                     )));
                     types.push(AdsType::Integer);
                 }
-                &ExprAst::Plus(span, _, _) => {
+                ExprAstNode::Plus(span, lhs_ast, rhs_ast) => {
                     debug_assert!(types.len() >= 2);
-                    let rhs = types.pop().unwrap();
-                    let lhs = types.pop().unwrap();
-                    match (lhs, rhs) {
+                    let rhs_type = types.pop().unwrap();
+                    let lhs_type = types.pop().unwrap();
+                    match (lhs_type, rhs_type) {
                         (AdsType::Integer, AdsType::Integer) => {
                             ops.push(AdsExprOp::Add);
                             types.push(AdsType::Integer);
@@ -88,7 +90,15 @@ impl AdsExpr {
                         (type1, type2) => {
                             let message =
                                 format!("Cannot add {type1} and {type2}");
-                            errors.push(ParseError { span, message });
+                            let label1 =
+                                format!("this expression has type {type1}");
+                            let label2 =
+                                format!("this expression has type {type2}");
+                            errors.push(
+                                ParseError::new(*span, message)
+                                    .with_label(lhs_ast.span, label1)
+                                    .with_label(rhs_ast.span, label2),
+                            );
                             types.push(AdsType::Bottom);
                         }
                     }
@@ -182,14 +192,19 @@ impl AdsCompiler {
                 }
             }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
+                let pred_span = pred_ast.span;
                 let pred_expr = match self.typecheck_expr(pred_ast) {
                     Some((expr, AdsType::Boolean)) => expr,
                     Some((_, ty)) => {
-                        let span = SrcSpan::from_byte_range(0..0); // TODO
                         let message = format!(
                             "predicate must be of type bool, not {ty}"
                         );
-                        self.errors.push(ParseError { span, message });
+                        self.errors.push(
+                            ParseError::new(pred_span, message).with_label(
+                                pred_span,
+                                format!("this expression has type {ty}"),
+                            ),
+                        );
                         AdsExpr::constant(false)
                     }
                     None => AdsExpr::constant(false),
@@ -361,8 +376,8 @@ impl AdsScope {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue, ExprAst};
-    use crate::parse::{IdentifierAst, SrcSpan};
+    use super::{AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue};
+    use crate::parse::{ExprAst, ExprAstNode, SrcSpan};
     use num_bigint::BigInt;
     use std::ops::Range;
 
@@ -371,14 +386,17 @@ mod tests {
     }
 
     fn id_ast(name: &str, range: Range<usize>) -> ExprAst {
-        ExprAst::Identifier(IdentifierAst {
-            name: name.to_string(),
+        ExprAst {
             span: SrcSpan::from_byte_range(range),
-        })
+            node: ExprAstNode::Identifier(name.to_string()),
+        }
     }
 
-    fn int_ast(value: i32) -> ExprAst {
-        ExprAst::IntLiteral(BigInt::from(value))
+    fn int_ast(value: i32, range: Range<usize>) -> ExprAst {
+        ExprAst {
+            span: SrcSpan::from_byte_range(range),
+            node: ExprAstNode::IntLiteral(BigInt::from(value)),
+        }
     }
 
     fn int_value(value: i32) -> AdsValue {
@@ -402,7 +420,7 @@ mod tests {
     fn typecheck_int_literal_expr() {
         let env = AdsTypeEnv::empty();
         assert_eq!(
-            AdsExpr::typecheck(&int_ast(42), &env),
+            AdsExpr::typecheck(&int_ast(42, 0..2), &env),
             Ok((
                 expr(vec![AdsExprOp::Literal(int_value(42))]),
                 AdsType::Integer,
