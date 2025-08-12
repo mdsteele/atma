@@ -6,7 +6,7 @@ mod lex;
 mod types;
 
 pub use ads::{AdsModuleAst, AdsStmtAst};
-pub use expr::{ExprAst, ExprAstNode, IdentifierAst, parse_expr};
+pub use expr::{BinOpAst, ExprAst, ExprAstNode, IdentifierAst, parse_expr};
 pub use lex::{Token, TokenLexer, TokenValue};
 pub use types::{ParseError, SrcSpan};
 

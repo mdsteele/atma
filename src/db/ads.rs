@@ -1,3 +1,4 @@
+use super::binop::AdsBinOp;
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
 use crate::parse::{
@@ -10,7 +11,7 @@ use std::io::Read;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum AdsExprOp {
-    Add,
+    BinOp(AdsBinOp),
     Id(String),
     Literal(AdsValue),
 }
@@ -41,7 +42,7 @@ impl AdsExpr {
                     ExprAstNode::BoolLiteral(_) => {}
                     ExprAstNode::Identifier(_) => {}
                     ExprAstNode::IntLiteral(_) => {}
-                    ExprAstNode::Plus(_, lhs, rhs) => {
+                    ExprAstNode::BinOp(_, lhs, rhs) => {
                         stack.push(lhs);
                         stack.push(rhs);
                     }
@@ -75,30 +76,23 @@ impl AdsExpr {
                     )));
                     types.push(AdsType::Integer);
                 }
-                ExprAstNode::Plus(span, lhs_ast, rhs_ast) => {
+                ExprAstNode::BinOp(binop_ast, lhs_ast, rhs_ast) => {
                     debug_assert!(types.len() >= 2);
                     let rhs_type = types.pop().unwrap();
                     let lhs_type = types.pop().unwrap();
-                    match (lhs_type, rhs_type) {
-                        (AdsType::Integer, AdsType::Integer) => {
-                            ops.push(AdsExprOp::Add);
-                            types.push(AdsType::Integer);
+                    match AdsBinOp::typecheck(
+                        *binop_ast,
+                        lhs_ast.span,
+                        lhs_type,
+                        rhs_ast.span,
+                        rhs_type,
+                    ) {
+                        Ok((binop, ty)) => {
+                            ops.push(AdsExprOp::BinOp(binop));
+                            types.push(ty);
                         }
-                        (AdsType::Bottom, _) | (_, AdsType::Bottom) => {
-                            types.push(AdsType::Bottom);
-                        }
-                        (type1, type2) => {
-                            let message =
-                                format!("Cannot add {type1} and {type2}");
-                            let label1 =
-                                format!("this expression has type {type1}");
-                            let label2 =
-                                format!("this expression has type {type2}");
-                            errors.push(
-                                ParseError::new(*span, message)
-                                    .with_label(lhs_ast.span, label1)
-                                    .with_label(rhs_ast.span, label2),
-                            );
+                        Err(mut errs) => {
+                            errors.append(&mut errs);
                             types.push(AdsType::Bottom);
                         }
                     }
@@ -335,11 +329,11 @@ impl AdsEnvironment {
         let mut stack = Vec::<AdsValue>::new();
         for op in &expr.ops {
             match op {
-                AdsExprOp::Add => {
+                AdsExprOp::BinOp(binop) => {
                     assert!(stack.len() >= 2);
-                    let rhs = stack.pop().unwrap().unwrap_int();
-                    let lhs = stack.pop().unwrap().unwrap_int();
-                    stack.push(AdsValue::Integer(lhs + rhs));
+                    let rhs = stack.pop().unwrap();
+                    let lhs = stack.pop().unwrap();
+                    stack.push(binop.evaluate(lhs, rhs));
                 }
                 AdsExprOp::Id(name) => {
                     stack.push(self.scope.get_value(name, &self.sim));

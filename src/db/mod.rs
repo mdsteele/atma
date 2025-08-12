@@ -1,6 +1,7 @@
 //! Facilities for simulating and debugging compiled binaries.
 
 mod ads;
+mod binop;
 mod env;
 mod load;
 mod value;

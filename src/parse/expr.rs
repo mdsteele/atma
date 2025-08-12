@@ -12,14 +12,49 @@ pub(crate) type PError<'a> =
 
 //===========================================================================//
 
+/// A binary operation between two expressions in an abstract syntax tree.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BinOpAst {
+    /// "Equals" comparison.
+    CmpEq,
+    /// Addition.
+    Plus,
+}
+
+impl BinOpAst {
+    pub(crate) fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], (SrcSpan, BinOpAst), PError<'a>> + Clone
+    {
+        chumsky::prelude::any()
+            .try_map(|token: Token, span| {
+                let op = match token.value {
+                    TokenValue::EqEq => BinOpAst::CmpEq,
+                    TokenValue::Plus => BinOpAst::Plus,
+                    _ => return Err(chumsky::error::Rich::custom(span, "")),
+                };
+                Ok((token.span, op))
+            })
+            .labelled("binary operator")
+    }
+
+    pub(crate) fn verb(self) -> &'static str {
+        match self {
+            BinOpAst::CmpEq => "compare",
+            BinOpAst::Plus => "add",
+        }
+    }
+}
+
+//===========================================================================//
+
 /// An identifier in an expression or lvalue.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdentifierAst {
-    /// The name of the identifier.
-    pub name: String,
     /// The location in the source code where this instance of the identifier
     /// appears.
     pub span: SrcSpan,
+    /// The name of the identifier.
+    pub name: String,
 }
 
 impl IdentifierAst {
@@ -79,11 +114,11 @@ impl ExprAst {
             expr_atom
                 .clone()
                 .foldl(
-                    symbol(TokenValue::Plus).then(expr_atom).repeated(),
-                    |lhs, (plus, rhs)| {
+                    BinOpAst::parser().then(expr_atom).repeated(),
+                    |lhs, (op, rhs)| {
                         let span = lhs.span.merged_with(rhs.span);
-                        let node = ExprAstNode::Plus(
-                            plus.span,
+                        let node = ExprAstNode::BinOp(
+                            op,
                             Box::new(lhs),
                             Box::new(rhs),
                         );
@@ -100,14 +135,14 @@ impl ExprAst {
 /// One node in the abstract syntax tree for an expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExprAstNode {
+    /// A binary operation between two subexpressions.
+    BinOp((SrcSpan, BinOpAst), Box<ExprAst>, Box<ExprAst>),
     /// An boolean literal.
     BoolLiteral(bool),
     /// An identifier.
     Identifier(String),
     /// An integer literal.
     IntLiteral(BigInt),
-    /// An addition operation between two subexpressions.
-    Plus(SrcSpan, Box<ExprAst>, Box<ExprAst>),
 }
 
 //===========================================================================//
@@ -178,7 +213,7 @@ pub fn parse_expr(tokens: &[Token]) -> Result<ExprAst, Vec<ParseError>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExprAst, ExprAstNode, parse_expr};
+    use super::{BinOpAst, ExprAst, ExprAstNode, parse_expr};
     use crate::parse::{ParseError, SrcSpan, Token, TokenLexer};
     use num_bigint::BigInt;
     use std::ops::Range;
@@ -224,20 +259,20 @@ mod tests {
             parse("1 + 2 + (3 + 4)"),
             Ok(ExprAst {
                 span: SrcSpan::from_byte_range(0..15),
-                node: ExprAstNode::Plus(
-                    SrcSpan::from_byte_range(6..7),
+                node: ExprAstNode::BinOp(
+                    (SrcSpan::from_byte_range(6..7), BinOpAst::Plus),
                     Box::new(ExprAst {
                         span: SrcSpan::from_byte_range(0..5),
-                        node: ExprAstNode::Plus(
-                            SrcSpan::from_byte_range(2..3),
+                        node: ExprAstNode::BinOp(
+                            (SrcSpan::from_byte_range(2..3), BinOpAst::Plus),
                             Box::new(int_ast(0..1, 1)),
                             Box::new(int_ast(4..5, 2)),
                         ),
                     }),
                     Box::new(ExprAst {
                         span: SrcSpan::from_byte_range(8..15),
-                        node: ExprAstNode::Plus(
-                            SrcSpan::from_byte_range(11..12),
+                        node: ExprAstNode::BinOp(
+                            (SrcSpan::from_byte_range(11..12), BinOpAst::Plus),
                             Box::new(int_ast(9..10, 3)),
                             Box::new(int_ast(13..14, 4)),
                         ),
