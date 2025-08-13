@@ -46,8 +46,9 @@ fn backslash_callback(
 }
 
 fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
+    debug_assert!(lex.slice().starts_with("%"));
     let digits: Vec<u8> =
-        lex.slice().chars().map(|chr| chr as u8 - b'0').collect();
+        lex.slice()[1..].chars().map(|chr| chr as u8 - b'0').collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 2).unwrap()
 }
 
@@ -55,6 +56,22 @@ fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     let digits: Vec<u8> =
         lex.slice().chars().map(|chr| chr as u8 - b'0').collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 10).unwrap()
+}
+
+fn hex_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
+    debug_assert!(lex.slice().starts_with("$"));
+    let digits: Vec<u8> = lex.slice()[1..]
+        .chars()
+        .map(|chr| {
+            let byte = chr as u8;
+            match byte {
+                b'A'..=b'F' => (byte - b'A') + 10,
+                b'a'..=b'f' => (byte - b'a') + 10,
+                _ => byte - b'0',
+            }
+        })
+        .collect();
+    BigInt::from_radix_be(Sign::Plus, &digits, 16).unwrap()
 }
 
 fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
@@ -119,6 +136,7 @@ enum TokenKind {
     Identifier,
     #[regex(r"%[01]+", binary_literal_callback)]
     #[regex(r"[0-9]+", decimal_literal_callback)]
+    #[regex(r"\$[0-9A-Fa-f]+", hex_literal_callback)]
     IntLiteral(BigInt),
     #[regex(r"\n", newline_callback)]
     Linebreak,
@@ -324,10 +342,29 @@ mod tests {
     }
 
     #[test]
+    fn binary_literal() {
+        assert_eq!(
+            read_all("%11010100"),
+            vec![token(
+                0..9,
+                TokenValue::IntLiteral(BigInt::from(0b11010100))
+            )]
+        );
+    }
+
+    #[test]
     fn decimal_literal() {
         assert_eq!(
             read_all("12345"),
             vec![token(0..5, TokenValue::IntLiteral(BigInt::from(12345)))]
+        );
+    }
+
+    #[test]
+    fn hex_literal() {
+        assert_eq!(
+            read_all("$f0FA9a"),
+            vec![token(0..7, TokenValue::IntLiteral(BigInt::from(0xf0fa9a)))]
         );
     }
 
