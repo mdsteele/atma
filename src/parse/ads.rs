@@ -19,8 +19,8 @@ impl AdsModuleAst {
     pub fn read_from<R: Read>(
         mut reader: R,
     ) -> Result<AdsModuleAst, Vec<ParseError>> {
-        let mut data = Vec::<u8>::new();
-        reader.read_to_end(&mut data).unwrap(); // TODO handle error
+        let mut data = String::new();
+        reader.read_to_string(&mut data).unwrap(); // TODO handle error
         let lexer = TokenLexer::new(&data);
         let tokens: Vec<Token> =
             lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
@@ -163,7 +163,7 @@ mod tests {
 
     fn read_statements(input: &str) -> Vec<AdsStmtAst> {
         AdsModuleAst::parse(
-            &TokenLexer::new(input.as_bytes())
+            &TokenLexer::new(input)
                 .collect::<Result<Vec<Token>, ParseError>>()
                 .unwrap(),
         )

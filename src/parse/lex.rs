@@ -46,12 +46,14 @@ fn backslash_callback(
 }
 
 fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
-    let digits: Vec<u8> = lex.slice().iter().map(|&chr| chr - b'0').collect();
+    let digits: Vec<u8> =
+        lex.slice().chars().map(|chr| chr as u8 - b'0').collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 2).unwrap()
 }
 
 fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
-    let digits: Vec<u8> = lex.slice().iter().map(|&chr| chr - b'0').collect();
+    let digits: Vec<u8> =
+        lex.slice().chars().map(|chr| chr as u8 - b'0').collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 10).unwrap()
 }
 
@@ -66,12 +68,34 @@ fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
     }
 }
 
+fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> String {
+    debug_assert!(lex.slice().starts_with("\""));
+    debug_assert!(lex.slice().ends_with("\""));
+    let mut string = String::new();
+    let mut backslash = false;
+    for chr in lex.slice()[1..(lex.slice().len() - 1)].chars() {
+        if backslash {
+            string.push(match chr {
+                'n' => '\n',
+                't' => '\t',
+                _ => chr, // TODO return error for invalid escape
+            });
+            backslash = false;
+        } else if chr == '\\' {
+            backslash = true;
+        } else {
+            string.push(chr);
+        }
+    }
+    string
+}
+
 #[derive(Debug, Eq, Logos, PartialEq)]
 #[logos(error = LexerError)]
 #[logos(extras = LexerState)]
 #[logos(skip r"[ \t]+")] // whitespace
 #[logos(skip r";[^\n]+")] // comments
-#[logos(source = [u8])]
+#[logos(source = str)]
 enum TokenKind {
     #[token("\\", backslash_callback)]
     Backslash,
@@ -104,6 +128,8 @@ enum TokenKind {
     ParenOpen,
     #[token("+")]
     Plus,
+    #[regex("\"([^\"\\n\\\\]|\\\\.)+\"", string_literal_callback)]
+    StrLiteral(String),
 }
 
 impl TokenKind {
@@ -123,14 +149,14 @@ impl TokenKind {
             TokenKind::EqEq => TokenValue::EqEq,
             TokenKind::Equals => TokenValue::Equals,
             TokenKind::Identifier => {
-                let id = String::from_utf8(lexer.slice().to_vec()).unwrap();
-                TokenValue::Identifier(id)
+                TokenValue::Identifier(lexer.slice().to_string())
             }
             TokenKind::IntLiteral(int) => TokenValue::IntLiteral(int),
             TokenKind::Linebreak => TokenValue::Linebreak,
             TokenKind::ParenClose => TokenValue::ParenClose,
             TokenKind::ParenOpen => TokenValue::ParenOpen,
             TokenKind::Plus => TokenValue::Plus,
+            TokenKind::StrLiteral(string) => TokenValue::StrLiteral(string),
         };
         if let Some(span) = lexer.extras.backslash {
             let message =
@@ -172,6 +198,8 @@ pub enum TokenValue {
     ParenOpen,
     /// A "`+`" symbol.
     Plus,
+    /// A string literal.
+    StrLiteral(String),
 }
 
 impl TokenValue {
@@ -191,6 +219,7 @@ impl TokenValue {
             TokenValue::ParenClose => "close parenthesis",
             TokenValue::ParenOpen => "open parenthesis",
             TokenValue::Plus => "plus sign",
+            TokenValue::StrLiteral(_) => "string literal",
         }
     }
 }
@@ -215,7 +244,7 @@ pub struct TokenLexer<'a> {
 
 impl<'a> TokenLexer<'a> {
     /// Constructs a new lexer in its initial state.
-    pub fn new(input: &'a [u8]) -> TokenLexer<'a> {
+    pub fn new(input: &'a str) -> TokenLexer<'a> {
         TokenLexer { lexer: TokenKind::lexer(input) }
     }
 }
@@ -239,8 +268,8 @@ impl<'a> Iterator for TokenLexer<'a> {
             Some(Err(LexerError::InvalidToken)) => {
                 let span = SrcSpan::from_byte_range(self.lexer.span());
                 let message = format!(
-                    "invalid character: {}",
-                    self.lexer.slice().escape_ascii()
+                    "invalid character: '{}'",
+                    self.lexer.slice().escape_debug()
                 );
                 Some(Err(ParseError::new(span, message)))
             }
@@ -266,11 +295,11 @@ mod tests {
         ParseError::new(SrcSpan::from_byte_range(range), message.to_string())
     }
 
-    fn read_all(input: &[u8]) -> Vec<Token> {
+    fn read_all(input: &str) -> Vec<Token> {
         TokenLexer::new(input).collect::<Result<_, _>>().unwrap()
     }
 
-    fn expect_error(input: &[u8]) -> ParseError {
+    fn expect_error(input: &str) -> ParseError {
         for result in TokenLexer::new(input) {
             if let Err(error) = result {
                 return error;
@@ -281,31 +310,42 @@ mod tests {
 
     #[test]
     fn empty_input() {
-        assert_eq!(read_all(b""), vec![]);
+        assert_eq!(read_all(""), vec![]);
     }
 
     #[test]
     fn comment() {
-        assert_eq!(read_all(b";;; Hello, world!"), vec![]);
+        assert_eq!(read_all(";;; Hello, world!"), vec![]);
     }
 
     #[test]
     fn linebreak() {
-        assert_eq!(read_all(b"\n"), vec![token(0..1, TokenValue::Linebreak)]);
+        assert_eq!(read_all("\n"), vec![token(0..1, TokenValue::Linebreak)]);
     }
 
     #[test]
     fn decimal_literal() {
         assert_eq!(
-            read_all(b"12345"),
+            read_all("12345"),
             vec![token(0..5, TokenValue::IntLiteral(BigInt::from(12345)))]
+        );
+    }
+
+    #[test]
+    fn string_literal() {
+        assert_eq!(
+            read_all("\"foo\\n\\t\\\\\\\"\""),
+            vec![token(
+                0..13,
+                TokenValue::StrLiteral("foo\n\t\\\"".to_string())
+            )]
         );
     }
 
     #[test]
     fn comma_separated_integers() {
         assert_eq!(
-            read_all(b"1, 2, 3"),
+            read_all("1, 2, 3"),
             vec![
                 token(0..1, TokenValue::IntLiteral(BigInt::from(1))),
                 token(1..2, TokenValue::Comma),
@@ -319,7 +359,7 @@ mod tests {
     #[test]
     fn backslash_before_linebreak() {
         assert_eq!(
-            read_all(b"  \\  \n42"),
+            read_all("  \\  \n42"),
             vec![token(6..8, TokenValue::IntLiteral(BigInt::from(42)))]
         );
     }
@@ -327,7 +367,7 @@ mod tests {
     #[test]
     fn backslash_before_comment() {
         assert_eq!(
-            read_all(b"  \\ ; 123 \n:"),
+            read_all("  \\ ; 123 \n:"),
             vec![token(11..12, TokenValue::Colon)]
         );
     }
@@ -335,7 +375,7 @@ mod tests {
     #[test]
     fn backslash_before_backslash() {
         assert_eq!(
-            expect_error(b"\\ \\ \n"),
+            expect_error("\\ \\ \n"),
             error(0..1, "unexpected backslash before backslash")
         );
     }
@@ -343,7 +383,7 @@ mod tests {
     #[test]
     fn backslash_before_eof() {
         assert_eq!(
-            expect_error(b"  \\ "),
+            expect_error("  \\ "),
             error(2..3, "unexpected backslash before EOF")
         );
     }
@@ -351,7 +391,7 @@ mod tests {
     #[test]
     fn backslash_before_identifier() {
         assert_eq!(
-            expect_error(b"  \\ foo"),
+            expect_error("  \\ foo"),
             error(2..3, "unexpected backslash before identifier")
         );
     }
@@ -359,8 +399,8 @@ mod tests {
     #[test]
     fn invalid_token() {
         assert_eq!(
-            expect_error(b" `foo\n"),
-            error(1..2, "invalid character: `")
+            expect_error(" `foo\n"),
+            error(1..2, "invalid character: '`'")
         );
     }
 }

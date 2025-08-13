@@ -108,6 +108,7 @@ impl ExprAst {
                 identifier,
                 bool_literal(),
                 int_literal(),
+                str_literal(),
             ))
             .labelled("subexpression");
 
@@ -143,6 +144,8 @@ pub enum ExprAstNode {
     Identifier(String),
     /// An integer literal.
     IntLiteral(BigInt),
+    /// A string literal.
+    StrLiteral(String),
 }
 
 //===========================================================================//
@@ -177,6 +180,22 @@ fn int_literal<'a>()
             }
         })
         .labelled("integer literal")
+}
+
+fn str_literal<'a>()
+-> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
+    chumsky::prelude::any()
+        .try_map(|token: Token, span| {
+            if let TokenValue::StrLiteral(string) = token.value {
+                Ok(ExprAst {
+                    span: token.span,
+                    node: ExprAstNode::StrLiteral(string),
+                })
+            } else {
+                Err(chumsky::error::Rich::custom(span, ""))
+            }
+        })
+        .labelled("string literal")
 }
 
 pub(crate) fn symbol<'a>(
@@ -220,7 +239,7 @@ mod tests {
 
     fn parse(input: &str) -> Result<ExprAst, Vec<ParseError>> {
         parse_expr(
-            &TokenLexer::new(input.as_bytes())
+            &TokenLexer::new(input)
                 .collect::<Result<Vec<Token>, ParseError>>()
                 .map_err(|error| vec![error])?,
         )

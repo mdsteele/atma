@@ -77,6 +77,15 @@ impl AdsValue {
             value => panic!("AdsValue::unwrap_int on {value:?}"),
         }
     }
+
+    /// Returns the contained [`String`](AdsValue::String) value, or panics
+    /// if this value is not a string.
+    pub fn unwrap_str(self) -> String {
+        match self {
+            AdsValue::String(string) => string,
+            value => panic!("AdsValue::unwrap_str on {value:?}"),
+        }
+    }
 }
 
 impl From<bool> for AdsValue {

@@ -8,6 +8,7 @@ pub(crate) enum AdsBinOp {
     BoolCmpEq,
     IntCmpEq,
     IntPlus,
+    StrCmpEq,
 }
 
 impl AdsBinOp {
@@ -27,6 +28,9 @@ impl AdsBinOp {
             }
             (BinOpAst::CmpEq, AdsType::Integer, AdsType::Integer) => {
                 Ok((AdsBinOp::IntCmpEq, AdsType::Boolean))
+            }
+            (BinOpAst::CmpEq, AdsType::String, AdsType::String) => {
+                Ok((AdsBinOp::StrCmpEq, AdsType::Boolean))
             }
             (op, lhs_type, rhs_type) => {
                 let message =
@@ -52,6 +56,9 @@ impl AdsBinOp {
             }
             AdsBinOp::IntPlus => {
                 AdsValue::Integer(lhs.unwrap_int() + rhs.unwrap_int())
+            }
+            AdsBinOp::StrCmpEq => {
+                AdsValue::Boolean(lhs.unwrap_str() == rhs.unwrap_str())
             }
         }
     }

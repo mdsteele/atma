@@ -39,13 +39,14 @@ impl AdsExpr {
             while let Some(subexpr) = stack.pop() {
                 subexprs.push(subexpr);
                 match &subexpr.node {
-                    ExprAstNode::BoolLiteral(_) => {}
-                    ExprAstNode::Identifier(_) => {}
-                    ExprAstNode::IntLiteral(_) => {}
                     ExprAstNode::BinOp(_, lhs, rhs) => {
                         stack.push(lhs);
                         stack.push(rhs);
                     }
+                    ExprAstNode::BoolLiteral(_) => {}
+                    ExprAstNode::Identifier(_) => {}
+                    ExprAstNode::IntLiteral(_) => {}
+                    ExprAstNode::StrLiteral(_) => {}
                 }
             }
             subexprs
@@ -55,6 +56,27 @@ impl AdsExpr {
         let mut errors = Vec::<ParseError>::new();
         for subexpr in subexpressions.into_iter().rev() {
             match &subexpr.node {
+                ExprAstNode::BinOp(binop_ast, lhs_ast, rhs_ast) => {
+                    debug_assert!(types.len() >= 2);
+                    let rhs_type = types.pop().unwrap();
+                    let lhs_type = types.pop().unwrap();
+                    match AdsBinOp::typecheck(
+                        *binop_ast,
+                        lhs_ast.span,
+                        lhs_type,
+                        rhs_ast.span,
+                        rhs_type,
+                    ) {
+                        Ok((binop, ty)) => {
+                            ops.push(AdsExprOp::BinOp(binop));
+                            types.push(ty);
+                        }
+                        Err(mut errs) => {
+                            errors.append(&mut errs);
+                            types.push(AdsType::Bottom);
+                        }
+                    }
+                }
                 &ExprAstNode::BoolLiteral(value) => {
                     ops.push(AdsExprOp::Literal(AdsValue::Boolean(value)));
                     types.push(AdsType::Boolean);
@@ -76,26 +98,11 @@ impl AdsExpr {
                     )));
                     types.push(AdsType::Integer);
                 }
-                ExprAstNode::BinOp(binop_ast, lhs_ast, rhs_ast) => {
-                    debug_assert!(types.len() >= 2);
-                    let rhs_type = types.pop().unwrap();
-                    let lhs_type = types.pop().unwrap();
-                    match AdsBinOp::typecheck(
-                        *binop_ast,
-                        lhs_ast.span,
-                        lhs_type,
-                        rhs_ast.span,
-                        rhs_type,
-                    ) {
-                        Ok((binop, ty)) => {
-                            ops.push(AdsExprOp::BinOp(binop));
-                            types.push(ty);
-                        }
-                        Err(mut errs) => {
-                            errors.append(&mut errs);
-                            types.push(AdsType::Bottom);
-                        }
-                    }
+                ExprAstNode::StrLiteral(value) => {
+                    ops.push(AdsExprOp::Literal(AdsValue::String(
+                        value.clone(),
+                    )));
+                    types.push(AdsType::String);
                 }
             }
         }
