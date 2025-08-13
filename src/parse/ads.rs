@@ -75,6 +75,8 @@ pub enum AdsStmtAst {
     Relax,
     /// Steps the simulated processor forward by one instruction.
     Step,
+    /// Sets up a breakpoint handler.
+    When(BreakpointAst, Vec<AdsStmtAst>),
 }
 
 impl AdsStmtAst {
@@ -88,11 +90,16 @@ impl AdsStmtAst {
             let if_statement = keyword("if")
                 .ignore_then(ExprAst::parser())
                 .then(stmt_block.clone())
-                .then(keyword("else").ignore_then(stmt_block).or_not())
+                .then(keyword("else").ignore_then(stmt_block.clone()).or_not())
                 .then_ignore(linebreak())
                 .map(|((p, t), e)| {
                     AdsStmtAst::If(p, t, e.unwrap_or_else(Vec::new))
                 });
+            let when_statement = keyword("when")
+                .ignore_then(BreakpointAst::parser())
+                .then(stmt_block)
+                .then_ignore(linebreak())
+                .map(|(cond, block)| AdsStmtAst::When(cond, block));
             chumsky::prelude::choice((
                 exit_statement(),
                 if_statement,
@@ -100,8 +107,26 @@ impl AdsStmtAst {
                 print_statement(),
                 relax_statement(),
                 step_statement(),
+                when_statement,
             ))
         })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a breakpoint condition in an Atma Debugger
+/// Script program.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BreakpointAst {
+    /// Triggers when the PC is at the specified label or address.
+    Pc(ExprAst),
+}
+
+impl BreakpointAst {
+    pub(crate) fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], BreakpointAst, PError<'a>> + Clone {
+        keyword("at").ignore_then(ExprAst::parser()).map(BreakpointAst::Pc)
     }
 }
 

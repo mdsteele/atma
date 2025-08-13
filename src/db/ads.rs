@@ -2,11 +2,49 @@ use super::binop::AdsBinOp;
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
 use crate::parse::{
-    AdsModuleAst, AdsStmtAst, ExprAst, ExprAstNode, ParseError,
+    AdsModuleAst, AdsStmtAst, BreakpointAst, ExprAst, ExprAstNode, ParseError,
+    SrcSpan,
 };
-use crate::proc::SimBreak;
+use crate::proc::{Breakpoint, SimBreak};
+use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::io::Read;
+
+//===========================================================================//
+
+enum AdsBreakpoint {
+    Pc(AdsExpr),
+}
+
+impl AdsBreakpoint {
+    pub fn typecheck(
+        breakpoint_ast: &BreakpointAst,
+        env: &AdsTypeEnv,
+    ) -> Result<AdsBreakpoint, Vec<ParseError>> {
+        match breakpoint_ast {
+            BreakpointAst::Pc(expr_ast) => {
+                let (expr, ty) = AdsExpr::typecheck(expr_ast, env)?;
+                AdsBreakpoint::check_addr_type(expr_ast.span, ty)?;
+                Ok(AdsBreakpoint::Pc(expr))
+            }
+        }
+    }
+
+    fn check_addr_type(
+        span: SrcSpan,
+        ty: AdsType,
+    ) -> Result<(), Vec<ParseError>> {
+        if let AdsType::Integer = ty {
+            Ok(())
+        } else {
+            let message =
+                format!("breakpoint address must be of type int, not {ty}");
+            let label = format!("this expression has type {ty}");
+            let error = ParseError::new(span, message).with_label(span, label);
+            Err(vec![error])
+        }
+    }
+}
 
 //===========================================================================//
 
@@ -139,12 +177,25 @@ impl AdsTypeEnv {
 //===========================================================================//
 
 enum AdsInstruction {
+    /// Evaluates the boolean expression, and adds the given offset to the ADS
+    /// program counter if the result is false.
     BranchUnless(AdsExpr, isize),
+    /// Exit the program.
     Exit,
+    /// Declares a new variable in the current scope (possibly shadowing an
+    /// existing variable).
     Let(String, AdsExpr),
+    /// Adds the given offset to the ADS program counter.
     Jump(isize),
+    /// Evaluates the expression and prints the result to stdout.
     Print(AdsExpr),
+    /// Returns from the current breakpoint handler.
+    Return,
+    /// Advances the simulated processor by one instruction.
     Step,
+    /// Sets a breakpoint for the simulated processor and jumps to the ADS
+    /// instruction relative to this one whenever that breakpoint is reached.
+    When(AdsBreakpoint, isize),
 }
 
 //===========================================================================//
@@ -228,15 +279,35 @@ impl AdsCompiler {
                 instructions_out.append(&mut then_stmts);
                 instructions_out.append(&mut else_stmts);
             }
+            AdsStmtAst::When(breakpoint_ast, do_ast) => {
+                let breakpoint = self.typecheck_breakpoint(breakpoint_ast);
+                let mut do_stmts = Vec::<AdsInstruction>::new();
+                self.typecheck_statements(do_ast, &mut do_stmts);
+                do_stmts.push(AdsInstruction::Return);
+                instructions_out.push(AdsInstruction::When(breakpoint, 1));
+                instructions_out
+                    .push(AdsInstruction::Jump(do_stmts.len() as isize));
+                instructions_out.append(&mut do_stmts);
+            }
         }
     }
 
-    fn typecheck_expr(&mut self, expr: ExprAst) -> Option<(AdsExpr, AdsType)> {
-        match AdsExpr::typecheck(&expr, &self.env) {
+    fn typecheck_expr(&mut self, ast: ExprAst) -> Option<(AdsExpr, AdsType)> {
+        match AdsExpr::typecheck(&ast, &self.env) {
             Ok((expr, ty)) => Some((expr, ty)),
             Err(mut errors) => {
                 self.errors.append(&mut errors);
                 None
+            }
+        }
+    }
+
+    fn typecheck_breakpoint(&mut self, ast: BreakpointAst) -> AdsBreakpoint {
+        match AdsBreakpoint::typecheck(&ast, &self.env) {
+            Ok(breakpoint) => breakpoint,
+            Err(mut errors) => {
+                self.errors.append(&mut errors);
+                AdsBreakpoint::Pc(AdsExpr::constant(false))
             }
         }
     }
@@ -287,13 +358,22 @@ pub struct AdsEnvironment {
     sim: SimEnv,
     program: AdsProgram,
     pc: usize,
+    stack: Vec<usize>,
     scope: AdsScope,
+    handlers: HashMap<Breakpoint, usize>,
 }
 
 impl AdsEnvironment {
     /// Creates a new execution of the given program.
     pub fn new(sim: SimEnv, program: AdsProgram) -> AdsEnvironment {
-        AdsEnvironment { sim, program, pc: 0, scope: AdsScope::empty() }
+        AdsEnvironment {
+            sim,
+            program,
+            pc: 0,
+            scope: AdsScope::empty(),
+            stack: Vec::new(),
+            handlers: HashMap::new(),
+        }
     }
 
     /// Executes the next instruction in the program.
@@ -327,7 +407,9 @@ impl AdsEnvironment {
                     Ok(()) => {}
                     Err(SimBreak::Breakpoint(breakpoint)) => {
                         println!("Breakpoint: {breakpoint:?}");
-                        return Ok(true);
+                        self.stack.push(self.pc);
+                        self.pc = *self.handlers.get(&breakpoint).unwrap();
+                        return Ok(false);
                     }
                     Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
                         println!("Halted by {mnemonic} opcode ${opcode:02x}");
@@ -335,21 +417,31 @@ impl AdsEnvironment {
                     }
                 }
             }
+            AdsInstruction::Return => {
+                self.pc = self.stack.pop().unwrap();
+            }
+            AdsInstruction::When(breakpoint, offset) => {
+                let breakpoint = self.eval_breakpoint(breakpoint)?;
+                self.handlers.insert(breakpoint, self.destination(*offset));
+                self.sim.add_breakpoint(breakpoint);
+            }
         }
         self.pc += 1;
         Ok(false)
     }
 
-    fn jump(&mut self, mut offset: isize) -> Result<bool, AdsRuntimeError> {
-        offset += 1;
-        if offset < 0 {
-            let offset = (-offset) as usize;
-            assert!(offset <= self.pc);
-            self.pc -= offset;
-        } else {
-            self.pc += offset as usize;
-        }
+    fn jump(&mut self, offset: isize) -> Result<bool, AdsRuntimeError> {
+        self.pc = self.destination(offset);
         Ok(false)
+    }
+
+    fn destination(&self, offset: isize) -> usize {
+        let base = self.pc + 1;
+        if offset < 0 {
+            base - (-offset) as usize
+        } else {
+            base + offset as usize
+        }
     }
 
     fn evaluate(&self, expr: &AdsExpr) -> Result<AdsValue, AdsRuntimeError> {
@@ -370,6 +462,19 @@ impl AdsEnvironment {
         }
         assert_eq!(stack.len(), 1);
         Ok(stack.pop().unwrap())
+    }
+
+    fn eval_breakpoint(
+        &self,
+        breakpoint: &AdsBreakpoint,
+    ) -> Result<Breakpoint, AdsRuntimeError> {
+        match breakpoint {
+            AdsBreakpoint::Pc(expr) => {
+                let addr = self.evaluate(expr)?.unwrap_int()
+                    & BigInt::from(0xffffffffu32);
+                Ok(Breakpoint::Pc(addr.try_into().unwrap()))
+            }
+        }
     }
 }
 
