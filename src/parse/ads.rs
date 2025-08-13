@@ -73,6 +73,8 @@ pub enum AdsStmtAst {
     Print(ExprAst),
     /// A no-op statement.
     Relax,
+    /// Steps the simulated processor forward by one instruction.
+    Step,
 }
 
 impl AdsStmtAst {
@@ -97,6 +99,7 @@ impl AdsStmtAst {
                 let_statement(),
                 print_statement(),
                 relax_statement(),
+                step_statement(),
             ))
         })
     }
@@ -149,6 +152,11 @@ fn print_statement<'a>()
 fn relax_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
     keyword("relax").then_ignore(linebreak()).to(AdsStmtAst::Relax)
+}
+
+fn step_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("step").then_ignore(linebreak()).to(AdsStmtAst::Step)
 }
 
 //===========================================================================//

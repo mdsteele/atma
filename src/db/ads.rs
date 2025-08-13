@@ -4,6 +4,7 @@ use crate::db::SimEnv;
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, ExprAst, ExprAstNode, ParseError,
 };
+use crate::proc::SimBreak;
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -143,6 +144,7 @@ enum AdsInstruction {
     Let(String, AdsExpr),
     Jump(isize),
     Print(AdsExpr),
+    Step,
 }
 
 //===========================================================================//
@@ -179,6 +181,7 @@ impl AdsCompiler {
         match statement {
             AdsStmtAst::Relax => {}
             AdsStmtAst::Exit => instructions_out.push(AdsInstruction::Exit),
+            AdsStmtAst::Step => instructions_out.push(AdsInstruction::Step),
             AdsStmtAst::Print(expr) => {
                 if let Some((expr, _)) = self.typecheck_expr(expr) {
                     instructions_out.push(AdsInstruction::Print(expr));
@@ -314,6 +317,23 @@ impl AdsEnvironment {
             }
             AdsInstruction::Print(expr) => {
                 println!("{}", self.evaluate(expr)?);
+            }
+            AdsInstruction::Step => {
+                let pc = self.sim.pc();
+                let instruction = self.sim.disassemble(self.sim.pc()).1;
+                let result = self.sim.step();
+                println!("${:04x} | {:16}", pc, instruction);
+                match result {
+                    Ok(()) => {}
+                    Err(SimBreak::Breakpoint(breakpoint)) => {
+                        println!("Breakpoint: {breakpoint:?}");
+                        return Ok(true);
+                    }
+                    Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
+                        println!("Halted by {mnemonic} opcode ${opcode:02x}");
+                        return Ok(true);
+                    }
+                }
             }
         }
         self.pc += 1;
