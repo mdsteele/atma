@@ -5,7 +5,7 @@ mod expr;
 mod lex;
 mod types;
 
-pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
+pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, IdentifierAst, parse_expr};
 pub use lex::{Token, TokenLexer, TokenValue};
 pub use types::{ParseError, SrcSpan};

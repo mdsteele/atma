@@ -62,17 +62,19 @@ impl AdsModuleAst {
 /// module.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdsStmtAst {
+    /// Declares a constant or variable.
+    Declare(DeclareAst, IdentifierAst, ExprAst),
     /// Exits the script.
     Exit,
     /// Executes the first block if the expression is true, the second block
     /// otherwise.
     If(ExprAst, Vec<AdsStmtAst>, Vec<AdsStmtAst>),
-    /// Defines a constant.
-    Let(IdentifierAst, ExprAst),
     /// Prints the value of an expression.
     Print(ExprAst),
     /// A no-op statement.
     Relax,
+    /// Updates a variable.
+    Set(IdentifierAst, ExprAst),
     /// Steps the simulated processor forward by one instruction.
     Step,
     /// Sets up a breakpoint handler.
@@ -101,15 +103,37 @@ impl AdsStmtAst {
                 .then_ignore(linebreak())
                 .map(|(cond, block)| AdsStmtAst::When(cond, block));
             chumsky::prelude::choice((
+                declare_statement(),
                 exit_statement(),
                 if_statement,
-                let_statement(),
                 print_statement(),
                 relax_statement(),
+                set_statement(),
                 step_statement(),
                 when_statement,
             ))
         })
+    }
+}
+
+//===========================================================================//
+
+/// The kind of variable declaration.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeclareAst {
+    /// Declares a new constant.
+    Let,
+    /// Declares a new variable.
+    Var,
+}
+
+impl DeclareAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], DeclareAst, PError<'a>> + Clone {
+        chumsky::prelude::choice((
+            keyword("let").to(DeclareAst::Let),
+            keyword("var").to(DeclareAst::Var),
+        ))
     }
 }
 
@@ -151,19 +175,19 @@ fn linebreak<'a>() -> impl Parser<'a, &'a [Token], (), PError<'a>> + Clone {
     symbol(TokenValue::Linebreak).repeated().at_least(1)
 }
 
-fn exit_statement<'a>()
+fn declare_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
-    keyword("exit").then_ignore(linebreak()).to(AdsStmtAst::Exit)
-}
-
-fn let_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
-    keyword("let")
-        .ignore_then(IdentifierAst::parser())
+    DeclareAst::parser()
+        .then(IdentifierAst::parser())
         .then_ignore(symbol(TokenValue::Equals))
         .then(ExprAst::parser())
         .then_ignore(linebreak())
-        .map(|(id, expr)| AdsStmtAst::Let(id, expr))
+        .map(|((declare, id), expr)| AdsStmtAst::Declare(declare, id, expr))
+}
+
+fn exit_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("exit").then_ignore(linebreak()).to(AdsStmtAst::Exit)
 }
 
 fn print_statement<'a>()
@@ -179,6 +203,16 @@ fn relax_statement<'a>()
     keyword("relax").then_ignore(linebreak()).to(AdsStmtAst::Relax)
 }
 
+fn set_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("set")
+        .ignore_then(IdentifierAst::parser())
+        .then_ignore(symbol(TokenValue::Equals))
+        .then(ExprAst::parser())
+        .then_ignore(linebreak())
+        .map(|(id, expr)| AdsStmtAst::Set(id, expr))
+}
+
 fn step_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
     keyword("step").then_ignore(linebreak()).to(AdsStmtAst::Step)
@@ -188,7 +222,7 @@ fn step_statement<'a>()
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsModuleAst, AdsStmtAst, IdentifierAst};
+    use super::{AdsModuleAst, AdsStmtAst, DeclareAst, IdentifierAst};
     use crate::parse::{
         ExprAst, ExprAstNode, ParseError, SrcSpan, Token, TokenLexer,
     };
@@ -235,7 +269,8 @@ mod tests {
     fn let_statement() {
         assert_eq!(
             read_statements("let foo = 42\n"),
-            vec![AdsStmtAst::Let(
+            vec![AdsStmtAst::Declare(
+                DeclareAst::Let,
                 IdentifierAst {
                     span: SrcSpan::from_byte_range(4..7),
                     name: "foo".to_string(),

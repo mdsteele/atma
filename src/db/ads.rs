@@ -2,8 +2,8 @@ use super::binop::AdsBinOp;
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
 use crate::parse::{
-    AdsModuleAst, AdsStmtAst, BreakpointAst, ExprAst, ExprAstNode, ParseError,
-    SrcSpan,
+    AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst, ExprAstNode,
+    IdentifierAst, ParseError, SrcSpan,
 };
 use crate::proc::{Breakpoint, SimBreak};
 use num_bigint::BigInt;
@@ -157,7 +157,7 @@ impl AdsExpr {
 //===========================================================================//
 
 pub struct AdsTypeEnv {
-    variables: HashMap<String, AdsType>,
+    variables: HashMap<String, (DeclareAst, SrcSpan, AdsType)>,
 }
 
 impl AdsTypeEnv {
@@ -165,12 +165,19 @@ impl AdsTypeEnv {
         AdsTypeEnv { variables: HashMap::new() }
     }
 
-    fn bind(&mut self, id: String, ty: AdsType) {
-        self.variables.insert(id, ty);
+    fn declare(&mut self, kind: DeclareAst, id: IdentifierAst, ty: AdsType) {
+        self.variables.insert(id.name, (kind, id.span, ty));
+    }
+
+    fn get_declaration(
+        &self,
+        id: &str,
+    ) -> Option<(DeclareAst, SrcSpan, &AdsType)> {
+        self.variables.get(id).map(|(kind, span, ty)| (*kind, *span, ty))
     }
 
     fn get_type(&self, id: &str) -> Option<&AdsType> {
-        self.variables.get(id)
+        self.variables.get(id).map(|(_, _, ty)| ty)
     }
 }
 
@@ -180,17 +187,19 @@ enum AdsInstruction {
     /// Evaluates the boolean expression, and adds the given offset to the ADS
     /// program counter if the result is false.
     BranchUnless(AdsExpr, isize),
-    /// Exit the program.
-    Exit,
     /// Declares a new variable in the current scope (possibly shadowing an
     /// existing variable).
-    Let(String, AdsExpr),
+    Declare(String, AdsExpr),
+    /// Exit the program.
+    Exit,
     /// Adds the given offset to the ADS program counter.
     Jump(isize),
     /// Evaluates the expression and prints the result to stdout.
     Print(AdsExpr),
     /// Returns from the current breakpoint handler.
     Return,
+    /// Updates an existing variable, in the current scope or an enclosing one.
+    Set(String, AdsExpr),
     /// Advances the simulated processor by one instruction.
     Step,
     /// Sets a breakpoint for the simulated processor and jumps to the ADS
@@ -238,13 +247,73 @@ impl AdsCompiler {
                     instructions_out.push(AdsInstruction::Print(expr));
                 }
             }
-            AdsStmtAst::Let(id, expr) => {
-                if let Some((expr, ty)) = self.typecheck_expr(expr) {
-                    self.env.bind(id.name.clone(), ty);
-                    instructions_out.push(AdsInstruction::Let(id.name, expr));
-                } else {
-                    self.env.bind(id.name.clone(), AdsType::Bottom);
+            AdsStmtAst::Set(id, expr_ast) => {
+                let expr_span = expr_ast.span;
+                let opt_expr = self.typecheck_expr(expr_ast);
+                match self.env.get_declaration(&id.name) {
+                    Some((DeclareAst::Var, decl_span, var_type)) => {
+                        if let Some((expr, expr_type)) = opt_expr {
+                            if expr_type == *var_type {
+                                instructions_out
+                                    .push(AdsInstruction::Set(id.name, expr));
+                            } else {
+                                let message = format!(
+                                    "cannot assign {expr_type} value to \
+                                     {var_type} variable `{}`",
+                                    id.name
+                                );
+                                let label1 = format!(
+                                    "this expression has type {expr_type}"
+                                );
+                                let label2 = format!(
+                                    "`{}` was declared as {var_type} here",
+                                    id.name
+                                );
+                                self.errors.push(
+                                    ParseError::new(id.span, message)
+                                        .with_label(expr_span, label1)
+                                        .with_label(decl_span, label2),
+                                );
+                            }
+                        }
+                    }
+                    Some((DeclareAst::Let, decl_span, _)) => {
+                        let message = format!(
+                            "cannot change value of constant `{}`",
+                            id.name
+                        );
+                        let label1 =
+                            format!("cannot set value of `{}`", id.name);
+                        let label2 = format!(
+                            "`{}` was declared as a constant here",
+                            id.name
+                        );
+                        self.errors.push(
+                            ParseError::new(id.span, message)
+                                .with_label(id.span, label1)
+                                .with_label(decl_span, label2),
+                        );
+                    }
+                    None => {
+                        let message = format!("no such variable: {}", id.name);
+                        let label =
+                            "this variable was never declared".to_string();
+                        self.errors.push(
+                            ParseError::new(id.span, message)
+                                .with_label(id.span, label),
+                        );
+                    }
                 }
+            }
+            AdsStmtAst::Declare(kind, id, expr) => {
+                let ty = if let Some((expr, ty)) = self.typecheck_expr(expr) {
+                    instructions_out
+                        .push(AdsInstruction::Declare(id.name.clone(), expr));
+                    ty
+                } else {
+                    AdsType::Bottom
+                };
+                self.env.declare(kind, id, ty);
             }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
                 let pred_span = pred_ast.span;
@@ -388,8 +457,8 @@ impl AdsEnvironment {
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
             }
-            AdsInstruction::Let(name, expr) => {
-                self.scope.set_value(
+            AdsInstruction::Declare(name, expr) => {
+                self.scope.declare_value(
                     name.clone(),
                     self.evaluate(expr)?,
                     &self.sim,
@@ -397,6 +466,13 @@ impl AdsEnvironment {
             }
             AdsInstruction::Print(expr) => {
                 println!("{}", self.evaluate(expr)?);
+            }
+            AdsInstruction::Set(name, expr) => {
+                self.scope.update_value(
+                    name.clone(),
+                    self.evaluate(expr)?,
+                    &self.sim,
+                );
             }
             AdsInstruction::Step => {
                 let pc = self.sim.pc();
@@ -493,7 +569,13 @@ impl AdsScope {
         self.locals.get(id).unwrap().clone()
     }
 
-    pub fn set_value(&mut self, id: String, value: AdsValue, _: &SimEnv) {
+    pub fn declare_value(&mut self, id: String, value: AdsValue, _: &SimEnv) {
+        self.locals.insert(id, value);
+    }
+
+    pub fn update_value(&mut self, id: String, value: AdsValue, _: &SimEnv) {
+        // TODO: if the variable doesn't exist in this scope, check enclosing
+        // scopes.
         self.locals.insert(id, value);
     }
 }
@@ -503,7 +585,9 @@ impl AdsScope {
 #[cfg(test)]
 mod tests {
     use super::{AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue};
-    use crate::parse::{ExprAst, ExprAstNode, SrcSpan};
+    use crate::parse::{
+        DeclareAst, ExprAst, ExprAstNode, IdentifierAst, SrcSpan,
+    };
     use num_bigint::BigInt;
     use std::ops::Range;
 
@@ -532,7 +616,14 @@ mod tests {
     #[test]
     fn typecheck_identifier_expr() {
         let mut env = AdsTypeEnv::empty();
-        env.bind("foo".to_string(), AdsType::Boolean);
+        env.declare(
+            DeclareAst::Let,
+            IdentifierAst {
+                span: SrcSpan::from_byte_range(1..4),
+                name: "foo".to_string(),
+            },
+            AdsType::Boolean,
+        );
         assert_eq!(
             AdsExpr::typecheck(&id_ast("foo", 10..13), &env),
             Ok((
