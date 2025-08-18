@@ -111,7 +111,7 @@ fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> String {
 #[logos(error = LexerError)]
 #[logos(extras = LexerState)]
 #[logos(skip r"[ \t]+")] // whitespace
-#[logos(skip r";[^\n]+")] // comments
+#[logos(skip r";[^\n]*")] // comments
 #[logos(source = str)]
 enum TokenKind {
     #[token("\\", backslash_callback)]

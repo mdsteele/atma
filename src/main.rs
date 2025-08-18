@@ -164,6 +164,12 @@ fn report_parse_error(source: &str, error: ParseError) {
     )
     .with_config(make_report_config())
     .with_message(&error.message);
+    if error.labels.is_empty() {
+        builder = builder.with_label(
+            Label::new((id, error.span.byte_range()))
+                .with_color(colors.next()),
+        );
+    }
     for label in error.labels {
         builder = builder.with_label(
             Label::new((id, label.span.byte_range()))
