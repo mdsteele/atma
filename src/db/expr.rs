@@ -10,8 +10,8 @@ use std::collections::HashMap;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdsExprOp {
     BinOp(AdsBinOp),
-    Id(String),
     Literal(AdsValue),
+    Variable(usize),
 }
 
 //===========================================================================//
@@ -58,20 +58,26 @@ impl AdsExpr {
                     debug_assert!(types.len() >= 2);
                     let rhs_type = types.pop().unwrap();
                     let lhs_type = types.pop().unwrap();
-                    match AdsBinOp::typecheck(
-                        *binop_ast,
-                        lhs_ast.span,
-                        lhs_type,
-                        rhs_ast.span,
-                        rhs_type,
-                    ) {
-                        Ok((binop, ty)) => {
-                            ops.push(AdsExprOp::BinOp(binop));
-                            types.push(ty);
-                        }
-                        Err(mut errs) => {
-                            errors.append(&mut errs);
-                            types.push(AdsType::Bottom);
+                    if lhs_type == AdsType::Bottom
+                        || rhs_type == AdsType::Bottom
+                    {
+                        types.push(AdsType::Bottom);
+                    } else {
+                        match AdsBinOp::typecheck(
+                            *binop_ast,
+                            lhs_ast.span,
+                            lhs_type,
+                            rhs_ast.span,
+                            rhs_type,
+                        ) {
+                            Ok((binop, ty)) => {
+                                ops.push(AdsExprOp::BinOp(binop));
+                                types.push(ty);
+                            }
+                            Err(mut errs) => {
+                                errors.append(&mut errs);
+                                types.push(AdsType::Bottom);
+                            }
                         }
                     }
                 }
@@ -80,13 +86,17 @@ impl AdsExpr {
                     types.push(AdsType::Boolean);
                 }
                 ExprAstNode::Identifier(id) => {
-                    if let Some(ty) = env.get_type(id) {
-                        ops.push(AdsExprOp::Id(id.clone()));
-                        types.push(ty.clone());
+                    if let Some(decl) = env.get_declaration(id) {
+                        ops.push(AdsExprOp::Variable(decl.stack_index));
+                        types.push(decl.var_type.clone());
                     } else {
                         let span = subexpr.span;
-                        let message = format!("No such identifier: {}", id);
-                        errors.push(ParseError::new(span, message));
+                        let message = format!("No such identifier: `{}`", id);
+                        let label = "this was never declared".to_string();
+                        errors.push(
+                            ParseError::new(span, message)
+                                .with_label(subexpr.span, label),
+                        );
                         types.push(AdsType::Bottom);
                     }
                 }
@@ -115,13 +125,74 @@ impl AdsExpr {
 
 //===========================================================================//
 
+pub struct AdsDeclaration {
+    pub kind: DeclareAst,
+    pub id_span: SrcSpan,
+    pub var_type: AdsType,
+    pub stack_index: usize,
+}
+
+//===========================================================================//
+
+struct AdsScope {
+    variables: HashMap<String, AdsDeclaration>,
+    stack_start: usize,
+    frame_size: usize,
+}
+
+impl AdsScope {
+    fn with_start(stack_start: usize) -> AdsScope {
+        AdsScope { variables: HashMap::new(), stack_start, frame_size: 0 }
+    }
+
+    fn stack_size(&self) -> usize {
+        self.stack_start + self.frame_size
+    }
+
+    fn declare(
+        &mut self,
+        kind: DeclareAst,
+        id: IdentifierAst,
+        var_type: AdsType,
+    ) {
+        self.variables.insert(
+            id.name,
+            AdsDeclaration {
+                kind,
+                id_span: id.span,
+                var_type,
+                stack_index: self.stack_size(),
+            },
+        );
+        self.frame_size += 1;
+    }
+
+    fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {
+        self.variables.get(id)
+    }
+}
+
+//===========================================================================//
+
 pub struct AdsTypeEnv {
-    variables: HashMap<String, (DeclareAst, SrcSpan, AdsType)>,
+    scopes: Vec<AdsScope>,
 }
 
 impl AdsTypeEnv {
     pub fn empty() -> AdsTypeEnv {
-        AdsTypeEnv { variables: HashMap::new() }
+        AdsTypeEnv { scopes: vec![AdsScope::with_start(0)] }
+    }
+
+    pub fn push_scope(&mut self) {
+        debug_assert!(!self.scopes.is_empty());
+        let stack_size = self.scopes.last().unwrap().stack_size();
+        self.scopes.push(AdsScope::with_start(stack_size));
+    }
+
+    /// Returns the size of the stack frame.
+    pub fn pop_scope(&mut self) -> usize {
+        debug_assert!(self.scopes.len() >= 2);
+        self.scopes.pop().unwrap().frame_size
     }
 
     pub fn declare(
@@ -130,18 +201,17 @@ impl AdsTypeEnv {
         id: IdentifierAst,
         ty: AdsType,
     ) {
-        self.variables.insert(id.name, (kind, id.span, ty));
+        debug_assert!(!self.scopes.is_empty());
+        self.scopes.last_mut().unwrap().declare(kind, id, ty);
     }
 
-    pub fn get_declaration(
-        &self,
-        id: &str,
-    ) -> Option<(DeclareAst, SrcSpan, &AdsType)> {
-        self.variables.get(id).map(|(kind, span, ty)| (*kind, *span, ty))
-    }
-
-    pub fn get_type(&self, id: &str) -> Option<&AdsType> {
-        self.variables.get(id).map(|(_, _, ty)| ty)
+    pub fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(decl) = scope.get_declaration(id) {
+                return Some(decl);
+            }
+        }
+        None
     }
 }
 
