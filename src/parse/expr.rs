@@ -1,7 +1,7 @@
 //! Facilities for parsing expressions.
 
 use crate::parse::{ParseError, SrcSpan, Token, TokenValue};
-use chumsky::{self, Parser};
+use chumsky::{self, IterParser, Parser};
 use num_bigint::BigInt;
 
 //===========================================================================//
@@ -89,13 +89,20 @@ impl ExprAst {
         chumsky::prelude::recursive(|expr| {
             let parenthesized_expr = chumsky::prelude::group((
                 symbol(TokenValue::ParenOpen),
-                expr,
+                expr.separated_by(symbol(TokenValue::Comma))
+                    .collect::<Vec<_>>(),
                 symbol(TokenValue::ParenClose),
             ))
             .map(
-                |(open, ast, close): (Token, ExprAst, Token)| ExprAst {
-                    span: open.span.merged_with(close.span),
-                    node: ast.node,
+                |(open, mut asts, close): (Token, Vec<ExprAst>, Token)| {
+                    ExprAst {
+                        span: open.span.merged_with(close.span),
+                        node: if asts.len() == 1 {
+                            asts.pop().unwrap().node
+                        } else {
+                            ExprAstNode::TupleLiteral(asts)
+                        },
+                    }
                 },
             );
             let identifier = IdentifierAst::parser().map(|id| ExprAst {
@@ -146,6 +153,8 @@ pub enum ExprAstNode {
     IntLiteral(BigInt),
     /// A string literal.
     StrLiteral(String),
+    /// A tuple literal.
+    TupleLiteral(Vec<ExprAst>),
 }
 
 //===========================================================================//

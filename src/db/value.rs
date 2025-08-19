@@ -97,14 +97,14 @@ impl From<bool> for AdsValue {
 impl fmt::Display for AdsValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AdsValue::Boolean(value) => value.fmt(f),
+            AdsValue::Boolean(value) => write!(f, "%{value}"),
             AdsValue::Integer(value) => value.fmt(f),
             AdsValue::List(values) => {
                 f.write_str("{")?;
                 comma_separate(f, values)?;
                 f.write_str("}")
             }
-            AdsValue::String(value) => value.fmt(f),
+            AdsValue::String(value) => write!(f, "{:?}", value),
             AdsValue::Tuple(values) => {
                 f.write_str("(")?;
                 comma_separate(f, values)?;
@@ -175,8 +175,8 @@ mod tests {
 
     #[test]
     fn display_boolean_value() {
-        assert_eq!(format!("{}", AdsValue::Boolean(false)), "false");
-        assert_eq!(format!("{}", AdsValue::Boolean(true)), "true");
+        assert_eq!(format!("{}", AdsValue::Boolean(false)), "%false");
+        assert_eq!(format!("{}", AdsValue::Boolean(true)), "%true");
     }
 
     #[test]
@@ -188,8 +188,9 @@ mod tests {
 
     #[test]
     fn display_string_value() {
-        assert_eq!(format!("{}", str_value("")), "");
-        assert_eq!(format!("{}", str_value("foo")), "foo");
+        assert_eq!(format!("{}", str_value("")), "\"\"");
+        assert_eq!(format!("{}", str_value("foo")), "\"foo\"");
+        assert_eq!(format!("{}", str_value("\"")), "\"\\\"\"");
     }
 
     #[test]
@@ -209,7 +210,7 @@ mod tests {
         assert_eq!(format!("{}", value), "()");
         let value =
             AdsValue::Tuple(vec![int_value(37), AdsValue::Boolean(true)]);
-        assert_eq!(format!("{}", value), "(37, true)");
+        assert_eq!(format!("{}", value), "(37, %true)");
     }
 }
 

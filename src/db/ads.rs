@@ -426,15 +426,20 @@ impl AdsEnvironment {
         for op in &expr.ops {
             match op {
                 AdsExprOp::BinOp(binop) => {
-                    assert!(stack.len() >= 2);
+                    debug_assert!(stack.len() >= 2);
                     let rhs = stack.pop().unwrap();
                     let lhs = stack.pop().unwrap();
                     stack.push(binop.evaluate(lhs, rhs));
                 }
+                AdsExprOp::Literal(value) => stack.push(value.clone()),
+                &AdsExprOp::MakeTuple(num_items) => {
+                    debug_assert!(stack.len() >= num_items);
+                    let items = stack.split_off(stack.len() - num_items);
+                    stack.push(AdsValue::Tuple(items));
+                }
                 AdsExprOp::Variable(index) => {
                     stack.push(self.variable_stack[*index].clone());
                 }
-                AdsExprOp::Literal(value) => stack.push(value.clone()),
             }
         }
         assert_eq!(stack.len(), 1);

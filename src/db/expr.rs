@@ -4,6 +4,7 @@ use crate::parse::{
     DeclareAst, ExprAst, ExprAstNode, IdentifierAst, ParseError, SrcSpan,
 };
 use std::collections::HashMap;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -11,6 +12,7 @@ use std::collections::HashMap;
 pub enum AdsExprOp {
     BinOp(AdsBinOp),
     Literal(AdsValue),
+    MakeTuple(usize),
     Variable(usize),
 }
 
@@ -45,6 +47,7 @@ impl AdsExpr {
                     ExprAstNode::Identifier(_) => {}
                     ExprAstNode::IntLiteral(_) => {}
                     ExprAstNode::StrLiteral(_) => {}
+                    ExprAstNode::TupleLiteral(items) => stack.extend(items),
                 }
             }
             subexprs
@@ -111,6 +114,13 @@ impl AdsExpr {
                         value.clone(),
                     )));
                     types.push(AdsType::String);
+                }
+                ExprAstNode::TupleLiteral(item_asts) => {
+                    let num_items = item_asts.len();
+                    debug_assert!(types.len() >= num_items);
+                    let item_types = types.split_off(types.len() - num_items);
+                    ops.push(AdsExprOp::MakeTuple(num_items));
+                    types.push(AdsType::Tuple(Rc::new(item_types)));
                 }
             }
         }
