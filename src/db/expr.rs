@@ -12,6 +12,7 @@ use std::rc::Rc;
 pub enum AdsExprOp {
     BinOp(AdsBinOp),
     Literal(AdsValue),
+    MakeList(usize),
     MakeTuple(usize),
     Variable(usize),
 }
@@ -46,6 +47,7 @@ impl AdsExpr {
                     ExprAstNode::BoolLiteral(_) => {}
                     ExprAstNode::Identifier(_) => {}
                     ExprAstNode::IntLiteral(_) => {}
+                    ExprAstNode::ListLiteral(items) => stack.extend(items),
                     ExprAstNode::StrLiteral(_) => {}
                     ExprAstNode::TupleLiteral(items) => stack.extend(items),
                 }
@@ -108,6 +110,33 @@ impl AdsExpr {
                         value.clone(),
                     )));
                     types.push(AdsType::Integer);
+                }
+                ExprAstNode::ListLiteral(item_asts) => {
+                    let num_items = item_asts.len();
+                    debug_assert!(types.len() >= num_items);
+                    let item_types = types.split_off(types.len() - num_items);
+                    let item_type = item_types
+                        .first()
+                        .cloned()
+                        .unwrap_or(AdsType::Integer);
+                    for (ty, ast) in item_types.into_iter().zip(item_asts) {
+                        if ty != item_type {
+                            let message =
+                                "all items in a list must have the same type"
+                                    .to_string();
+                            let label1 =
+                                format!("this item has type {item_type}");
+                            let label2 = format!("this item has type {ty}");
+                            errors.push(
+                                ParseError::new(ast.span, message)
+                                    .with_label(item_asts[0].span, label1)
+                                    .with_label(ast.span, label2),
+                            );
+                            break;
+                        }
+                    }
+                    ops.push(AdsExprOp::MakeList(num_items));
+                    types.push(AdsType::List(Rc::new(item_type)));
                 }
                 ExprAstNode::StrLiteral(value) => {
                     ops.push(AdsExprOp::Literal(AdsValue::String(

@@ -432,6 +432,11 @@ impl AdsEnvironment {
                     stack.push(binop.evaluate(lhs, rhs));
                 }
                 AdsExprOp::Literal(value) => stack.push(value.clone()),
+                &AdsExprOp::MakeList(num_items) => {
+                    debug_assert!(stack.len() >= num_items);
+                    let items = stack.split_off(stack.len() - num_items);
+                    stack.push(AdsValue::List(items));
+                }
                 &AdsExprOp::MakeTuple(num_items) => {
                     debug_assert!(stack.len() >= num_items);
                     let items = stack.split_off(stack.len() - num_items);

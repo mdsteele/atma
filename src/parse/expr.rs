@@ -89,7 +89,8 @@ impl ExprAst {
         chumsky::prelude::recursive(|expr| {
             let parenthesized_expr = chumsky::prelude::group((
                 symbol(TokenValue::ParenOpen),
-                expr.separated_by(symbol(TokenValue::Comma))
+                expr.clone()
+                    .separated_by(symbol(TokenValue::Comma))
                     .collect::<Vec<_>>(),
                 symbol(TokenValue::ParenClose),
             ))
@@ -105,6 +106,19 @@ impl ExprAst {
                     }
                 },
             );
+            let list_literal = chumsky::prelude::group((
+                symbol(TokenValue::BraceOpen),
+                expr.separated_by(symbol(TokenValue::Comma))
+                    .allow_trailing()
+                    .collect::<Vec<_>>(),
+                symbol(TokenValue::BraceClose),
+            ))
+            .map(
+                |(open, asts, close): (Token, Vec<ExprAst>, Token)| ExprAst {
+                    span: open.span.merged_with(close.span),
+                    node: ExprAstNode::ListLiteral(asts),
+                },
+            );
             let identifier = IdentifierAst::parser().map(|id| ExprAst {
                 span: id.span,
                 node: ExprAstNode::Identifier(id.name),
@@ -113,6 +127,7 @@ impl ExprAst {
             let expr_atom = chumsky::prelude::choice((
                 parenthesized_expr,
                 identifier,
+                list_literal,
                 bool_literal(),
                 int_literal(),
                 str_literal(),
@@ -151,6 +166,8 @@ pub enum ExprAstNode {
     Identifier(String),
     /// An integer literal.
     IntLiteral(BigInt),
+    /// A list literal.
+    ListLiteral(Vec<ExprAst>),
     /// A string literal.
     StrLiteral(String),
     /// A tuple literal.
