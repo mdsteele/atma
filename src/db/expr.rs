@@ -136,20 +136,30 @@ pub struct AdsDeclaration {
 
 struct AdsScope {
     variables: HashMap<String, AdsDeclaration>,
+    num_handlers: usize,
     stack_start: usize,
     frame_size: usize,
 }
 
 impl AdsScope {
     fn with_start(stack_start: usize) -> AdsScope {
-        AdsScope { variables: HashMap::new(), stack_start, frame_size: 0 }
+        AdsScope {
+            variables: HashMap::new(),
+            num_handlers: 0,
+            stack_start,
+            frame_size: 0,
+        }
     }
 
     fn stack_size(&self) -> usize {
         self.stack_start + self.frame_size
     }
 
-    fn declare(
+    fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {
+        self.variables.get(id)
+    }
+
+    fn add_declaration(
         &mut self,
         kind: DeclareAst,
         id: IdentifierAst,
@@ -167,8 +177,8 @@ impl AdsScope {
         self.frame_size += 1;
     }
 
-    fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {
-        self.variables.get(id)
+    fn add_handler(&mut self) {
+        self.num_handlers += 1;
     }
 }
 
@@ -189,20 +199,26 @@ impl AdsTypeEnv {
         self.scopes.push(AdsScope::with_start(stack_size));
     }
 
-    /// Returns the size of the stack frame.
-    pub fn pop_scope(&mut self) -> usize {
+    /// Returns the number of handlers and variables in the popped scope.
+    pub fn pop_scope(&mut self) -> (usize, usize) {
         debug_assert!(self.scopes.len() >= 2);
-        self.scopes.pop().unwrap().frame_size
+        let scope = self.scopes.pop().unwrap();
+        (scope.num_handlers, scope.frame_size)
     }
 
-    pub fn declare(
+    pub fn add_handler(&mut self) {
+        debug_assert!(!self.scopes.is_empty());
+        self.scopes.last_mut().unwrap().add_handler();
+    }
+
+    pub fn add_declaration(
         &mut self,
         kind: DeclareAst,
         id: IdentifierAst,
         ty: AdsType,
     ) {
         debug_assert!(!self.scopes.is_empty());
-        self.scopes.last_mut().unwrap().declare(kind, id, ty);
+        self.scopes.last_mut().unwrap().add_declaration(kind, id, ty);
     }
 
     pub fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {

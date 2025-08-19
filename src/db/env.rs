@@ -25,6 +25,10 @@ impl EnvProc {
         self.pc_breakpoints.insert(addr);
     }
 
+    fn remove_pc_breakpoint(&mut self, addr: u32) {
+        self.pc_breakpoints.remove(&addr);
+    }
+
     fn disassemble(&self, addr: u32) -> (usize, String) {
         self.core.disassemble(addr)
     }
@@ -121,6 +125,16 @@ impl SimEnv {
         match breakpoint {
             Breakpoint::Pc(addr) => {
                 self.current_processor_mut().add_pc_breakpoint(addr)
+            }
+            _ => panic!("{breakpoint:?} not supported yet"),
+        }
+    }
+
+    /// Removes a condition under which the simulation should be paused.
+    pub fn remove_breakpoint(&mut self, breakpoint: Breakpoint) {
+        match breakpoint {
+            Breakpoint::Pc(addr) => {
+                self.current_processor_mut().remove_pc_breakpoint(addr)
             }
             _ => panic!("{breakpoint:?} not supported yet"),
         }

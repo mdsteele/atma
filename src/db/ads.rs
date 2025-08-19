@@ -21,10 +21,16 @@ enum AdsInstruction {
     Exit,
     /// Adds the given offset to the ADS program counter.
     Jump(isize),
+    /// Pops a handler from the handler stack and removes its breakpoint.
+    PopHandler,
     /// Pops a variable from the variable stack.
     PopVar,
     /// Evaluates the expression and prints the result to stdout.
     Print(AdsExpr),
+    /// Pushes a new handler onto the handler stack, and sets a breakpoint for
+    /// the simulated processor and jumps to the ADS instruction relative to
+    /// this one whenever that breakpoint is reached.
+    PushHandler(AdsBreakpoint, isize),
     /// Pushes a new variable onto the variable stack.
     PushVar(AdsExpr),
     /// Returns from the current breakpoint handler.
@@ -33,9 +39,6 @@ enum AdsInstruction {
     SetVar(usize, AdsExpr),
     /// Advances the simulated processor by one instruction.
     Step,
-    /// Sets a breakpoint for the simulated processor and jumps to the ADS
-    /// instruction relative to this one whenever that breakpoint is reached.
-    When(AdsBreakpoint, isize),
 }
 
 //===========================================================================//
@@ -88,7 +91,7 @@ impl AdsCompiler {
                 } else {
                     AdsType::Bottom
                 };
-                self.env.declare(kind, id, ty);
+                self.env.add_declaration(kind, id, ty);
             }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
                 let pred_span = pred_ast.span;
@@ -134,7 +137,9 @@ impl AdsCompiler {
                 self.typecheck_statements(do_ast, &mut do_stmts);
                 self.pop_scope(&mut do_stmts);
                 do_stmts.push(AdsInstruction::Return);
-                instructions_out.push(AdsInstruction::When(breakpoint, 1));
+                self.env.add_handler();
+                instructions_out
+                    .push(AdsInstruction::PushHandler(breakpoint, 1));
                 instructions_out
                     .push(AdsInstruction::Jump(do_stmts.len() as isize));
                 instructions_out.append(&mut do_stmts);
@@ -231,8 +236,11 @@ impl AdsCompiler {
     }
 
     fn pop_scope(&mut self, instructions_out: &mut Vec<AdsInstruction>) {
-        let frame_size = self.env.pop_scope();
-        for _ in 0..frame_size {
+        let (num_handlers, num_variables) = self.env.pop_scope();
+        for _ in 0..num_handlers {
+            instructions_out.push(AdsInstruction::PopHandler);
+        }
+        for _ in 0..num_variables {
             instructions_out.push(AdsInstruction::PopVar);
         }
     }
@@ -284,8 +292,9 @@ pub struct AdsEnvironment {
     program: AdsProgram,
     pc: usize,
     variable_stack: Vec<AdsValue>,
+    handler_stack: Vec<Breakpoint>,
     return_stack: Vec<usize>,
-    handlers: HashMap<Breakpoint, usize>,
+    handlers: HashMap<Breakpoint, Vec<usize>>,
 }
 
 impl AdsEnvironment {
@@ -296,6 +305,7 @@ impl AdsEnvironment {
             program,
             pc: 0,
             variable_stack: Vec::new(),
+            handler_stack: Vec::new(),
             return_stack: Vec::new(),
             handlers: HashMap::new(),
         }
@@ -313,11 +323,31 @@ impl AdsEnvironment {
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
             }
+            AdsInstruction::PopHandler => {
+                debug_assert!(!self.handler_stack.is_empty());
+                let breakpoint = self.handler_stack.pop().unwrap();
+                debug_assert!(self.handlers.contains_key(&breakpoint));
+                let destinations = self.handlers.get_mut(&breakpoint).unwrap();
+                debug_assert!(!destinations.is_empty());
+                destinations.pop();
+                if destinations.is_empty() {
+                    self.handlers.remove(&breakpoint);
+                    self.sim.remove_breakpoint(breakpoint);
+                }
+            }
             AdsInstruction::PopVar => {
+                debug_assert!(!self.variable_stack.is_empty());
                 self.variable_stack.pop();
             }
             AdsInstruction::Print(expr) => {
                 println!("{}", self.evaluate(expr)?);
+            }
+            AdsInstruction::PushHandler(breakpoint, offset) => {
+                let breakpoint = self.eval_breakpoint(breakpoint)?;
+                let destination = self.destination(*offset);
+                self.handlers.entry(breakpoint).or_default().push(destination);
+                self.sim.add_breakpoint(breakpoint);
+                self.handler_stack.push(breakpoint);
             }
             AdsInstruction::PushVar(expr) => {
                 self.variable_stack.push(self.evaluate(expr)?);
@@ -335,7 +365,11 @@ impl AdsEnvironment {
                     Err(SimBreak::Breakpoint(breakpoint)) => {
                         println!("Breakpoint: {breakpoint:?}");
                         self.return_stack.push(self.pc);
-                        self.pc = *self.handlers.get(&breakpoint).unwrap();
+                        debug_assert!(self.handlers.contains_key(&breakpoint));
+                        let destinations =
+                            self.handlers.get(&breakpoint).unwrap();
+                        debug_assert!(!destinations.is_empty());
+                        self.pc = *destinations.last().unwrap();
                         return Ok(false);
                     }
                     Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
@@ -346,11 +380,6 @@ impl AdsEnvironment {
             }
             AdsInstruction::Return => {
                 self.pc = self.return_stack.pop().unwrap();
-            }
-            AdsInstruction::When(breakpoint, offset) => {
-                let breakpoint = self.eval_breakpoint(breakpoint)?;
-                self.handlers.insert(breakpoint, self.destination(*offset));
-                self.sim.add_breakpoint(breakpoint);
             }
         }
         self.pc += 1;
@@ -441,7 +470,7 @@ mod tests {
     #[test]
     fn typecheck_identifier_expr() {
         let mut env = AdsTypeEnv::empty();
-        env.declare(
+        env.add_declaration(
             DeclareAst::Let,
             IdentifierAst {
                 span: SrcSpan::from_byte_range(1..4),
