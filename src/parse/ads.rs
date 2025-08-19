@@ -73,6 +73,8 @@ pub enum AdsStmtAst {
     Print(ExprAst),
     /// A no-op statement.
     Relax,
+    /// Runs the simulated processor until the specified breakpoint is reached.
+    RunUntil(BreakpointAst),
     /// Updates a variable.
     Set(IdentifierAst, ExprAst),
     /// Steps the simulated processor forward by one instruction.
@@ -108,6 +110,7 @@ impl AdsStmtAst {
                 if_statement,
                 print_statement(),
                 relax_statement(),
+                run_until_statement(),
                 set_statement(),
                 step_statement(),
                 when_statement,
@@ -187,7 +190,7 @@ fn declare_statement<'a>()
 
 fn exit_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
-    keyword("exit").then_ignore(linebreak()).to(AdsStmtAst::Exit)
+    keyword("exit").ignore_then(linebreak()).to(AdsStmtAst::Exit)
 }
 
 fn print_statement<'a>()
@@ -200,7 +203,16 @@ fn print_statement<'a>()
 
 fn relax_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
-    keyword("relax").then_ignore(linebreak()).to(AdsStmtAst::Relax)
+    keyword("relax").ignore_then(linebreak()).to(AdsStmtAst::Relax)
+}
+
+fn run_until_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    keyword("run")
+        .ignore_then(keyword("until"))
+        .ignore_then(BreakpointAst::parser())
+        .then_ignore(linebreak())
+        .map(AdsStmtAst::RunUntil)
 }
 
 fn set_statement<'a>()
@@ -215,7 +227,7 @@ fn set_statement<'a>()
 
 fn step_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
-    keyword("step").then_ignore(linebreak()).to(AdsStmtAst::Step)
+    keyword("step").ignore_then(linebreak()).to(AdsStmtAst::Step)
 }
 
 //===========================================================================//

@@ -130,6 +130,27 @@ impl AdsCompiler {
                 instructions_out.append(&mut then_stmts);
                 instructions_out.append(&mut else_stmts);
             }
+            AdsStmtAst::RunUntil(breakpoint_ast) => {
+                let breakpoint = self.typecheck_breakpoint(breakpoint_ast);
+                let index = self.env.variable_stack_size();
+                instructions_out
+                    .push(AdsInstruction::PushVar(AdsExpr::constant(false)));
+                instructions_out
+                    .push(AdsInstruction::PushHandler(breakpoint, 1));
+                instructions_out.push(AdsInstruction::Jump(2));
+                instructions_out.push(AdsInstruction::SetVar(
+                    index,
+                    AdsExpr::constant(true),
+                ));
+                instructions_out.push(AdsInstruction::Return);
+                instructions_out.push(AdsInstruction::Step);
+                instructions_out.push(AdsInstruction::BranchUnless(
+                    AdsExpr { ops: vec![AdsExprOp::Variable(index)] },
+                    -2,
+                ));
+                instructions_out.push(AdsInstruction::PopHandler);
+                instructions_out.push(AdsInstruction::PopVar);
+            }
             AdsStmtAst::When(breakpoint_ast, do_ast) => {
                 let breakpoint = self.typecheck_breakpoint(breakpoint_ast);
                 self.push_scope();

@@ -151,7 +151,7 @@ impl AdsScope {
         }
     }
 
-    fn stack_size(&self) -> usize {
+    fn variable_stack_size(&self) -> usize {
         self.stack_start + self.frame_size
     }
 
@@ -171,7 +171,7 @@ impl AdsScope {
                 kind,
                 id_span: id.span,
                 var_type,
-                stack_index: self.stack_size(),
+                stack_index: self.variable_stack_size(),
             },
         );
         self.frame_size += 1;
@@ -193,10 +193,14 @@ impl AdsTypeEnv {
         AdsTypeEnv { scopes: vec![AdsScope::with_start(0)] }
     }
 
-    pub fn push_scope(&mut self) {
+    pub fn variable_stack_size(&self) -> usize {
         debug_assert!(!self.scopes.is_empty());
-        let stack_size = self.scopes.last().unwrap().stack_size();
-        self.scopes.push(AdsScope::with_start(stack_size));
+        self.scopes.last().unwrap().variable_stack_size()
+    }
+
+    pub fn push_scope(&mut self) {
+        let start = self.variable_stack_size();
+        self.scopes.push(AdsScope::with_start(start));
     }
 
     /// Returns the number of handlers and variables in the popped scope.
