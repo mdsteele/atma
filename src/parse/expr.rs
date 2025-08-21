@@ -108,7 +108,8 @@ impl ExprAst {
             );
             let list_literal = chumsky::prelude::group((
                 symbol(TokenValue::BraceOpen),
-                expr.separated_by(symbol(TokenValue::Comma))
+                expr.clone()
+                    .separated_by(symbol(TokenValue::Comma))
                     .allow_trailing()
                     .collect::<Vec<_>>(),
                 symbol(TokenValue::BraceClose),
@@ -134,10 +135,35 @@ impl ExprAst {
             ))
             .labelled("subexpression");
 
-            expr_atom
+            let indexed = expr_atom
+                .then(
+                    chumsky::prelude::group((
+                        symbol(TokenValue::BracketOpen),
+                        expr,
+                        symbol(TokenValue::BracketClose),
+                    ))
+                    .or_not(),
+                )
+                .map(|(base, opt_subscript)| {
+                    if let Some((open, index, close)) = opt_subscript {
+                        let index_span = open.span.merged_with(close.span);
+                        ExprAst {
+                            span: base.span.merged_with(index_span),
+                            node: ExprAstNode::Index(
+                                index_span,
+                                Box::new(base),
+                                Box::new(index),
+                            ),
+                        }
+                    } else {
+                        base
+                    }
+                });
+
+            indexed
                 .clone()
                 .foldl(
-                    BinOpAst::parser().then(expr_atom).repeated(),
+                    BinOpAst::parser().then(indexed).repeated(),
                     |lhs, (op, rhs)| {
                         let span = lhs.span.merged_with(rhs.span);
                         let node = ExprAstNode::BinOp(
@@ -164,6 +190,8 @@ pub enum ExprAstNode {
     BoolLiteral(bool),
     /// An identifier.
     Identifier(String),
+    /// An indexing operation (e.g. into a list).
+    Index(SrcSpan, Box<ExprAst>, Box<ExprAst>),
     /// An integer literal.
     IntLiteral(BigInt),
     /// A list literal.

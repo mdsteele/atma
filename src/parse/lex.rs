@@ -124,6 +124,10 @@ enum TokenKind {
     BraceClose,
     #[token("{")]
     BraceOpen,
+    #[token("]")]
+    BracketClose,
+    #[token("[")]
+    BracketOpen,
     #[token(":")]
     Colon,
     #[token(",")]
@@ -162,6 +166,8 @@ impl TokenKind {
             TokenKind::BoolLiteralTrue => TokenValue::BoolLiteral(true),
             TokenKind::BraceClose => TokenValue::BraceClose,
             TokenKind::BraceOpen => TokenValue::BraceOpen,
+            TokenKind::BracketClose => TokenValue::BracketClose,
+            TokenKind::BracketOpen => TokenValue::BracketOpen,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
             TokenKind::EqEq => TokenValue::EqEq,
@@ -196,6 +202,10 @@ pub enum TokenValue {
     BraceClose,
     /// A "`{`" symbol.
     BraceOpen,
+    /// A "`]`" symbol.
+    BracketClose,
+    /// A "`[`" symbol.
+    BracketOpen,
     /// A "`:`" symbol.
     Colon,
     /// A "`,`" symbol.
@@ -227,6 +237,8 @@ impl TokenValue {
             TokenValue::BoolLiteral(_) => "boolean literal",
             TokenValue::BraceClose => "close brace",
             TokenValue::BraceOpen => "open brace",
+            TokenValue::BracketClose => "close bracket",
+            TokenValue::BracketOpen => "open bracket",
             TokenValue::Colon => "colon",
             TokenValue::Comma => "comma",
             TokenValue::EqEq => "equals-equals",

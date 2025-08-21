@@ -11,6 +11,7 @@ use std::rc::Rc;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdsExprOp {
     BinOp(AdsBinOp),
+    ListIndex,
     Literal(AdsValue),
     MakeList(usize),
     MakeTuple(usize),
@@ -46,6 +47,10 @@ impl AdsExpr {
                     }
                     ExprAstNode::BoolLiteral(_) => {}
                     ExprAstNode::Identifier(_) => {}
+                    ExprAstNode::Index(_, lhs, rhs) => {
+                        stack.push(lhs);
+                        stack.push(rhs);
+                    }
                     ExprAstNode::IntLiteral(_) => {}
                     ExprAstNode::ListLiteral(items) => stack.extend(items),
                     ExprAstNode::StrLiteral(_) => {}
@@ -104,6 +109,44 @@ impl AdsExpr {
                         );
                         types.push(AdsType::Bottom);
                     }
+                }
+                ExprAstNode::Index(index_span, lhs_ast, rhs_ast) => {
+                    debug_assert!(types.len() >= 2);
+                    let rhs_type = types.pop().unwrap();
+                    let lhs_type = types.pop().unwrap();
+                    types.push(match (lhs_type, rhs_type) {
+                        (_, AdsType::Bottom) | (AdsType::Bottom, _) => {
+                            AdsType::Bottom
+                        }
+                        (AdsType::List(item_type), AdsType::Integer) => {
+                            ops.push(AdsExprOp::ListIndex);
+                            Rc::unwrap_or_clone(item_type)
+                        }
+                        (AdsType::List(item_type), rhs_type) => {
+                            let message = format!(
+                                "cannot use {rhs_type} as a list index"
+                            );
+                            let label =
+                                format!("this expression has type {rhs_type}");
+                            errors.push(
+                                ParseError::new(rhs_ast.span, message)
+                                    .with_label(rhs_ast.span, label),
+                            );
+                            Rc::unwrap_or_clone(item_type)
+                        }
+                        (lhs_type, _) => {
+                            let message = format!(
+                                "cannot index into value of type {lhs_type}"
+                            );
+                            let label =
+                                format!("this expression has type {lhs_type}");
+                            errors.push(
+                                ParseError::new(*index_span, message)
+                                    .with_label(lhs_ast.span, label),
+                            );
+                            AdsType::Bottom
+                        }
+                    });
                 }
                 ExprAstNode::IntLiteral(value) => {
                     ops.push(AdsExprOp::Literal(AdsValue::Integer(

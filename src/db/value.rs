@@ -78,6 +78,15 @@ impl AdsValue {
         }
     }
 
+    /// Returns the contained [`List`](AdsValue::List) value, or panics if this
+    /// value is not a list.
+    pub fn unwrap_list(self) -> Vec<AdsValue> {
+        match self {
+            AdsValue::List(values) => values,
+            value => panic!("AdsValue::unwrap_list on {value:?}"),
+        }
+    }
+
     /// Returns the contained [`String`](AdsValue::String) value, or panics
     /// if this value is not a string.
     pub fn unwrap_str(self) -> String {

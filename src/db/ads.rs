@@ -431,6 +431,18 @@ impl AdsEnvironment {
                     let lhs = stack.pop().unwrap();
                     stack.push(binop.evaluate(lhs, rhs));
                 }
+                AdsExprOp::ListIndex => {
+                    debug_assert!(stack.len() >= 2);
+                    let rhs = stack.pop().unwrap().unwrap_int();
+                    let lhs = stack.pop().unwrap().unwrap_list();
+                    if rhs < BigInt::ZERO {
+                        return Err(AdsRuntimeError {}); // TODO message
+                    }
+                    if rhs >= BigInt::from(lhs.len()) {
+                        return Err(AdsRuntimeError {}); // TODO message
+                    }
+                    stack.push(lhs[usize::try_from(rhs).unwrap()].clone());
+                }
                 AdsExprOp::Literal(value) => stack.push(value.clone()),
                 &AdsExprOp::MakeList(num_items) => {
                     debug_assert!(stack.len() >= num_items);
