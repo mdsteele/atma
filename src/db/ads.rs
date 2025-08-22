@@ -1,5 +1,5 @@
 use super::breakpoint::AdsBreakpoint;
-use super::expr::{AdsExpr, AdsExprOp, AdsTypeEnv};
+use super::expr::{AdsDeclarationKind, AdsExpr, AdsExprOp, AdsTypeEnv};
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
 use crate::parse::{
@@ -85,13 +85,21 @@ impl AdsCompiler {
                 self.typecheck_set_statement(id, expr_ast, instructions_out);
             }
             AdsStmtAst::Declare(kind, id, expr) => {
-                let ty = if let Some((expr, ty)) = self.typecheck_expr(expr) {
-                    instructions_out.push(AdsInstruction::PushVar(expr));
-                    ty
-                } else {
-                    AdsType::Bottom
+                let (expr_type, static_value) =
+                    if let Some((expr, ty)) = self.typecheck_expr(expr) {
+                        let static_value = expr.static_value().cloned();
+                        instructions_out.push(AdsInstruction::PushVar(expr));
+                        (ty, static_value)
+                    } else {
+                        (AdsType::Bottom, None)
+                    };
+                let kind = match kind {
+                    DeclareAst::Let => {
+                        AdsDeclarationKind::Constant(static_value)
+                    }
+                    DeclareAst::Var => AdsDeclarationKind::Variable,
                 };
-                self.env.add_declaration(kind, id, ty);
+                self.env.add_declaration(kind, id, expr_type);
             }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
                 let pred_span = pred_ast.span;
@@ -178,7 +186,7 @@ impl AdsCompiler {
         let opt_expr = self.typecheck_expr(expr_ast);
         if let Some(decl) = self.env.get_declaration(&id.name) {
             match decl.kind {
-                DeclareAst::Var => {
+                AdsDeclarationKind::Variable => {
                     if let Some((expr, expr_type)) = opt_expr {
                         if expr_type == decl.var_type {
                             instructions_out.push(AdsInstruction::SetVar(
@@ -206,7 +214,7 @@ impl AdsCompiler {
                         }
                     }
                 }
-                DeclareAst::Let => {
+                AdsDeclarationKind::Constant(_) => {
                     let message = format!(
                         "cannot change value of constant `{}`",
                         id.name
@@ -454,6 +462,12 @@ impl AdsEnvironment {
                     let items = stack.split_off(stack.len() - num_items);
                     stack.push(AdsValue::Tuple(items));
                 }
+                &AdsExprOp::TupleItem(index) => {
+                    debug_assert!(!stack.is_empty());
+                    let items = stack.pop().unwrap().unwrap_tuple();
+                    debug_assert!(index < items.len());
+                    stack.push(items[index].clone());
+                }
                 AdsExprOp::Variable(index) => {
                     stack.push(self.variable_stack[*index].clone());
                 }
@@ -481,10 +495,10 @@ impl AdsEnvironment {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue};
-    use crate::parse::{
-        DeclareAst, ExprAst, ExprAstNode, IdentifierAst, SrcSpan,
+    use super::{
+        AdsDeclarationKind, AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue,
     };
+    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, SrcSpan};
     use num_bigint::BigInt;
     use std::ops::Range;
 
@@ -514,7 +528,7 @@ mod tests {
     fn typecheck_identifier_expr() {
         let mut env = AdsTypeEnv::empty();
         env.add_declaration(
-            DeclareAst::Let,
+            AdsDeclarationKind::Constant(None),
             IdentifierAst {
                 span: SrcSpan::from_byte_range(1..4),
                 name: "foo".to_string(),

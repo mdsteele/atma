@@ -95,6 +95,15 @@ impl AdsValue {
             value => panic!("AdsValue::unwrap_str on {value:?}"),
         }
     }
+
+    /// Returns the contained [`List`](AdsValue::List) value, or panics if this
+    /// value is not a list.
+    pub fn unwrap_tuple(self) -> Vec<AdsValue> {
+        match self {
+            AdsValue::Tuple(values) => values,
+            value => panic!("AdsValue::unwrap_tuple on {value:?}"),
+        }
+    }
 }
 
 impl From<bool> for AdsValue {
