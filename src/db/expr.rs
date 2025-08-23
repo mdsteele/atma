@@ -1,4 +1,5 @@
 use super::binop::AdsBinOp;
+use super::inst::AdsInstruction;
 use super::value::{AdsType, AdsValue};
 use crate::parse::{
     BinOpAst, ExprAst, ExprAstNode, IdentifierAst, ParseError, SrcSpan,
@@ -9,34 +10,13 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AdsExprOp {
-    BinOp(AdsBinOp),
-    ListIndex,
-    Literal(AdsValue),
-    MakeList(usize),
-    MakeTuple(usize),
-    TupleItem(usize),
-    Variable(usize),
-}
-
-impl AdsExprOp {
-    pub(crate) fn unwrap_literal(self) -> AdsValue {
-        match self {
-            AdsExprOp::Literal(value) => value,
-            op => panic!("AdsExprOp::unwrap_literal on {op:?}"),
-        }
-    }
-}
-
-//===========================================================================//
-
 struct AdsExprCompiler<'a> {
     env: &'a AdsTypeEnv,
     // Invariant: If the top N entries of `types` all hold `is_static = true`,
-    // then the top N entries of `ops` are all `AdsExprOp::Literal` values.
+    // then the top N entries of `ops` are all
+    // `AdsInstruction::PushValue` values.
     types: Vec<(AdsType, bool)>, // (type, is_static)
-    ops: Vec<AdsExprOp>,
+    ops: Vec<AdsInstruction>,
     errors: Vec<ParseError>,
 }
 
@@ -53,7 +33,7 @@ impl<'a> AdsExprCompiler<'a> {
     pub fn typecheck(
         mut self,
         expr: &ExprAst,
-    ) -> Result<(AdsExpr, AdsType), Vec<ParseError>> {
+    ) -> Result<(Vec<AdsInstruction>, AdsType), Vec<ParseError>> {
         let mut stack = vec![expr];
         let mut subexprs = Vec::<&ExprAst>::new();
         while let Some(subexpr) = stack.pop() {
@@ -80,7 +60,7 @@ impl<'a> AdsExprCompiler<'a> {
         }
         debug_assert_eq!(self.types.len(), 1);
         if self.errors.is_empty() {
-            Ok((AdsExpr { ops: self.ops }, self.types.pop().unwrap().0))
+            Ok((self.ops, self.types.pop().unwrap().0))
         } else {
             Err(self.errors)
         }
@@ -93,7 +73,8 @@ impl<'a> AdsExprCompiler<'a> {
             }
             &ExprAstNode::BoolLiteral(value) => {
                 self.types.push((AdsType::Boolean, true));
-                self.ops.push(AdsExprOp::Literal(AdsValue::Boolean(value)));
+                self.ops
+                    .push(AdsInstruction::PushValue(AdsValue::Boolean(value)));
             }
             ExprAstNode::Identifier(id) => {
                 self.typecheck_identifier(subexpr.span, id);
@@ -102,7 +83,7 @@ impl<'a> AdsExprCompiler<'a> {
                 self.typecheck_index(*index_span, lhs_ast, rhs_ast);
             }
             ExprAstNode::IntLiteral(value) => {
-                self.ops.push(AdsExprOp::Literal(AdsValue::Integer(
+                self.ops.push(AdsInstruction::PushValue(AdsValue::Integer(
                     value.clone(),
                 )));
                 self.types.push((AdsType::Integer, true));
@@ -111,8 +92,9 @@ impl<'a> AdsExprCompiler<'a> {
                 self.typecheck_list_literal(item_asts);
             }
             ExprAstNode::StrLiteral(value) => {
-                self.ops
-                    .push(AdsExprOp::Literal(AdsValue::String(value.clone())));
+                self.ops.push(AdsInstruction::PushValue(AdsValue::String(
+                    value.clone(),
+                )));
                 self.types.push((AdsType::String, true));
             }
             ExprAstNode::TupleLiteral(item_asts) => {
@@ -146,10 +128,10 @@ impl<'a> AdsExprCompiler<'a> {
                     let rhs_value = self.pop_literal();
                     let lhs_value = self.pop_literal();
                     let result_value = binop.evaluate(lhs_value, rhs_value);
-                    self.ops.push(AdsExprOp::Literal(result_value));
+                    self.ops.push(AdsInstruction::PushValue(result_value));
                     self.types.push((result_type, true));
                 } else {
-                    self.ops.push(AdsExprOp::BinOp(binop));
+                    self.ops.push(AdsInstruction::BinOp(binop));
                     self.types.push((result_type, false));
                 }
             }
@@ -162,15 +144,14 @@ impl<'a> AdsExprCompiler<'a> {
 
     fn typecheck_identifier(&mut self, span: SrcSpan, id: &str) {
         if let Some(decl) = self.env.get_declaration(id) {
-            let is_static = if let AdsDeclarationKind::Constant(Some(value)) =
-                &decl.kind
-            {
-                self.ops.push(AdsExprOp::Literal(value.clone()));
-                true
-            } else {
-                self.ops.push(AdsExprOp::Variable(decl.stack_index));
-                false
-            };
+            let is_static =
+                if let AdsDeclKind::Constant(Some(value)) = &decl.kind {
+                    self.ops.push(AdsInstruction::PushValue(value.clone()));
+                    true
+                } else {
+                    self.ops.push(AdsInstruction::CopyValue(decl.stack_index));
+                    false
+                };
             self.types.push((decl.var_type.clone(), is_static));
             return;
         }
@@ -197,7 +178,7 @@ impl<'a> AdsExprCompiler<'a> {
             (AdsType::List(item_type), AdsType::Integer) => {
                 let item_type = Rc::unwrap_or_clone(item_type);
                 if !lhs_static || !rhs_static {
-                    self.ops.push(AdsExprOp::ListIndex);
+                    self.ops.push(AdsInstruction::ListIndex);
                     self.types.push((item_type, false));
                     return;
                 }
@@ -222,7 +203,7 @@ impl<'a> AdsExprCompiler<'a> {
                 }
                 let result_value =
                     list_values[usize::try_from(index).unwrap()].clone();
-                self.ops.push(AdsExprOp::Literal(result_value));
+                self.ops.push(AdsInstruction::PushValue(result_value));
                 self.types.push((item_type, true));
             }
             (AdsType::List(_), rhs_type) => {
@@ -268,11 +249,12 @@ impl<'a> AdsExprCompiler<'a> {
                 let item_type = item_types[index].clone();
                 if lhs_static {
                     let tuple_values = self.pop_literal().unwrap_tuple();
-                    self.ops
-                        .push(AdsExprOp::Literal(tuple_values[index].clone()));
+                    self.ops.push(AdsInstruction::PushValue(
+                        tuple_values[index].clone(),
+                    ));
                     self.types.push((item_type, true));
                 } else {
-                    self.ops.push(AdsExprOp::TupleItem(index));
+                    self.ops.push(AdsInstruction::TupleItem(index));
                     self.types.push((item_type, false));
                 }
             }
@@ -319,9 +301,10 @@ impl<'a> AdsExprCompiler<'a> {
         }
         if is_static {
             let item_values = self.pop_literals(num_items);
-            self.ops.push(AdsExprOp::Literal(AdsValue::List(item_values)));
+            self.ops
+                .push(AdsInstruction::PushValue(AdsValue::List(item_values)));
         } else {
-            self.ops.push(AdsExprOp::MakeList(num_items));
+            self.ops.push(AdsInstruction::MakeList(num_items));
         }
         self.types.push((AdsType::List(Rc::new(item_type)), is_static));
     }
@@ -331,23 +314,30 @@ impl<'a> AdsExprCompiler<'a> {
         let (item_types, is_static) = self.pop_types(num_items);
         if is_static {
             let item_values = self.pop_literals(num_items);
-            self.ops.push(AdsExprOp::Literal(AdsValue::Tuple(item_values)));
+            self.ops
+                .push(AdsInstruction::PushValue(AdsValue::Tuple(item_values)));
         } else {
-            self.ops.push(AdsExprOp::MakeTuple(num_items));
+            self.ops.push(AdsInstruction::MakeTuple(num_items));
         }
         self.types.push((AdsType::Tuple(Rc::new(item_types)), is_static));
     }
 
+    fn unwrap_literal(&self, op: AdsInstruction) -> AdsValue {
+        match op {
+            AdsInstruction::PushValue(value) => value,
+            op => panic!("pop_literal on {op:?}"),
+        }
+    }
+
     fn pop_literal(&mut self) -> AdsValue {
-        self.ops.pop().unwrap().unwrap_literal()
+        let op = self.ops.pop().unwrap();
+        self.unwrap_literal(op)
     }
 
     fn pop_literals(&mut self, num_items: usize) -> Vec<AdsValue> {
         debug_assert!(num_items <= self.ops.len());
-        self.ops
-            .drain((self.ops.len() - num_items)..)
-            .map(|op| op.unwrap_literal())
-            .collect::<Vec<_>>()
+        let ops = self.ops.split_off(self.ops.len() - num_items);
+        ops.into_iter().map(|op| self.unwrap_literal(op)).collect::<Vec<_>>()
     }
 
     fn pop_types(&mut self, num_items: usize) -> (Vec<AdsType>, bool) {
@@ -361,44 +351,15 @@ impl<'a> AdsExprCompiler<'a> {
 
 //===========================================================================//
 
-/// An expression in an [AdsProgram].
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AdsExpr {
-    pub(crate) ops: Vec<AdsExprOp>,
-}
-
-impl AdsExpr {
-    pub fn constant<T: Into<AdsValue>>(value: T) -> AdsExpr {
-        AdsExpr { ops: vec![AdsExprOp::Literal(value.into())] }
-    }
-
-    pub fn typecheck(
-        expr: &ExprAst,
-        env: &AdsTypeEnv,
-    ) -> Result<(AdsExpr, AdsType), Vec<ParseError>> {
-        AdsExprCompiler::new(env).typecheck(expr)
-    }
-
-    pub fn static_value(&self) -> Option<&AdsValue> {
-        if let [AdsExprOp::Literal(value)] = self.ops.as_slice() {
-            Some(value)
-        } else {
-            None
-        }
-    }
-}
-
-//===========================================================================//
-
-pub enum AdsDeclarationKind {
+pub enum AdsDeclKind {
     Constant(Option<AdsValue>),
     Variable,
 }
 
 //===========================================================================//
 
-pub struct AdsDeclaration {
-    pub kind: AdsDeclarationKind,
+pub struct AdsDecl {
+    pub kind: AdsDeclKind,
     pub id_span: SrcSpan,
     pub var_type: AdsType,
     pub stack_index: usize,
@@ -407,7 +368,7 @@ pub struct AdsDeclaration {
 //===========================================================================//
 
 struct AdsScope {
-    variables: HashMap<String, AdsDeclaration>,
+    variables: HashMap<String, AdsDecl>,
     num_handlers: usize,
     stack_start: usize,
     frame_size: usize,
@@ -427,19 +388,19 @@ impl AdsScope {
         self.stack_start + self.frame_size
     }
 
-    fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {
+    fn get_declaration(&self, id: &str) -> Option<&AdsDecl> {
         self.variables.get(id)
     }
 
     fn add_declaration(
         &mut self,
-        kind: AdsDeclarationKind,
+        kind: AdsDeclKind,
         id: IdentifierAst,
         var_type: AdsType,
     ) {
         self.variables.insert(
             id.name,
-            AdsDeclaration {
+            AdsDecl {
                 kind,
                 id_span: id.span,
                 var_type,
@@ -489,7 +450,7 @@ impl AdsTypeEnv {
 
     pub fn add_declaration(
         &mut self,
-        kind: AdsDeclarationKind,
+        kind: AdsDeclKind,
         id: IdentifierAst,
         ty: AdsType,
     ) {
@@ -497,13 +458,77 @@ impl AdsTypeEnv {
         self.scopes.last_mut().unwrap().add_declaration(kind, id, ty);
     }
 
-    pub fn get_declaration(&self, id: &str) -> Option<&AdsDeclaration> {
+    pub fn get_declaration(&self, id: &str) -> Option<&AdsDecl> {
         for scope in self.scopes.iter().rev() {
             if let Some(decl) = scope.get_declaration(id) {
                 return Some(decl);
             }
         }
         None
+    }
+
+    pub fn typecheck_expression(
+        &self,
+        expr: ExprAst,
+    ) -> Result<(Vec<AdsInstruction>, AdsType), Vec<ParseError>> {
+        AdsExprCompiler::new(self).typecheck(&expr)
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::{AdsDeclKind, AdsInstruction, AdsType, AdsTypeEnv, AdsValue};
+    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, SrcSpan};
+    use num_bigint::BigInt;
+    use std::ops::Range;
+
+    fn id_ast(name: &str, range: Range<usize>) -> ExprAst {
+        ExprAst {
+            span: SrcSpan::from_byte_range(range),
+            node: ExprAstNode::Identifier(name.to_string()),
+        }
+    }
+
+    fn int_ast(value: i32, range: Range<usize>) -> ExprAst {
+        ExprAst {
+            span: SrcSpan::from_byte_range(range),
+            node: ExprAstNode::IntLiteral(BigInt::from(value)),
+        }
+    }
+
+    fn int_value(value: i32) -> AdsValue {
+        AdsValue::Integer(BigInt::from(value))
+    }
+
+    #[test]
+    fn typecheck_identifier_expr() {
+        let mut env = AdsTypeEnv::empty();
+        env.add_declaration(
+            AdsDeclKind::Constant(None),
+            IdentifierAst {
+                span: SrcSpan::from_byte_range(1..4),
+                name: "foo".to_string(),
+            },
+            AdsType::Boolean,
+        );
+        assert_eq!(
+            env.typecheck_expression(id_ast("foo", 10..13)),
+            Ok((vec![AdsInstruction::CopyValue(0)], AdsType::Boolean))
+        );
+    }
+
+    #[test]
+    fn typecheck_int_literal_expr() {
+        let env = AdsTypeEnv::empty();
+        assert_eq!(
+            env.typecheck_expression(int_ast(42, 0..2)),
+            Ok((
+                vec![AdsInstruction::PushValue(int_value(42))],
+                AdsType::Integer,
+            ))
+        );
     }
 }
 

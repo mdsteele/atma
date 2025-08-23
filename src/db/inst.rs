@@ -1,0 +1,73 @@
+use super::binop::AdsBinOp;
+use super::value::AdsValue;
+
+//===========================================================================//
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum AdsInstruction {
+    /// Pops the top two values from the value stack, evaluates the specified
+    /// binary operation using the second-from-the-top value as the left-hand
+    /// side and the topmost value as the right-hand side, then pushes the
+    /// result onto the value stack.
+    BinOp(AdsBinOp),
+    /// Pops the top value from the value stack (which must be a boolean).  If
+    /// the value is false, adds the given offset to the ADS program counter.
+    BranchUnless(isize),
+    /// Copies the value at the specified offset from the bottom of the stack,
+    /// and pushes the copied value onto the stack.
+    CopyValue(usize),
+    /// Exits the program.
+    Exit,
+    /// Pops the top two values from the value stack, and uses the topmost
+    /// value (which must be an integer) as an index into the
+    /// second-from-the-top value (which must be a list), then pushes that list
+    /// element back onto the stack. If the index value is out of range, an ADS
+    /// runtime error will occur.
+    ListIndex,
+    /// Adds the given offset to the ADS program counter.
+    Jump(isize),
+    /// Pops the specified number of values from the value stack (which must
+    /// all have the same type), packs them into a list (with the topmost value
+    /// last), then pushes that list onto the value stack.
+    MakeList(usize),
+    /// Pops the specified number of values from the value stack, packs them
+    /// into a tuple (with the topmost value last), then pushes that tuple onto
+    /// the value stack.
+    MakeTuple(usize),
+    /// Pops a handler from the handler stack, and removes its breakpoint from
+    /// the simulated processsor if it was the last handler for that
+    /// breakpoint.
+    PopHandler,
+    /// Pops a value from the value stack and discards it.
+    PopValue,
+    /// Pops the top value from the value stack and prints it to stdout.
+    Print,
+    /// Pops the top value from the value stack and uses it as the argument for
+    /// the specified breakpoint kind to set a breakpoint for the simulated
+    /// processor, and pushes a new handler onto the handler stack for that
+    /// breakpoint that will jumps to the ADS instruction relative to this one
+    /// when the breakpoint is reached.
+    PushHandler(AdsBreakpointKind, isize),
+    /// Pushes a value onto the value stack.
+    PushValue(AdsValue),
+    /// Returns from the current breakpoint handler.
+    Return,
+    /// Pops a value from the value stack, then sets the value at the specified
+    /// offset from the bottom of the stack to the popped value.
+    SetValue(usize),
+    /// Advances the simulated processor by one instruction.
+    Step,
+    /// Pops the top value from the value stack (which must be a tuple), gets
+    /// the specified item from that tuple, then pushes that item onto the
+    /// value stack.
+    TupleItem(usize),
+}
+
+//===========================================================================//
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdsBreakpointKind {
+    Pc,
+}
+
+//===========================================================================//

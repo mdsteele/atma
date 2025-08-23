@@ -1,5 +1,5 @@
-use super::breakpoint::AdsBreakpoint;
-use super::expr::{AdsDeclarationKind, AdsExpr, AdsExprOp, AdsTypeEnv};
+use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
+use super::inst::{AdsBreakpointKind, AdsInstruction};
 use super::value::{AdsType, AdsValue};
 use crate::db::SimEnv;
 use crate::parse::{
@@ -10,36 +10,6 @@ use crate::proc::{Breakpoint, SimBreak};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::io::Read;
-
-//===========================================================================//
-
-enum AdsInstruction {
-    /// Evaluates the boolean expression, and adds the given offset to the ADS
-    /// program counter if the result is false.
-    BranchUnless(AdsExpr, isize),
-    /// Exit the program.
-    Exit,
-    /// Adds the given offset to the ADS program counter.
-    Jump(isize),
-    /// Pops a handler from the handler stack and removes its breakpoint.
-    PopHandler,
-    /// Pops a variable from the variable stack.
-    PopVar,
-    /// Evaluates the expression and prints the result to stdout.
-    Print(AdsExpr),
-    /// Pushes a new handler onto the handler stack, and sets a breakpoint for
-    /// the simulated processor and jumps to the ADS instruction relative to
-    /// this one whenever that breakpoint is reached.
-    PushHandler(AdsBreakpoint, isize),
-    /// Pushes a new variable onto the variable stack.
-    PushVar(AdsExpr),
-    /// Returns from the current breakpoint handler.
-    Return,
-    /// Updates an existing variable on the variable stack.
-    SetVar(usize, AdsExpr),
-    /// Advances the simulated processor by one instruction.
-    Step,
-}
 
 //===========================================================================//
 
@@ -67,6 +37,16 @@ impl AdsCompiler {
         }
     }
 
+    fn try_get_static(
+        &self,
+        instructions: &[AdsInstruction],
+    ) -> Option<AdsValue> {
+        match instructions {
+            [AdsInstruction::PushValue(value)] => Some(value.clone()),
+            _ => None,
+        }
+    }
+
     fn typecheck_statement(
         &mut self,
         statement: AdsStmtAst,
@@ -77,8 +57,9 @@ impl AdsCompiler {
             AdsStmtAst::Exit => instructions_out.push(AdsInstruction::Exit),
             AdsStmtAst::Step => instructions_out.push(AdsInstruction::Step),
             AdsStmtAst::Print(expr) => {
-                if let Some((expr, _)) = self.typecheck_expr(expr) {
-                    instructions_out.push(AdsInstruction::Print(expr));
+                if let Some((mut ops, _)) = self.typecheck_expr(expr) {
+                    instructions_out.append(&mut ops);
+                    instructions_out.push(AdsInstruction::Print);
                 }
             }
             AdsStmtAst::Set(id, expr_ast) => {
@@ -86,39 +67,40 @@ impl AdsCompiler {
             }
             AdsStmtAst::Declare(kind, id, expr) => {
                 let (expr_type, static_value) =
-                    if let Some((expr, ty)) = self.typecheck_expr(expr) {
-                        let static_value = expr.static_value().cloned();
-                        instructions_out.push(AdsInstruction::PushVar(expr));
+                    if let Some((mut ops, ty)) = self.typecheck_expr(expr) {
+                        let static_value = self.try_get_static(&ops);
+                        instructions_out.append(&mut ops);
                         (ty, static_value)
                     } else {
                         (AdsType::Bottom, None)
                     };
                 let kind = match kind {
-                    DeclareAst::Let => {
-                        AdsDeclarationKind::Constant(static_value)
-                    }
-                    DeclareAst::Var => AdsDeclarationKind::Variable,
+                    DeclareAst::Let => AdsDeclKind::Constant(static_value),
+                    DeclareAst::Var => AdsDeclKind::Variable,
                 };
                 self.env.add_declaration(kind, id, expr_type);
             }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
                 let pred_span = pred_ast.span;
-                let pred_expr = match self.typecheck_expr(pred_ast) {
-                    Some((expr, AdsType::Boolean)) => expr,
-                    Some((_, ty)) => {
+                if let Some((mut ops, expr_type)) =
+                    self.typecheck_expr(pred_ast)
+                {
+                    if let AdsType::Boolean = expr_type {
+                        instructions_out.append(&mut ops);
+                    } else {
                         let message = format!(
-                            "predicate must be of type bool, not {ty}"
+                            "predicate must be of type bool, not {expr_type}"
                         );
                         self.errors.push(
                             ParseError::new(pred_span, message).with_label(
                                 pred_span,
-                                format!("this expression has type {ty}"),
+                                format!(
+                                    "this expression has type {expr_type}"
+                                ),
                             ),
                         );
-                        AdsExpr::constant(false)
                     }
-                    None => AdsExpr::constant(false),
-                };
+                }
                 self.push_scope();
                 let mut then_stmts = Vec::<AdsInstruction>::new();
                 self.typecheck_statements(then_ast, &mut then_stmts);
@@ -132,43 +114,49 @@ impl AdsCompiler {
                         .push(AdsInstruction::Jump(else_stmts.len() as isize));
                 }
                 instructions_out.push(AdsInstruction::BranchUnless(
-                    pred_expr,
                     then_stmts.len() as isize,
                 ));
                 instructions_out.append(&mut then_stmts);
                 instructions_out.append(&mut else_stmts);
             }
             AdsStmtAst::RunUntil(breakpoint_ast) => {
-                let breakpoint = self.typecheck_breakpoint(breakpoint_ast);
-                let index = self.env.variable_stack_size();
-                instructions_out
-                    .push(AdsInstruction::PushVar(AdsExpr::constant(false)));
-                instructions_out
-                    .push(AdsInstruction::PushHandler(breakpoint, 1));
-                instructions_out.push(AdsInstruction::Jump(2));
-                instructions_out.push(AdsInstruction::SetVar(
-                    index,
-                    AdsExpr::constant(true),
-                ));
-                instructions_out.push(AdsInstruction::Return);
-                instructions_out.push(AdsInstruction::Step);
-                instructions_out.push(AdsInstruction::BranchUnless(
-                    AdsExpr { ops: vec![AdsExprOp::Variable(index)] },
-                    -2,
-                ));
-                instructions_out.push(AdsInstruction::PopHandler);
-                instructions_out.push(AdsInstruction::PopVar);
+                if let Some((mut ops, kind)) =
+                    self.typecheck_breakpoint(breakpoint_ast)
+                {
+                    let index = self.env.variable_stack_size();
+                    instructions_out.push(AdsInstruction::PushValue(
+                        AdsValue::Boolean(false),
+                    ));
+                    instructions_out.append(&mut ops);
+                    instructions_out
+                        .push(AdsInstruction::PushHandler(kind, 1));
+                    instructions_out.push(AdsInstruction::Jump(3));
+                    instructions_out.push(AdsInstruction::PushValue(
+                        AdsValue::Boolean(true),
+                    ));
+                    instructions_out.push(AdsInstruction::SetValue(index));
+                    instructions_out.push(AdsInstruction::Return);
+                    instructions_out.push(AdsInstruction::Step);
+                    instructions_out.push(AdsInstruction::CopyValue(index));
+                    instructions_out.push(AdsInstruction::BranchUnless(-3));
+                    instructions_out.push(AdsInstruction::PopHandler);
+                    instructions_out.push(AdsInstruction::PopValue);
+                }
             }
             AdsStmtAst::When(breakpoint_ast, do_ast) => {
-                let breakpoint = self.typecheck_breakpoint(breakpoint_ast);
+                if let Some((mut ops, kind)) =
+                    self.typecheck_breakpoint(breakpoint_ast)
+                {
+                    instructions_out.append(&mut ops);
+                    instructions_out
+                        .push(AdsInstruction::PushHandler(kind, 1));
+                }
                 self.push_scope();
                 let mut do_stmts = Vec::<AdsInstruction>::new();
                 self.typecheck_statements(do_ast, &mut do_stmts);
                 self.pop_scope(&mut do_stmts);
                 do_stmts.push(AdsInstruction::Return);
                 self.env.add_handler();
-                instructions_out
-                    .push(AdsInstruction::PushHandler(breakpoint, 1));
                 instructions_out
                     .push(AdsInstruction::Jump(do_stmts.len() as isize));
                 instructions_out.append(&mut do_stmts);
@@ -182,67 +170,62 @@ impl AdsCompiler {
         expr_ast: ExprAst,
         instructions_out: &mut Vec<AdsInstruction>,
     ) {
+        let id_name = id.name;
         let expr_span = expr_ast.span;
         let opt_expr = self.typecheck_expr(expr_ast);
-        if let Some(decl) = self.env.get_declaration(&id.name) {
-            match decl.kind {
-                AdsDeclarationKind::Variable => {
-                    if let Some((expr, expr_type)) = opt_expr {
-                        if expr_type == decl.var_type {
-                            instructions_out.push(AdsInstruction::SetVar(
-                                decl.stack_index,
-                                expr,
-                            ));
-                        } else {
-                            let message = format!(
-                                "cannot assign {expr_type} value to {} \
-                                 variable `{}`",
-                                decl.var_type, id.name
-                            );
-                            let label1 = format!(
-                                "this expression has type {expr_type}"
-                            );
-                            let label2 = format!(
-                                "`{}` was declared as {} here",
-                                id.name, decl.var_type
-                            );
-                            self.errors.push(
-                                ParseError::new(id.span, message)
-                                    .with_label(expr_span, label1)
-                                    .with_label(decl.id_span, label2),
-                            );
-                        }
+        match self.env.get_declaration(&id_name) {
+            Some(decl @ AdsDecl { kind: AdsDeclKind::Variable, .. }) => {
+                if let Some((mut ops, expr_type)) = opt_expr {
+                    if expr_type == decl.var_type {
+                        instructions_out.append(&mut ops);
+                    } else {
+                        let var_type = &decl.var_type;
+                        let message = format!(
+                            "cannot assign {expr_type} value to {var_type} \
+                             variable `{id_name}`"
+                        );
+                        let label1 =
+                            format!("this expression has type {expr_type}");
+                        let label2 = format!(
+                            "`{id_name}` was declared as {var_type} here"
+                        );
+                        self.errors.push(
+                            ParseError::new(id.span, message)
+                                .with_label(expr_span, label1)
+                                .with_label(decl.id_span, label2),
+                        );
                     }
                 }
-                AdsDeclarationKind::Constant(_) => {
-                    let message = format!(
-                        "cannot change value of constant `{}`",
-                        id.name
-                    );
-                    let label1 = format!("cannot set value of `{}`", id.name);
-                    let label2 = format!(
-                        "`{}` was declared as a constant here",
-                        id.name
-                    );
-                    self.errors.push(
-                        ParseError::new(id.span, message)
-                            .with_label(id.span, label1)
-                            .with_label(decl.id_span, label2),
-                    );
-                }
             }
-        } else {
-            let message = format!("no such variable: `{}`", id.name);
-            let label = "this was never declared".to_string();
-            self.errors.push(
-                ParseError::new(id.span, message).with_label(id.span, label),
-            );
+            Some(decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. }) => {
+                let message =
+                    format!("cannot change value of constant `{id_name}`");
+                let label1 = format!("cannot set value of `{id_name}`");
+                let label2 =
+                    format!("`{id_name}` was declared as a constant here");
+                self.errors.push(
+                    ParseError::new(id.span, message)
+                        .with_label(id.span, label1)
+                        .with_label(decl.id_span, label2),
+                );
+            }
+            None => {
+                let message = format!("no such variable: `{id_name}`");
+                let label = "this was never declared".to_string();
+                self.errors.push(
+                    ParseError::new(id.span, message)
+                        .with_label(id.span, label),
+                );
+            }
         }
     }
 
-    fn typecheck_expr(&mut self, ast: ExprAst) -> Option<(AdsExpr, AdsType)> {
-        match AdsExpr::typecheck(&ast, &self.env) {
-            Ok((expr, ty)) => Some((expr, ty)),
+    fn typecheck_expr(
+        &mut self,
+        ast: ExprAst,
+    ) -> Option<(Vec<AdsInstruction>, AdsType)> {
+        match self.env.typecheck_expression(ast) {
+            Ok(ops_and_type) => Some(ops_and_type),
             Err(mut errors) => {
                 self.errors.append(&mut errors);
                 None
@@ -250,12 +233,30 @@ impl AdsCompiler {
         }
     }
 
-    fn typecheck_breakpoint(&mut self, ast: BreakpointAst) -> AdsBreakpoint {
-        match AdsBreakpoint::typecheck(&ast, &self.env) {
-            Ok(breakpoint) => breakpoint,
-            Err(mut errors) => {
-                self.errors.append(&mut errors);
-                AdsBreakpoint::Pc(AdsExpr::constant(false))
+    fn typecheck_breakpoint(
+        &mut self,
+        ast: BreakpointAst,
+    ) -> Option<(Vec<AdsInstruction>, AdsBreakpointKind)> {
+        match ast {
+            BreakpointAst::Pc(expr_ast) => {
+                let expr_span = expr_ast.span;
+                if let Some((ops, ty)) = self.typecheck_expr(expr_ast) {
+                    if let AdsType::Integer = ty {
+                        Some((ops, AdsBreakpointKind::Pc))
+                    } else {
+                        let message = format!(
+                            "breakpoint address must be of type int, not {ty}"
+                        );
+                        let label = format!("this expression has type {ty}");
+                        self.errors.push(
+                            ParseError::new(expr_span, message)
+                                .with_label(expr_span, label),
+                        );
+                        None
+                    }
+                } else {
+                    None
+                }
             }
         }
     }
@@ -270,7 +271,7 @@ impl AdsCompiler {
             instructions_out.push(AdsInstruction::PopHandler);
         }
         for _ in 0..num_variables {
-            instructions_out.push(AdsInstruction::PopVar);
+            instructions_out.push(AdsInstruction::PopValue);
         }
     }
 }
@@ -343,14 +344,49 @@ impl AdsEnvironment {
     /// Executes the next instruction in the program.
     pub fn step(&mut self) -> Result<bool, AdsRuntimeError> {
         match &self.program.instructions[self.pc] {
-            AdsInstruction::BranchUnless(predicate, offset) => {
-                if !self.evaluate(predicate)?.unwrap_bool() {
+            AdsInstruction::BinOp(binop) => {
+                debug_assert!(self.variable_stack.len() >= 2);
+                let rhs = self.variable_stack.pop().unwrap();
+                let lhs = self.variable_stack.pop().unwrap();
+                self.variable_stack.push(binop.evaluate(lhs, rhs));
+            }
+            AdsInstruction::BranchUnless(offset) => {
+                if !self.variable_stack.pop().unwrap().unwrap_bool() {
                     return self.jump(*offset);
                 }
+            }
+            &AdsInstruction::CopyValue(index) => {
+                let value = self.variable_stack[index].clone();
+                self.variable_stack.push(value);
             }
             AdsInstruction::Exit => return Ok(true),
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
+            }
+            AdsInstruction::ListIndex => {
+                debug_assert!(self.variable_stack.len() >= 2);
+                let rhs = self.variable_stack.pop().unwrap().unwrap_int();
+                let lhs = self.variable_stack.pop().unwrap().unwrap_list();
+                if rhs < BigInt::ZERO {
+                    return Err(AdsRuntimeError {}); // TODO message
+                }
+                if rhs >= BigInt::from(lhs.len()) {
+                    return Err(AdsRuntimeError {}); // TODO message
+                }
+                let item = lhs[usize::try_from(rhs).unwrap()].clone();
+                self.variable_stack.push(item);
+            }
+            &AdsInstruction::MakeList(num_items) => {
+                debug_assert!(self.variable_stack.len() >= num_items);
+                let start = self.variable_stack.len() - num_items;
+                let items = self.variable_stack.split_off(start);
+                self.variable_stack.push(AdsValue::List(items));
+            }
+            &AdsInstruction::MakeTuple(num_items) => {
+                debug_assert!(self.variable_stack.len() >= num_items);
+                let start = self.variable_stack.len() - num_items;
+                let items = self.variable_stack.split_off(start);
+                self.variable_stack.push(AdsValue::Tuple(items));
             }
             AdsInstruction::PopHandler => {
                 debug_assert!(!self.handler_stack.is_empty());
@@ -364,25 +400,27 @@ impl AdsEnvironment {
                     self.sim.remove_breakpoint(breakpoint);
                 }
             }
-            AdsInstruction::PopVar => {
+            AdsInstruction::PopValue => {
                 debug_assert!(!self.variable_stack.is_empty());
                 self.variable_stack.pop();
             }
-            AdsInstruction::Print(expr) => {
-                println!("{}", self.evaluate(expr)?);
+            AdsInstruction::Print => {
+                let value = self.variable_stack.pop().unwrap();
+                println!("{}", value);
             }
-            AdsInstruction::PushHandler(breakpoint, offset) => {
-                let breakpoint = self.eval_breakpoint(breakpoint)?;
-                let destination = self.destination(*offset);
+            &AdsInstruction::PushHandler(kind, offset) => {
+                let breakpoint = self.create_breakpoint(kind);
+                let destination = self.destination(offset);
                 self.handlers.entry(breakpoint).or_default().push(destination);
                 self.sim.add_breakpoint(breakpoint);
                 self.handler_stack.push(breakpoint);
             }
-            AdsInstruction::PushVar(expr) => {
-                self.variable_stack.push(self.evaluate(expr)?);
+            AdsInstruction::PushValue(value) => {
+                self.variable_stack.push(value.clone());
             }
-            AdsInstruction::SetVar(index, expr) => {
-                self.variable_stack[*index] = self.evaluate(expr)?;
+            &AdsInstruction::SetValue(index) => {
+                let value = self.variable_stack.pop().unwrap();
+                self.variable_stack[index] = value;
             }
             AdsInstruction::Step => {
                 let pc = self.sim.pc();
@@ -410,6 +448,11 @@ impl AdsEnvironment {
             AdsInstruction::Return => {
                 self.pc = self.return_stack.pop().unwrap();
             }
+            &AdsInstruction::TupleItem(index) => {
+                let items = self.variable_stack.pop().unwrap().unwrap_tuple();
+                debug_assert!(index < items.len());
+                self.variable_stack.push(items[index].clone());
+            }
         }
         self.pc += 1;
         Ok(false)
@@ -429,128 +472,14 @@ impl AdsEnvironment {
         }
     }
 
-    fn evaluate(&self, expr: &AdsExpr) -> Result<AdsValue, AdsRuntimeError> {
-        let mut stack = Vec::<AdsValue>::new();
-        for op in &expr.ops {
-            match op {
-                AdsExprOp::BinOp(binop) => {
-                    debug_assert!(stack.len() >= 2);
-                    let rhs = stack.pop().unwrap();
-                    let lhs = stack.pop().unwrap();
-                    stack.push(binop.evaluate(lhs, rhs));
-                }
-                AdsExprOp::ListIndex => {
-                    debug_assert!(stack.len() >= 2);
-                    let rhs = stack.pop().unwrap().unwrap_int();
-                    let lhs = stack.pop().unwrap().unwrap_list();
-                    if rhs < BigInt::ZERO {
-                        return Err(AdsRuntimeError {}); // TODO message
-                    }
-                    if rhs >= BigInt::from(lhs.len()) {
-                        return Err(AdsRuntimeError {}); // TODO message
-                    }
-                    stack.push(lhs[usize::try_from(rhs).unwrap()].clone());
-                }
-                AdsExprOp::Literal(value) => stack.push(value.clone()),
-                &AdsExprOp::MakeList(num_items) => {
-                    debug_assert!(stack.len() >= num_items);
-                    let items = stack.split_off(stack.len() - num_items);
-                    stack.push(AdsValue::List(items));
-                }
-                &AdsExprOp::MakeTuple(num_items) => {
-                    debug_assert!(stack.len() >= num_items);
-                    let items = stack.split_off(stack.len() - num_items);
-                    stack.push(AdsValue::Tuple(items));
-                }
-                &AdsExprOp::TupleItem(index) => {
-                    debug_assert!(!stack.is_empty());
-                    let items = stack.pop().unwrap().unwrap_tuple();
-                    debug_assert!(index < items.len());
-                    stack.push(items[index].clone());
-                }
-                AdsExprOp::Variable(index) => {
-                    stack.push(self.variable_stack[*index].clone());
-                }
-            }
-        }
-        assert_eq!(stack.len(), 1);
-        Ok(stack.pop().unwrap())
-    }
-
-    fn eval_breakpoint(
-        &self,
-        breakpoint: &AdsBreakpoint,
-    ) -> Result<Breakpoint, AdsRuntimeError> {
-        match breakpoint {
-            AdsBreakpoint::Pc(expr) => {
-                let addr = self.evaluate(expr)?.unwrap_int()
+    fn create_breakpoint(&mut self, kind: AdsBreakpointKind) -> Breakpoint {
+        match kind {
+            AdsBreakpointKind::Pc => {
+                let addr = self.variable_stack.pop().unwrap().unwrap_int()
                     & BigInt::from(0xffffffffu32);
-                Ok(Breakpoint::Pc(addr.try_into().unwrap()))
+                Breakpoint::Pc(u32::try_from(addr).unwrap())
             }
         }
-    }
-}
-
-//===========================================================================//
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        AdsDeclarationKind, AdsExpr, AdsExprOp, AdsType, AdsTypeEnv, AdsValue,
-    };
-    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, SrcSpan};
-    use num_bigint::BigInt;
-    use std::ops::Range;
-
-    fn expr(ops: Vec<AdsExprOp>) -> AdsExpr {
-        AdsExpr { ops }
-    }
-
-    fn id_ast(name: &str, range: Range<usize>) -> ExprAst {
-        ExprAst {
-            span: SrcSpan::from_byte_range(range),
-            node: ExprAstNode::Identifier(name.to_string()),
-        }
-    }
-
-    fn int_ast(value: i32, range: Range<usize>) -> ExprAst {
-        ExprAst {
-            span: SrcSpan::from_byte_range(range),
-            node: ExprAstNode::IntLiteral(BigInt::from(value)),
-        }
-    }
-
-    fn int_value(value: i32) -> AdsValue {
-        AdsValue::Integer(BigInt::from(value))
-    }
-
-    #[test]
-    fn typecheck_identifier_expr() {
-        let mut env = AdsTypeEnv::empty();
-        env.add_declaration(
-            AdsDeclarationKind::Constant(None),
-            IdentifierAst {
-                span: SrcSpan::from_byte_range(1..4),
-                name: "foo".to_string(),
-            },
-            AdsType::Boolean,
-        );
-        assert_eq!(
-            AdsExpr::typecheck(&id_ast("foo", 10..13), &env),
-            Ok((expr(vec![AdsExprOp::Variable(0)]), AdsType::Boolean))
-        );
-    }
-
-    #[test]
-    fn typecheck_int_literal_expr() {
-        let env = AdsTypeEnv::empty();
-        assert_eq!(
-            AdsExpr::typecheck(&int_ast(42, 0..2), &env),
-            Ok((
-                expr(vec![AdsExprOp::Literal(int_value(42))]),
-                AdsType::Integer,
-            ))
-        );
     }
 }
 

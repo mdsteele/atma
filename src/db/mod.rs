@@ -2,9 +2,9 @@
 
 mod ads;
 mod binop;
-mod breakpoint;
 mod env;
 mod expr;
+mod inst;
 mod load;
 mod value;
 
