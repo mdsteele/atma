@@ -13,8 +13,8 @@ use std::rc::Rc;
 struct AdsExprCompiler<'a> {
     env: &'a AdsTypeEnv,
     // Invariant: If the top N entries of `types` all hold `is_static = true`,
-    // then the top N entries of `ops` are all
-    // `AdsInstruction::PushValue` values.
+    // then the top N entries of `ops` are all safe for
+    // `AdsExprCompiler::unwrap_static()`.
     types: Vec<(AdsType, bool)>, // (type, is_static)
     ops: Vec<AdsInstruction>,
     errors: Vec<ParseError>,
@@ -125,8 +125,8 @@ impl<'a> AdsExprCompiler<'a> {
         ) {
             Ok((binop, result_type)) => {
                 if lhs_static && rhs_static {
-                    let rhs_value = self.pop_literal();
-                    let lhs_value = self.pop_literal();
+                    let rhs_value = self.pop_static();
+                    let lhs_value = self.pop_static();
                     let result_value = binop.evaluate(lhs_value, rhs_value);
                     self.ops.push(AdsInstruction::PushValue(result_value));
                     self.types.push((result_type, true));
@@ -144,22 +144,15 @@ impl<'a> AdsExprCompiler<'a> {
 
     fn typecheck_identifier(&mut self, span: SrcSpan, id: &str) {
         if let Some(decl) = self.env.get_declaration(id) {
-            let is_static =
-                if let AdsDeclKind::Constant(Some(value)) = &decl.kind {
-                    self.ops.push(AdsInstruction::PushValue(value.clone()));
-                    true
-                } else {
-                    self.ops.push(AdsInstruction::CopyValue(decl.stack_index));
-                    false
-                };
-            self.types.push((decl.var_type.clone(), is_static));
-            return;
+            self.ops.push(AdsInstruction::CopyValue(decl.stack_index));
+            self.types.push((decl.var_type.clone(), decl.kind.is_static()));
+        } else {
+            let message = format!("No such identifier: `{id}`");
+            let label = "this was never declared".to_string();
+            self.errors
+                .push(ParseError::new(span, message).with_label(span, label));
+            self.types.push((AdsType::Bottom, false));
         }
-        let message = format!("No such identifier: `{}`", id);
-        let label = "this was never declared".to_string();
-        self.errors
-            .push(ParseError::new(span, message).with_label(span, label));
-        self.types.push((AdsType::Bottom, false));
     }
 
     fn typecheck_index(
@@ -182,8 +175,8 @@ impl<'a> AdsExprCompiler<'a> {
                     self.types.push((item_type, false));
                     return;
                 }
-                let index = self.pop_literal().unwrap_int();
-                let list_values = self.pop_literal().unwrap_list();
+                let index = self.pop_static().unwrap_int();
+                let list_values = self.pop_static().unwrap_list();
                 if index < BigInt::ZERO
                     || index >= BigInt::from(list_values.len())
                 {
@@ -226,7 +219,7 @@ impl<'a> AdsExprCompiler<'a> {
                     self.types.push((AdsType::Bottom, false));
                     return;
                 }
-                let index = self.pop_literal().unwrap_int();
+                let index = self.pop_static().unwrap_int();
                 if index < BigInt::ZERO
                     || index >= BigInt::from(item_types.len())
                 {
@@ -248,7 +241,7 @@ impl<'a> AdsExprCompiler<'a> {
                 let index = usize::try_from(index).unwrap();
                 let item_type = item_types[index].clone();
                 if lhs_static {
-                    let tuple_values = self.pop_literal().unwrap_tuple();
+                    let tuple_values = self.pop_static().unwrap_tuple();
                     self.ops.push(AdsInstruction::PushValue(
                         tuple_values[index].clone(),
                     ));
@@ -300,7 +293,7 @@ impl<'a> AdsExprCompiler<'a> {
             }
         }
         if is_static {
-            let item_values = self.pop_literals(num_items);
+            let item_values = self.pop_statics(num_items);
             self.ops
                 .push(AdsInstruction::PushValue(AdsValue::List(item_values)));
         } else {
@@ -313,7 +306,7 @@ impl<'a> AdsExprCompiler<'a> {
         let num_items = item_asts.len();
         let (item_types, is_static) = self.pop_types(num_items);
         if is_static {
-            let item_values = self.pop_literals(num_items);
+            let item_values = self.pop_statics(num_items);
             self.ops
                 .push(AdsInstruction::PushValue(AdsValue::Tuple(item_values)));
         } else {
@@ -322,22 +315,26 @@ impl<'a> AdsExprCompiler<'a> {
         self.types.push((AdsType::Tuple(Rc::new(item_types)), is_static));
     }
 
-    fn unwrap_literal(&self, op: AdsInstruction) -> AdsValue {
+    fn unwrap_static(&self, op: AdsInstruction) -> AdsValue {
         match op {
+            AdsInstruction::CopyValue(index) => {
+                let decl = self.env.declaration_for_index(index).unwrap();
+                decl.kind.clone().unwrap_static()
+            }
             AdsInstruction::PushValue(value) => value,
-            op => panic!("pop_literal on {op:?}"),
+            op => panic!("pop_static on {op:?}"),
         }
     }
 
-    fn pop_literal(&mut self) -> AdsValue {
+    fn pop_static(&mut self) -> AdsValue {
         let op = self.ops.pop().unwrap();
-        self.unwrap_literal(op)
+        self.unwrap_static(op)
     }
 
-    fn pop_literals(&mut self, num_items: usize) -> Vec<AdsValue> {
+    fn pop_statics(&mut self, num_items: usize) -> Vec<AdsValue> {
         debug_assert!(num_items <= self.ops.len());
         let ops = self.ops.split_off(self.ops.len() - num_items);
-        ops.into_iter().map(|op| self.unwrap_literal(op)).collect::<Vec<_>>()
+        ops.into_iter().map(|op| self.unwrap_static(op)).collect::<Vec<_>>()
     }
 
     fn pop_types(&mut self, num_items: usize) -> (Vec<AdsType>, bool) {
@@ -351,9 +348,28 @@ impl<'a> AdsExprCompiler<'a> {
 
 //===========================================================================//
 
+#[derive(Clone)]
 pub enum AdsDeclKind {
     Constant(Option<AdsValue>),
     Variable,
+}
+
+impl AdsDeclKind {
+    pub fn is_static(&self) -> bool {
+        matches!(self, AdsDeclKind::Constant(Some(_)))
+    }
+
+    pub fn unwrap_static(self) -> AdsValue {
+        match self {
+            AdsDeclKind::Constant(Some(value)) => value,
+            AdsDeclKind::Constant(None) => {
+                panic!("AdsDeclKind::unwrap_static on non-static constant")
+            }
+            AdsDeclKind::Variable => {
+                panic!("AdsDeclKind::unwrap_static on variable")
+            }
+        }
+    }
 }
 
 //===========================================================================//
@@ -390,6 +406,13 @@ impl AdsScope {
 
     fn get_declaration(&self, id: &str) -> Option<&AdsDecl> {
         self.variables.get(id)
+    }
+
+    pub fn declaration_for_index(
+        &self,
+        stack_index: usize,
+    ) -> Option<&AdsDecl> {
+        self.variables.values().find(|decl| decl.stack_index == stack_index)
     }
 
     fn add_declaration(
@@ -462,6 +485,18 @@ impl AdsTypeEnv {
         for scope in self.scopes.iter().rev() {
             if let Some(decl) = scope.get_declaration(id) {
                 return Some(decl);
+            }
+        }
+        None
+    }
+
+    pub fn declaration_for_index(
+        &self,
+        stack_index: usize,
+    ) -> Option<&AdsDecl> {
+        for scope in self.scopes.iter().rev() {
+            if scope.stack_start <= stack_index {
+                return scope.declaration_for_index(stack_index);
             }
         }
         None
