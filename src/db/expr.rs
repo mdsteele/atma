@@ -421,15 +421,10 @@ impl AdsScope {
         id: IdentifierAst,
         var_type: AdsType,
     ) {
-        self.variables.insert(
-            id.name,
-            AdsDecl {
-                kind,
-                id_span: id.span,
-                var_type,
-                stack_index: self.variable_stack_size(),
-            },
-        );
+        let id_span = id.span;
+        let stack_index = self.variable_stack_size();
+        let decl = AdsDecl { kind, id_span, var_type, stack_index };
+        self.variables.insert(id.name, decl);
         self.frame_size += 1;
     }
 
