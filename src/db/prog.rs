@@ -1,5 +1,5 @@
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
-use super::inst::{AdsBreakpointKind, AdsInstruction};
+use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
 use super::value::{AdsType, AdsValue};
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
@@ -151,14 +151,14 @@ impl AdsCompiler {
                 );
             }
         }
-        self.push_scope();
+        self.env.push_scope();
         let mut then_stmts = Vec::<AdsInstruction>::new();
         self.typecheck_statements(then_ast, &mut then_stmts);
-        self.pop_scope(&mut then_stmts);
-        self.push_scope();
+        self.env.pop_scope(&mut then_stmts);
+        self.env.push_scope();
         let mut else_stmts = Vec::<AdsInstruction>::new();
         self.typecheck_statements(else_ast, &mut else_stmts);
-        self.pop_scope(&mut else_stmts);
+        self.env.pop_scope(&mut else_stmts);
         if !else_stmts.is_empty() {
             then_stmts.push(AdsInstruction::Jump(else_stmts.len() as isize));
         }
@@ -183,19 +183,24 @@ impl AdsCompiler {
         breakpoint_ast: BreakpointAst,
         out: &mut Vec<AdsInstruction>,
     ) {
-        if let Some((mut ops, kind)) =
+        if let Some((mut breakpoint_ops, breakpoint_kind)) =
             self.typecheck_breakpoint(breakpoint_ast)
         {
-            let index = self.env.variable_stack_size();
+            let (outer_ref, inner_ref) = if self.env.in_global_frame() {
+                (AdsFrameRef::Global, AdsFrameRef::Global)
+            } else {
+                (AdsFrameRef::Local(0), AdsFrameRef::Local(1))
+            };
+            let index = self.env.frame_end();
             out.push(AdsInstruction::PushValue(AdsValue::Boolean(false)));
-            out.append(&mut ops);
-            out.push(AdsInstruction::PushHandler(kind, 1));
+            out.append(&mut breakpoint_ops);
+            out.push(AdsInstruction::PushHandler(breakpoint_kind, 1));
             out.push(AdsInstruction::Jump(3));
             out.push(AdsInstruction::PushValue(AdsValue::Boolean(true)));
-            out.push(AdsInstruction::SetValue(index));
+            out.push(AdsInstruction::SetValue(inner_ref, index));
             out.push(AdsInstruction::Return);
             out.push(AdsInstruction::Step);
-            out.push(AdsInstruction::CopyValue(index));
+            out.push(AdsInstruction::GetValue(outer_ref, index));
             out.push(AdsInstruction::BranchUnless(-3));
             out.push(AdsInstruction::PopHandler);
             out.push(AdsInstruction::PopValue);
@@ -212,11 +217,17 @@ impl AdsCompiler {
         let expr_span = expr_ast.span;
         let opt_expr = self.typecheck_expr(expr_ast);
         match self.env.get_declaration(&id_name) {
-            Some(decl @ AdsDecl { kind: AdsDeclKind::Variable, .. }) => {
+            Some((
+                frame_ref,
+                decl @ AdsDecl { kind: AdsDeclKind::Variable, .. },
+            )) => {
                 if let Some((mut ops, expr_type)) = opt_expr {
                     if expr_type == decl.var_type {
                         out.append(&mut ops);
-                        out.push(AdsInstruction::SetValue(decl.stack_index));
+                        out.push(AdsInstruction::SetValue(
+                            frame_ref,
+                            decl.stack_index,
+                        ));
                     } else {
                         let var_type = &decl.var_type;
                         let message = format!(
@@ -236,7 +247,10 @@ impl AdsCompiler {
                     }
                 }
             }
-            Some(decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. }) => {
+            Some((
+                _,
+                decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. },
+            )) => {
                 let message =
                     format!("cannot change value of constant `{id_name}`");
                 let label1 = format!("cannot set value of `{id_name}`");
@@ -271,10 +285,10 @@ impl AdsCompiler {
             out.append(&mut ops);
             out.push(AdsInstruction::PushHandler(kind, 1));
         }
-        self.push_scope();
+        self.env.push_frame();
         let mut do_stmts = Vec::<AdsInstruction>::new();
         self.typecheck_statements(do_ast, &mut do_stmts);
-        self.pop_scope(&mut do_stmts);
+        self.env.pop_frame(&mut do_stmts);
         do_stmts.push(AdsInstruction::Return);
         self.env.add_handler();
         out.push(AdsInstruction::Jump(do_stmts.len() as isize));
@@ -327,27 +341,15 @@ impl AdsCompiler {
         );
         false
     }
-
-    fn push_scope(&mut self) {
-        self.env.push_scope();
-    }
-
-    fn pop_scope(&mut self, out: &mut Vec<AdsInstruction>) {
-        let (num_handlers, num_variables) = self.env.pop_scope();
-        for _ in 0..num_handlers {
-            out.push(AdsInstruction::PopHandler);
-        }
-        for _ in 0..num_variables {
-            out.push(AdsInstruction::PopValue);
-        }
-    }
 }
 
 //===========================================================================//
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsBreakpointKind, AdsInstruction, AdsProgram, AdsValue};
+    use super::{
+        AdsBreakpointKind, AdsFrameRef, AdsInstruction, AdsProgram, AdsValue,
+    };
     use num_bigint::BigInt;
 
     fn parse_instructions(source: &str) -> Vec<AdsInstruction> {
@@ -433,7 +435,7 @@ mod tests {
             vec![
                 AdsInstruction::PushValue(int_value(1)),
                 AdsInstruction::PushValue(int_value(2)),
-                AdsInstruction::SetValue(0),
+                AdsInstruction::SetValue(AdsFrameRef::Global, 0),
                 AdsInstruction::Exit,
             ]
         );

@@ -1,10 +1,11 @@
-use super::inst::{AdsBreakpointKind, AdsInstruction};
+use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use super::value::AdsValue;
 use crate::db::SimEnv;
 use crate::proc::{Breakpoint, SimBreak};
 use num_bigint::BigInt;
 use std::collections::HashMap;
+use std::io::Write;
 
 //===========================================================================//
 
@@ -14,28 +15,61 @@ pub struct AdsRuntimeError {}
 
 //===========================================================================//
 
+struct CallFrame {
+    /// The index into the call stack for the frame that lexically encloses
+    /// this handler's declaration, or `None` if this call is to a handler that
+    /// was declared in the global frame.
+    parent_index: Option<usize>,
+    /// The index into the value stack for the first local variable native to
+    /// this call frame.
+    frame_start: usize,
+    /// The ADS program counter for the first instruction that should be
+    /// executed after returning from this handler call.
+    return_address: usize,
+}
+
+//===========================================================================//
+
+struct HandlerData {
+    /// The index into the call stack for the frame that lexically encloses
+    /// this handler's declaration, or `None` if this handler was declared in
+    /// the global frame.
+    parent_index: Option<usize>,
+    /// The ADS program counter for the first instruction that should be
+    /// executed when the handler is invoked.
+    destination_address: usize,
+}
+
+//===========================================================================//
+
 /// An in-progress execution of an [AdsProgram].
-pub struct AdsEnvironment {
+pub struct AdsEnvironment<W> {
     sim: SimEnv,
     program: AdsProgram,
     pc: usize,
-    variable_stack: Vec<AdsValue>,
+    value_stack: Vec<AdsValue>,
+    call_stack: Vec<CallFrame>,
     handler_stack: Vec<Breakpoint>,
-    return_stack: Vec<usize>,
-    handlers: HashMap<Breakpoint, Vec<usize>>,
+    handlers: HashMap<Breakpoint, Vec<HandlerData>>,
+    output: W,
 }
 
-impl AdsEnvironment {
+impl<W: Write> AdsEnvironment<W> {
     /// Creates a new execution of the given program.
-    pub fn new(sim: SimEnv, program: AdsProgram) -> AdsEnvironment {
+    pub fn new(
+        sim: SimEnv,
+        program: AdsProgram,
+        output: W,
+    ) -> AdsEnvironment<W> {
         AdsEnvironment {
             sim,
             program,
             pc: 0,
-            variable_stack: Vec::new(),
+            value_stack: Vec::new(),
+            call_stack: Vec::new(),
             handler_stack: Vec::new(),
-            return_stack: Vec::new(),
             handlers: HashMap::new(),
+            output,
         }
     }
 
@@ -43,28 +77,29 @@ impl AdsEnvironment {
     pub fn step(&mut self) -> Result<bool, AdsRuntimeError> {
         match &self.program.instructions[self.pc] {
             AdsInstruction::BinOp(binop) => {
-                debug_assert!(self.variable_stack.len() >= 2);
-                let rhs = self.variable_stack.pop().unwrap();
-                let lhs = self.variable_stack.pop().unwrap();
-                self.variable_stack.push(binop.evaluate(lhs, rhs));
+                debug_assert!(self.value_stack.len() >= 2);
+                let rhs = self.value_stack.pop().unwrap();
+                let lhs = self.value_stack.pop().unwrap();
+                self.value_stack.push(binop.evaluate(lhs, rhs));
             }
             AdsInstruction::BranchUnless(offset) => {
-                if !self.variable_stack.pop().unwrap().unwrap_bool() {
+                if !self.value_stack.pop().unwrap().unwrap_bool() {
                     return self.jump(*offset);
                 }
             }
-            &AdsInstruction::CopyValue(index) => {
-                let value = self.variable_stack[index].clone();
-                self.variable_stack.push(value);
-            }
             AdsInstruction::Exit => return Ok(true),
+            &AdsInstruction::GetValue(frame_ref, index) => {
+                let start = self.frame_start(frame_ref);
+                let value = self.value_stack[start + index].clone();
+                self.value_stack.push(value);
+            }
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
             }
             AdsInstruction::ListIndex => {
-                debug_assert!(self.variable_stack.len() >= 2);
-                let rhs = self.variable_stack.pop().unwrap().unwrap_int();
-                let lhs = self.variable_stack.pop().unwrap().unwrap_list();
+                debug_assert!(self.value_stack.len() >= 2);
+                let rhs = self.value_stack.pop().unwrap().unwrap_int();
+                let lhs = self.value_stack.pop().unwrap().unwrap_list();
                 if rhs < BigInt::ZERO {
                     return Err(AdsRuntimeError {}); // TODO message
                 }
@@ -72,84 +107,98 @@ impl AdsEnvironment {
                     return Err(AdsRuntimeError {}); // TODO message
                 }
                 let item = lhs[usize::try_from(rhs).unwrap()].clone();
-                self.variable_stack.push(item);
+                self.value_stack.push(item);
             }
             &AdsInstruction::MakeList(num_items) => {
-                debug_assert!(self.variable_stack.len() >= num_items);
-                let start = self.variable_stack.len() - num_items;
-                let items = self.variable_stack.split_off(start);
-                self.variable_stack.push(AdsValue::List(items));
+                debug_assert!(self.value_stack.len() >= num_items);
+                let start = self.value_stack.len() - num_items;
+                let items = self.value_stack.split_off(start);
+                self.value_stack.push(AdsValue::List(items));
             }
             &AdsInstruction::MakeTuple(num_items) => {
-                debug_assert!(self.variable_stack.len() >= num_items);
-                let start = self.variable_stack.len() - num_items;
-                let items = self.variable_stack.split_off(start);
-                self.variable_stack.push(AdsValue::Tuple(items));
+                debug_assert!(self.value_stack.len() >= num_items);
+                let start = self.value_stack.len() - num_items;
+                let items = self.value_stack.split_off(start);
+                self.value_stack.push(AdsValue::Tuple(items));
             }
             AdsInstruction::PopHandler => {
                 debug_assert!(!self.handler_stack.is_empty());
                 let breakpoint = self.handler_stack.pop().unwrap();
                 debug_assert!(self.handlers.contains_key(&breakpoint));
-                let destinations = self.handlers.get_mut(&breakpoint).unwrap();
-                debug_assert!(!destinations.is_empty());
-                destinations.pop();
-                if destinations.is_empty() {
+                let handlers = self.handlers.get_mut(&breakpoint).unwrap();
+                debug_assert!(!handlers.is_empty());
+                handlers.pop();
+                if handlers.is_empty() {
                     self.handlers.remove(&breakpoint);
                     self.sim.remove_breakpoint(breakpoint);
                 }
             }
             AdsInstruction::PopValue => {
-                debug_assert!(!self.variable_stack.is_empty());
-                self.variable_stack.pop();
+                debug_assert!(!self.value_stack.is_empty());
+                self.value_stack.pop();
             }
             AdsInstruction::Print => {
-                let value = self.variable_stack.pop().unwrap();
-                println!("{}", value);
+                let value = self.value_stack.pop().unwrap();
+                // TODO: Report IO error via AdsRuntimeError.
+                writeln!(self.output, "{}", value)
+                    .map_err(|_| AdsRuntimeError {})?;
             }
             &AdsInstruction::PushHandler(kind, offset) => {
+                let parent_index = if self.call_stack.is_empty() {
+                    None
+                } else {
+                    Some(self.call_stack.len() - 1)
+                };
+                let destination_address = self.destination(offset);
+                let data = HandlerData { parent_index, destination_address };
                 let breakpoint = self.create_breakpoint(kind);
-                let destination = self.destination(offset);
-                self.handlers.entry(breakpoint).or_default().push(destination);
+                self.handlers.entry(breakpoint).or_default().push(data);
                 self.sim.add_breakpoint(breakpoint);
                 self.handler_stack.push(breakpoint);
             }
             AdsInstruction::PushValue(value) => {
-                self.variable_stack.push(value.clone());
+                self.value_stack.push(value.clone());
             }
-            &AdsInstruction::SetValue(index) => {
-                let value = self.variable_stack.pop().unwrap();
-                self.variable_stack[index] = value;
+            &AdsInstruction::SetValue(frame_ref, index) => {
+                let start = self.frame_start(frame_ref);
+                let value = self.value_stack.pop().unwrap();
+                self.value_stack[start + index] = value;
             }
             AdsInstruction::Step => {
                 let pc = self.sim.pc();
                 let instruction = self.sim.disassemble(self.sim.pc()).1;
                 let result = self.sim.step();
-                println!("${:04x} | {:16}", pc, instruction);
+                eprintln!("${:04x} | {:16}", pc, instruction);
                 match result {
                     Ok(()) => {}
                     Err(SimBreak::Breakpoint(breakpoint)) => {
-                        println!("Breakpoint: {breakpoint:?}");
-                        self.return_stack.push(self.pc);
+                        eprintln!("Breakpoint: {breakpoint:?}");
                         debug_assert!(self.handlers.contains_key(&breakpoint));
-                        let destinations =
-                            self.handlers.get(&breakpoint).unwrap();
-                        debug_assert!(!destinations.is_empty());
-                        self.pc = *destinations.last().unwrap();
+                        let handlers = self.handlers.get(&breakpoint).unwrap();
+                        debug_assert!(!handlers.is_empty());
+                        let data = handlers.last().unwrap();
+                        self.call_stack.push(CallFrame {
+                            parent_index: data.parent_index,
+                            frame_start: self.value_stack.len(),
+                            return_address: self.pc + 1,
+                        });
+                        self.pc = data.destination_address;
                         return Ok(false);
                     }
                     Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
-                        println!("Halted by {mnemonic} opcode ${opcode:02x}");
+                        eprintln!("Halted by {mnemonic} opcode ${opcode:02x}");
                         return Ok(true);
                     }
                 }
             }
             AdsInstruction::Return => {
-                self.pc = self.return_stack.pop().unwrap();
+                self.pc = self.call_stack.pop().unwrap().return_address;
+                return Ok(false);
             }
             &AdsInstruction::TupleItem(index) => {
-                let items = self.variable_stack.pop().unwrap().unwrap_tuple();
+                let items = self.value_stack.pop().unwrap().unwrap_tuple();
                 debug_assert!(index < items.len());
-                self.variable_stack.push(items[index].clone());
+                self.value_stack.push(items[index].clone());
             }
         }
         self.pc += 1;
@@ -173,11 +222,146 @@ impl AdsEnvironment {
     fn create_breakpoint(&mut self, kind: AdsBreakpointKind) -> Breakpoint {
         match kind {
             AdsBreakpointKind::Pc => {
-                let addr = self.variable_stack.pop().unwrap().unwrap_int()
+                let addr = self.value_stack.pop().unwrap().unwrap_int()
                     & BigInt::from(0xffffffffu32);
                 Breakpoint::Pc(u32::try_from(addr).unwrap())
             }
         }
+    }
+
+    fn frame_start(&self, frame_ref: AdsFrameRef) -> usize {
+        match frame_ref {
+            AdsFrameRef::Global => 0,
+            AdsFrameRef::Local(mut depth) => {
+                debug_assert!(!self.call_stack.is_empty());
+                let mut frame_index = self.call_stack.len() - 1;
+                while depth > 0 {
+                    frame_index =
+                        self.call_stack[frame_index].parent_index.unwrap();
+                    depth -= 1;
+                }
+                self.call_stack[frame_index].frame_start
+            }
+        }
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::{AdsEnvironment, AdsProgram, SimEnv};
+    use crate::bus::null_bus;
+    use crate::proc::SharpSm83;
+    use std::io::Write;
+
+    fn make_env<'a>(
+        source: &str,
+        output: &'a mut Vec<u8>,
+    ) -> AdsEnvironment<&'a mut Vec<u8>> {
+        // An SM83 processor starts at PC = 0.  A null bus always returns zero
+        // for reads, which an SM83 processor will interpret as NOP. So this
+        // processor will start at PC = 0, advance by one byte per step, and
+        // otherwise do nothing.
+        let proc = SharpSm83::new(null_bus());
+        let sim = SimEnv::new(vec![("cpu".to_string(), Box::new(proc))]);
+        let program = AdsProgram::read_from(source.as_bytes()).unwrap();
+        AdsEnvironment::new(sim, program, output)
+    }
+
+    fn run_to_completion<W: Write>(env: &mut AdsEnvironment<W>) {
+        loop {
+            match env.step() {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(err) => panic!("{err:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn empty_program_finishes_in_one_step() {
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env("", &mut output);
+        assert!(matches!(ads.step(), Ok(true)));
+        assert_eq!(String::from_utf8(output).unwrap(), "");
+    }
+
+    #[test]
+    fn print_statement() {
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env("print 42\n", &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "42\n");
+    }
+
+    #[test]
+    fn when_handler() {
+        let source = "\
+          when at $0001 {\n\
+            print 2\n\
+          }\n\
+          print 1\n\
+          step\n\
+          print 3\n";
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env(source, &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n");
+    }
+
+    #[test]
+    fn when_handler_with_local_variable() {
+        let source = "\
+          var x = 1
+          when at $0001 {\n\
+            var y = 2
+            print x\n\
+            print y\n\
+          }\n\
+          var z = 3\n\
+          step\n\
+          print z\n";
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env(source, &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n");
+    }
+
+    #[test]
+    fn run_until_statement() {
+        let source = "\
+          var x = 1
+          when at $0010 {\n\
+            set x = 2
+          }\n\
+          run until at $0020
+          print x\n";
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env(source, &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "2\n");
+    }
+
+    #[test]
+    fn nested_handlers() {
+        let source = "\
+          when at $0010 {\n\
+            print 1
+            var x = 2\n
+            when at $0020 {\n\
+              print x
+              set x = 3\n
+            }\n
+            run until at $0030
+            print x
+          }\n\
+          run until at $0040
+          print 4\n";
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env(source, &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n4\n");
     }
 }
 

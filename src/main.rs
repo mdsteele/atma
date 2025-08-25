@@ -101,7 +101,7 @@ fn command_db(
                 }
             }
         };
-        let mut ads_env = AdsEnvironment::new(sim_env, program);
+        let mut ads_env = AdsEnvironment::new(sim_env, program, io::stdout());
         loop {
             let finished = ads_env.step()?;
             if finished {

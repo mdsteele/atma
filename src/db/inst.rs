@@ -4,7 +4,7 @@ use super::value::AdsValue;
 //===========================================================================//
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) enum AdsInstruction {
+pub enum AdsInstruction {
     /// Pops the top two values from the value stack, evaluates the specified
     /// binary operation using the second-from-the-top value as the left-hand
     /// side and the topmost value as the right-hand side, then pushes the
@@ -13,11 +13,12 @@ pub(crate) enum AdsInstruction {
     /// Pops the top value from the value stack (which must be a boolean).  If
     /// the value is false, adds the given offset to the ADS program counter.
     BranchUnless(isize),
-    /// Copies the value at the specified offset from the bottom of the stack,
-    /// and pushes the copied value onto the stack.
-    CopyValue(usize),
     /// Exits the program.
     Exit,
+    /// Copies the value at the specified offset from the start of the
+    /// specified frame in the call stack, and pushes the copied value onto the
+    /// stack.
+    GetValue(AdsFrameRef, usize),
     /// Pops the top two values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then pushes that list
@@ -53,14 +54,22 @@ pub(crate) enum AdsInstruction {
     /// Returns from the current breakpoint handler.
     Return,
     /// Pops a value from the value stack, then sets the value at the specified
-    /// offset from the bottom of the stack to the popped value.
-    SetValue(usize),
+    /// offset from the start of the specified call frame to the popped value.
+    SetValue(AdsFrameRef, usize),
     /// Advances the simulated processor by one instruction.
     Step,
     /// Pops the top value from the value stack (which must be a tuple), gets
     /// the specified item from that tuple, then pushes that item onto the
     /// value stack.
     TupleItem(usize),
+}
+
+//===========================================================================//
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdsFrameRef {
+    Global,       // outermost frame
+    Local(usize), // 0 for innermost frame, 1 for next most inner, etc.
 }
 
 //===========================================================================//
