@@ -52,6 +52,9 @@ pub trait SimProc {
     /// Returns the current address of the program counter.
     fn pc(&self) -> u32;
 
+    /// Sets the current address of the program counter.
+    fn set_pc(&mut self, addr: u32);
+
     /// Returns a list of the this processor's register names and current
     /// values.
     fn registers(&self) -> Vec<(&'static str, u32)>;

@@ -15,6 +15,9 @@ pub enum AdsInstruction {
     BranchUnless(isize),
     /// Exits the program.
     Exit,
+    /// Pushes the value of the simulated processsor's program counter onto the
+    /// stack.
+    GetPc,
     /// Copies the value at the specified offset from the start of the
     /// specified frame in the call stack, and pushes the copied value onto the
     /// stack.
@@ -53,6 +56,9 @@ pub enum AdsInstruction {
     PushValue(AdsValue),
     /// Returns from the current breakpoint handler.
     Return,
+    /// Pops a value from the value stack (which must be an integer), and sets
+    /// the simulated processsor's program counter to that value.
+    SetPc,
     /// Pops a value from the value stack, then sets the value at the specified
     /// offset from the start of the specified call frame to the popped value.
     SetValue(AdsFrameRef, usize),

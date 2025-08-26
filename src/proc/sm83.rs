@@ -338,6 +338,14 @@ impl SimProc for SharpSm83 {
         self.pc as u32
     }
 
+    fn set_pc(&mut self, addr: u32) {
+        self.pc = (addr & 0xffff) as u16;
+        match self.ime {
+            Ime::Pending1 | Ime::Pending2 => self.ime = Ime::Enabled,
+            Ime::Disabled | Ime::Enabled => {}
+        }
+    }
+
     fn registers(&self) -> Vec<(&'static str, u32)> {
         vec![
             ("A", self.reg_a as u32),

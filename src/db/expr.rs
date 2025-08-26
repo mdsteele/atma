@@ -147,6 +147,9 @@ impl<'a> AdsExprCompiler<'a> {
             self.ops
                 .push(AdsInstruction::GetValue(frame_ref, decl.stack_index));
             self.types.push((decl.var_type.clone(), decl.kind.is_static()));
+        } else if id == "pc" {
+            self.ops.push(AdsInstruction::GetPc);
+            self.types.push((AdsType::Integer, false));
         } else {
             let message = format!("No such identifier: `{id}`");
             let label = "this was never declared".to_string();

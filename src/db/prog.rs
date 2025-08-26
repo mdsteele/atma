@@ -263,12 +263,33 @@ impl AdsCompiler {
                 );
             }
             None => {
-                let message = format!("no such variable: `{id_name}`");
-                let label = "this was never declared".to_string();
-                self.errors.push(
-                    ParseError::new(id.span, message)
-                        .with_label(id.span, label),
-                );
+                if id_name == "pc" {
+                    if let Some((mut ops, expr_type)) = opt_expr {
+                        if let AdsType::Integer = expr_type {
+                            out.append(&mut ops);
+                            out.push(AdsInstruction::SetPc);
+                        } else {
+                            let message = format!(
+                                "cannot assign {expr_type} value to simulated \
+                                 processor program counter"
+                            );
+                            let label = format!(
+                                "this expression has type {expr_type}"
+                            );
+                            self.errors.push(
+                                ParseError::new(id.span, message)
+                                    .with_label(expr_span, label),
+                            );
+                        }
+                    }
+                } else {
+                    let message = format!("no such variable: `{id_name}`");
+                    let label = "this was never declared".to_string();
+                    self.errors.push(
+                        ParseError::new(id.span, message)
+                            .with_label(id.span, label),
+                    );
+                }
             }
         }
     }
@@ -408,6 +429,14 @@ mod tests {
                 AdsInstruction::PushValue(int_value(5)),
                 AdsInstruction::Exit,
             ]
+        );
+    }
+
+    #[test]
+    fn let_instruction_with_pc() {
+        assert_eq!(
+            parse_instructions("let x = pc\n"),
+            vec![AdsInstruction::GetPc, AdsInstruction::Exit]
         );
     }
 

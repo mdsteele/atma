@@ -690,6 +690,10 @@ impl SimProc for Mos6502 {
         self.pc as u32
     }
 
+    fn set_pc(&mut self, addr: u32) {
+        self.pc = (addr & 0xffff) as u16;
+    }
+
     fn registers(&self) -> Vec<(&'static str, u32)> {
         vec![
             ("A", self.reg_a as u32),

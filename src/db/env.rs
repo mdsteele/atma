@@ -17,6 +17,10 @@ impl EnvProc {
         self.core.pc()
     }
 
+    fn set_pc(&mut self, addr: u32) {
+        self.core.set_pc(addr);
+    }
+
     pub fn registers(&self) -> Vec<(&'static str, u32)> {
         self.core.registers()
     }
@@ -99,6 +103,12 @@ impl SimEnv {
     /// program counter.
     pub fn pc(&self) -> u32 {
         self.current_processor().pc()
+    }
+
+    /// Sets the current address of the currently selected processor's program
+    /// counter.
+    pub fn set_pc(&mut self, addr: u32) {
+        self.current_processor_mut().set_pc(addr);
     }
 
     /// Returns a list of the currently selected processor's register names and

@@ -88,6 +88,10 @@ impl<W: Write> AdsEnvironment<W> {
                 }
             }
             AdsInstruction::Exit => return Ok(true),
+            AdsInstruction::GetPc => {
+                self.value_stack
+                    .push(AdsValue::Integer(BigInt::from(self.sim.pc())));
+            }
             &AdsInstruction::GetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
                 let value = self.value_stack[start + index].clone();
@@ -159,6 +163,10 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::PushValue(value) => {
                 self.value_stack.push(value.clone());
             }
+            AdsInstruction::SetPc => {
+                let addr = self.pop_address_value();
+                self.sim.set_pc(addr);
+            }
             &AdsInstruction::SetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
                 let value = self.value_stack.pop().unwrap();
@@ -219,13 +227,14 @@ impl<W: Write> AdsEnvironment<W> {
         }
     }
 
+    fn pop_address_value(&mut self) -> u32 {
+        let int_value = self.value_stack.pop().unwrap().unwrap_int();
+        u32::try_from(int_value & BigInt::from(0xffffffffu32)).unwrap()
+    }
+
     fn create_breakpoint(&mut self, kind: AdsBreakpointKind) -> Breakpoint {
         match kind {
-            AdsBreakpointKind::Pc => {
-                let addr = self.value_stack.pop().unwrap().unwrap_int()
-                    & BigInt::from(0xffffffffu32);
-                Breakpoint::Pc(u32::try_from(addr).unwrap())
-            }
+            AdsBreakpointKind::Pc => Breakpoint::Pc(self.pop_address_value()),
         }
     }
 
@@ -362,6 +371,19 @@ mod tests {
         let mut ads = make_env(source, &mut output);
         run_to_completion(&mut ads);
         assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n4\n");
+    }
+
+    #[test]
+    fn get_and_set_pc() {
+        let source = "\
+          run until at $0010\n\
+          print pc\n\
+          set pc = $0020\n\
+          print pc\n";
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env(source, &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "16\n32\n");
     }
 }
 
