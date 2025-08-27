@@ -3,7 +3,6 @@
 use super::expr::{ExprAst, IdentifierAst, PError, symbol};
 use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
 use chumsky::{self, IterParser, Parser};
-use std::io::Read;
 
 //===========================================================================//
 
@@ -16,12 +15,10 @@ pub struct AdsModuleAst {
 impl AdsModuleAst {
     /// Reads the abstract syntax tree for an Atma Debugger Script module from
     /// a file.
-    pub fn read_from<R: Read>(
-        mut reader: R,
+    pub fn parse_source(
+        source: &str,
     ) -> Result<AdsModuleAst, Vec<ParseError>> {
-        let mut data = String::new();
-        reader.read_to_string(&mut data).unwrap(); // TODO handle error
-        let lexer = TokenLexer::new(&data);
+        let lexer = TokenLexer::new(source);
         let tokens: Vec<Token> =
             lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
         AdsModuleAst::parse(&tokens)

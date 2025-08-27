@@ -1,5 +1,5 @@
 use ariadne::{self, Label, ReportKind, Source};
-use atma::db::{AdsEnvironment, AdsProgram, AdsRuntimeError, SimEnv};
+use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
 use atma::parse::ParseError;
 use atma::proc::{Breakpoint, SimBreak};
 use clap::{Parser, Subcommand};
@@ -90,18 +90,16 @@ fn command_db(
     };
     print!("{}", sim_env.description());
     if let Some(ads_path) = opt_ads_path {
-        let program = {
+        let mut ads_env = {
             let file = File::open(&ads_path)?;
-            match AdsProgram::read_from(file) {
-                Ok(program) => program,
+            let source = io::read_to_string(file)?;
+            match AdsEnvironment::create(&source, sim_env, io::stdout()) {
+                Ok(ads_env) => ads_env,
                 Err(parse_errors) => {
-                    let file = File::open(&ads_path)?;
-                    let source = io::read_to_string(file)?;
                     return Err(CliError::Parse(source, parse_errors));
                 }
             }
         };
-        let mut ads_env = AdsEnvironment::new(sim_env, program, io::stdout());
         loop {
             let finished = ads_env.step()?;
             if finished {
@@ -140,9 +138,12 @@ fn command_db(
 
 fn format_registers(sim_env: &SimEnv) -> String {
     sim_env
-        .registers()
-        .into_iter()
-        .map(|(name, value)| format!("{name}=${value:02x}"))
+        .register_names()
+        .iter()
+        .map(|name| {
+            let value = sim_env.get_register(name).unwrap();
+            format!("{name}=${value:02x}")
+        })
         .collect::<Vec<String>>()
         .join(" ")
 }

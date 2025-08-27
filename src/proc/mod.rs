@@ -1,9 +1,11 @@
 //! Facilities for simulating a processor.
 
 mod mos6502;
+mod nop;
 mod sm83;
 
 pub use mos6502::Mos6502;
+pub use nop::NopProc;
 pub use sm83::SharpSm83;
 
 //===========================================================================//
@@ -55,9 +57,16 @@ pub trait SimProc {
     /// Sets the current address of the program counter.
     fn set_pc(&mut self, addr: u32);
 
-    /// Returns a list of the this processor's register names and current
-    /// values.
-    fn registers(&self) -> Vec<(&'static str, u32)>;
+    /// Returns a list of the this processor's register names.
+    fn register_names(&self) -> &'static [&'static str];
+
+    /// Returns the value of the specified register, or `None` if no such
+    /// register exists.
+    fn get_register(&self, name: &str) -> Option<u32>;
+
+    /// Sets the value of the specified register.  Does nothing if no such
+    /// register exists.
+    fn set_register(&mut self, name: &str, value: u32);
 
     /// Advances this processor by one instruction.
     fn step(&mut self) -> Result<(), SimBreak>;

@@ -21,8 +21,16 @@ impl EnvProc {
         self.core.set_pc(addr);
     }
 
-    pub fn registers(&self) -> Vec<(&'static str, u32)> {
-        self.core.registers()
+    fn register_names(&self) -> &'static [&'static str] {
+        self.core.register_names()
+    }
+
+    fn get_register(&self, name: &str) -> Option<u32> {
+        self.core.get_register(name)
+    }
+
+    fn set_register(&mut self, name: &str, value: u32) {
+        self.core.set_register(name, value)
     }
 
     fn add_pc_breakpoint(&mut self, addr: u32) {
@@ -72,6 +80,12 @@ impl SimEnv {
         SimEnv { selected_processor, processors }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_nop_cpu() -> SimEnv {
+        let cpu = crate::proc::NopProc::new();
+        SimEnv::new(vec![("cpu".to_string(), Box::new(cpu))])
+    }
+
     /// Returns a human-readable, multi-line description of this simulated
     /// environment.
     pub fn description(&self) -> String {
@@ -113,8 +127,20 @@ impl SimEnv {
 
     /// Returns a list of the currently selected processor's register names and
     /// current values.
-    pub fn registers(&self) -> Vec<(&'static str, u32)> {
-        self.current_processor().registers()
+    pub fn register_names(&self) -> &'static [&'static str] {
+        self.current_processor().register_names()
+    }
+
+    /// Returns the value of the specified register in the currently selected
+    /// processor, or `None` if no such register exists in that processor.
+    pub fn get_register(&self, name: &str) -> Option<u32> {
+        self.current_processor().get_register(name)
+    }
+
+    /// Sets the value of the specified register in the currently selected
+    /// processor.  Does nothing if no such register exists in that processor.
+    pub fn set_register(&mut self, name: &str, value: u32) {
+        self.current_processor_mut().set_register(name, value)
     }
 
     /// Disassembles the instruction starting at the given address for the

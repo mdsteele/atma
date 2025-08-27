@@ -1,4 +1,5 @@
 use super::binop::AdsBinOp;
+use super::env::SimEnv;
 use super::inst::{AdsFrameRef, AdsInstruction};
 use super::value::{AdsType, AdsValue};
 use crate::parse::{
@@ -11,7 +12,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 struct AdsExprCompiler<'a> {
-    env: &'a AdsTypeEnv,
+    env: &'a AdsTypeEnv<'a>,
     // Invariant: If the top N entries of `types` all hold `is_static = true`,
     // then the top N entries of `ops` are all safe for
     // `AdsExprCompiler::unwrap_static()`.
@@ -21,7 +22,7 @@ struct AdsExprCompiler<'a> {
 }
 
 impl<'a> AdsExprCompiler<'a> {
-    pub fn new(env: &'a AdsTypeEnv) -> AdsExprCompiler<'a> {
+    pub fn new(env: &'a AdsTypeEnv<'a>) -> AdsExprCompiler<'a> {
         AdsExprCompiler {
             env,
             types: Vec::new(),
@@ -147,7 +148,17 @@ impl<'a> AdsExprCompiler<'a> {
             self.ops
                 .push(AdsInstruction::GetValue(frame_ref, decl.stack_index));
             self.types.push((decl.var_type.clone(), decl.kind.is_static()));
-        } else if id == "pc" {
+            return;
+        }
+        let uppercase = id.to_ascii_uppercase();
+        for &register in self.env.register_names() {
+            if uppercase == register {
+                self.ops.push(AdsInstruction::GetRegister(register));
+                self.types.push((AdsType::Integer, false));
+                return;
+            }
+        }
+        if uppercase == "PC" {
             self.ops.push(AdsInstruction::GetPc);
             self.types.push((AdsType::Integer, false));
         } else {
@@ -455,13 +466,14 @@ impl AdsScope {
 
 //===========================================================================//
 
-pub struct AdsTypeEnv {
+pub struct AdsTypeEnv<'a> {
+    sim_env: &'a SimEnv,
     frames: Vec<Vec<AdsScope>>,
 }
 
-impl AdsTypeEnv {
-    pub fn empty() -> AdsTypeEnv {
-        AdsTypeEnv { frames: vec![vec![AdsScope::with_start(0)]] }
+impl<'a> AdsTypeEnv<'a> {
+    pub fn new(sim_env: &'a SimEnv) -> AdsTypeEnv<'a> {
+        AdsTypeEnv { sim_env, frames: vec![vec![AdsScope::with_start(0)]] }
     }
 
     pub fn in_global_frame(&self) -> bool {
@@ -569,6 +581,10 @@ impl AdsTypeEnv {
         None
     }
 
+    pub fn register_names(&self) -> &'static [&'static str] {
+        self.sim_env.register_names()
+    }
+
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
@@ -583,7 +599,7 @@ impl AdsTypeEnv {
 mod tests {
     use super::{
         AdsDeclKind, AdsFrameRef, AdsInstruction, AdsType, AdsTypeEnv,
-        AdsValue,
+        AdsValue, SimEnv,
     };
     use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, SrcSpan};
     use num_bigint::BigInt;
@@ -609,7 +625,8 @@ mod tests {
 
     #[test]
     fn typecheck_identifier_expr() {
-        let mut env = AdsTypeEnv::empty();
+        let sim_env = SimEnv::with_nop_cpu();
+        let mut env = AdsTypeEnv::new(&sim_env);
         env.add_declaration(
             AdsDeclKind::Constant(None),
             IdentifierAst {
@@ -629,7 +646,8 @@ mod tests {
 
     #[test]
     fn typecheck_int_literal_expr() {
-        let env = AdsTypeEnv::empty();
+        let sim_env = SimEnv::with_nop_cpu();
+        let env = AdsTypeEnv::new(&sim_env);
         assert_eq!(
             env.typecheck_expression(int_ast(42, 0..2)),
             Ok((

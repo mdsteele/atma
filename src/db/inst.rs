@@ -15,9 +15,12 @@ pub enum AdsInstruction {
     BranchUnless(isize),
     /// Exits the program.
     Exit,
-    /// Pushes the value of the simulated processsor's program counter onto the
-    /// stack.
+    /// Pushes the integer value of the simulated processsor's program counter
+    /// onto the stack.
     GetPc,
+    /// Pushes the integer value of the specified register in the simulated
+    /// processsor onto the stack.
+    GetRegister(&'static str),
     /// Copies the value at the specified offset from the start of the
     /// specified frame in the call stack, and pushes the copied value onto the
     /// stack.
@@ -59,6 +62,10 @@ pub enum AdsInstruction {
     /// Pops a value from the value stack (which must be an integer), and sets
     /// the simulated processsor's program counter to that value.
     SetPc,
+    /// Pops a value from the value stack (which must be an integer), and sets
+    /// the value of the specified register in the simulated processsor to the
+    /// popped value.
+    SetRegister(&'static str),
     /// Pops a value from the value stack, then sets the value at the specified
     /// offset from the start of the specified call frame to the popped value.
     SetValue(AdsFrameRef, usize),

@@ -2,6 +2,7 @@ use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use super::value::AdsValue;
 use crate::db::SimEnv;
+use crate::parse::ParseError;
 use crate::proc::{Breakpoint, SimBreak};
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -56,12 +57,13 @@ pub struct AdsEnvironment<W> {
 
 impl<W: Write> AdsEnvironment<W> {
     /// Creates a new execution of the given program.
-    pub fn new(
+    pub fn create(
+        source: &str,
         sim: SimEnv,
-        program: AdsProgram,
         output: W,
-    ) -> AdsEnvironment<W> {
-        AdsEnvironment {
+    ) -> Result<AdsEnvironment<W>, Vec<ParseError>> {
+        let program = AdsProgram::compile_source(source, &sim)?;
+        Ok(AdsEnvironment {
             sim,
             program,
             pc: 0,
@@ -70,7 +72,7 @@ impl<W: Write> AdsEnvironment<W> {
             handler_stack: Vec::new(),
             handlers: HashMap::new(),
             output,
-        }
+        })
     }
 
     /// Executes the next instruction in the program.
@@ -89,8 +91,12 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::Exit => return Ok(true),
             AdsInstruction::GetPc => {
-                self.value_stack
-                    .push(AdsValue::Integer(BigInt::from(self.sim.pc())));
+                let value = self.sim.pc();
+                self.value_stack.push(AdsValue::Integer(BigInt::from(value)));
+            }
+            AdsInstruction::GetRegister(name) => {
+                let value = self.sim.get_register(name).unwrap();
+                self.value_stack.push(AdsValue::Integer(BigInt::from(value)));
             }
             &AdsInstruction::GetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
@@ -162,6 +168,10 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::PushValue(value) => {
                 self.value_stack.push(value.clone());
+            }
+            &AdsInstruction::SetRegister(name) => {
+                let value = self.pop_address_value();
+                self.sim.set_register(name, value);
             }
             AdsInstruction::SetPc => {
                 let addr = self.pop_address_value();
@@ -259,23 +269,15 @@ impl<W: Write> AdsEnvironment<W> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsEnvironment, AdsProgram, SimEnv};
-    use crate::bus::null_bus;
-    use crate::proc::SharpSm83;
+    use super::{AdsEnvironment, SimEnv};
     use std::io::Write;
 
     fn make_env<'a>(
         source: &str,
         output: &'a mut Vec<u8>,
     ) -> AdsEnvironment<&'a mut Vec<u8>> {
-        // An SM83 processor starts at PC = 0.  A null bus always returns zero
-        // for reads, which an SM83 processor will interpret as NOP. So this
-        // processor will start at PC = 0, advance by one byte per step, and
-        // otherwise do nothing.
-        let proc = SharpSm83::new(null_bus());
-        let sim = SimEnv::new(vec![("cpu".to_string(), Box::new(proc))]);
-        let program = AdsProgram::read_from(source.as_bytes()).unwrap();
-        AdsEnvironment::new(sim, program, output)
+        let sim = SimEnv::with_nop_cpu();
+        AdsEnvironment::create(source, sim, output).unwrap()
     }
 
     fn run_to_completion<W: Write>(env: &mut AdsEnvironment<W>) {
@@ -375,11 +377,12 @@ mod tests {
 
     #[test]
     fn get_and_set_pc() {
+        // Unlike user-defined variables, "PC" is case-insensitive.
         let source = "\
           run until at $0010\n\
           print pc\n\
-          set pc = $0020\n\
-          print pc\n";
+          set Pc = $0020\n\
+          print pC\n";
         let mut output = Vec::<u8>::new();
         let mut ads = make_env(source, &mut output);
         run_to_completion(&mut ads);

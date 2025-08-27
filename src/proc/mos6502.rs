@@ -694,14 +694,30 @@ impl SimProc for Mos6502 {
         self.pc = (addr & 0xffff) as u16;
     }
 
-    fn registers(&self) -> Vec<(&'static str, u32)> {
-        vec![
-            ("A", self.reg_a as u32),
-            ("X", self.reg_x as u32),
-            ("Y", self.reg_y as u32),
-            ("P", self.reg_p as u32),
-            ("S", self.reg_s as u32),
-        ]
+    fn register_names(&self) -> &'static [&'static str] {
+        &["A", "X", "Y", "P", "S"]
+    }
+
+    fn get_register(&self, name: &str) -> Option<u32> {
+        match name {
+            "A" => Some(u32::from(self.reg_a)),
+            "X" => Some(u32::from(self.reg_x)),
+            "Y" => Some(u32::from(self.reg_y)),
+            "P" => Some(u32::from(self.reg_p)),
+            "S" => Some(u32::from(self.reg_s)),
+            _ => None,
+        }
+    }
+
+    fn set_register(&mut self, name: &str, value: u32) {
+        match name {
+            "A" => self.reg_a = (value & 0xff) as u8,
+            "X" => self.reg_x = (value & 0xff) as u8,
+            "Y" => self.reg_y = (value & 0xff) as u8,
+            "P" => self.reg_p = (value & u32::from(REG_P_MASK)) as u8,
+            "S" => self.reg_s = (value & 0xff) as u8,
+            _ => {}
+        };
     }
 
     fn step(&mut self) -> Result<(), SimBreak> {
@@ -896,6 +912,44 @@ impl SimProc for Mos6502 {
             // TODO: implement remaining undocumented opcodes
             _ => Err(SimBreak::HaltOpcode("unimplemented", opcode)),
         }
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::{Mos6502, REG_P_MASK, SimProc};
+    use crate::bus::null_bus;
+
+    #[test]
+    fn get_registers() {
+        let proc = Mos6502::new(null_bus());
+        for &register in proc.register_names() {
+            assert!(proc.get_register(register).is_some());
+        }
+    }
+
+    #[test]
+    fn set_registers() {
+        let mut proc = Mos6502::new(null_bus());
+        for &register in proc.register_names() {
+            proc.set_register(register, 0);
+            assert_eq!(proc.get_register(register), Some(0));
+            let value = u32::from(REG_P_MASK);
+            proc.set_register(register, value);
+            assert_eq!(proc.get_register(register), Some(value));
+        }
+    }
+
+    #[test]
+    fn set_p_register() {
+        let mut proc = Mos6502::new(null_bus());
+        proc.set_register("P", 0);
+        assert_eq!(proc.get_register("P"), Some(0));
+        // Invalid bits should get masked off of the P register.
+        proc.set_register("P", 0xff);
+        assert_eq!(proc.get_register("P"), Some(u32::from(REG_P_MASK)));
     }
 }
 

@@ -1,3 +1,4 @@
+use super::env::SimEnv;
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
 use super::value::{AdsType, AdsValue};
@@ -5,7 +6,6 @@ use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
     IdentifierAst, ParseError, SrcSpan,
 };
-use std::io::Read;
 
 //===========================================================================//
 
@@ -16,18 +16,20 @@ pub struct AdsProgram {
 
 impl AdsProgram {
     /// Reads an Atma Debugger Script program from a file.
-    pub fn read_from<R: Read>(
-        reader: R,
+    pub fn compile_source(
+        source: &str,
+        sim_env: &SimEnv,
     ) -> Result<AdsProgram, Vec<ParseError>> {
-        AdsProgram::typecheck(AdsModuleAst::read_from(reader)?)
+        AdsProgram::compile_ast(AdsModuleAst::parse_source(source)?, sim_env)
     }
 
     /// Distills the abstract syntax tree for an Atma Debugger Script module
     /// into a program that can be executed.
-    pub fn typecheck(
+    fn compile_ast(
         module: AdsModuleAst,
+        sim_env: &SimEnv,
     ) -> Result<AdsProgram, Vec<ParseError>> {
-        let mut compiler = AdsCompiler::new();
+        let mut compiler = AdsCompiler::new(sim_env);
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions);
         let errors = compiler.into_errors();
@@ -44,14 +46,14 @@ impl AdsProgram {
 
 //===========================================================================//
 
-struct AdsCompiler {
-    env: AdsTypeEnv,
+struct AdsCompiler<'a> {
+    env: AdsTypeEnv<'a>,
     errors: Vec<ParseError>,
 }
 
-impl AdsCompiler {
-    fn new() -> AdsCompiler {
-        AdsCompiler { env: AdsTypeEnv::empty(), errors: Vec::new() }
+impl<'a> AdsCompiler<'a> {
+    fn new(sim_env: &'a SimEnv) -> AdsCompiler<'a> {
+        AdsCompiler { env: AdsTypeEnv::new(sim_env), errors: Vec::new() }
     }
 
     fn into_errors(self) -> Vec<ParseError> {
@@ -263,7 +265,31 @@ impl AdsCompiler {
                 );
             }
             None => {
-                if id_name == "pc" {
+                let uppercase = id_name.to_ascii_uppercase();
+                for &reg in self.env.register_names() {
+                    if uppercase == reg {
+                        if let Some((mut ops, expr_type)) = opt_expr {
+                            if let AdsType::Integer = expr_type {
+                                out.append(&mut ops);
+                                out.push(AdsInstruction::SetRegister(reg));
+                            } else {
+                                let message = format!(
+                                    "cannot assign {expr_type} value to \
+                                     simulated processor register"
+                                );
+                                let label = format!(
+                                    "this expression has type {expr_type}"
+                                );
+                                self.errors.push(
+                                    ParseError::new(id.span, message)
+                                        .with_label(expr_span, label),
+                                );
+                            }
+                        }
+                        return;
+                    }
+                }
+                if uppercase == "PC" {
                     if let Some((mut ops, expr_type)) = opt_expr {
                         if let AdsType::Integer = expr_type {
                             out.append(&mut ops);
@@ -370,11 +396,16 @@ impl AdsCompiler {
 mod tests {
     use super::{
         AdsBreakpointKind, AdsFrameRef, AdsInstruction, AdsProgram, AdsValue,
+        SimEnv,
     };
+    use crate::bus::null_bus;
+    use crate::proc::Mos6502;
     use num_bigint::BigInt;
 
-    fn parse_instructions(source: &str) -> Vec<AdsInstruction> {
-        AdsProgram::read_from(source.as_bytes()).unwrap().instructions
+    fn compile(source: &str) -> Vec<AdsInstruction> {
+        let cpu = Mos6502::new(null_bus());
+        let sim_env = SimEnv::new(vec![("cpu".to_string(), Box::new(cpu))]);
+        AdsProgram::compile_source(source, &sim_env).unwrap().instructions
     }
 
     fn int_value(value: i32) -> AdsValue {
@@ -383,18 +414,18 @@ mod tests {
 
     #[test]
     fn empty_program() {
-        assert_eq!(parse_instructions(""), vec![AdsInstruction::Exit]);
+        assert_eq!(compile(""), vec![AdsInstruction::Exit]);
     }
 
     #[test]
     fn exit_instruction_only() {
-        assert_eq!(parse_instructions("exit\n"), vec![AdsInstruction::Exit]);
+        assert_eq!(compile("exit\n"), vec![AdsInstruction::Exit]);
     }
 
     #[test]
     fn if_instruction() {
         assert_eq!(
-            parse_instructions("if %false {\nstep\n}\n"),
+            compile("if %false {\nstep\n}\n"),
             vec![
                 AdsInstruction::PushValue(AdsValue::Boolean(false)),
                 AdsInstruction::BranchUnless(1),
@@ -407,7 +438,7 @@ mod tests {
     #[test]
     fn if_else_instruction() {
         assert_eq!(
-            parse_instructions("if %false {\nprint 1\n} else {\nprint 2\n}\n"),
+            compile("if %false {\nprint 1\n} else {\nprint 2\n}\n"),
             vec![
                 AdsInstruction::PushValue(AdsValue::Boolean(false)),
                 AdsInstruction::BranchUnless(3),
@@ -424,7 +455,7 @@ mod tests {
     #[test]
     fn let_instruction() {
         assert_eq!(
-            parse_instructions("let x = 5\n"),
+            compile("let x = 5\n"),
             vec![
                 AdsInstruction::PushValue(int_value(5)),
                 AdsInstruction::Exit,
@@ -435,7 +466,7 @@ mod tests {
     #[test]
     fn let_instruction_with_pc() {
         assert_eq!(
-            parse_instructions("let x = pc\n"),
+            compile("let x = pc\n"),
             vec![AdsInstruction::GetPc, AdsInstruction::Exit]
         );
     }
@@ -443,7 +474,7 @@ mod tests {
     #[test]
     fn print_instruction() {
         assert_eq!(
-            parse_instructions("print 42\n"),
+            compile("print 42\n"),
             vec![
                 AdsInstruction::PushValue(int_value(42)),
                 AdsInstruction::Print,
@@ -454,13 +485,13 @@ mod tests {
 
     #[test]
     fn relax_instruction() {
-        assert_eq!(parse_instructions("relax\n"), vec![AdsInstruction::Exit]);
+        assert_eq!(compile("relax\n"), vec![AdsInstruction::Exit]);
     }
 
     #[test]
     fn set_instruction() {
         assert_eq!(
-            parse_instructions("var x = 1\nset x = 2\n"),
+            compile("var x = 1\nset x = 2\n"),
             vec![
                 AdsInstruction::PushValue(int_value(1)),
                 AdsInstruction::PushValue(int_value(2)),
@@ -473,7 +504,7 @@ mod tests {
     #[test]
     fn step_instruction() {
         assert_eq!(
-            parse_instructions("step\n"),
+            compile("step\n"),
             vec![AdsInstruction::Step, AdsInstruction::Exit]
         );
     }
@@ -481,7 +512,7 @@ mod tests {
     #[test]
     fn when_instruction() {
         assert_eq!(
-            parse_instructions("when at $ff {\nprint 1\n}\nstep\n"),
+            compile("when at $ff {\nprint 1\n}\nstep\n"),
             vec![
                 AdsInstruction::PushValue(int_value(255)),
                 AdsInstruction::PushHandler(AdsBreakpointKind::Pc, 1),

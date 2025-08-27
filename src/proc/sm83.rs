@@ -346,17 +346,47 @@ impl SimProc for SharpSm83 {
         }
     }
 
-    fn registers(&self) -> Vec<(&'static str, u32)> {
-        vec![
-            ("A", self.reg_a as u32),
-            ("F", self.reg_f as u32),
-            ("B", self.reg_b as u32),
-            ("C", self.reg_c as u32),
-            ("D", self.reg_d as u32),
-            ("E", self.reg_e as u32),
-            ("H", self.reg_h as u32),
-            ("L", self.reg_l as u32),
-        ]
+    fn register_names(&self) -> &'static [&'static str] {
+        &["A", "F", "B", "C", "D", "E", "H", "L", "AF", "BC", "DE", "HL"]
+    }
+
+    fn get_register(&self, name: &str) -> Option<u32> {
+        match name {
+            "A" => Some(u32::from(self.reg_a)),
+            "F" => Some(u32::from(self.reg_f)),
+            "B" => Some(u32::from(self.reg_b)),
+            "C" => Some(u32::from(self.reg_c)),
+            "D" => Some(u32::from(self.reg_d)),
+            "E" => Some(u32::from(self.reg_e)),
+            "H" => Some(u32::from(self.reg_h)),
+            "L" => Some(u32::from(self.reg_l)),
+            "AF" => Some(u32::from(pack(self.reg_a, self.reg_f))),
+            "BC" => Some(u32::from(pack(self.reg_b, self.reg_c))),
+            "DE" => Some(u32::from(pack(self.reg_d, self.reg_e))),
+            "HL" => Some(u32::from(pack(self.reg_h, self.reg_l))),
+            _ => None,
+        }
+    }
+
+    fn set_register(&mut self, name: &str, value: u32) {
+        match name {
+            "A" => self.reg_a = (value & 0xff) as u8,
+            "F" => self.reg_f = (value & u32::from(REG_F_MASK)) as u8,
+            "B" => self.reg_b = (value & 0xff) as u8,
+            "C" => self.reg_c = (value & 0xff) as u8,
+            "D" => self.reg_d = (value & 0xff) as u8,
+            "E" => self.reg_e = (value & 0xff) as u8,
+            "H" => self.reg_h = (value & 0xff) as u8,
+            "L" => self.reg_l = (value & 0xff) as u8,
+            "AF" => {
+                (self.reg_a, self.reg_f) = unpack((value & 0xffff) as u16);
+                self.reg_f &= REG_F_MASK;
+            }
+            "BC" => (self.reg_b, self.reg_c) = unpack((value & 0xffff) as u16),
+            "DE" => (self.reg_d, self.reg_e) = unpack((value & 0xffff) as u16),
+            "HL" => (self.reg_h, self.reg_l) = unpack((value & 0xffff) as u16),
+            _ => {}
+        };
     }
 
     fn step(&mut self) -> Result<(), SimBreak> {
@@ -494,6 +524,44 @@ impl SimProc for SharpSm83 {
             self.ime = Ime::Pending1;
         }
         Ok(())
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::{REG_F_MASK, SharpSm83, SimProc};
+    use crate::bus::null_bus;
+
+    #[test]
+    fn get_registers() {
+        let proc = SharpSm83::new(null_bus());
+        for &register in proc.register_names() {
+            assert!(proc.get_register(register).is_some());
+        }
+    }
+
+    #[test]
+    fn set_registers() {
+        let mut proc = SharpSm83::new(null_bus());
+        for &register in proc.register_names() {
+            proc.set_register(register, 0);
+            assert_eq!(proc.get_register(register), Some(0));
+            let value = u32::from(REG_F_MASK);
+            proc.set_register(register, value);
+            assert_eq!(proc.get_register(register), Some(value));
+        }
+    }
+
+    #[test]
+    fn set_f_register() {
+        let mut proc = SharpSm83::new(null_bus());
+        proc.set_register("F", 0);
+        assert_eq!(proc.get_register("F"), Some(0));
+        // Invalid bits should get masked off of the F register.
+        proc.set_register("F", 0xff);
+        assert_eq!(proc.get_register("F"), Some(u32::from(REG_F_MASK)));
     }
 }
 
