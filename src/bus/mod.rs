@@ -3,12 +3,14 @@
 use std::io::{self, Read};
 
 mod label;
+mod mmc3;
 mod nes;
 mod null;
 mod ram;
 mod rom;
 
 pub use label::LabeledBus;
+pub use mmc3::Mmc3Bus;
 pub use nes::NesBus;
 pub use null::null_bus;
 pub use ram::RamBus;

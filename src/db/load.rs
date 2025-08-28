@@ -1,5 +1,5 @@
 use super::env::SimEnv;
-use crate::bus::{NesBus, RamBus, RomBus, SimBus};
+use crate::bus::{Mmc3Bus, NesBus, RamBus, RomBus, SimBus, null_bus};
 use crate::proc::{Mos6502, SharpSm83, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -111,10 +111,20 @@ impl NesMapper {
         }
     }
 
-    fn make_cpu_bus(&self, rom: Box<[u8]>) -> Box<dyn SimBus> {
+    fn make_cpu_bus(
+        &self,
+        sram_size: usize,
+        rom: Box<[u8]>,
+    ) -> Box<dyn SimBus> {
+        let ram_bus = if sram_size == 0 {
+            null_bus()
+        } else {
+            Box::new(RamBus::new(vec![0u8; sram_size].into_boxed_slice()))
+        };
+        let rom_bus: Box<dyn SimBus> = Box::new(RomBus::new(rom));
         let cart = match *self {
-            NesMapper::Nrom => Box::new(RomBus::new(rom)),
-            NesMapper::Mmc3 => panic!("MMC3 bus is not yet supported"),
+            NesMapper::Nrom => rom_bus,
+            NesMapper::Mmc3 => Box::new(Mmc3Bus::new(ram_bus, rom_bus)),
         };
         Box::new(NesBus::with_cartridge(cart))
     }
@@ -151,10 +161,12 @@ pub fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         0x4000 * (((hi_byte as usize) << 8) | (lo_byte as usize))
     };
 
+    let sram_size: usize = 0x40 << (header[10] >> 4);
+
     let mut prg_rom = vec![0u8; prg_rom_size];
     reader.read_exact(&mut prg_rom)?;
 
-    let cpu_bus = mapper.make_cpu_bus(prg_rom.into_boxed_slice());
+    let cpu_bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new(cpu_bus));
     let processors = vec![("cpu".to_string(), cpu)];
     Ok(SimEnv::new(processors))
