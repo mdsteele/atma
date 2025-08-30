@@ -1,6 +1,7 @@
 //! Facilities for parsing Atma Debugger Script.
 
 use super::expr::{ExprAst, IdentifierAst, PError, symbol};
+use super::lvalue::LValueAst;
 use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
@@ -73,7 +74,7 @@ pub enum AdsStmtAst {
     /// Runs the simulated processor until the specified breakpoint is reached.
     RunUntil(BreakpointAst),
     /// Updates a variable.
-    Set(IdentifierAst, ExprAst),
+    Set(LValueAst, ExprAst),
     /// Steps the simulated processor forward by one instruction.
     Step,
     /// Sets up a breakpoint handler.
@@ -215,7 +216,7 @@ fn run_until_statement<'a>()
 fn set_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
     keyword("set")
-        .ignore_then(IdentifierAst::parser())
+        .ignore_then(LValueAst::parser())
         .then_ignore(symbol(TokenValue::Equals))
         .then(ExprAst::parser())
         .then_ignore(linebreak())

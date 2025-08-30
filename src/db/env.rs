@@ -1,36 +1,50 @@
+use crate::bus::SimBus;
 use crate::proc::{Breakpoint, SimBreak, SimProc};
 use std::collections::{HashMap, HashSet};
 
 //===========================================================================//
 
+pub type ProcBus = (Box<dyn SimProc>, Box<dyn SimBus>);
+
+//===========================================================================//
+
 struct EnvProc {
-    core: Box<dyn SimProc>,
+    proc: Box<dyn SimProc>,
+    bus: Box<dyn SimBus>,
     pc_breakpoints: HashSet<u32>,
 }
 
 impl EnvProc {
-    fn new(core: Box<dyn SimProc>) -> EnvProc {
-        EnvProc { core, pc_breakpoints: HashSet::new() }
+    fn new(proc: Box<dyn SimProc>, bus: Box<dyn SimBus>) -> EnvProc {
+        EnvProc { proc, bus, pc_breakpoints: HashSet::new() }
+    }
+
+    fn description(&self) -> String {
+        format!("{} with {}", self.proc.description(), self.bus.description())
     }
 
     fn pc(&self) -> u32 {
-        self.core.pc()
+        self.proc.pc()
     }
 
     fn set_pc(&mut self, addr: u32) {
-        self.core.set_pc(addr);
+        self.proc.set_pc(addr);
     }
 
     fn register_names(&self) -> &'static [&'static str] {
-        self.core.register_names()
+        self.proc.register_names()
     }
 
     fn get_register(&self, name: &str) -> Option<u32> {
-        self.core.get_register(name)
+        self.proc.get_register(name)
     }
 
     fn set_register(&mut self, name: &str, value: u32) {
-        self.core.set_register(name, value)
+        self.proc.set_register(name, value)
+    }
+
+    fn write_byte(&mut self, addr: u32, data: u8) {
+        self.bus.write_byte(addr, data);
     }
 
     fn add_pc_breakpoint(&mut self, addr: u32) {
@@ -42,12 +56,12 @@ impl EnvProc {
     }
 
     fn disassemble(&self, addr: u32) -> (usize, String) {
-        self.core.disassemble(addr)
+        self.proc.disassemble(&*self.bus, addr)
     }
 
     fn step(&mut self) -> Result<(), SimBreak> {
-        self.core.step()?;
-        let pc = self.core.pc();
+        self.proc.step(&mut *self.bus)?;
+        let pc = self.proc.pc();
         if self.pc_breakpoints.contains(&pc) {
             Err(SimBreak::Breakpoint(Breakpoint::Pc(pc)))
         } else {
@@ -68,22 +82,23 @@ pub struct SimEnv {
 impl SimEnv {
     /// Constructs a new debugging environment with the given list of
     /// processors.  Panics if `processors` is empty.
-    pub fn new(processors: Vec<(String, Box<dyn SimProc>)>) -> SimEnv {
+    pub fn new(processors: Vec<(String, ProcBus)>) -> SimEnv {
         if processors.is_empty() {
             panic!("must provide non-empty list of processors to SimEnv::new");
         }
         let selected_processor = processors[0].0.clone();
         let processors = processors
             .into_iter()
-            .map(|(name, core)| (name, EnvProc::new(core)))
+            .map(|(name, (proc, bus))| (name, EnvProc::new(proc, bus)))
             .collect();
         SimEnv { selected_processor, processors }
     }
 
     #[cfg(test)]
     pub(crate) fn with_nop_cpu() -> SimEnv {
+        let bus = crate::bus::null_bus();
         let cpu = crate::proc::NopProc::new();
-        SimEnv::new(vec![("cpu".to_string(), Box::new(cpu))])
+        SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))])
     }
 
     /// Returns a human-readable, multi-line description of this simulated
@@ -97,12 +112,7 @@ impl SimEnv {
     }
 
     fn describe_processor((name, proc): (&String, &EnvProc)) -> String {
-        format!(
-            "{}: {}, pc={:x}\n",
-            name,
-            proc.core.description(),
-            proc.core.pc()
-        )
+        format!("{name}: {}, pc={:x}\n", proc.description(), proc.pc())
     }
 
     fn current_processor(&self) -> &EnvProc {
@@ -140,7 +150,13 @@ impl SimEnv {
     /// Sets the value of the specified register in the currently selected
     /// processor.  Does nothing if no such register exists in that processor.
     pub fn set_register(&mut self, name: &str, value: u32) {
-        self.current_processor_mut().set_register(name, value)
+        self.current_processor_mut().set_register(name, value);
+    }
+
+    /// Writes a single byte to memory using the currently selected processor's
+    /// memory bus.
+    pub fn write_byte(&mut self, addr: u32, data: u8) {
+        self.current_processor_mut().write_byte(addr, data);
     }
 
     /// Disassembles the instruction starting at the given address for the

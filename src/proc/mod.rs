@@ -8,6 +8,8 @@ pub use mos6502::Mos6502;
 pub use nop::NopProc;
 pub use sm83::SharpSm83;
 
+use crate::bus::SimBus;
+
 //===========================================================================//
 
 /// Specifies a condition under which the simulation should be paused.
@@ -49,7 +51,7 @@ pub trait SimProc {
     /// Disassembles the instruction starting at the given address, returning
     /// the length of the instruction in bytes, and a human-readable string
     /// with the assembly code for that instruction.
-    fn disassemble(&self, addr: u32) -> (usize, String);
+    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (usize, String);
 
     /// Returns the current address of the program counter.
     fn pc(&self) -> u32;
@@ -69,7 +71,7 @@ pub trait SimProc {
     fn set_register(&mut self, name: &str, value: u32);
 
     /// Advances this processor by one instruction.
-    fn step(&mut self) -> Result<(), SimBreak>;
+    fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak>;
 }
 
 //===========================================================================//

@@ -47,7 +47,7 @@ pub trait SimBus {
     /// Writes a single byte to memory.
     ///
     /// Depending on the implementation, the write may be ignored (e.g. if this
-    /// bus represents read-only memory).
+    /// bus represents read-only memory), and/or have other side effects.
     fn write_byte(&mut self, addr: u32, data: u8);
 }
 

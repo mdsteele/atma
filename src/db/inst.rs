@@ -59,6 +59,11 @@ pub enum AdsInstruction {
     PushValue(AdsValue),
     /// Returns from the current breakpoint handler.
     Return,
+    /// Pops the top two values from the value stack (which must both be
+    /// integers), then writes a byte to the simulated processor's memory bus,
+    /// using the topmost value as the address and the second-from-the-top
+    /// value as the data to write.
+    SetMemory,
     /// Pops a value from the value stack (which must be an integer), and sets
     /// the simulated processsor's program counter to that value.
     SetPc,

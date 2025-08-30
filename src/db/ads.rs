@@ -43,7 +43,7 @@ struct HandlerData {
 
 //===========================================================================//
 
-/// An in-progress execution of an [AdsProgram].
+/// An in-progress execution of an Atma Debugger Script program.
 pub struct AdsEnvironment<W> {
     sim: SimEnv,
     program: AdsProgram,
@@ -172,6 +172,12 @@ impl<W: Write> AdsEnvironment<W> {
             &AdsInstruction::SetRegister(name) => {
                 let value = self.pop_address_value();
                 self.sim.set_register(name, value);
+            }
+            AdsInstruction::SetMemory => {
+                let addr = self.pop_address_value();
+                let data = self.value_stack.pop().unwrap().unwrap_int();
+                let data = u8::try_from(data & BigInt::from(0xff)).unwrap();
+                self.sim.write_byte(addr, data);
             }
             AdsInstruction::SetPc => {
                 let addr = self.pop_address_value();

@@ -42,7 +42,8 @@ const GB_HEADER_LOGO: &[u8; 0x30] = &[
 /// * SFC/SMC
 /// * SPC
 pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
-    let mut processors = Vec::<(String, Box<dyn SimProc>)>::new();
+    let mut processors =
+        Vec::<(String, (Box<dyn SimProc>, Box<dyn SimBus>))>::new();
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
     if &header[..4] == b"NES\x1a" {
@@ -74,9 +75,9 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         // Copy reset_addr into RAM at the reset vector.
         cursor.seek(SeekFrom::Start(0xfffc))?;
         cursor.write_u16::<LittleEndian>(reset_addr)?;
-        let bus = Box::new(RamBus::new(ram));
-        let cpu = Box::new(Mos6502::new(bus));
-        processors.push(("cpu".to_string(), cpu));
+        let mut bus = RamBus::new(ram);
+        let cpu = Box::new(Mos6502::new(&mut bus));
+        processors.push(("cpu".to_string(), (cpu, Box::new(bus))));
     } else {
         reader.seek(SeekFrom::Start(0x0104))?;
         let mut logo = [0u8; 0x30];
@@ -85,8 +86,8 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
             // TODO: Emulate memory bus based on mapper byte.
             let ram = Box::new([0u8; 0x10000]);
             let bus = Box::new(RamBus::new(ram));
-            let cpu = Box::new(SharpSm83::new(bus));
-            processors.push(("cpu".to_string(), cpu));
+            let cpu = Box::new(SharpSm83::new());
+            processors.push(("cpu".to_string(), (cpu, bus)));
         } else {
             invalid_data!("unsupported binary file type");
         }
@@ -166,9 +167,9 @@ pub fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut prg_rom = vec![0u8; prg_rom_size];
     reader.read_exact(&mut prg_rom)?;
 
-    let cpu_bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
-    let cpu: Box<dyn SimProc> = Box::new(Mos6502::new(cpu_bus));
-    let processors = vec![("cpu".to_string(), cpu)];
+    let mut bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
+    let cpu: Box<dyn SimProc> = Box::new(Mos6502::new(&mut *bus));
+    let processors = vec![("cpu".to_string(), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 

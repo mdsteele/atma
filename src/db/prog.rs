@@ -4,7 +4,7 @@ use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
 use super::value::{AdsType, AdsValue};
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
-    IdentifierAst, ParseError, SrcSpan,
+    IdentifierAst, LValueAst, LValueAstNode, ParseError, SrcSpan,
 };
 
 //===========================================================================//
@@ -100,8 +100,8 @@ impl<'a> AdsCompiler<'a> {
             AdsStmtAst::RunUntil(breakpoint_ast) => {
                 self.typecheck_run_until_statement(breakpoint_ast, out);
             }
-            AdsStmtAst::Set(id, expr_ast) => {
-                self.typecheck_set_statement(id, expr_ast, out);
+            AdsStmtAst::Set(lvalue, expr_ast) => {
+                self.typecheck_set_statement(lvalue, expr_ast, out);
             }
             AdsStmtAst::Step => out.push(AdsInstruction::Step),
             AdsStmtAst::When(breakpoint_ast, do_ast) => {
@@ -211,113 +211,32 @@ impl<'a> AdsCompiler<'a> {
 
     fn typecheck_set_statement(
         &mut self,
-        id: IdentifierAst,
+        lvalue_ast: LValueAst,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) {
-        let id_name = id.name;
+        let lvalue_span = lvalue_ast.span;
         let expr_span = expr_ast.span;
-        let opt_expr = self.typecheck_expr(expr_ast);
-        match self.env.get_declaration(&id_name) {
-            Some((
-                frame_ref,
-                decl @ AdsDecl { kind: AdsDeclKind::Variable, .. },
-            )) => {
-                if let Some((mut ops, expr_type)) = opt_expr {
-                    if expr_type == decl.var_type {
-                        out.append(&mut ops);
-                        out.push(AdsInstruction::SetValue(
-                            frame_ref,
-                            decl.stack_index,
-                        ));
-                    } else {
-                        let var_type = &decl.var_type;
-                        let message = format!(
-                            "cannot assign {expr_type} value to {var_type} \
-                             variable `{id_name}`"
-                        );
-                        let label1 =
-                            format!("this expression has type {expr_type}");
-                        let label2 = format!(
-                            "`{id_name}` was declared as {var_type} here"
-                        );
-                        self.errors.push(
-                            ParseError::new(id.span, message)
-                                .with_label(expr_span, label1)
-                                .with_label(decl.id_span, label2),
-                        );
-                    }
-                }
-            }
-            Some((
-                _,
-                decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. },
-            )) => {
-                let message =
-                    format!("cannot change value of constant `{id_name}`");
-                let label1 = format!("cannot set value of `{id_name}`");
-                let label2 =
-                    format!("`{id_name}` was declared as a constant here");
-                self.errors.push(
-                    ParseError::new(id.span, message)
-                        .with_label(id.span, label1)
-                        .with_label(decl.id_span, label2),
-                );
-            }
-            None => {
-                let uppercase = id_name.to_ascii_uppercase();
-                for &reg in self.env.register_names() {
-                    if uppercase == reg {
-                        if let Some((mut ops, expr_type)) = opt_expr {
-                            if let AdsType::Integer = expr_type {
-                                out.append(&mut ops);
-                                out.push(AdsInstruction::SetRegister(reg));
-                            } else {
-                                let message = format!(
-                                    "cannot assign {expr_type} value to \
-                                     simulated processor register"
-                                );
-                                let label = format!(
-                                    "this expression has type {expr_type}"
-                                );
-                                self.errors.push(
-                                    ParseError::new(id.span, message)
-                                        .with_label(expr_span, label),
-                                );
-                            }
-                        }
-                        return;
-                    }
-                }
-                if uppercase == "PC" {
-                    if let Some((mut ops, expr_type)) = opt_expr {
-                        if let AdsType::Integer = expr_type {
-                            out.append(&mut ops);
-                            out.push(AdsInstruction::SetPc);
-                        } else {
-                            let message = format!(
-                                "cannot assign {expr_type} value to simulated \
-                                 processor program counter"
-                            );
-                            let label = format!(
-                                "this expression has type {expr_type}"
-                            );
-                            self.errors.push(
-                                ParseError::new(id.span, message)
-                                    .with_label(expr_span, label),
-                            );
-                        }
-                    }
-                } else {
-                    let message = format!("no such variable: `{id_name}`");
-                    let label = "this was never declared".to_string();
-                    self.errors.push(
-                        ParseError::new(id.span, message)
-                            .with_label(id.span, label),
-                    );
-                }
-            }
+        let (mut expr_ops, expr_type) =
+            self.typecheck_expr(expr_ast).unwrap_or((vec![], AdsType::Bottom));
+        out.append(&mut expr_ops);
+        let lvalue_type = self.typecheck_lvalue(lvalue_ast, out);
+        if expr_type == AdsType::Bottom
+            || lvalue_type == AdsType::Bottom
+            || expr_type == lvalue_type
+        {
+            return;
         }
+        let message = format!(
+            "cannot assign {expr_type} value to {lvalue_type} destination"
+        );
+        let label1 = format!("this expression has type {expr_type}");
+        let label2 = format!("this destination has type {lvalue_type}");
+        self.errors.push(
+            ParseError::new(expr_span, message)
+                .with_label(expr_span, label1)
+                .with_label(lvalue_span, label2),
+        );
     }
 
     fn typecheck_when_statement(
@@ -388,6 +307,99 @@ impl<'a> AdsCompiler<'a> {
         );
         false
     }
+
+    fn typecheck_lvalue(
+        &mut self,
+        lvalue_ast: LValueAst,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsType {
+        match lvalue_ast.node {
+            LValueAstNode::Memory(expr_ast) => {
+                self.typecheck_memory_lvalue(expr_ast, out)
+            }
+            LValueAstNode::Variable(name) => {
+                self.typecheck_variable_lvalue(lvalue_ast.span, name, out)
+            }
+        }
+    }
+
+    fn typecheck_memory_lvalue(
+        &mut self,
+        expr_ast: ExprAst,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsType {
+        let expr_span = expr_ast.span;
+        let (mut expr_ops, expr_type) =
+            self.typecheck_expr(expr_ast).unwrap_or((vec![], AdsType::Bottom));
+        out.append(&mut expr_ops);
+        out.push(AdsInstruction::SetMemory);
+        if expr_type != AdsType::Integer {
+            let message =
+                format!("memory address must be of type int, not {expr_type}");
+            let label = format!("this expression has type {expr_type}");
+            self.errors.push(
+                ParseError::new(expr_span, message)
+                    .with_label(expr_span, label),
+            );
+        }
+        AdsType::Integer
+    }
+
+    fn typecheck_variable_lvalue(
+        &mut self,
+        id_span: SrcSpan,
+        id_name: String,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsType {
+        match self.env.get_declaration(&id_name) {
+            Some((
+                frame_ref,
+                decl @ AdsDecl { kind: AdsDeclKind::Variable, .. },
+            )) => {
+                out.push(AdsInstruction::SetValue(
+                    frame_ref,
+                    decl.stack_index,
+                ));
+                decl.var_type.clone()
+            }
+            Some((
+                _,
+                decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. },
+            )) => {
+                let message =
+                    format!("cannot change value of constant `{id_name}`");
+                let label1 = format!("cannot set value of `{id_name}`");
+                let label2 =
+                    format!("`{id_name}` was declared as a constant here");
+                self.errors.push(
+                    ParseError::new(id_span, message)
+                        .with_label(id_span, label1)
+                        .with_label(decl.id_span, label2),
+                );
+                decl.var_type.clone()
+            }
+            None => {
+                let uppercase = id_name.to_ascii_uppercase();
+                for &reg in self.env.register_names() {
+                    if uppercase == reg {
+                        out.push(AdsInstruction::SetRegister(reg));
+                        return AdsType::Integer;
+                    }
+                }
+                if uppercase == "PC" {
+                    out.push(AdsInstruction::SetPc);
+                    return AdsType::Integer;
+                }
+                let message = format!("no such variable: `{id_name}`");
+                let label = "this was never declared".to_string();
+                self.errors.push(
+                    ParseError::new(id_span, message)
+                        .with_label(id_span, label),
+                );
+                AdsType::Bottom
+            }
+        }
+    }
 }
 
 //===========================================================================//
@@ -403,9 +415,10 @@ mod tests {
     use num_bigint::BigInt;
 
     fn compile(source: &str) -> Vec<AdsInstruction> {
-        let cpu = Mos6502::new(null_bus());
-        let sim_env = SimEnv::new(vec![("cpu".to_string(), Box::new(cpu))]);
-        AdsProgram::compile_source(source, &sim_env).unwrap().instructions
+        let mut bus = null_bus();
+        let cpu = Mos6502::new(&mut *bus);
+        let sim = SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))]);
+        AdsProgram::compile_source(source, &sim).unwrap().instructions
     }
 
     fn int_value(value: i32) -> AdsValue {

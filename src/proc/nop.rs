@@ -1,3 +1,4 @@
+use crate::bus::SimBus;
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -21,7 +22,7 @@ impl SimProc for NopProc {
         "null processor".to_string()
     }
 
-    fn disassemble(&self, _addr: u32) -> (usize, String) {
+    fn disassemble(&self, _bus: &dyn SimBus, _addr: u32) -> (usize, String) {
         (1, "NOP".to_string())
     }
 
@@ -43,7 +44,8 @@ impl SimProc for NopProc {
 
     fn set_register(&mut self, _name: &str, _value: u32) {}
 
-    fn step(&mut self) -> Result<(), SimBreak> {
+    fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        bus.read_byte(self.pc);
         self.pc += 1;
         Ok(())
     }
