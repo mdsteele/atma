@@ -6,6 +6,7 @@ use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
     IdentifierAst, LValueAst, LValueAstNode, ParseError, SrcSpan,
 };
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -317,6 +318,9 @@ impl<'a> AdsCompiler<'a> {
             LValueAstNode::Memory(expr_ast) => {
                 self.typecheck_memory_lvalue(expr_ast, out)
             }
+            LValueAstNode::Tuple(lvalue_asts) => {
+                self.typecheck_tuple_lvalue(lvalue_asts, out)
+            }
             LValueAstNode::Variable(name) => {
                 self.typecheck_variable_lvalue(lvalue_ast.span, name, out)
             }
@@ -343,6 +347,20 @@ impl<'a> AdsCompiler<'a> {
             );
         }
         AdsType::Integer
+    }
+
+    fn typecheck_tuple_lvalue(
+        &mut self,
+        lvalue_asts: Vec<LValueAst>,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsType {
+        out.push(AdsInstruction::ExpandTuple);
+        let mut types = Vec::<AdsType>::new();
+        for lvalue_ast in lvalue_asts.into_iter().rev() {
+            types.push(self.typecheck_lvalue(lvalue_ast, out));
+        }
+        types.reverse();
+        AdsType::Tuple(Rc::new(types))
     }
 
     fn typecheck_variable_lvalue(

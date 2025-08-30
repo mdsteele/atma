@@ -90,6 +90,10 @@ impl<W: Write> AdsEnvironment<W> {
                 }
             }
             AdsInstruction::Exit => return Ok(true),
+            AdsInstruction::ExpandTuple => {
+                let values = self.value_stack.pop().unwrap().unwrap_tuple();
+                self.value_stack.extend(values);
+            }
             AdsInstruction::GetPc => {
                 let value = self.sim.pc();
                 self.value_stack.push(AdsValue::Integer(BigInt::from(value)));

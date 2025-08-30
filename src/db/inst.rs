@@ -15,6 +15,10 @@ pub enum AdsInstruction {
     BranchUnless(isize),
     /// Exits the program.
     Exit,
+    /// Pops the top value from the value stack (which must be a tuple), and
+    /// pushes its elements onto the stack in order, such that the last element
+    /// of the tuple ends up as the top element on the stack.
+    ExpandTuple,
     /// Pushes the integer value of the simulated processsor's program counter
     /// onto the stack.
     GetPc,
