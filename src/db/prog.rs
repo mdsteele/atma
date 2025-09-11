@@ -428,12 +428,12 @@ mod tests {
         AdsBreakpointKind, AdsFrameRef, AdsInstruction, AdsProgram, AdsValue,
         SimEnv,
     };
-    use crate::bus::null_bus;
+    use crate::bus::new_null_bus;
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
 
     fn compile(source: &str) -> Vec<AdsInstruction> {
-        let mut bus = null_bus();
+        let mut bus = new_null_bus();
         let cpu = Mos6502::new(&mut *bus);
         let sim = SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))]);
         AdsProgram::compile_source(source, &sim).unwrap().instructions

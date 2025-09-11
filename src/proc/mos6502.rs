@@ -1056,11 +1056,11 @@ impl SimProc for Mos6502 {
 #[cfg(test)]
 mod tests {
     use super::{Mos6502, REG_P_MASK, SimProc};
-    use crate::bus::null_bus;
+    use crate::bus::new_null_bus;
 
     #[test]
     fn get_registers() {
-        let proc = Mos6502::new(&mut *null_bus());
+        let proc = Mos6502::new(&mut *new_null_bus());
         for &register in proc.register_names() {
             assert!(proc.get_register(register).is_some());
         }
@@ -1068,7 +1068,7 @@ mod tests {
 
     #[test]
     fn set_registers() {
-        let mut proc = Mos6502::new(&mut *null_bus());
+        let mut proc = Mos6502::new(&mut *new_null_bus());
         for &register in proc.register_names() {
             proc.set_register(register, 0);
             assert_eq!(proc.get_register(register), Some(0));
@@ -1080,7 +1080,7 @@ mod tests {
 
     #[test]
     fn set_p_register() {
-        let mut proc = Mos6502::new(&mut *null_bus());
+        let mut proc = Mos6502::new(&mut *new_null_bus());
         proc.set_register("P", 0);
         assert_eq!(proc.get_register("P"), Some(0));
         // Invalid bits should get masked off of the P register.

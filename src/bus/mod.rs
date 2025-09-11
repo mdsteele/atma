@@ -1,20 +1,48 @@
 //! Facilities for representing a memory mapping and simulating a memory bus.
 
 use std::io::{self, Read};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod label;
 mod mmc3;
 mod nes;
 mod null;
 mod ram;
-mod rom;
 
 pub use label::LabeledBus;
 pub use mmc3::Mmc3Bus;
 pub use nes::NesBus;
-pub use null::null_bus;
-pub use ram::RamBus;
-pub use rom::RomBus;
+pub use null::new_null_bus;
+pub use ram::{new_ram_bus, new_rom_bus};
+
+//===========================================================================//
+
+/// Unique identifier for a watchpoint within a simulated memory bus.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct WatchId(u64);
+
+impl WatchId {
+    /// Creates a new [WatchId] that is different from any other created so
+    /// far.
+    pub fn create() -> WatchId {
+        static NEXT_TAG: AtomicU64 = AtomicU64::new(0);
+        WatchId(NEXT_TAG.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
+//===========================================================================//
+
+/// Kinds of watchpoints that can be set on a simulated memory bus.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum WatchKind {
+    /// Watch for execution of an instruction that starts at the specified
+    /// location.
+    Exec,
+    /// Watch for reading data from the specified location.
+    Read,
+    /// Watch for writing data to the specified location.
+    Write,
+}
 
 //===========================================================================//
 
@@ -33,8 +61,21 @@ pub trait SimBus {
     /// Returns a label for the given address, if there is one.
     fn label_at(&self, addr: u32) -> Option<&str>;
 
+    /// Returns a watchpoint for the given address, if there is one.
+    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId>;
+
+    /// Sets a watchpoint on the given address.
+    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId;
+
+    /// Sets a watchpoint at the given label, if it exists.
+    fn watch_label(&mut self, label: &str, kind: WatchKind)
+    -> Option<WatchId>;
+
+    /// Removes the specified watchpoint from the bus.
+    fn unwatch(&mut self, id: WatchId);
+
     /// Returns the value of a single byte in memory, if the processor were to
-    /// read it, but without triggering any breakpoints or performing any side
+    /// read it, but without triggering any watchpoints or performing any side
     /// effects that would occur if the processor actually read the byte.
     fn peek_byte(&self, addr: u32) -> u8;
 
@@ -71,6 +112,22 @@ impl Read for BusPeeker<'_> {
             self.addr = self.addr.wrapping_add(1);
         }
         Ok(buf.len())
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::WatchId;
+
+    #[test]
+    fn create_watch_id() {
+        let id1 = WatchId::create();
+        let id2 = WatchId::create();
+        let id3 = id1;
+        assert_ne!(id1, id2);
+        assert_eq!(id1, id3);
     }
 }
 

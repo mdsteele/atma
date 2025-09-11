@@ -96,7 +96,7 @@ impl SimEnv {
 
     #[cfg(test)]
     pub(crate) fn with_nop_cpu() -> SimEnv {
-        let bus = crate::bus::null_bus();
+        let bus = crate::bus::new_null_bus();
         let cpu = crate::proc::NopProc::new();
         SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))])
     }

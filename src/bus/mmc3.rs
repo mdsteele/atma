@@ -1,4 +1,4 @@
-use super::SimBus;
+use super::{SimBus, WatchId, WatchKind};
 
 //===========================================================================//
 
@@ -69,6 +69,41 @@ impl SimBus for Mmc3Bus {
             0x6000..0x8000 => self.ram.label_at(addr),
             0x8000.. => self.rom.label_at(self.translate_rom_address(addr)),
         }
+    }
+
+    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
+        match addr & 0xffff {
+            0x0000..0x6000 => None,
+            0x6000..0x8000 => self.ram.watchpoint_at(addr, kind),
+            0x8000.. => {
+                self.rom.watchpoint_at(self.translate_rom_address(addr), kind)
+            }
+        }
+    }
+
+    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+        match addr & 0xffff {
+            0x0000..0x6000 => WatchId::create(),
+            0x6000..0x8000 => self.ram.watch_address(addr, kind),
+            0x8000.. => {
+                self.rom.watch_address(self.translate_rom_address(addr), kind)
+            }
+        }
+    }
+
+    fn watch_label(
+        &mut self,
+        label: &str,
+        kind: WatchKind,
+    ) -> Option<WatchId> {
+        self.ram
+            .watch_label(label, kind)
+            .or_else(|| self.rom.watch_label(label, kind))
+    }
+
+    fn unwatch(&mut self, id: WatchId) {
+        self.ram.unwatch(id);
+        self.rom.unwatch(id);
     }
 
     fn peek_byte(&self, addr: u32) -> u8 {

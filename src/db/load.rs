@@ -1,5 +1,7 @@
 use super::env::SimEnv;
-use crate::bus::{Mmc3Bus, NesBus, RamBus, RomBus, SimBus, null_bus};
+use crate::bus::{
+    Mmc3Bus, NesBus, SimBus, new_null_bus, new_ram_bus, new_rom_bus,
+};
 use crate::proc::{Mos6502, SharpSm83, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -75,9 +77,9 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         // Copy reset_addr into RAM at the reset vector.
         cursor.seek(SeekFrom::Start(0xfffc))?;
         cursor.write_u16::<LittleEndian>(reset_addr)?;
-        let mut bus = RamBus::new(ram);
-        let cpu = Box::new(Mos6502::new(&mut bus));
-        processors.push(("cpu".to_string(), (cpu, Box::new(bus))));
+        let mut bus = new_ram_bus(ram);
+        let cpu = Box::new(Mos6502::new(&mut *bus));
+        processors.push(("cpu".to_string(), (cpu, bus)));
     } else {
         reader.seek(SeekFrom::Start(0x0104))?;
         let mut logo = [0u8; 0x30];
@@ -85,7 +87,7 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         if &logo == GB_HEADER_LOGO {
             // TODO: Emulate memory bus based on mapper byte.
             let ram = Box::new([0u8; 0x10000]);
-            let bus = Box::new(RamBus::new(ram));
+            let bus = new_ram_bus(ram);
             let cpu = Box::new(SharpSm83::new());
             processors.push(("cpu".to_string(), (cpu, bus)));
         } else {
@@ -118,11 +120,11 @@ impl NesMapper {
         rom: Box<[u8]>,
     ) -> Box<dyn SimBus> {
         let ram_bus = if sram_size == 0 {
-            null_bus()
+            new_null_bus()
         } else {
-            Box::new(RamBus::new(vec![0u8; sram_size].into_boxed_slice()))
+            new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
         };
-        let rom_bus: Box<dyn SimBus> = Box::new(RomBus::new(rom));
+        let rom_bus: Box<dyn SimBus> = new_rom_bus(rom);
         let cart = match *self {
             NesMapper::Nrom => rom_bus,
             NesMapper::Mmc3 => Box::new(Mmc3Bus::new(ram_bus, rom_bus)),
