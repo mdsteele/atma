@@ -8,33 +8,15 @@ pub use mos6502::Mos6502;
 pub use nop::NopProc;
 pub use sm83::SharpSm83;
 
-use crate::bus::SimBus;
-
-//===========================================================================//
-
-/// Specifies a condition under which the simulation should be paused.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Breakpoint {
-    /// Break if the processor tries execute an instruction with the given
-    /// opcode.
-    Opcode(u8),
-    /// Break when the program counter becomes equal to the given value.
-    Pc(u32),
-    /// Break when the processor tries to read from the given address on its
-    /// bus.
-    ReadAddr(u32),
-    /// Break when the processor tries to write to the given address on its
-    /// bus.
-    WriteAddr(u32),
-}
+use crate::bus::{SimBus, WatchId, WatchKind};
 
 //===========================================================================//
 
 /// A condition that pauses or halts the simulation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SimBreak {
-    /// A breakpoint was reached.
-    Breakpoint(Breakpoint),
+    /// A watchpoint was triggered.
+    Watchpoint(WatchKind, WatchId),
     /// The processor executed an instruction (with the given mnemonic and
     /// opcode) that halts the processor, and now the processor cannot continue
     /// until a reset and/or interrupt occurs.

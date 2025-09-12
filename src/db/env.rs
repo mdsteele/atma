@@ -1,6 +1,6 @@
-use crate::bus::SimBus;
-use crate::proc::{Breakpoint, SimBreak, SimProc};
-use std::collections::{HashMap, HashSet};
+use crate::bus::{SimBus, WatchId, WatchKind};
+use crate::proc::{SimBreak, SimProc};
+use std::collections::HashMap;
 
 //===========================================================================//
 
@@ -11,48 +11,15 @@ pub type ProcBus = (Box<dyn SimProc>, Box<dyn SimBus>);
 struct EnvProc {
     proc: Box<dyn SimProc>,
     bus: Box<dyn SimBus>,
-    pc_breakpoints: HashSet<u32>,
 }
 
 impl EnvProc {
     fn new(proc: Box<dyn SimProc>, bus: Box<dyn SimBus>) -> EnvProc {
-        EnvProc { proc, bus, pc_breakpoints: HashSet::new() }
+        EnvProc { proc, bus }
     }
 
     fn description(&self) -> String {
         format!("{} with {}", self.proc.description(), self.bus.description())
-    }
-
-    fn pc(&self) -> u32 {
-        self.proc.pc()
-    }
-
-    fn set_pc(&mut self, addr: u32) {
-        self.proc.set_pc(addr);
-    }
-
-    fn register_names(&self) -> &'static [&'static str] {
-        self.proc.register_names()
-    }
-
-    fn get_register(&self, name: &str) -> Option<u32> {
-        self.proc.get_register(name)
-    }
-
-    fn set_register(&mut self, name: &str, value: u32) {
-        self.proc.set_register(name, value)
-    }
-
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        self.bus.write_byte(addr, data);
-    }
-
-    fn add_pc_breakpoint(&mut self, addr: u32) {
-        self.pc_breakpoints.insert(addr);
-    }
-
-    fn remove_pc_breakpoint(&mut self, addr: u32) {
-        self.pc_breakpoints.remove(&addr);
     }
 
     fn disassemble(&self, addr: u32) -> (usize, String) {
@@ -60,13 +27,7 @@ impl EnvProc {
     }
 
     fn step(&mut self) -> Result<(), SimBreak> {
-        self.proc.step(&mut *self.bus)?;
-        let pc = self.proc.pc();
-        if self.pc_breakpoints.contains(&pc) {
-            Err(SimBreak::Breakpoint(Breakpoint::Pc(pc)))
-        } else {
-            Ok(())
-        }
+        self.proc.step(&mut *self.bus)
     }
 }
 
@@ -96,7 +57,7 @@ impl SimEnv {
 
     #[cfg(test)]
     pub(crate) fn with_nop_cpu() -> SimEnv {
-        let bus = crate::bus::new_null_bus();
+        let bus = crate::bus::new_open_bus(32);
         let cpu = crate::proc::NopProc::new();
         SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))])
     }
@@ -112,7 +73,7 @@ impl SimEnv {
     }
 
     fn describe_processor((name, proc): (&String, &EnvProc)) -> String {
-        format!("{name}: {}, pc={:x}\n", proc.description(), proc.pc())
+        format!("{name}: {}, pc={:x}\n", proc.description(), proc.proc.pc())
     }
 
     fn current_processor(&self) -> &EnvProc {
@@ -126,37 +87,37 @@ impl SimEnv {
     /// Returns the current address of the currently selected processor's
     /// program counter.
     pub fn pc(&self) -> u32 {
-        self.current_processor().pc()
+        self.current_processor().proc.pc()
     }
 
     /// Sets the current address of the currently selected processor's program
     /// counter.
     pub fn set_pc(&mut self, addr: u32) {
-        self.current_processor_mut().set_pc(addr);
+        self.current_processor_mut().proc.set_pc(addr);
     }
 
     /// Returns a list of the currently selected processor's register names and
     /// current values.
     pub fn register_names(&self) -> &'static [&'static str] {
-        self.current_processor().register_names()
+        self.current_processor().proc.register_names()
     }
 
     /// Returns the value of the specified register in the currently selected
     /// processor, or `None` if no such register exists in that processor.
     pub fn get_register(&self, name: &str) -> Option<u32> {
-        self.current_processor().get_register(name)
+        self.current_processor().proc.get_register(name)
     }
 
     /// Sets the value of the specified register in the currently selected
     /// processor.  Does nothing if no such register exists in that processor.
     pub fn set_register(&mut self, name: &str, value: u32) {
-        self.current_processor_mut().set_register(name, value);
+        self.current_processor_mut().proc.set_register(name, value);
     }
 
     /// Writes a single byte to memory using the currently selected processor's
     /// memory bus.
     pub fn write_byte(&mut self, addr: u32, data: u8) {
-        self.current_processor_mut().write_byte(addr, data);
+        self.current_processor_mut().bus.write_byte(addr, data);
     }
 
     /// Disassembles the instruction starting at the given address for the
@@ -172,24 +133,15 @@ impl SimEnv {
         self.current_processor_mut().step()
     }
 
-    /// Adds a new condition under which the simulation should be paused.
-    pub fn add_breakpoint(&mut self, breakpoint: Breakpoint) {
-        match breakpoint {
-            Breakpoint::Pc(addr) => {
-                self.current_processor_mut().add_pc_breakpoint(addr)
-            }
-            _ => panic!("{breakpoint:?} not supported yet"),
-        }
+    /// Sets a watchpoint on the given address for the currently selected
+    /// processor.
+    pub fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+        self.current_processor_mut().bus.watch_address(addr, kind)
     }
 
-    /// Removes a condition under which the simulation should be paused.
-    pub fn remove_breakpoint(&mut self, breakpoint: Breakpoint) {
-        match breakpoint {
-            Breakpoint::Pc(addr) => {
-                self.current_processor_mut().remove_pc_breakpoint(addr)
-            }
-            _ => panic!("{breakpoint:?} not supported yet"),
-        }
+    /// Removes the specified watchpoint from the currently selected processor.
+    pub fn unwatch(&mut self, id: WatchId) {
+        self.current_processor_mut().bus.unwatch(id);
     }
 }
 

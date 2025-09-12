@@ -1,4 +1,4 @@
-use crate::bus::SimBus;
+use crate::bus::{SimBus, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -45,8 +45,22 @@ impl SimProc for NopProc {
     fn set_register(&mut self, _name: &str, _value: u32) {}
 
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        watch(bus, self.pc, WatchKind::Read)?;
         bus.read_byte(self.pc);
         self.pc += 1;
+        watch(bus, self.pc, WatchKind::Exec)?;
+        Ok(())
+    }
+}
+
+fn watch(
+    bus: &dyn SimBus,
+    addr: u32,
+    kind: WatchKind,
+) -> Result<(), SimBreak> {
+    if let Some(id) = bus.watchpoint_at(addr, kind) {
+        Err(SimBreak::Watchpoint(kind, id))
+    } else {
         Ok(())
     }
 }

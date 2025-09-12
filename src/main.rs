@@ -1,7 +1,8 @@
 use ariadne::{self, Label, ReportKind, Source};
+use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
 use atma::parse::ParseError;
-use atma::proc::{Breakpoint, SimBreak};
+use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
 use std::fs::File;
 use std::io;
@@ -107,8 +108,8 @@ fn command_db(
             }
         }
     } else {
-        sim_env.add_breakpoint(Breakpoint::Pc(0xfff7));
-        sim_env.add_breakpoint(Breakpoint::Pc(0xfff9));
+        sim_env.watch_address(0xfff7, WatchKind::Exec);
+        sim_env.watch_address(0xfff9, WatchKind::Exec);
         loop {
             let pc = sim_env.pc();
             let instruction = sim_env.disassemble(sim_env.pc()).1;
@@ -121,8 +122,8 @@ fn command_db(
             );
             match result {
                 Ok(()) => {}
-                Err(SimBreak::Breakpoint(breakpoint)) => {
-                    println!("Breakpoint: {breakpoint:?}");
+                Err(SimBreak::Watchpoint(kind, id)) => {
+                    println!("Watchpoint: {kind:?} {id:?}");
                     return Ok(());
                 }
                 Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {

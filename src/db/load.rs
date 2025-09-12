@@ -1,6 +1,6 @@
 use super::env::SimEnv;
 use crate::bus::{
-    Mmc3Bus, NesBus, SimBus, new_null_bus, new_ram_bus, new_rom_bus,
+    Mmc3Bus, NesBus, SimBus, new_open_bus, new_ram_bus, new_rom_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -120,7 +120,7 @@ impl NesMapper {
         rom: Box<[u8]>,
     ) -> Box<dyn SimBus> {
         let ram_bus = if sram_size == 0 {
-            new_null_bus()
+            new_open_bus(16)
         } else {
             new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
         };

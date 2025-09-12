@@ -555,17 +555,16 @@ fn read_word<R: Read>(reader: &mut R) -> io::Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::{disassemble_instruction, format_instruction};
-    use crate::bus::{LabeledBus, SimBus, new_null_bus};
-    use std::borrow::Borrow;
+    use crate::bus::{LabeledBus, SimBus, new_open_bus};
     use std::collections::HashMap;
 
     fn disassemble(code: &[u8]) -> String {
-        disassemble_with_bus(code, new_null_bus().borrow())
+        disassemble_with_bus(code, &*new_open_bus(16))
     }
 
     fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
         let labels = HashMap::from([(label.to_string(), addr)]);
-        let bus = LabeledBus::new(new_null_bus(), labels);
+        let bus = LabeledBus::new(new_open_bus(16), labels);
         disassemble_with_bus(code, &bus)
     }
 

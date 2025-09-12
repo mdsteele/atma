@@ -1,4 +1,4 @@
-use crate::bus::SimBus;
+use crate::bus::{SimBus, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -569,6 +569,18 @@ impl SimProc for SharpSm83 {
         } else if let Ime::Pending2 = self.ime {
             self.ime = Ime::Pending1;
         }
+        watch(bus, u32::from(self.pc), WatchKind::Exec)
+    }
+}
+
+fn watch(
+    bus: &dyn SimBus,
+    addr: u32,
+    kind: WatchKind,
+) -> Result<(), SimBreak> {
+    if let Some(id) = bus.watchpoint_at(addr, kind) {
+        Err(SimBreak::Watchpoint(kind, id))
+    } else {
         Ok(())
     }
 }

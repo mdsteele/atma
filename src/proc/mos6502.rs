@@ -1,4 +1,4 @@
-use crate::bus::{BusPeeker, SimBus};
+use crate::bus::{BusPeeker, SimBus, WatchKind};
 use crate::dis::mos6502::{disassemble_instruction, format_instruction};
 use crate::proc::{SimBreak, SimProc};
 
@@ -859,7 +859,7 @@ impl SimProc for Mos6502 {
     }
 
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let opcode = bus.read_byte(self.pc as u32);
+        let opcode = bus.read_byte(u32::from(self.pc));
         self.pc = self.pc.wrapping_add(1);
         match opcode {
             0x00 => self.op_brk(bus),
@@ -1047,7 +1047,20 @@ impl SimProc for Mos6502 {
             0xfe => self.op_inc(bus, AddrMode::XIndexedAbsolute),
             // TODO: implement remaining undocumented opcodes
             _ => Err(SimBreak::HaltOpcode("unimplemented", opcode)),
-        }
+        }?;
+        watch(bus, u32::from(self.pc), WatchKind::Exec)
+    }
+}
+
+fn watch(
+    bus: &dyn SimBus,
+    addr: u32,
+    kind: WatchKind,
+) -> Result<(), SimBreak> {
+    if let Some(id) = bus.watchpoint_at(addr, kind) {
+        Err(SimBreak::Watchpoint(kind, id))
+    } else {
+        Ok(())
     }
 }
 
@@ -1056,11 +1069,11 @@ impl SimProc for Mos6502 {
 #[cfg(test)]
 mod tests {
     use super::{Mos6502, REG_P_MASK, SimProc};
-    use crate::bus::new_null_bus;
+    use crate::bus::new_open_bus;
 
     #[test]
     fn get_registers() {
-        let proc = Mos6502::new(&mut *new_null_bus());
+        let proc = Mos6502::new(&mut *new_open_bus(16));
         for &register in proc.register_names() {
             assert!(proc.get_register(register).is_some());
         }
@@ -1068,7 +1081,7 @@ mod tests {
 
     #[test]
     fn set_registers() {
-        let mut proc = Mos6502::new(&mut *new_null_bus());
+        let mut proc = Mos6502::new(&mut *new_open_bus(16));
         for &register in proc.register_names() {
             proc.set_register(register, 0);
             assert_eq!(proc.get_register(register), Some(0));
@@ -1080,7 +1093,7 @@ mod tests {
 
     #[test]
     fn set_p_register() {
-        let mut proc = Mos6502::new(&mut *new_null_bus());
+        let mut proc = Mos6502::new(&mut *new_open_bus(16));
         proc.set_register("P", 0);
         assert_eq!(proc.get_register("P"), Some(0));
         // Invalid bits should get masked off of the P register.

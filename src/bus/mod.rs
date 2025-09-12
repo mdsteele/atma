@@ -6,14 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 mod label;
 mod mmc3;
 mod nes;
-mod null;
 mod ram;
 
 pub use label::LabeledBus;
 pub use mmc3::Mmc3Bus;
 pub use nes::NesBus;
-pub use null::new_null_bus;
-pub use ram::{new_ram_bus, new_rom_bus};
+pub use ram::{new_open_bus, new_ram_bus, new_rom_bus};
 
 //===========================================================================//
 

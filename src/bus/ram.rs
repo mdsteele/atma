@@ -3,50 +3,48 @@ use bimap::BiHashMap;
 
 //===========================================================================//
 
+/// Returns a simulated bus, with the given number of address bits, that's not
+/// connected to anything.  All writes will be ignored, and all reads will
+/// return zero.
+pub fn new_open_bus(addr_bits: u32) -> Box<dyn SimBus> {
+    assert!(addr_bits <= 32);
+    let storage = OpenBus { addr_bits };
+    Box::new(RandomAccessBus::new(Box::new(storage)))
+}
+
 /// Creates a simulated RAM bus with the given initial contents.  Panics if the
 /// length of the byte array is not a power of 2.
 pub fn new_ram_bus(contents: Box<[u8]>) -> Box<dyn SimBus> {
-    Box::new(RandomAccessBus::new(contents, false))
+    assert!(contents.len().is_power_of_two());
+    let storage = RamStorage { contents, read_only: false };
+    Box::new(RandomAccessBus::new(Box::new(storage)))
 }
 
 /// Creates a simulated ROM bus with the given contents.  All writes to this
 /// bus will be ignored.  Panics if the length of the byte array is not a power
 /// of 2.
 pub fn new_rom_bus(contents: Box<[u8]>) -> Box<dyn SimBus> {
-    Box::new(RandomAccessBus::new(contents, true))
+    assert!(contents.len().is_power_of_two());
+    let storage = RamStorage { contents, read_only: true };
+    Box::new(RandomAccessBus::new(Box::new(storage)))
 }
 
 //===========================================================================//
 
-/// A simulated RAM bus.  Reads beyond the RAM size will be mirrored.
 struct RandomAccessBus {
-    ram: Box<[u8]>,
+    storage: Box<dyn Storage>,
     watchpoints: BiHashMap<(u32, WatchKind), WatchId>,
-    read_only: bool,
 }
 
 impl RandomAccessBus {
-    /// Returns a new simulated RAM bus using the given byte array as the
-    /// contents of RAM.  Panics if the length of the byte array is not a power
-    /// of 2.
-    pub fn new(ram: Box<[u8]>, read_only: bool) -> RandomAccessBus {
-        assert!(ram.len().is_power_of_two());
-        RandomAccessBus { ram, watchpoints: BiHashMap::new(), read_only }
+    pub fn new(storage: Box<dyn Storage>) -> RandomAccessBus {
+        RandomAccessBus { storage, watchpoints: BiHashMap::new() }
     }
 }
 
 impl SimBus for RandomAccessBus {
     fn description(&self) -> String {
-        let byte_size = self.ram.len();
-        let (size, unit) = if byte_size < 1024 {
-            (byte_size, "B")
-        } else if byte_size < 1024 * 1024 {
-            (byte_size >> 10, "kB")
-        } else {
-            (byte_size >> 20, "MB")
-        };
-        let kind = if self.read_only { "ROM" } else { "RAM" };
-        format!("{size}{unit} {kind}")
+        self.storage.description()
     }
 
     fn label_at(&self, _addr: u32) -> Option<&str> {
@@ -54,10 +52,12 @@ impl SimBus for RandomAccessBus {
     }
 
     fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr & self.storage.addr_mask();
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+        let addr = addr & self.storage.addr_mask();
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -81,16 +81,81 @@ impl SimBus for RandomAccessBus {
     }
 
     fn peek_byte(&self, addr: u32) -> u8 {
-        self.ram[(addr as usize) & (self.ram.len() - 1)]
+        self.storage.read_byte(addr)
     }
 
     fn read_byte(&mut self, addr: u32) -> u8 {
-        self.peek_byte(addr)
+        self.storage.read_byte(addr)
+    }
+
+    fn write_byte(&mut self, addr: u32, data: u8) {
+        self.storage.write_byte(addr, data);
+    }
+}
+
+//===========================================================================//
+
+trait Storage {
+    fn description(&self) -> String;
+    fn addr_mask(&self) -> u32;
+    fn read_byte(&self, addr: u32) -> u8;
+    fn write_byte(&mut self, addr: u32, data: u8);
+}
+
+struct OpenBus {
+    addr_bits: u32,
+}
+
+impl Storage for OpenBus {
+    fn description(&self) -> String {
+        format!("{}-bit open bus", self.addr_bits)
+    }
+
+    fn addr_mask(&self) -> u32 {
+        debug_assert!(self.addr_bits <= 32);
+        ((1u64 << self.addr_bits) - 1) as u32
+    }
+
+    fn read_byte(&self, _addr: u32) -> u8 {
+        0
+    }
+
+    fn write_byte(&mut self, _addr: u32, _data: u8) {}
+}
+
+struct RamStorage {
+    contents: Box<[u8]>,
+    read_only: bool,
+}
+
+impl Storage for RamStorage {
+    fn description(&self) -> String {
+        let byte_size = self.contents.len();
+        let (size, unit) = if byte_size < 1024 {
+            (byte_size, "B")
+        } else if byte_size < 1024 * 1024 {
+            (byte_size >> 10, "kB")
+        } else {
+            (byte_size >> 20, "MB")
+        };
+        let kind = if self.read_only { "ROM" } else { "RAM" };
+        format!("{size}{unit} {kind}")
+    }
+
+    fn addr_mask(&self) -> u32 {
+        debug_assert!(self.contents.len().is_power_of_two());
+        (self.contents.len() - 1) as u32
+    }
+
+    fn read_byte(&self, addr: u32) -> u8 {
+        let addr = addr & self.addr_mask();
+        self.contents[addr as usize]
     }
 
     fn write_byte(&mut self, addr: u32, data: u8) {
         if !self.read_only {
-            self.ram[(addr as usize) & (self.ram.len() - 1)] = data;
+            let addr = addr & self.addr_mask();
+            self.contents[addr as usize] = data;
         }
     }
 }

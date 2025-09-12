@@ -1,9 +1,10 @@
 use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use super::value::AdsValue;
+use crate::bus::{WatchId, WatchKind};
 use crate::db::SimEnv;
 use crate::parse::ParseError;
-use crate::proc::{Breakpoint, SimBreak};
+use crate::proc::SimBreak;
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::io::Write;
@@ -50,8 +51,8 @@ pub struct AdsEnvironment<W> {
     pc: usize,
     value_stack: Vec<AdsValue>,
     call_stack: Vec<CallFrame>,
-    handler_stack: Vec<Breakpoint>,
-    handlers: HashMap<Breakpoint, Vec<HandlerData>>,
+    handler_stack: Vec<WatchId>,
+    handlers: HashMap<WatchId, Vec<HandlerData>>,
     output: W,
 }
 
@@ -137,14 +138,14 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::PopHandler => {
                 debug_assert!(!self.handler_stack.is_empty());
-                let breakpoint = self.handler_stack.pop().unwrap();
-                debug_assert!(self.handlers.contains_key(&breakpoint));
-                let handlers = self.handlers.get_mut(&breakpoint).unwrap();
+                let id = self.handler_stack.pop().unwrap();
+                debug_assert!(self.handlers.contains_key(&id));
+                let handlers = self.handlers.get_mut(&id).unwrap();
                 debug_assert!(!handlers.is_empty());
                 handlers.pop();
                 if handlers.is_empty() {
-                    self.handlers.remove(&breakpoint);
-                    self.sim.remove_breakpoint(breakpoint);
+                    self.handlers.remove(&id);
+                    self.sim.unwatch(id);
                 }
             }
             AdsInstruction::PopValue => {
@@ -165,10 +166,9 @@ impl<W: Write> AdsEnvironment<W> {
                 };
                 let destination_address = self.destination(offset);
                 let data = HandlerData { parent_index, destination_address };
-                let breakpoint = self.create_breakpoint(kind);
-                self.handlers.entry(breakpoint).or_default().push(data);
-                self.sim.add_breakpoint(breakpoint);
-                self.handler_stack.push(breakpoint);
+                let id = self.create_watchpoint(kind);
+                self.handlers.entry(id).or_default().push(data);
+                self.handler_stack.push(id);
             }
             AdsInstruction::PushValue(value) => {
                 self.value_stack.push(value.clone());
@@ -199,10 +199,10 @@ impl<W: Write> AdsEnvironment<W> {
                 eprintln!("${:04x} | {:16}", pc, instruction);
                 match result {
                     Ok(()) => {}
-                    Err(SimBreak::Breakpoint(breakpoint)) => {
-                        eprintln!("Breakpoint: {breakpoint:?}");
-                        debug_assert!(self.handlers.contains_key(&breakpoint));
-                        let handlers = self.handlers.get(&breakpoint).unwrap();
+                    Err(SimBreak::Watchpoint(kind, id)) => {
+                        eprintln!("{kind:?} watchpoint reached");
+                        debug_assert!(self.handlers.contains_key(&id));
+                        let handlers = self.handlers.get(&id).unwrap();
                         debug_assert!(!handlers.is_empty());
                         let data = handlers.last().unwrap();
                         self.call_stack.push(CallFrame {
@@ -252,9 +252,12 @@ impl<W: Write> AdsEnvironment<W> {
         u32::try_from(int_value & BigInt::from(0xffffffffu32)).unwrap()
     }
 
-    fn create_breakpoint(&mut self, kind: AdsBreakpointKind) -> Breakpoint {
+    fn create_watchpoint(&mut self, kind: AdsBreakpointKind) -> WatchId {
         match kind {
-            AdsBreakpointKind::Pc => Breakpoint::Pc(self.pop_address_value()),
+            AdsBreakpointKind::Pc => {
+                let addr = self.pop_address_value();
+                self.sim.watch_address(addr, WatchKind::Exec)
+            }
         }
     }
 
