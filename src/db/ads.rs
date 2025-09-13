@@ -1,7 +1,7 @@
-use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
+use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use super::value::AdsValue;
-use crate::bus::{WatchId, WatchKind};
+use crate::bus::WatchId;
 use crate::db::SimEnv;
 use crate::parse::ParseError;
 use crate::proc::SimBreak;
@@ -166,7 +166,8 @@ impl<W: Write> AdsEnvironment<W> {
                 };
                 let destination_address = self.destination(offset);
                 let data = HandlerData { parent_index, destination_address };
-                let id = self.create_watchpoint(kind);
+                let addr = self.pop_address_value();
+                let id = self.sim.watch_address(addr, kind);
                 self.handlers.entry(id).or_default().push(data);
                 self.handler_stack.push(id);
             }
@@ -195,32 +196,16 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::Step => {
                 let pc = self.sim.pc();
                 let instruction = self.sim.disassemble(self.sim.pc()).1;
-                let result = self.sim.step();
-                eprintln!("${:04x} | {:16}", pc, instruction);
-                match result {
-                    Ok(()) => {}
-                    Err(SimBreak::Watchpoint(kind, id)) => {
-                        eprintln!("{kind:?} watchpoint reached");
-                        debug_assert!(self.handlers.contains_key(&id));
-                        let handlers = self.handlers.get(&id).unwrap();
-                        debug_assert!(!handlers.is_empty());
-                        let data = handlers.last().unwrap();
-                        self.call_stack.push(CallFrame {
-                            parent_index: data.parent_index,
-                            frame_start: self.value_stack.len(),
-                            return_address: self.pc + 1,
-                        });
-                        self.pc = data.destination_address;
-                        return Ok(false);
-                    }
-                    Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
-                        eprintln!("Halted by {mnemonic} opcode ${opcode:02x}");
-                        return Ok(true);
-                    }
+                eprintln!("${pc:04x} | {instruction:16}");
+                if let Some(finished) = self.step_processor() {
+                    return Ok(finished);
                 }
             }
             AdsInstruction::Return => {
                 self.pc = self.call_stack.pop().unwrap().return_address;
+                if self.sim.is_mid_instruction() {
+                    return Ok(self.step_processor().unwrap_or(false));
+                }
                 return Ok(false);
             }
             &AdsInstruction::TupleItem(index) => {
@@ -231,6 +216,30 @@ impl<W: Write> AdsEnvironment<W> {
         }
         self.pc += 1;
         Ok(false)
+    }
+
+    fn step_processor(&mut self) -> Option<bool> {
+        match self.sim.step() {
+            Ok(()) => None,
+            Err(SimBreak::Watchpoint(kind, id)) => {
+                eprintln!("{kind:?} watchpoint reached");
+                debug_assert!(self.handlers.contains_key(&id));
+                let handlers = self.handlers.get(&id).unwrap();
+                debug_assert!(!handlers.is_empty());
+                let data = handlers.last().unwrap();
+                self.call_stack.push(CallFrame {
+                    parent_index: data.parent_index,
+                    frame_start: self.value_stack.len(),
+                    return_address: self.pc + 1,
+                });
+                self.pc = data.destination_address;
+                Some(false)
+            }
+            Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
+                eprintln!("Halted by {mnemonic} opcode ${opcode:02x}");
+                Some(true)
+            }
+        }
     }
 
     fn jump(&mut self, offset: isize) -> Result<bool, AdsRuntimeError> {
@@ -250,15 +259,6 @@ impl<W: Write> AdsEnvironment<W> {
     fn pop_address_value(&mut self) -> u32 {
         let int_value = self.value_stack.pop().unwrap().unwrap_int();
         u32::try_from(int_value & BigInt::from(0xffffffffu32)).unwrap()
-    }
-
-    fn create_watchpoint(&mut self, kind: AdsBreakpointKind) -> WatchId {
-        match kind {
-            AdsBreakpointKind::Pc => {
-                let addr = self.pop_address_value();
-                self.sim.watch_address(addr, WatchKind::Exec)
-            }
-        }
     }
 
     fn frame_start(&self, frame_ref: AdsFrameRef) -> usize {
@@ -400,6 +400,20 @@ mod tests {
         let mut ads = make_env(source, &mut output);
         run_to_completion(&mut ads);
         assert_eq!(String::from_utf8(output).unwrap(), "16\n32\n");
+    }
+
+    #[test]
+    fn mid_instruction_handler() {
+        let source = "\
+          when read $0000 {\n\
+            print pc  ; still mid-instruction, so PC has not advanced yet\n\
+          }\n\
+          step        ; read and execute the NOP at $0000\n\
+          print pc    ; now PC has advanced\n";
+        let mut output = Vec::<u8>::new();
+        let mut ads = make_env(source, &mut output);
+        run_to_completion(&mut ads);
+        assert_eq!(String::from_utf8(output).unwrap(), "0\n1\n");
     }
 }
 

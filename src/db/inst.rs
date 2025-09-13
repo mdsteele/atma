@@ -1,5 +1,6 @@
 use super::binop::AdsBinOp;
 use super::value::AdsValue;
+use crate::bus::WatchKind;
 
 //===========================================================================//
 
@@ -58,7 +59,7 @@ pub enum AdsInstruction {
     /// processor, and pushes a new handler onto the handler stack for that
     /// breakpoint that will jumps to the ADS instruction relative to this one
     /// when the breakpoint is reached.
-    PushHandler(AdsBreakpointKind, isize),
+    PushHandler(WatchKind, isize),
     /// Pushes a value onto the value stack.
     PushValue(AdsValue),
     /// Returns from the current breakpoint handler.
@@ -92,13 +93,6 @@ pub enum AdsInstruction {
 pub enum AdsFrameRef {
     Global,       // outermost frame
     Local(usize), // 0 for innermost frame, 1 for next most inner, etc.
-}
-
-//===========================================================================//
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AdsBreakpointKind {
-    Pc,
 }
 
 //===========================================================================//

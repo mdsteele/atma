@@ -133,6 +133,14 @@ impl SimEnv {
         self.current_processor_mut().step()
     }
 
+    /// Returns true if the currently selected processor is currently paused in
+    /// the middle of an instruction due to the last `step()` being interrupted
+    /// by a breakpoint condition.  Returns false if the processor is between
+    /// instructions.
+    pub fn is_mid_instruction(&self) -> bool {
+        self.current_processor().proc.is_mid_instruction()
+    }
+
     /// Sets a watchpoint on the given address for the currently selected
     /// processor.
     pub fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {

@@ -108,8 +108,8 @@ fn command_db(
             }
         }
     } else {
-        sim_env.watch_address(0xfff7, WatchKind::Exec);
-        sim_env.watch_address(0xfff9, WatchKind::Exec);
+        sim_env.watch_address(0xfff7, WatchKind::Pc);
+        sim_env.watch_address(0xfff9, WatchKind::Pc);
         loop {
             let pc = sim_env.pc();
             let instruction = sim_env.disassemble(sim_env.pc()).1;

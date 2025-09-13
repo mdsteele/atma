@@ -33,9 +33,8 @@ impl WatchId {
 /// Kinds of watchpoints that can be set on a simulated memory bus.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum WatchKind {
-    /// Watch for execution of an instruction that starts at the specified
-    /// location.
-    Exec,
+    /// Watch for the PC reaching the instruction at the specified location.
+    Pc,
     /// Watch for reading data from the specified location.
     Read,
     /// Watch for writing data to the specified location.

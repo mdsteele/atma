@@ -146,12 +146,28 @@ impl DeclareAst {
 pub enum BreakpointAst {
     /// Triggers when the PC is at the specified label or address.
     Pc(ExprAst),
+    /// Triggers when the processor tries to read a byte from the specified
+    /// label or address.
+    Read(ExprAst),
+    /// Triggers when the processor tries to write a byte to the specified
+    /// label or address.
+    Write(ExprAst),
 }
 
 impl BreakpointAst {
     pub(crate) fn parser<'a>()
     -> impl Parser<'a, &'a [Token], BreakpointAst, PError<'a>> + Clone {
-        keyword("at").ignore_then(ExprAst::parser()).map(BreakpointAst::Pc)
+        chumsky::prelude::choice((
+            keyword("at")
+                .ignore_then(ExprAst::parser())
+                .map(BreakpointAst::Pc),
+            keyword("read")
+                .ignore_then(ExprAst::parser())
+                .map(BreakpointAst::Read),
+            keyword("write")
+                .ignore_then(ExprAst::parser())
+                .map(BreakpointAst::Write),
+        ))
     }
 }
 

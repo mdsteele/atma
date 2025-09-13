@@ -1,7 +1,8 @@
 use super::env::SimEnv;
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
-use super::inst::{AdsBreakpointKind, AdsFrameRef, AdsInstruction};
+use super::inst::{AdsFrameRef, AdsInstruction};
 use super::value::{AdsType, AdsValue};
+use crate::bus::WatchKind;
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
     IdentifierAst, LValueAst, LValueAstNode, ParseError, SrcSpan,
@@ -278,14 +279,30 @@ impl<'a> AdsCompiler<'a> {
     fn typecheck_breakpoint(
         &mut self,
         ast: BreakpointAst,
-    ) -> Option<(Vec<AdsInstruction>, AdsBreakpointKind)> {
+    ) -> Option<(Vec<AdsInstruction>, WatchKind)> {
         match ast {
             BreakpointAst::Pc(expr_ast) => {
                 let expr_span = expr_ast.span;
                 if let Some((ops, expr_type)) = self.typecheck_expr(expr_ast)
                     && self.typecheck_breakpoint_addr(expr_span, expr_type)
                 {
-                    return Some((ops, AdsBreakpointKind::Pc));
+                    return Some((ops, WatchKind::Pc));
+                }
+            }
+            BreakpointAst::Read(expr_ast) => {
+                let expr_span = expr_ast.span;
+                if let Some((ops, expr_type)) = self.typecheck_expr(expr_ast)
+                    && self.typecheck_breakpoint_addr(expr_span, expr_type)
+                {
+                    return Some((ops, WatchKind::Read));
+                }
+            }
+            BreakpointAst::Write(expr_ast) => {
+                let expr_span = expr_ast.span;
+                if let Some((ops, expr_type)) = self.typecheck_expr(expr_ast)
+                    && self.typecheck_breakpoint_addr(expr_span, expr_type)
+                {
+                    return Some((ops, WatchKind::Write));
                 }
             }
         }
@@ -424,11 +441,8 @@ impl<'a> AdsCompiler<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AdsBreakpointKind, AdsFrameRef, AdsInstruction, AdsProgram, AdsValue,
-        SimEnv,
-    };
-    use crate::bus::new_open_bus;
+    use super::{AdsFrameRef, AdsInstruction, AdsProgram, AdsValue, SimEnv};
+    use crate::bus::{WatchKind, new_open_bus};
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
 
@@ -546,7 +560,7 @@ mod tests {
             compile("when at $ff {\nprint 1\n}\nstep\n"),
             vec![
                 AdsInstruction::PushValue(int_value(255)),
-                AdsInstruction::PushHandler(AdsBreakpointKind::Pc, 1),
+                AdsInstruction::PushHandler(WatchKind::Pc, 1),
                 AdsInstruction::Jump(3),
                 AdsInstruction::PushValue(int_value(1)),
                 AdsInstruction::Print,

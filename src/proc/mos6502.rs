@@ -1048,7 +1048,11 @@ impl SimProc for Mos6502 {
             // TODO: implement remaining undocumented opcodes
             _ => Err(SimBreak::HaltOpcode("unimplemented", opcode)),
         }?;
-        watch(bus, u32::from(self.pc), WatchKind::Exec)
+        watch(bus, u32::from(self.pc), WatchKind::Pc)
+    }
+
+    fn is_mid_instruction(&self) -> bool {
+        false
     }
 }
 

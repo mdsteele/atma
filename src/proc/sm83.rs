@@ -569,7 +569,11 @@ impl SimProc for SharpSm83 {
         } else if let Ime::Pending2 = self.ime {
             self.ime = Ime::Pending1;
         }
-        watch(bus, u32::from(self.pc), WatchKind::Exec)
+        watch(bus, u32::from(self.pc), WatchKind::Pc)
+    }
+
+    fn is_mid_instruction(&self) -> bool {
+        false
     }
 }
 

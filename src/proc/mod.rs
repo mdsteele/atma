@@ -38,7 +38,10 @@ pub trait SimProc {
     /// Returns the current address of the program counter.
     fn pc(&self) -> u32;
 
-    /// Sets the current address of the program counter.
+    /// Sets the current address of the program counter.  If the processor is
+    /// currently paused in the middle of an instruction due to the last
+    /// `step()` being interrupted by a breakpoint condition, that instruction
+    /// will be aborted.
     fn set_pc(&mut self, addr: u32);
 
     /// Returns a list of the this processor's register names.
@@ -52,8 +55,14 @@ pub trait SimProc {
     /// register exists.
     fn set_register(&mut self, name: &str, value: u32);
 
-    /// Advances this processor by one instruction.
+    /// Runs this processor forward until it finishes an instruction or
+    /// encounters a breakpoint condition.
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak>;
+
+    /// Returns true if this processor is currently paused in the middle of an
+    /// instruction due to the last `step()` being interrupted by a breakpoint
+    /// condition.  Returns false if the processor is between instructions.
+    fn is_mid_instruction(&self) -> bool;
 }
 
 //===========================================================================//

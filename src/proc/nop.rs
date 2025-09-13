@@ -3,11 +3,21 @@ use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
 
+#[derive(Clone, Copy, Default)]
+enum Cycle {
+    #[default]
+    BetweenInstructions,
+    ExecOpcode,
+}
+
+//===========================================================================//
+
 /// A simulated processor that has no registers and treats every opcode as NOP.
 /// This can be used as a stub for testing.
 #[derive(Default)]
 pub struct NopProc {
     pc: u32,
+    cycle: Cycle,
 }
 
 impl NopProc {
@@ -32,6 +42,7 @@ impl SimProc for NopProc {
 
     fn set_pc(&mut self, addr: u32) {
         self.pc = addr;
+        self.cycle = Cycle::BetweenInstructions;
     }
 
     fn register_names(&self) -> &'static [&'static str] {
@@ -45,11 +56,19 @@ impl SimProc for NopProc {
     fn set_register(&mut self, _name: &str, _value: u32) {}
 
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        watch(bus, self.pc, WatchKind::Read)?;
+        if matches!(self.cycle, Cycle::BetweenInstructions) {
+            self.cycle = Cycle::ExecOpcode;
+            watch(bus, self.pc, WatchKind::Read)?;
+        }
+        debug_assert!(matches!(self.cycle, Cycle::ExecOpcode));
+        self.cycle = Cycle::BetweenInstructions;
         bus.read_byte(self.pc);
         self.pc += 1;
-        watch(bus, self.pc, WatchKind::Exec)?;
-        Ok(())
+        watch(bus, self.pc, WatchKind::Pc)
+    }
+
+    fn is_mid_instruction(&self) -> bool {
+        !matches!(self.cycle, Cycle::BetweenInstructions)
     }
 }
 
@@ -62,6 +81,28 @@ fn watch(
         Err(SimBreak::Watchpoint(kind, id))
     } else {
         Ok(())
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::{NopProc, SimBreak, SimProc};
+    use crate::bus::{WatchKind, new_open_bus};
+
+    #[test]
+    fn set_pc_mid_instruction() {
+        let mut bus = new_open_bus(16);
+        let mut proc = NopProc::new();
+        let id = bus.watch_address(0x0000, WatchKind::Read);
+        assert_eq!(
+            proc.step(&mut *bus),
+            Err(SimBreak::Watchpoint(WatchKind::Read, id)),
+        );
+        assert!(proc.is_mid_instruction());
+        proc.set_pc(0x0100);
+        assert!(!proc.is_mid_instruction());
     }
 }
 
