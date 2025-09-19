@@ -447,8 +447,8 @@ mod tests {
     use num_bigint::BigInt;
 
     fn compile(source: &str) -> Vec<AdsInstruction> {
-        let mut bus = new_open_bus(16);
-        let cpu = Mos6502::new(&mut *bus);
+        let bus = new_open_bus(16);
+        let cpu = Mos6502::new();
         let sim = SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))]);
         AdsProgram::compile_source(source, &sim).unwrap().instructions
     }

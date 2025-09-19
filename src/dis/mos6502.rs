@@ -121,6 +121,54 @@ pub enum Operation {
     Txs,
     /// A TYA (transfer index Y to A) operation.
     Tya,
+    /// An undocumented ANC (AND then set carry from negative flag) operation.
+    UndocAnc,
+    /// An undocumented ARR (AND then rotate right) operation.
+    UndocArr,
+    /// An undocumented ASR (AND then logical shift right) operation.
+    UndocAsr,
+    /// An undocumented DCP (decrement memory then compare with accumulator)
+    /// operation.
+    UndocDcp,
+    /// An undocumented ISC (increment memory then subtract with borrow)
+    /// operation.
+    UndocIsc,
+    /// An undocumented JAM (halt processor) operation.
+    UndocJam,
+    /// An undocumented LAS (load then AND with stack pointer) operation.
+    UndocLas,
+    /// An undocumented LAX (load accumulator and index X) operation.
+    UndocLax,
+    /// An undocumented NOP (no operation) operation.
+    UndocNop,
+    /// An undocumented RLA (rotate left then binary AND) operation.
+    UndocRla,
+    /// An undocumented RRA (rotate right then add with carry) operation.
+    UndocRra,
+    /// An undocumented SAX (store accumulator AND index X) operation.
+    UndocSax,
+    /// An undocumented SBC (subtract from accumulator with borrow) operation.
+    UndocSbc,
+    /// An undocumented SBX (subtract from accumulator AND index X) operation.
+    UndocSbx,
+    /// An undocumented SHA (store accumulator AND index X AND value)
+    /// operation.
+    UndocSha,
+    /// An undocumented SHS (transfer accumulator AND index X to stack pointer
+    /// and store) operation.
+    UndocShs,
+    /// An undocumented SHX (store index X AND value) operation.
+    UndocShx,
+    /// An undocumented SHY (store index Y AND value) operation.
+    UndocShy,
+    /// An undocumented SLO (arithmetic shift left then OR with accumulator)
+    /// operation.
+    UndocSlo,
+    /// An undocumented SRE (logical shift right then exclusive OR with
+    /// accumulator) operation.
+    UndocSre,
+    /// An undocumented XAA (non-deterministic) operation.
+    UndocXaa,
 }
 
 impl Operation {
@@ -183,6 +231,27 @@ impl Operation {
             Operation::Txa => "TXA",
             Operation::Txs => "TXS",
             Operation::Tya => "TYA",
+            Operation::UndocAnc => "anc",
+            Operation::UndocArr => "arr",
+            Operation::UndocAsr => "asr",
+            Operation::UndocDcp => "dcp",
+            Operation::UndocIsc => "isc",
+            Operation::UndocJam => "jam",
+            Operation::UndocLas => "las",
+            Operation::UndocLax => "lax",
+            Operation::UndocNop => "nop",
+            Operation::UndocRla => "rla",
+            Operation::UndocRra => "rra",
+            Operation::UndocSax => "sax",
+            Operation::UndocSbc => "sbc",
+            Operation::UndocSbx => "sbx",
+            Operation::UndocSha => "sha",
+            Operation::UndocShs => "shs",
+            Operation::UndocShx => "shx",
+            Operation::UndocShy => "shy",
+            Operation::UndocSlo => "slo",
+            Operation::UndocSre => "sre",
+            Operation::UndocXaa => "xaa",
         }
     }
 }
@@ -192,6 +261,8 @@ impl Operation {
 pub enum AddrMode {
     /// No additional arguments to the opcode.
     Implied,
+    /// Operate on the A register.
+    Accumulator,
     /// Operate on a constant byte immediately following the opcode.
     Immediate,
     /// Operate on an address that is offset (by the signed byte following the
@@ -229,6 +300,8 @@ pub enum AddrMode {
 pub enum Operand {
     /// No additional arguments to the opcode.
     Implied,
+    /// Operate on the A register.
+    Accumulator,
     /// Operate on the given constant byte.
     Immediate(u8),
     /// Operate on an address that is offset (by the given signed byte) from
@@ -262,6 +335,7 @@ impl Operand {
     pub fn size(self) -> usize {
         match self {
             Operand::Implied => 0,
+            Operand::Accumulator => 0,
             Operand::Immediate(_) => 1,
             Operand::Relative(_) => 1,
             Operand::Absolute(_) => 2,
@@ -281,6 +355,7 @@ impl Operand {
     fn format(self, pc: u16, bus: &dyn SimBus) -> String {
         match self {
             Operand::Implied => String::new(),
+            Operand::Accumulator => " A".to_string(),
             Operand::Immediate(byte) => format!(" #${byte:02x}"),
             Operand::Relative(offset) => {
                 let dest = pc.wrapping_add(2).wrapping_add(offset as u16);
@@ -334,157 +409,260 @@ pub fn decode_opcode(opcode: u8) -> (Operation, AddrMode) {
     match opcode {
         0x00 => (Operation::Brk, AddrMode::Immediate),
         0x01 => (Operation::Ora, AddrMode::XIndexedZeroPageIndirect),
+        0x02 => (Operation::UndocJam, AddrMode::Implied),
+        0x03 => (Operation::UndocSlo, AddrMode::XIndexedZeroPageIndirect),
+        0x04 => (Operation::UndocNop, AddrMode::ZeroPage),
         0x05 => (Operation::Ora, AddrMode::ZeroPage),
         0x06 => (Operation::Asl, AddrMode::ZeroPage),
+        0x07 => (Operation::UndocSlo, AddrMode::ZeroPage),
         0x08 => (Operation::Php, AddrMode::Implied),
         0x09 => (Operation::Ora, AddrMode::Immediate),
-        0x0a => (Operation::Asl, AddrMode::Implied),
+        0x0a => (Operation::Asl, AddrMode::Accumulator),
+        0x0b => (Operation::UndocAnc, AddrMode::Immediate),
+        0x0c => (Operation::UndocNop, AddrMode::Absolute),
         0x0d => (Operation::Ora, AddrMode::Absolute),
         0x0e => (Operation::Asl, AddrMode::Absolute),
+        0x0f => (Operation::UndocSlo, AddrMode::Absolute),
         0x10 => (Operation::Bpl, AddrMode::Relative),
         0x11 => (Operation::Ora, AddrMode::ZeroPageIndirectYIndexed),
+        0x12 => (Operation::UndocJam, AddrMode::Implied),
+        0x13 => (Operation::UndocSlo, AddrMode::ZeroPageIndirectYIndexed),
+        0x14 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
         0x15 => (Operation::Ora, AddrMode::XIndexedZeroPage),
         0x16 => (Operation::Asl, AddrMode::XIndexedZeroPage),
+        0x17 => (Operation::UndocSlo, AddrMode::XIndexedZeroPage),
         0x18 => (Operation::Clc, AddrMode::Implied),
         0x19 => (Operation::Ora, AddrMode::YIndexedAbsolute),
+        0x1a => (Operation::UndocNop, AddrMode::Implied),
+        0x1b => (Operation::UndocSlo, AddrMode::YIndexedAbsolute),
+        0x1c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
         0x1d => (Operation::Ora, AddrMode::XIndexedAbsolute),
         0x1e => (Operation::Asl, AddrMode::XIndexedAbsolute),
+        0x1f => (Operation::UndocSlo, AddrMode::XIndexedAbsolute),
         0x20 => (Operation::Jsr, AddrMode::Absolute),
         0x21 => (Operation::And, AddrMode::XIndexedZeroPageIndirect),
+        0x22 => (Operation::UndocJam, AddrMode::Implied),
+        0x23 => (Operation::UndocRla, AddrMode::XIndexedZeroPageIndirect),
         0x24 => (Operation::Bit, AddrMode::ZeroPage),
         0x25 => (Operation::And, AddrMode::ZeroPage),
         0x26 => (Operation::Rol, AddrMode::ZeroPage),
+        0x27 => (Operation::UndocRla, AddrMode::ZeroPage),
         0x28 => (Operation::Plp, AddrMode::Implied),
         0x29 => (Operation::And, AddrMode::Immediate),
-        0x2a => (Operation::Rol, AddrMode::Implied),
+        0x2a => (Operation::Rol, AddrMode::Accumulator),
+        0x2b => (Operation::UndocAnc, AddrMode::Immediate),
         0x2c => (Operation::Bit, AddrMode::Absolute),
         0x2d => (Operation::And, AddrMode::Absolute),
         0x2e => (Operation::Rol, AddrMode::Absolute),
+        0x2f => (Operation::UndocRla, AddrMode::Absolute),
         0x30 => (Operation::Bmi, AddrMode::Relative),
         0x31 => (Operation::And, AddrMode::ZeroPageIndirectYIndexed),
+        0x32 => (Operation::UndocJam, AddrMode::Implied),
+        0x33 => (Operation::UndocRla, AddrMode::ZeroPageIndirectYIndexed),
+        0x34 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
         0x35 => (Operation::And, AddrMode::XIndexedZeroPage),
         0x36 => (Operation::Rol, AddrMode::XIndexedZeroPage),
+        0x37 => (Operation::UndocRla, AddrMode::XIndexedZeroPage),
         0x38 => (Operation::Sec, AddrMode::Implied),
         0x39 => (Operation::And, AddrMode::YIndexedAbsolute),
+        0x3a => (Operation::UndocNop, AddrMode::Implied),
+        0x3b => (Operation::UndocRla, AddrMode::YIndexedAbsolute),
+        0x3c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
         0x3d => (Operation::And, AddrMode::XIndexedAbsolute),
         0x3e => (Operation::Rol, AddrMode::XIndexedAbsolute),
+        0x3f => (Operation::UndocRla, AddrMode::XIndexedAbsolute),
         0x40 => (Operation::Rti, AddrMode::Implied),
         0x41 => (Operation::Eor, AddrMode::XIndexedZeroPageIndirect),
+        0x42 => (Operation::UndocJam, AddrMode::Implied),
+        0x43 => (Operation::UndocSre, AddrMode::XIndexedZeroPageIndirect),
+        0x44 => (Operation::UndocNop, AddrMode::ZeroPage),
         0x45 => (Operation::Eor, AddrMode::ZeroPage),
         0x46 => (Operation::Lsr, AddrMode::ZeroPage),
+        0x47 => (Operation::UndocSre, AddrMode::ZeroPage),
         0x48 => (Operation::Pha, AddrMode::Implied),
         0x49 => (Operation::Eor, AddrMode::Immediate),
-        0x4a => (Operation::Lsr, AddrMode::Implied),
+        0x4a => (Operation::Lsr, AddrMode::Accumulator),
+        0x4b => (Operation::UndocAsr, AddrMode::Immediate),
         0x4c => (Operation::Jmp, AddrMode::Absolute),
         0x4d => (Operation::Eor, AddrMode::Absolute),
         0x4e => (Operation::Lsr, AddrMode::Absolute),
+        0x4f => (Operation::UndocSre, AddrMode::Absolute),
         0x50 => (Operation::Bvc, AddrMode::Relative),
         0x51 => (Operation::Eor, AddrMode::ZeroPageIndirectYIndexed),
+        0x52 => (Operation::UndocJam, AddrMode::Implied),
+        0x53 => (Operation::UndocSre, AddrMode::ZeroPageIndirectYIndexed),
+        0x54 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
         0x55 => (Operation::Eor, AddrMode::XIndexedZeroPage),
         0x56 => (Operation::Lsr, AddrMode::XIndexedZeroPage),
+        0x57 => (Operation::UndocSre, AddrMode::XIndexedZeroPage),
         0x58 => (Operation::Cli, AddrMode::Implied),
         0x59 => (Operation::Eor, AddrMode::YIndexedAbsolute),
+        0x5a => (Operation::UndocNop, AddrMode::Implied),
+        0x5b => (Operation::UndocSre, AddrMode::YIndexedAbsolute),
+        0x5c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
         0x5d => (Operation::Eor, AddrMode::XIndexedAbsolute),
         0x5e => (Operation::Lsr, AddrMode::XIndexedAbsolute),
+        0x5f => (Operation::UndocSre, AddrMode::XIndexedAbsolute),
         0x60 => (Operation::Rts, AddrMode::Implied),
         0x61 => (Operation::Adc, AddrMode::XIndexedZeroPageIndirect),
+        0x62 => (Operation::UndocJam, AddrMode::Implied),
+        0x63 => (Operation::UndocRra, AddrMode::XIndexedZeroPageIndirect),
+        0x64 => (Operation::UndocNop, AddrMode::ZeroPage),
         0x65 => (Operation::Adc, AddrMode::ZeroPage),
         0x66 => (Operation::Ror, AddrMode::ZeroPage),
+        0x67 => (Operation::UndocRra, AddrMode::ZeroPage),
         0x68 => (Operation::Pla, AddrMode::Implied),
         0x69 => (Operation::Adc, AddrMode::Immediate),
-        0x6a => (Operation::Ror, AddrMode::Implied),
+        0x6a => (Operation::Ror, AddrMode::Accumulator),
+        0x6b => (Operation::UndocArr, AddrMode::Immediate),
         0x6c => (Operation::Jmp, AddrMode::AbsoluteIndirect),
         0x6d => (Operation::Adc, AddrMode::Absolute),
         0x6e => (Operation::Ror, AddrMode::Absolute),
+        0x6f => (Operation::UndocRra, AddrMode::Absolute),
         0x70 => (Operation::Bvs, AddrMode::Relative),
         0x71 => (Operation::Adc, AddrMode::ZeroPageIndirectYIndexed),
+        0x72 => (Operation::UndocJam, AddrMode::Implied),
+        0x73 => (Operation::UndocRra, AddrMode::ZeroPageIndirectYIndexed),
+        0x74 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
         0x75 => (Operation::Adc, AddrMode::XIndexedZeroPage),
         0x76 => (Operation::Ror, AddrMode::XIndexedZeroPage),
+        0x77 => (Operation::UndocRra, AddrMode::XIndexedZeroPage),
         0x78 => (Operation::Sei, AddrMode::Implied),
         0x79 => (Operation::Adc, AddrMode::YIndexedAbsolute),
+        0x7a => (Operation::UndocNop, AddrMode::Implied),
+        0x7b => (Operation::UndocRra, AddrMode::YIndexedAbsolute),
+        0x7c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
         0x7d => (Operation::Adc, AddrMode::XIndexedAbsolute),
         0x7e => (Operation::Ror, AddrMode::XIndexedAbsolute),
+        0x7f => (Operation::UndocRra, AddrMode::XIndexedAbsolute),
+        0x80 => (Operation::UndocNop, AddrMode::Immediate),
         0x81 => (Operation::Sta, AddrMode::XIndexedZeroPageIndirect),
+        0x82 => (Operation::UndocNop, AddrMode::Immediate),
+        0x83 => (Operation::UndocSax, AddrMode::XIndexedZeroPageIndirect),
         0x84 => (Operation::Sty, AddrMode::ZeroPage),
         0x85 => (Operation::Sta, AddrMode::ZeroPage),
         0x86 => (Operation::Stx, AddrMode::ZeroPage),
+        0x87 => (Operation::UndocSax, AddrMode::ZeroPage),
         0x88 => (Operation::Dey, AddrMode::Implied),
+        0x89 => (Operation::UndocNop, AddrMode::Immediate),
         0x8a => (Operation::Txa, AddrMode::Implied),
+        0x8b => (Operation::UndocXaa, AddrMode::Immediate),
         0x8c => (Operation::Sty, AddrMode::Absolute),
         0x8d => (Operation::Sta, AddrMode::Absolute),
         0x8e => (Operation::Stx, AddrMode::Absolute),
+        0x8f => (Operation::UndocSax, AddrMode::Absolute),
         0x90 => (Operation::Bcc, AddrMode::Relative),
         0x91 => (Operation::Sta, AddrMode::ZeroPageIndirectYIndexed),
+        0x92 => (Operation::UndocJam, AddrMode::Implied),
+        0x93 => (Operation::UndocSha, AddrMode::ZeroPageIndirectYIndexed),
         0x94 => (Operation::Sty, AddrMode::XIndexedZeroPage),
         0x95 => (Operation::Sta, AddrMode::XIndexedZeroPage),
         0x96 => (Operation::Stx, AddrMode::YIndexedZeroPage),
+        0x97 => (Operation::UndocSax, AddrMode::YIndexedZeroPage),
         0x98 => (Operation::Tya, AddrMode::Implied),
         0x99 => (Operation::Sta, AddrMode::YIndexedAbsolute),
         0x9a => (Operation::Txs, AddrMode::Implied),
+        0x9b => (Operation::UndocShs, AddrMode::YIndexedAbsolute),
+        0x9c => (Operation::UndocShy, AddrMode::XIndexedAbsolute),
         0x9d => (Operation::Sta, AddrMode::XIndexedAbsolute),
+        0x9e => (Operation::UndocShx, AddrMode::YIndexedAbsolute),
+        0x9f => (Operation::UndocSha, AddrMode::YIndexedAbsolute),
         0xa0 => (Operation::Ldy, AddrMode::Immediate),
         0xa1 => (Operation::Lda, AddrMode::XIndexedZeroPageIndirect),
         0xa2 => (Operation::Ldx, AddrMode::Immediate),
+        0xa3 => (Operation::UndocLax, AddrMode::XIndexedZeroPageIndirect),
         0xa4 => (Operation::Ldy, AddrMode::ZeroPage),
         0xa5 => (Operation::Lda, AddrMode::ZeroPage),
         0xa6 => (Operation::Ldx, AddrMode::ZeroPage),
+        0xa7 => (Operation::UndocLax, AddrMode::ZeroPage),
         0xa8 => (Operation::Tay, AddrMode::Implied),
         0xa9 => (Operation::Lda, AddrMode::Immediate),
         0xaa => (Operation::Tax, AddrMode::Implied),
+        0xab => (Operation::UndocLax, AddrMode::Immediate),
         0xac => (Operation::Ldy, AddrMode::Absolute),
         0xad => (Operation::Lda, AddrMode::Absolute),
         0xae => (Operation::Ldx, AddrMode::Absolute),
+        0xaf => (Operation::UndocLax, AddrMode::Absolute),
         0xb0 => (Operation::Bcs, AddrMode::Relative),
         0xb1 => (Operation::Lda, AddrMode::ZeroPageIndirectYIndexed),
+        0xb2 => (Operation::UndocJam, AddrMode::Implied),
+        0xb3 => (Operation::UndocLax, AddrMode::ZeroPageIndirectYIndexed),
         0xb4 => (Operation::Ldy, AddrMode::XIndexedZeroPage),
         0xb5 => (Operation::Lda, AddrMode::XIndexedZeroPage),
         0xb6 => (Operation::Ldx, AddrMode::YIndexedZeroPage),
+        0xb7 => (Operation::UndocLax, AddrMode::YIndexedZeroPage),
         0xb8 => (Operation::Clv, AddrMode::Implied),
         0xb9 => (Operation::Lda, AddrMode::YIndexedAbsolute),
         0xba => (Operation::Tsx, AddrMode::Implied),
+        0xbb => (Operation::UndocLas, AddrMode::YIndexedAbsolute),
         0xbc => (Operation::Ldy, AddrMode::XIndexedAbsolute),
         0xbd => (Operation::Lda, AddrMode::XIndexedAbsolute),
         0xbe => (Operation::Ldx, AddrMode::YIndexedAbsolute),
+        0xbf => (Operation::UndocLax, AddrMode::YIndexedAbsolute),
         0xc0 => (Operation::Cpy, AddrMode::Immediate),
         0xc1 => (Operation::Cmp, AddrMode::XIndexedZeroPageIndirect),
+        0xc2 => (Operation::UndocNop, AddrMode::Immediate),
+        0xc3 => (Operation::UndocDcp, AddrMode::XIndexedZeroPageIndirect),
         0xc4 => (Operation::Cpy, AddrMode::ZeroPage),
         0xc5 => (Operation::Cmp, AddrMode::ZeroPage),
         0xc6 => (Operation::Dec, AddrMode::ZeroPage),
+        0xc7 => (Operation::UndocDcp, AddrMode::ZeroPage),
         0xc8 => (Operation::Iny, AddrMode::Implied),
         0xc9 => (Operation::Cmp, AddrMode::Immediate),
         0xca => (Operation::Dex, AddrMode::Implied),
+        0xcb => (Operation::UndocSbx, AddrMode::Immediate),
         0xcc => (Operation::Cpy, AddrMode::Absolute),
         0xcd => (Operation::Cmp, AddrMode::Absolute),
         0xce => (Operation::Dec, AddrMode::Absolute),
+        0xcf => (Operation::UndocDcp, AddrMode::Absolute),
         0xd0 => (Operation::Bne, AddrMode::Relative),
         0xd1 => (Operation::Cmp, AddrMode::ZeroPageIndirectYIndexed),
+        0xd2 => (Operation::UndocJam, AddrMode::Implied),
+        0xd3 => (Operation::UndocDcp, AddrMode::ZeroPageIndirectYIndexed),
+        0xd4 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
         0xd5 => (Operation::Cmp, AddrMode::XIndexedZeroPage),
         0xd6 => (Operation::Dec, AddrMode::XIndexedZeroPage),
+        0xd7 => (Operation::UndocDcp, AddrMode::XIndexedZeroPage),
         0xd8 => (Operation::Cld, AddrMode::Implied),
         0xd9 => (Operation::Cmp, AddrMode::YIndexedAbsolute),
+        0xda => (Operation::UndocNop, AddrMode::Implied),
+        0xdb => (Operation::UndocDcp, AddrMode::YIndexedAbsolute),
+        0xdc => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
         0xdd => (Operation::Cmp, AddrMode::XIndexedAbsolute),
         0xde => (Operation::Dec, AddrMode::XIndexedAbsolute),
+        0xdf => (Operation::UndocDcp, AddrMode::XIndexedAbsolute),
         0xe0 => (Operation::Cpx, AddrMode::Immediate),
         0xe1 => (Operation::Sbc, AddrMode::XIndexedZeroPageIndirect),
+        0xe2 => (Operation::UndocNop, AddrMode::Immediate),
+        0xe3 => (Operation::UndocIsc, AddrMode::XIndexedZeroPageIndirect),
         0xe4 => (Operation::Cpx, AddrMode::ZeroPage),
         0xe5 => (Operation::Sbc, AddrMode::ZeroPage),
         0xe6 => (Operation::Inc, AddrMode::ZeroPage),
+        0xe7 => (Operation::UndocIsc, AddrMode::ZeroPage),
         0xe8 => (Operation::Inx, AddrMode::Implied),
         0xe9 => (Operation::Sbc, AddrMode::Immediate),
         0xea => (Operation::Nop, AddrMode::Implied),
+        0xeb => (Operation::UndocSbc, AddrMode::Immediate),
         0xec => (Operation::Cpx, AddrMode::Absolute),
         0xed => (Operation::Sbc, AddrMode::Absolute),
         0xee => (Operation::Inc, AddrMode::Absolute),
+        0xef => (Operation::UndocIsc, AddrMode::Absolute),
         0xf0 => (Operation::Beq, AddrMode::Relative),
         0xf1 => (Operation::Sbc, AddrMode::ZeroPageIndirectYIndexed),
+        0xf2 => (Operation::UndocJam, AddrMode::Implied),
+        0xf3 => (Operation::UndocIsc, AddrMode::ZeroPageIndirectYIndexed),
+        0xf4 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
         0xf5 => (Operation::Sbc, AddrMode::XIndexedZeroPage),
         0xf6 => (Operation::Inc, AddrMode::XIndexedZeroPage),
+        0xf7 => (Operation::UndocIsc, AddrMode::XIndexedZeroPage),
         0xf8 => (Operation::Sed, AddrMode::Implied),
         0xf9 => (Operation::Sbc, AddrMode::YIndexedAbsolute),
+        0xfa => (Operation::UndocNop, AddrMode::Implied),
+        0xfb => (Operation::UndocIsc, AddrMode::YIndexedAbsolute),
+        0xfc => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
         0xfd => (Operation::Sbc, AddrMode::XIndexedAbsolute),
         0xfe => (Operation::Inc, AddrMode::XIndexedAbsolute),
-        // TODO: implement remaining opcodes
-        _ => panic!("unimplemented opcode: ${opcode:02x}"),
+        0xff => (Operation::UndocIsc, AddrMode::XIndexedAbsolute),
     }
 }
 
@@ -496,6 +674,7 @@ pub fn disassemble_instruction<R: Read>(
     let (operation, mode) = decode_opcode(opcode);
     let operand = match mode {
         AddrMode::Implied => Operand::Implied,
+        AddrMode::Accumulator => Operand::Accumulator,
         AddrMode::Immediate => Operand::Immediate(read_byte(reader)?),
         AddrMode::Relative => Operand::Relative(read_byte(reader)? as i8),
         AddrMode::Absolute => Operand::Absolute(read_word(reader)?),
@@ -605,10 +784,10 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_accumulator() {
-        assert_eq!(disassemble(&[0x0a]), "ASL");
-        assert_eq!(disassemble(&[0x4a]), "LSR");
-        assert_eq!(disassemble(&[0x2a]), "ROL");
-        assert_eq!(disassemble(&[0x6a]), "ROR");
+        assert_eq!(disassemble(&[0x0a]), "ASL A");
+        assert_eq!(disassemble(&[0x4a]), "LSR A");
+        assert_eq!(disassemble(&[0x2a]), "ROL A");
+        assert_eq!(disassemble(&[0x6a]), "ROR A");
     }
 
     #[test]
@@ -815,6 +994,151 @@ mod tests {
             disassemble_with_label(&[0x91, 0xf0], 0xf0, "foo"),
             "STA (foo), Y"
         );
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_implied() {
+        assert_eq!(disassemble(&[0x02]), "jam");
+        assert_eq!(disassemble(&[0x12]), "jam");
+        assert_eq!(disassemble(&[0x22]), "jam");
+        assert_eq!(disassemble(&[0x32]), "jam");
+        assert_eq!(disassemble(&[0x42]), "jam");
+        assert_eq!(disassemble(&[0x52]), "jam");
+        assert_eq!(disassemble(&[0x62]), "jam");
+        assert_eq!(disassemble(&[0x72]), "jam");
+        assert_eq!(disassemble(&[0x92]), "jam");
+        assert_eq!(disassemble(&[0xb2]), "jam");
+        assert_eq!(disassemble(&[0xd2]), "jam");
+        assert_eq!(disassemble(&[0xf2]), "jam");
+        assert_eq!(disassemble(&[0x1a]), "nop");
+        assert_eq!(disassemble(&[0x3a]), "nop");
+        assert_eq!(disassemble(&[0x5a]), "nop");
+        assert_eq!(disassemble(&[0x7a]), "nop");
+        assert_eq!(disassemble(&[0xda]), "nop");
+        assert_eq!(disassemble(&[0xfa]), "nop");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_immediate() {
+        assert_eq!(disassemble(&[0x0b, 0x12]), "anc #$12");
+        assert_eq!(disassemble(&[0x2b, 0x34]), "anc #$34");
+        assert_eq!(disassemble(&[0x6b, 0x56]), "arr #$56");
+        assert_eq!(disassemble(&[0x4b, 0x78]), "asr #$78");
+        assert_eq!(disassemble(&[0xab, 0x9a]), "lax #$9a");
+        assert_eq!(disassemble(&[0x80, 0x12]), "nop #$12");
+        assert_eq!(disassemble(&[0x82, 0x34]), "nop #$34");
+        assert_eq!(disassemble(&[0x89, 0x56]), "nop #$56");
+        assert_eq!(disassemble(&[0xc2, 0x78]), "nop #$78");
+        assert_eq!(disassemble(&[0xe2, 0x9a]), "nop #$9a");
+        assert_eq!(disassemble(&[0xeb, 0x12]), "sbc #$12");
+        assert_eq!(disassemble(&[0xcb, 0x34]), "sbx #$34");
+        assert_eq!(disassemble(&[0x8b, 0x56]), "xaa #$56");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_absolute() {
+        assert_eq!(disassemble(&[0xcf, 0x34, 0x12]), "dcp $1234");
+        assert_eq!(disassemble(&[0xef, 0x34, 0x12]), "isc $1234");
+        assert_eq!(disassemble(&[0xaf, 0x34, 0x12]), "lax $1234");
+        assert_eq!(disassemble(&[0x0c, 0x34, 0x12]), "nop $1234");
+        assert_eq!(disassemble(&[0x2f, 0x34, 0x12]), "rla $1234");
+        assert_eq!(disassemble(&[0x6f, 0x34, 0x12]), "rra $1234");
+        assert_eq!(disassemble(&[0x8f, 0x34, 0x12]), "sax $1234");
+        assert_eq!(disassemble(&[0x0f, 0x34, 0x12]), "slo $1234");
+        assert_eq!(disassemble(&[0x4f, 0x34, 0x12]), "sre $1234");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_x_indexed_absolute() {
+        assert_eq!(disassemble(&[0xdf, 0x34, 0x12]), "dcp $1234, X");
+        assert_eq!(disassemble(&[0xff, 0x34, 0x12]), "isc $1234, X");
+        assert_eq!(disassemble(&[0x1c, 0x34, 0x12]), "nop $1234, X");
+        assert_eq!(disassemble(&[0x3c, 0x34, 0x12]), "nop $1234, X");
+        assert_eq!(disassemble(&[0x5c, 0x34, 0x12]), "nop $1234, X");
+        assert_eq!(disassemble(&[0x7c, 0x34, 0x12]), "nop $1234, X");
+        assert_eq!(disassemble(&[0xdc, 0x34, 0x12]), "nop $1234, X");
+        assert_eq!(disassemble(&[0xfc, 0x34, 0x12]), "nop $1234, X");
+        assert_eq!(disassemble(&[0x3f, 0x34, 0x12]), "rla $1234, X");
+        assert_eq!(disassemble(&[0x7f, 0x34, 0x12]), "rra $1234, X");
+        assert_eq!(disassemble(&[0x9c, 0x34, 0x12]), "shy $1234, X");
+        assert_eq!(disassemble(&[0x1f, 0x34, 0x12]), "slo $1234, X");
+        assert_eq!(disassemble(&[0x5f, 0x34, 0x12]), "sre $1234, X");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_y_indexed_absolute() {
+        assert_eq!(disassemble(&[0xdb, 0x34, 0x12]), "dcp $1234, Y");
+        assert_eq!(disassemble(&[0xfb, 0x34, 0x12]), "isc $1234, Y");
+        assert_eq!(disassemble(&[0xbb, 0x34, 0x12]), "las $1234, Y");
+        assert_eq!(disassemble(&[0xbf, 0x34, 0x12]), "lax $1234, Y");
+        assert_eq!(disassemble(&[0x3b, 0x34, 0x12]), "rla $1234, Y");
+        assert_eq!(disassemble(&[0x7b, 0x34, 0x12]), "rra $1234, Y");
+        assert_eq!(disassemble(&[0x9f, 0x34, 0x12]), "sha $1234, Y");
+        assert_eq!(disassemble(&[0x9b, 0x34, 0x12]), "shs $1234, Y");
+        assert_eq!(disassemble(&[0x9e, 0x34, 0x12]), "shx $1234, Y");
+        assert_eq!(disassemble(&[0x1b, 0x34, 0x12]), "slo $1234, Y");
+        assert_eq!(disassemble(&[0x5b, 0x34, 0x12]), "sre $1234, Y");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_zero_page() {
+        assert_eq!(disassemble(&[0xc7, 0x12]), "dcp $12");
+        assert_eq!(disassemble(&[0xe7, 0x12]), "isc $12");
+        assert_eq!(disassemble(&[0xa7, 0x12]), "lax $12");
+        assert_eq!(disassemble(&[0x04, 0x12]), "nop $12");
+        assert_eq!(disassemble(&[0x44, 0x12]), "nop $12");
+        assert_eq!(disassemble(&[0x64, 0x12]), "nop $12");
+        assert_eq!(disassemble(&[0x27, 0x12]), "rla $12");
+        assert_eq!(disassemble(&[0x67, 0x12]), "rra $12");
+        assert_eq!(disassemble(&[0x87, 0x12]), "sax $12");
+        assert_eq!(disassemble(&[0x07, 0x12]), "slo $12");
+        assert_eq!(disassemble(&[0x47, 0x12]), "sre $12");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_x_indexed_zero_page() {
+        assert_eq!(disassemble(&[0xd7, 0x12]), "dcp $12, X");
+        assert_eq!(disassemble(&[0xf7, 0x12]), "isc $12, X");
+        assert_eq!(disassemble(&[0x14, 0x12]), "nop $12, X");
+        assert_eq!(disassemble(&[0x34, 0x12]), "nop $12, X");
+        assert_eq!(disassemble(&[0x54, 0x12]), "nop $12, X");
+        assert_eq!(disassemble(&[0x74, 0x12]), "nop $12, X");
+        assert_eq!(disassemble(&[0xd4, 0x12]), "nop $12, X");
+        assert_eq!(disassemble(&[0xf4, 0x12]), "nop $12, X");
+        assert_eq!(disassemble(&[0x37, 0x12]), "rla $12, X");
+        assert_eq!(disassemble(&[0x77, 0x12]), "rra $12, X");
+        assert_eq!(disassemble(&[0x17, 0x12]), "slo $12, X");
+        assert_eq!(disassemble(&[0x57, 0x12]), "sre $12, X");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_y_indexed_zero_page() {
+        assert_eq!(disassemble(&[0xb7, 0x12]), "lax $12, Y");
+        assert_eq!(disassemble(&[0x97, 0x12]), "sax $12, Y");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_x_indexed_zero_page_indirect() {
+        assert_eq!(disassemble(&[0xc3, 0x12]), "dcp ($12, X)");
+        assert_eq!(disassemble(&[0xe3, 0x12]), "isc ($12, X)");
+        assert_eq!(disassemble(&[0xa3, 0x12]), "lax ($12, X)");
+        assert_eq!(disassemble(&[0x23, 0x12]), "rla ($12, X)");
+        assert_eq!(disassemble(&[0x63, 0x12]), "rra ($12, X)");
+        assert_eq!(disassemble(&[0x83, 0x12]), "sax ($12, X)");
+        assert_eq!(disassemble(&[0x03, 0x12]), "slo ($12, X)");
+        assert_eq!(disassemble(&[0x43, 0x12]), "sre ($12, X)");
+    }
+
+    #[test]
+    fn disassemble_undocumented_addr_mode_zero_page_indirect_y_indexed() {
+        assert_eq!(disassemble(&[0xd3, 0x12]), "dcp ($12), Y");
+        assert_eq!(disassemble(&[0xf3, 0x12]), "isc ($12), Y");
+        assert_eq!(disassemble(&[0xb3, 0x12]), "lax ($12), Y");
+        assert_eq!(disassemble(&[0x33, 0x12]), "rla ($12), Y");
+        assert_eq!(disassemble(&[0x73, 0x12]), "rra ($12), Y");
+        assert_eq!(disassemble(&[0x93, 0x12]), "sha ($12), Y");
+        assert_eq!(disassemble(&[0x13, 0x12]), "slo ($12), Y");
+        assert_eq!(disassemble(&[0x53, 0x12]), "sre ($12), Y");
     }
 }
 

@@ -1,8 +1,14 @@
 use crate::bus::{BusPeeker, SimBus, WatchKind};
-use crate::dis::mos6502::{disassemble_instruction, format_instruction};
+use crate::dis::mos6502::{
+    AddrMode, Operation, decode_opcode, disassemble_instruction,
+    format_instruction,
+};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
+
+const VECTOR_IRQ: u16 = 0xfffe;
+const VECTOR_RESET: u16 = 0xfffc;
 
 const PROC_FLAG_N: u8 = 0b1000_0000;
 const PROC_FLAG_V: u8 = 0b0100_0000;
@@ -22,19 +28,49 @@ const REG_P_MASK: u8 = PROC_FLAG_N
 
 //===========================================================================//
 
-/// An instruction addressing mode (for a 6502 processor).
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum AddrMode {
-    Immediate,
-    Absolute,
-    AbsoluteIndirect,
-    XIndexedAbsolute,
-    YIndexedAbsolute,
-    ZeroPage,
-    XIndexedZeroPage,
-    YIndexedZeroPage,
-    XIndexedZeroPageIndirect,
-    ZeroPageIndirectYIndexed,
+#[derive(Clone, Copy)]
+enum Microcode {
+    Add,          // A += DATA + C, update NVZC flags appropriately
+    BitTest,      // update NV from DATA and Z from (DATA & A)
+    BitwiseAnd,   // A &= DATA, update NZ flags from A
+    BitwiseOr,    // A |= DATA, update NZ flags from A
+    BitwiseXor,   // A ^= DATA, update NZ flags from A
+    Branch,       // if TEMP != 0 then PC += (DATA as i8)
+    Compare,      // compare DATA to TEMP, update NZC flags appropriately
+    DecodeOpcode, // decode DATA as opcode, push new microcode
+    Decrement,    // DATA -= 1, set_nz_flags(DATA)
+    GetPcHi,      // DATA = PC >> 8
+    GetPcLo,      // DATA = PC & 0xff
+    GetRegA,      // DATA = A
+    GetRegP,      // DATA = P | !REG_P_MASK
+    GetRegX,      // DATA = X
+    GetRegY,      // DATA = Y
+    IncAddr,      // ADDR += 1
+    IncAddrLo,    // ADDR = (ADDR & 0xff00) | ((ADDR + 1) & 0x00ff)
+    Increment,    // DATA += 1, set_nz_flags(DATA)
+    IndexX,       // ADDR += X
+    IndexXLo,     // ADDR = (ADDR & 0xff00) | ((ADDR + X) & 0x00ff)
+    IndexY,       // ADDR += Y
+    IndexYLo,     // ADDR = (ADDR & 0xff00) | ((ADDR + Y) & 0x00ff)
+    Jump,         // PC = ADDR
+    MakeAddrAbs,  // ADDR = (DATA << 8) | TEMP
+    MakeAddrZp,   // ADDR = DATA
+    Pull,         // S += 1, DATA = [SP], watch(SP, Read)
+    Push1,        // ADDR = SP, watch(ADDR, Write)
+    Push2,        // [ADDR] = DATA, S -= 1
+    Read,         // DATA = [ADDR], watch(ADDR, Read)
+    ReadAtPc,     // DATA = [PC], watch(PC, Read), PC += 1
+    SetRegA,      // A = DATA, update NZ flags from DATA
+    SetRegP,      // P = DATA & REG_P_MASK
+    SetRegX,      // X = DATA, update NZ flags from DATA
+    SetRegY,      // Y = DATA, update NZ flags from DATA
+    SetTemp,      // TEMP = DATA
+    Subtract,     // A -= DATA + 1 - C, update NVZC flags appropriately
+    RotateLeft,   // rotate DATA left with C, update NZC flags
+    RotateRight,  // rotate DATA right with C, update NZC flags
+    VectorIrq,    // ADDR = VECTOR_IRQ, P |= PROC_FLAG_I
+    Write1,       // watch(ADDR, Write)
+    Write2,       // [ADDR] = DATA
 }
 
 //===========================================================================//
@@ -42,554 +78,833 @@ enum AddrMode {
 /// A simulated MOS 6502 processor.
 pub struct Mos6502 {
     pc: u16,
+    addr: u16,
+    data: u8,
+    temp: u8,
     reg_s: u8,
     reg_p: u8,
     reg_a: u8,
     reg_x: u8,
     reg_y: u8,
+    microcode: Vec<Microcode>,
+}
+
+impl Default for Mos6502 {
+    fn default() -> Mos6502 {
+        Mos6502::new()
+    }
 }
 
 impl Mos6502 {
     /// Returns a new simulated MOS 6502 processor.
-    pub fn new(bus: &mut dyn SimBus) -> Mos6502 {
-        let reset_lo: u8 = bus.read_byte(0xfffc);
-        let reset_hi: u8 = bus.read_byte(0xfffd);
-        let pc = ((reset_hi as u16) << 8) | (reset_lo as u16);
-        Mos6502 { pc, reg_s: 0, reg_p: 0, reg_a: 0, reg_x: 0, reg_y: 0 }
+    pub fn new() -> Mos6502 {
+        Mos6502 {
+            pc: 0,
+            addr: VECTOR_RESET,
+            data: 0,
+            temp: 0,
+            reg_s: 0,
+            reg_p: 0,
+            reg_a: 0,
+            reg_x: 0,
+            reg_y: 0,
+            microcode: vec![
+                Microcode::Jump,
+                Microcode::MakeAddrAbs,
+                Microcode::Read,
+                Microcode::IncAddr,
+                Microcode::SetTemp,
+                Microcode::Read,
+            ],
+        }
     }
 
-    fn op_sbc(
+    fn execute_microcode(
         &mut self,
         bus: &mut dyn SimBus,
-        mode: AddrMode,
+        microcode: Microcode,
     ) -> Result<(), SimBreak> {
-        let rhs = !self.read_mode_data(bus, mode)?;
-        self.add_to(rhs)
+        match microcode {
+            Microcode::Add => self.exec_add(),
+            Microcode::BitTest => self.exec_bit_test(),
+            Microcode::BitwiseAnd => self.exec_bitwise_and(),
+            Microcode::BitwiseOr => self.exec_bitwise_or(),
+            Microcode::BitwiseXor => self.exec_bitwise_xor(),
+            Microcode::Branch => self.exec_branch(),
+            Microcode::Compare => self.exec_compare(),
+            Microcode::DecodeOpcode => self.exec_decode_opcode(),
+            Microcode::Decrement => self.exec_decrement(),
+            Microcode::GetPcHi => self.exec_get_pc_hi(),
+            Microcode::GetPcLo => self.exec_get_pc_lo(),
+            Microcode::GetRegA => self.exec_get_reg_a(),
+            Microcode::GetRegP => self.exec_get_reg_p(),
+            Microcode::GetRegX => self.exec_get_reg_x(),
+            Microcode::GetRegY => self.exec_get_reg_y(),
+            Microcode::IncAddr => self.exec_inc_addr(),
+            Microcode::IncAddrLo => self.exec_inc_addr_lo(),
+            Microcode::Increment => self.exec_increment(),
+            Microcode::IndexX => self.exec_index_x(),
+            Microcode::IndexXLo => self.exec_index_x_lo(),
+            Microcode::IndexY => self.exec_index_y(),
+            Microcode::IndexYLo => self.exec_index_y_lo(),
+            Microcode::Jump => self.exec_jump(),
+            Microcode::MakeAddrAbs => self.exec_make_addr_abs(),
+            Microcode::MakeAddrZp => self.exec_make_addr_zp(),
+            Microcode::Pull => self.exec_pull(bus),
+            Microcode::Push1 => self.exec_push1(bus),
+            Microcode::Push2 => self.exec_push2(bus),
+            Microcode::Read => self.exec_read(bus),
+            Microcode::ReadAtPc => self.exec_read_at_pc(bus),
+            Microcode::RotateLeft => self.exec_rotate_left(),
+            Microcode::RotateRight => self.exec_rotate_right(),
+            Microcode::SetRegA => self.exec_set_reg_a(),
+            Microcode::SetRegP => self.exec_set_reg_p(),
+            Microcode::SetRegX => self.exec_set_reg_x(),
+            Microcode::SetRegY => self.exec_set_reg_y(),
+            Microcode::SetTemp => self.exec_set_temp(),
+            Microcode::Subtract => self.exec_subtract(),
+            Microcode::VectorIrq => self.exec_vector_irq(),
+            Microcode::Write1 => self.exec_write1(bus),
+            Microcode::Write2 => self.exec_write2(bus),
+        }
     }
 
-    fn op_adc(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs = self.read_mode_data(bus, mode)?;
-        self.add_to(rhs)
-    }
-
-    fn op_and(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.reg_a &= rhs;
-        self.set_nz_flags(self.reg_a);
+    fn exec_decode_opcode(&mut self) -> Result<(), SimBreak> {
+        let (operation, addr_mode) = decode_opcode(self.data);
+        match operation {
+            Operation::Adc => self.decode_op_adc(addr_mode),
+            Operation::And => self.decode_op_and(addr_mode),
+            Operation::Asl => self.decode_op_asl(addr_mode),
+            Operation::Bcc => self.decode_op_bcc(),
+            Operation::Bcs => self.decode_op_bcs(),
+            Operation::Beq => self.decode_op_beq(),
+            Operation::Bit => self.decode_op_bit(addr_mode),
+            Operation::Bmi => self.decode_op_bmi(),
+            Operation::Bne => self.decode_op_bne(),
+            Operation::Bpl => self.decode_op_bpl(),
+            Operation::Brk => self.decode_op_brk(),
+            Operation::Bvc => self.decode_op_bvc(),
+            Operation::Bvs => self.decode_op_bvs(),
+            Operation::Clc => self.decode_op_clc(),
+            Operation::Cld => self.decode_op_cld(),
+            Operation::Cli => self.decode_op_cli(),
+            Operation::Clv => self.decode_op_clv(),
+            Operation::Cmp => self.decode_op_cmp(addr_mode),
+            Operation::Cpx => self.decode_op_cpx(addr_mode),
+            Operation::Cpy => self.decode_op_cpy(addr_mode),
+            Operation::Dec => self.decode_op_dec(addr_mode),
+            Operation::Dex => self.decode_op_dex(),
+            Operation::Dey => self.decode_op_dey(),
+            Operation::Eor => self.decode_op_eor(addr_mode),
+            Operation::Inc => self.decode_op_inc(addr_mode),
+            Operation::Inx => self.decode_op_inx(),
+            Operation::Iny => self.decode_op_iny(),
+            Operation::Jmp => self.decode_op_jmp(addr_mode),
+            Operation::Jsr => self.decode_op_jsr(),
+            Operation::Lda => self.decode_op_lda(addr_mode),
+            Operation::Ldx => self.decode_op_ldx(addr_mode),
+            Operation::Ldy => self.decode_op_ldy(addr_mode),
+            Operation::Lsr => self.decode_op_lsr(addr_mode),
+            Operation::Nop => {}
+            Operation::Ora => self.decode_op_ora(addr_mode),
+            Operation::Pha => self.decode_op_pha(),
+            Operation::Php => self.decode_op_php(),
+            Operation::Pla => self.decode_op_pla(),
+            Operation::Plp => self.decode_op_plp(),
+            Operation::Rol => self.decode_op_rol(addr_mode),
+            Operation::Ror => self.decode_op_ror(addr_mode),
+            Operation::Rti => self.decode_op_rti(),
+            Operation::Rts => self.decode_op_rts(),
+            Operation::Sbc => self.decode_op_sbc(addr_mode),
+            Operation::Sec => self.decode_op_sec(),
+            Operation::Sed => self.decode_op_sed(),
+            Operation::Sei => self.decode_op_sei(),
+            Operation::Sta => self.decode_op_sta(addr_mode),
+            Operation::Stx => self.decode_op_stx(addr_mode),
+            Operation::Sty => self.decode_op_sty(addr_mode),
+            Operation::Tax => self.decode_op_tax(),
+            Operation::Tay => self.decode_op_tay(),
+            Operation::Tsx => self.decode_op_tsx(),
+            Operation::Txa => self.decode_op_txa(),
+            Operation::Txs => self.decode_op_txs(),
+            Operation::Tya => self.decode_op_tya(),
+            Operation::UndocNop => self.decode_op_undoc_nop(addr_mode),
+            // TODO: Support more undocumented opcodes.
+            _ => {
+                return Err(SimBreak::HaltOpcode(
+                    operation.mnemonic(),
+                    self.data,
+                ));
+            }
+        }
         Ok(())
     }
 
-    fn op_asl(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let lhs: u8 = bus.read_byte(addr as u32);
-        let result: u8 = self.shift_left(lhs, false)?;
-        bus.write_byte(addr as u32, result);
-        Ok(())
+    fn decode_addr_mode(&mut self, addr_mode: AddrMode) {
+        match addr_mode {
+            AddrMode::Implied | AddrMode::Accumulator => {}
+            AddrMode::Immediate | AddrMode::Relative => {
+                self.addr = self.pc;
+                self.pc += 1;
+            }
+            AddrMode::Absolute => {
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::ReadAtPc);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::AbsoluteIndirect => {
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::Read);
+                self.microcode.push(Microcode::IncAddrLo);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::Read);
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::ReadAtPc);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::XIndexedAbsolute => {
+                self.microcode.push(Microcode::IndexX);
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::ReadAtPc);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::YIndexedAbsolute => {
+                self.microcode.push(Microcode::IndexY);
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::ReadAtPc);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::ZeroPage => {
+                self.microcode.push(Microcode::MakeAddrZp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::XIndexedZeroPage => {
+                self.microcode.push(Microcode::IndexXLo);
+                self.microcode.push(Microcode::MakeAddrZp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::YIndexedZeroPage => {
+                self.microcode.push(Microcode::IndexYLo);
+                self.microcode.push(Microcode::MakeAddrZp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::XIndexedZeroPageIndirect => {
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::Read);
+                self.microcode.push(Microcode::IncAddrLo);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::Read);
+                self.microcode.push(Microcode::IndexXLo);
+                self.microcode.push(Microcode::MakeAddrZp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+            AddrMode::ZeroPageIndirectYIndexed => {
+                self.microcode.push(Microcode::IndexY);
+                self.microcode.push(Microcode::MakeAddrAbs);
+                self.microcode.push(Microcode::Read);
+                self.microcode.push(Microcode::IncAddrLo);
+                self.microcode.push(Microcode::SetTemp);
+                self.microcode.push(Microcode::Read);
+                self.microcode.push(Microcode::MakeAddrZp);
+                self.microcode.push(Microcode::ReadAtPc);
+            }
+        }
     }
 
-    fn op_asl_a(&mut self) -> Result<(), SimBreak> {
-        self.reg_a = self.shift_left(self.reg_a, false)?;
-        Ok(())
+    fn decode_branch(&mut self, condition: u8) {
+        self.microcode.push(Microcode::Branch);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.temp = condition;
     }
 
-    fn op_bcc(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, !self.get_flag(PROC_FLAG_C))
+    fn decode_compare(&mut self, addr_mode: AddrMode, get_reg: Microcode) {
+        self.microcode.push(Microcode::Compare);
+        self.microcode.push(get_reg);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
     }
 
-    fn op_bcs(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, self.get_flag(PROC_FLAG_C))
+    fn decode_op_adc(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Add);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
     }
 
-    fn op_beq(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, self.get_flag(PROC_FLAG_Z))
+    fn decode_op_and(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::BitwiseAnd);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
     }
 
-    fn op_bmi(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, self.get_flag(PROC_FLAG_N))
+    fn decode_op_asl(&mut self, addr_mode: AddrMode) {
+        self.reg_p &= !PROC_FLAG_C;
+        self.decode_op_rol(addr_mode);
     }
 
-    fn op_bne(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, !self.get_flag(PROC_FLAG_Z))
+    fn decode_op_bcc(&mut self) {
+        self.decode_branch(PROC_FLAG_C & !self.reg_p);
     }
 
-    fn op_bpl(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, !self.get_flag(PROC_FLAG_N))
+    fn decode_op_bcs(&mut self) {
+        self.decode_branch(PROC_FLAG_C & self.reg_p);
     }
 
-    fn op_brk(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.read_immediate_byte(bus); // the 6502 reads and ignores this byte
-        self.push_word(bus, self.pc)?;
-        // Bits that don't actually exist in the P register are set to 1 on the
-        // stack by the BRK instruction.
-        self.push_byte(bus, self.reg_p | !REG_P_MASK)?;
+    fn decode_op_beq(&mut self) {
+        self.decode_branch(PROC_FLAG_Z & self.reg_p);
+    }
+
+    fn decode_op_bit(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::BitTest);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_bmi(&mut self) {
+        self.decode_branch(PROC_FLAG_N & self.reg_p);
+    }
+
+    fn decode_op_bne(&mut self) {
+        self.decode_branch(PROC_FLAG_Z & !self.reg_p);
+    }
+
+    fn decode_op_bpl(&mut self) {
+        self.decode_branch(PROC_FLAG_N & !self.reg_p);
+    }
+
+    fn decode_op_brk(&mut self) {
+        self.microcode.push(Microcode::Jump);
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::Read);
+        self.microcode.push(Microcode::IncAddr);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::Read);
+        self.microcode.push(Microcode::VectorIrq);
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetRegP);
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetPcLo);
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetPcHi);
+        self.pc += 1;
+    }
+
+    fn decode_op_bvc(&mut self) {
+        self.decode_branch(PROC_FLAG_V & !self.reg_p);
+    }
+
+    fn decode_op_bvs(&mut self) {
+        self.decode_branch(PROC_FLAG_V & self.reg_p);
+    }
+
+    fn decode_op_clc(&mut self) {
+        self.reg_p &= !PROC_FLAG_C;
+    }
+
+    fn decode_op_cld(&mut self) {
+        self.reg_p &= !PROC_FLAG_D;
+    }
+
+    fn decode_op_cli(&mut self) {
+        self.reg_p &= !PROC_FLAG_I;
+    }
+
+    fn decode_op_clv(&mut self) {
+        self.reg_p &= !PROC_FLAG_V;
+    }
+
+    fn decode_op_cmp(&mut self, addr_mode: AddrMode) {
+        self.decode_compare(addr_mode, Microcode::GetRegA);
+    }
+
+    fn decode_op_cpx(&mut self, addr_mode: AddrMode) {
+        self.decode_compare(addr_mode, Microcode::GetRegX);
+    }
+
+    fn decode_op_cpy(&mut self, addr_mode: AddrMode) {
+        self.decode_compare(addr_mode, Microcode::GetRegY);
+    }
+
+    fn decode_op_dec(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Write2);
+        self.microcode.push(Microcode::Write1);
+        self.microcode.push(Microcode::Decrement);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_dex(&mut self) {
+        self.data = self.reg_x.wrapping_sub(1);
+        self.set_nz_flags(self.data);
+        self.reg_x = self.data;
+    }
+
+    fn decode_op_dey(&mut self) {
+        self.data = self.reg_y.wrapping_sub(1);
+        self.set_nz_flags(self.data);
+        self.reg_y = self.data;
+    }
+
+    fn decode_op_eor(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::BitwiseXor);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_inc(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Write2);
+        self.microcode.push(Microcode::Write1);
+        self.microcode.push(Microcode::Increment);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_inx(&mut self) {
+        self.data = self.reg_x.wrapping_add(1);
+        self.set_nz_flags(self.data);
+        self.reg_x = self.data;
+    }
+
+    fn decode_op_iny(&mut self) {
+        self.data = self.reg_y.wrapping_add(1);
+        self.set_nz_flags(self.data);
+        self.reg_y = self.data;
+    }
+
+    fn decode_op_jmp(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Jump);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_jsr(&mut self) {
+        self.microcode.push(Microcode::Jump);
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetPcLo);
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetPcHi);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_lda(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::SetRegA);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_ldx(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::SetRegX);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_ldy(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::SetRegY);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_lsr(&mut self, addr_mode: AddrMode) {
+        self.reg_p &= !PROC_FLAG_C;
+        self.decode_op_ror(addr_mode);
+    }
+
+    fn decode_op_ora(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::BitwiseOr);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_pha(&mut self) {
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetRegA);
+    }
+
+    fn decode_op_php(&mut self) {
+        self.microcode.push(Microcode::Push2);
+        self.microcode.push(Microcode::Push1);
+        self.microcode.push(Microcode::GetRegP);
+    }
+
+    fn decode_op_pla(&mut self) {
+        self.microcode.push(Microcode::SetRegA);
+        self.microcode.push(Microcode::Pull);
+    }
+
+    fn decode_op_plp(&mut self) {
+        self.microcode.push(Microcode::SetRegP);
+        self.microcode.push(Microcode::Pull);
+    }
+
+    fn decode_op_rol(&mut self, addr_mode: AddrMode) {
+        if let AddrMode::Accumulator = addr_mode {
+            self.data = self.rotate_left(self.reg_a);
+            self.reg_a = self.data;
+        } else {
+            self.microcode.push(Microcode::Write2);
+            self.microcode.push(Microcode::Write1);
+            self.microcode.push(Microcode::RotateLeft);
+            self.microcode.push(Microcode::Read);
+            self.decode_addr_mode(addr_mode);
+        }
+    }
+
+    fn decode_op_ror(&mut self, addr_mode: AddrMode) {
+        if let AddrMode::Accumulator = addr_mode {
+            self.data = self.rotate_right(self.reg_a);
+            self.reg_a = self.data;
+        } else {
+            self.microcode.push(Microcode::Write2);
+            self.microcode.push(Microcode::Write1);
+            self.microcode.push(Microcode::RotateRight);
+            self.microcode.push(Microcode::Read);
+            self.decode_addr_mode(addr_mode);
+        }
+    }
+
+    fn decode_op_rti(&mut self) {
+        self.microcode.push(Microcode::Jump);
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::Pull);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::Pull);
+        self.microcode.push(Microcode::SetRegP);
+        self.microcode.push(Microcode::Pull);
+    }
+
+    fn decode_op_rts(&mut self) {
+        self.microcode.push(Microcode::Jump);
+        self.microcode.push(Microcode::IncAddr);
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::Pull);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::Pull);
+    }
+
+    fn decode_op_sbc(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Subtract);
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_sec(&mut self) {
+        self.reg_p |= PROC_FLAG_C;
+    }
+
+    fn decode_op_sed(&mut self) {
+        self.reg_p |= PROC_FLAG_D;
+    }
+
+    fn decode_op_sei(&mut self) {
         self.reg_p |= PROC_FLAG_I;
-        let lo = bus.read_byte(0xfffe);
-        let hi = bus.read_byte(0xffff);
-        self.pc = ((hi as u16) << 8) | (lo as u16);
+    }
+
+    fn decode_op_sta(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Write2);
+        self.microcode.push(Microcode::Write1);
+        self.microcode.push(Microcode::GetRegA);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_stx(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Write2);
+        self.microcode.push(Microcode::Write1);
+        self.microcode.push(Microcode::GetRegX);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_sty(&mut self, addr_mode: AddrMode) {
+        self.microcode.push(Microcode::Write2);
+        self.microcode.push(Microcode::Write1);
+        self.microcode.push(Microcode::GetRegY);
+        self.decode_addr_mode(addr_mode);
+    }
+
+    fn decode_op_tax(&mut self) {
+        self.data = self.reg_a;
+        self.set_nz_flags(self.data);
+        self.reg_x = self.data;
+    }
+
+    fn decode_op_tay(&mut self) {
+        self.data = self.reg_a;
+        self.set_nz_flags(self.data);
+        self.reg_y = self.data;
+    }
+
+    fn decode_op_tsx(&mut self) {
+        self.data = self.reg_s;
+        self.set_nz_flags(self.data);
+        self.reg_x = self.data;
+    }
+
+    fn decode_op_txa(&mut self) {
+        self.data = self.reg_x;
+        self.set_nz_flags(self.data);
+        self.reg_a = self.data;
+    }
+
+    fn decode_op_txs(&mut self) {
+        self.data = self.reg_x;
+        // TXS does not update processor flags.
+        self.reg_s = self.data;
+    }
+
+    fn decode_op_tya(&mut self) {
+        self.data = self.reg_y;
+        self.set_nz_flags(self.data);
+        self.reg_a = self.data;
+    }
+
+    fn decode_op_undoc_nop(&mut self, addr_mode: AddrMode) {
+        if !matches!(addr_mode, AddrMode::Implied) {
+            self.microcode.push(Microcode::Read);
+            self.decode_addr_mode(addr_mode);
+        }
+    }
+
+    fn exec_add(&mut self) -> Result<(), SimBreak> {
+        self.add(self.data);
         Ok(())
     }
 
-    fn op_bvc(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, !self.get_flag(PROC_FLAG_V))
-    }
-
-    fn op_bvs(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.branch_if(bus, self.get_flag(PROC_FLAG_V))
-    }
-
-    fn op_bit(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let data: u8 = self.read_mode_data(bus, mode)?;
+    fn exec_bit_test(&mut self) -> Result<(), SimBreak> {
         self.reg_p &= !(PROC_FLAG_N | PROC_FLAG_V | PROC_FLAG_Z);
-        self.reg_p |= data & (PROC_FLAG_N | PROC_FLAG_V);
-        if data & self.reg_a == 0 {
+        self.reg_p |= self.data & (PROC_FLAG_N | PROC_FLAG_V);
+        if self.data & self.reg_a == 0 {
             self.reg_p |= PROC_FLAG_Z;
         }
         Ok(())
     }
 
-    fn op_clc(&mut self) -> Result<(), SimBreak> {
-        self.reg_p &= !PROC_FLAG_C;
-        Ok(())
-    }
-
-    fn op_cld(&mut self) -> Result<(), SimBreak> {
-        self.reg_p &= !PROC_FLAG_D;
-        Ok(())
-    }
-
-    fn op_cli(&mut self) -> Result<(), SimBreak> {
-        self.reg_p &= !PROC_FLAG_I;
-        Ok(())
-    }
-
-    fn op_clv(&mut self) -> Result<(), SimBreak> {
-        self.reg_p &= !PROC_FLAG_V;
-        Ok(())
-    }
-
-    fn op_cmp(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.compare_to(bus, self.reg_a, mode)
-    }
-
-    fn op_cpx(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.compare_to(bus, self.reg_x, mode)
-    }
-
-    fn op_cpy(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.compare_to(bus, self.reg_y, mode)
-    }
-
-    fn op_dec(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let mut data: u8 = bus.read_byte(addr as u32);
-        data = data.wrapping_sub(1);
-        self.set_nz_flags(data);
-        bus.write_byte(addr as u32, data);
-        Ok(())
-    }
-
-    fn op_dex(&mut self) -> Result<(), SimBreak> {
-        self.reg_x = self.reg_x.wrapping_sub(1);
-        self.set_nz_flags(self.reg_x);
-        Ok(())
-    }
-
-    fn op_dey(&mut self) -> Result<(), SimBreak> {
-        self.reg_y = self.reg_y.wrapping_sub(1);
-        self.set_nz_flags(self.reg_y);
-        Ok(())
-    }
-
-    fn op_eor(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.reg_a ^= rhs;
+    fn exec_bitwise_and(&mut self) -> Result<(), SimBreak> {
+        self.reg_a &= self.data;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_inc(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let mut data: u8 = bus.read_byte(addr as u32);
-        data = data.wrapping_add(1);
-        self.set_nz_flags(data);
-        bus.write_byte(addr as u32, data);
-        Ok(())
-    }
-
-    fn op_inx(&mut self) -> Result<(), SimBreak> {
-        self.reg_x = self.reg_x.wrapping_add(1);
-        self.set_nz_flags(self.reg_x);
-        Ok(())
-    }
-
-    fn op_iny(&mut self) -> Result<(), SimBreak> {
-        self.reg_y = self.reg_y.wrapping_add(1);
-        self.set_nz_flags(self.reg_y);
-        Ok(())
-    }
-
-    fn op_jmp(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.pc = self.read_mode_addr(bus, mode)?;
-        Ok(())
-    }
-
-    fn op_jsr(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let dest: u16 = self.read_mode_addr(bus, mode)?;
-        let ret: u16 = self.pc.wrapping_sub(1);
-        self.push_word(bus, ret)?;
-        self.pc = dest;
-        Ok(())
-    }
-
-    fn op_lda(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.reg_a = self.read_mode_data(bus, mode)?;
+    fn exec_bitwise_or(&mut self) -> Result<(), SimBreak> {
+        self.reg_a |= self.data;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_ldx(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.reg_x = self.read_mode_data(bus, mode)?;
-        self.set_nz_flags(self.reg_x);
-        Ok(())
-    }
-
-    fn op_ldy(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.reg_y = self.read_mode_data(bus, mode)?;
-        self.set_nz_flags(self.reg_y);
-        Ok(())
-    }
-
-    fn op_lsr(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let lhs: u8 = bus.read_byte(addr as u32);
-        let result: u8 = self.shift_right(lhs, false)?;
-        bus.write_byte(addr as u32, result);
-        Ok(())
-    }
-
-    fn op_lsr_a(&mut self) -> Result<(), SimBreak> {
-        self.reg_a = self.shift_right(self.reg_a, false)?;
-        Ok(())
-    }
-
-    fn op_nop(&mut self) -> Result<(), SimBreak> {
-        Ok(())
-    }
-
-    fn op_ora(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.reg_a |= rhs;
+    fn exec_bitwise_xor(&mut self) -> Result<(), SimBreak> {
+        self.reg_a ^= self.data;
         self.set_nz_flags(self.reg_a);
         Ok(())
     }
 
-    fn op_pla(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.reg_a = self.pull_byte(bus)?;
-        self.set_nz_flags(self.reg_a);
-        Ok(())
-    }
-
-    fn op_plp(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.reg_p = self.pull_byte(bus)? & REG_P_MASK;
-        Ok(())
-    }
-
-    fn op_pha(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.push_byte(bus, self.reg_a)
-    }
-
-    fn op_php(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        // Bits that don't actually exist in the P register are set to 1 on the
-        // stack by the PHP instruction.
-        self.push_byte(bus, self.reg_p | !REG_P_MASK)
-    }
-
-    fn op_rol(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let lhs: u8 = bus.read_byte(addr as u32);
-        let carry_in = self.get_flag(PROC_FLAG_C);
-        let result: u8 = self.shift_left(lhs, carry_in)?;
-        bus.write_byte(addr as u32, result);
-        Ok(())
-    }
-
-    fn op_rol_a(&mut self) -> Result<(), SimBreak> {
-        let carry_in = self.get_flag(PROC_FLAG_C);
-        self.reg_a = self.shift_left(self.reg_a, carry_in)?;
-        Ok(())
-    }
-
-    fn op_ror(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let lhs: u8 = bus.read_byte(addr as u32);
-        let carry_in = self.get_flag(PROC_FLAG_C);
-        let result: u8 = self.shift_right(lhs, carry_in)?;
-        bus.write_byte(addr as u32, result);
-        Ok(())
-    }
-
-    fn op_ror_a(&mut self) -> Result<(), SimBreak> {
-        let carry_in = self.get_flag(PROC_FLAG_C);
-        self.reg_a = self.shift_right(self.reg_a, carry_in)?;
-        Ok(())
-    }
-
-    fn op_rti(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        self.reg_p = self.pull_byte(bus)?;
-        self.pc = self.pull_word(bus)?;
-        Ok(())
-    }
-
-    fn op_rts(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let addr: u16 = self.pull_word(bus)?;
-        self.pc = addr.wrapping_add(1);
-        Ok(())
-    }
-
-    fn op_sec(&mut self) -> Result<(), SimBreak> {
-        self.reg_p |= PROC_FLAG_C;
-        Ok(())
-    }
-
-    fn op_sed(&mut self) -> Result<(), SimBreak> {
-        self.reg_p |= PROC_FLAG_D;
-        Ok(())
-    }
-
-    fn op_sei(&mut self) -> Result<(), SimBreak> {
-        self.reg_p |= PROC_FLAG_I;
-        Ok(())
-    }
-
-    fn op_sta(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        bus.write_byte(addr as u32, self.reg_a);
-        Ok(())
-    }
-
-    fn op_stx(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        bus.write_byte(addr as u32, self.reg_x);
-        Ok(())
-    }
-
-    fn op_sty(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        bus.write_byte(addr as u32, self.reg_y);
-        Ok(())
-    }
-
-    fn op_tax(&mut self) -> Result<(), SimBreak> {
-        self.reg_x = self.reg_a;
-        self.set_nz_flags(self.reg_x);
-        Ok(())
-    }
-
-    fn op_tay(&mut self) -> Result<(), SimBreak> {
-        self.reg_y = self.reg_a;
-        self.set_nz_flags(self.reg_y);
-        Ok(())
-    }
-
-    fn op_tsx(&mut self) -> Result<(), SimBreak> {
-        self.reg_x = self.reg_s;
-        self.set_nz_flags(self.reg_x);
-        Ok(())
-    }
-
-    fn op_txa(&mut self) -> Result<(), SimBreak> {
-        self.reg_a = self.reg_x;
-        self.set_nz_flags(self.reg_a);
-        Ok(())
-    }
-
-    fn op_txs(&mut self) -> Result<(), SimBreak> {
-        self.reg_s = self.reg_x;
-        Ok(()) // TXS does not update processor flags
-    }
-
-    fn op_tya(&mut self) -> Result<(), SimBreak> {
-        self.reg_a = self.reg_y;
-        self.set_nz_flags(self.reg_a);
-        Ok(())
-    }
-
-    fn op_undocumented_alr(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.reg_a &= rhs;
-        self.reg_a = self.shift_right(self.reg_a, false)?;
-        Ok(())
-    }
-
-    fn op_undocumented_anc(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.reg_a &= rhs;
-        self.set_nz_flags(self.reg_a);
-        self.set_flag(PROC_FLAG_C, (self.reg_a & 0x80) != 0);
-        Ok(())
-    }
-
-    fn op_undocumented_arr(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.reg_a &= rhs;
-        let carry_in = self.get_flag(PROC_FLAG_C);
-        self.reg_a = self.shift_right(self.reg_a, carry_in)?;
-        Ok(())
-    }
-
-    fn op_undocumented_dcp(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = self.read_mode_addr(bus, mode)?;
-        let mut data: u8 = bus.read_byte(addr as u32);
-        data = data.wrapping_sub(1);
-        self.set_nz_flags(data);
-        bus.write_byte(addr as u32, data);
-        self.set_flag(PROC_FLAG_C, self.reg_a >= data);
-        self.set_nz_flags(self.reg_a.wrapping_sub(data));
-        Ok(())
-    }
-
-    fn op_undocumented_jam(&mut self, opcode: u8) -> Result<(), SimBreak> {
-        self.pc = self.pc.wrapping_sub(1); // keep PC at JAM instruction
-        Err(SimBreak::HaltOpcode("JAM", opcode))
-    }
-
-    fn op_undocumented_nop(
-        &mut self,
-        bus: &mut dyn SimBus,
-        opt_mode: Option<AddrMode>,
-    ) -> Result<(), SimBreak> {
-        if let Some(mode) = opt_mode {
-            self.read_mode_addr(bus, mode)?; // ignore the result
+    fn exec_branch(&mut self) -> Result<(), SimBreak> {
+        if self.temp != 0 {
+            let offset = self.data as i8;
+            self.pc = self.pc.wrapping_add(offset as u16);
         }
         Ok(())
     }
 
-    fn op_undocumented_sbc(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        self.op_sbc(bus, mode)
-    }
-
-    fn op_undocumented_sbx(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        let lhs: u8 = self.reg_a & self.reg_x;
-        self.reg_x = lhs.wrapping_sub(rhs);
+    fn exec_compare(&mut self) -> Result<(), SimBreak> {
+        let lhs = self.data;
+        let rhs = self.temp;
         self.set_flag(PROC_FLAG_C, lhs >= rhs);
-        self.set_nz_flags(self.reg_x);
+        self.set_nz_flags(lhs.wrapping_sub(rhs));
         Ok(())
     }
 
-    fn add_to(&mut self, rhs: u8) -> Result<(), SimBreak> {
+    fn exec_decrement(&mut self) -> Result<(), SimBreak> {
+        self.data = self.data.wrapping_sub(1);
+        self.set_nz_flags(self.data);
+        Ok(())
+    }
+
+    fn exec_get_pc_hi(&mut self) -> Result<(), SimBreak> {
+        self.data = (self.pc >> 8) as u8;
+        Ok(())
+    }
+
+    fn exec_get_pc_lo(&mut self) -> Result<(), SimBreak> {
+        self.data = self.pc as u8;
+        Ok(())
+    }
+
+    fn exec_get_reg_a(&mut self) -> Result<(), SimBreak> {
+        self.data = self.reg_a;
+        Ok(())
+    }
+
+    fn exec_get_reg_p(&mut self) -> Result<(), SimBreak> {
+        self.data = self.reg_p | !REG_P_MASK;
+        Ok(())
+    }
+
+    fn exec_get_reg_x(&mut self) -> Result<(), SimBreak> {
+        self.data = self.reg_x;
+        Ok(())
+    }
+
+    fn exec_get_reg_y(&mut self) -> Result<(), SimBreak> {
+        self.data = self.reg_y;
+        Ok(())
+    }
+
+    fn exec_inc_addr(&mut self) -> Result<(), SimBreak> {
+        self.addr = self.addr.wrapping_add(1);
+        Ok(())
+    }
+
+    fn exec_inc_addr_lo(&mut self) -> Result<(), SimBreak> {
+        self.addr = (self.addr & 0xff00) | (self.addr.wrapping_add(1) & 0xff);
+        Ok(())
+    }
+
+    fn exec_increment(&mut self) -> Result<(), SimBreak> {
+        self.data = self.data.wrapping_add(1);
+        self.set_nz_flags(self.data);
+        Ok(())
+    }
+
+    fn exec_index_x(&mut self) -> Result<(), SimBreak> {
+        self.addr = self.addr.wrapping_add(u16::from(self.reg_x));
+        Ok(())
+    }
+
+    fn exec_index_x_lo(&mut self) -> Result<(), SimBreak> {
+        let x = u16::from(self.reg_x);
+        self.addr = (self.addr & 0xff00) | (self.addr.wrapping_add(x) & 0xff);
+        Ok(())
+    }
+
+    fn exec_index_y(&mut self) -> Result<(), SimBreak> {
+        self.addr = self.addr.wrapping_add(u16::from(self.reg_y));
+        Ok(())
+    }
+
+    fn exec_index_y_lo(&mut self) -> Result<(), SimBreak> {
+        let y = u16::from(self.reg_y);
+        self.addr = (self.addr & 0xff00) | (self.addr.wrapping_add(y) & 0xff);
+        Ok(())
+    }
+
+    fn exec_jump(&mut self) -> Result<(), SimBreak> {
+        self.pc = self.addr;
+        Ok(())
+    }
+
+    fn exec_make_addr_abs(&mut self) -> Result<(), SimBreak> {
+        self.addr = (u16::from(self.data) << 8) | u16::from(self.temp);
+        Ok(())
+    }
+
+    fn exec_make_addr_zp(&mut self) -> Result<(), SimBreak> {
+        self.addr = u16::from(self.data);
+        Ok(())
+    }
+
+    fn exec_pull(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        self.reg_s = self.reg_s.wrapping_add(1);
+        let addr = 0x0100 | u32::from(self.reg_s);
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
+    }
+
+    fn exec_push1(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        self.addr = 0x0100 | u16::from(self.reg_s);
+        watch(bus, u32::from(self.addr), WatchKind::Write)
+    }
+
+    fn exec_push2(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        bus.write_byte(u32::from(self.addr), self.data);
+        self.reg_s = self.reg_s.wrapping_sub(1);
+        Ok(())
+    }
+
+    fn exec_read(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        let addr = u32::from(self.addr);
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
+    }
+
+    fn exec_read_at_pc(
+        &mut self,
+        bus: &mut dyn SimBus,
+    ) -> Result<(), SimBreak> {
+        let addr = u32::from(self.pc);
+        self.pc += 1;
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
+    }
+
+    fn exec_rotate_left(&mut self) -> Result<(), SimBreak> {
+        self.data = self.rotate_left(self.data);
+        Ok(())
+    }
+
+    fn exec_rotate_right(&mut self) -> Result<(), SimBreak> {
+        self.data = self.rotate_right(self.data);
+        Ok(())
+    }
+
+    fn exec_set_reg_a(&mut self) -> Result<(), SimBreak> {
+        self.set_nz_flags(self.data);
+        self.reg_a = self.data;
+        Ok(())
+    }
+
+    fn exec_set_reg_p(&mut self) -> Result<(), SimBreak> {
+        self.reg_p = self.data;
+        Ok(())
+    }
+
+    fn exec_set_reg_x(&mut self) -> Result<(), SimBreak> {
+        self.set_nz_flags(self.data);
+        self.reg_x = self.data;
+        Ok(())
+    }
+
+    fn exec_set_reg_y(&mut self) -> Result<(), SimBreak> {
+        self.set_nz_flags(self.data);
+        self.reg_y = self.data;
+        Ok(())
+    }
+
+    fn exec_set_temp(&mut self) -> Result<(), SimBreak> {
+        self.temp = self.data;
+        Ok(())
+    }
+
+    fn exec_subtract(&mut self) -> Result<(), SimBreak> {
+        self.add(!self.data);
+        Ok(())
+    }
+
+    fn exec_vector_irq(&mut self) -> Result<(), SimBreak> {
+        self.addr = VECTOR_IRQ;
+        self.reg_p |= PROC_FLAG_I;
+        Ok(())
+    }
+
+    fn exec_write1(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        watch(bus, u32::from(self.addr), WatchKind::Write)
+    }
+
+    fn exec_write2(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        bus.write_byte(u32::from(self.addr), self.data);
+        Ok(())
+    }
+
+    fn add(&mut self, rhs: u8) {
         let lhs: u8 = self.reg_a;
         let sum: u8 = if self.get_flag(PROC_FLAG_D) {
             0 // TODO: implement decimal mode
@@ -599,191 +914,39 @@ impl Mos6502 {
                 sum += 1;
             }
             self.set_flag(PROC_FLAG_C, sum >= 0x100);
-            (sum & 0xff) as u8
+            sum as u8
         };
         self.set_flag(PROC_FLAG_V, ((lhs ^ sum) & (rhs ^ sum) & 0x80) != 0);
         self.reg_a = sum;
         self.set_nz_flags(self.reg_a);
-        Ok(())
-    }
-
-    fn branch_if(
-        &mut self,
-        bus: &mut dyn SimBus,
-        condition: bool,
-    ) -> Result<(), SimBreak> {
-        let offset: i8 = self.read_immediate_byte(bus) as i8;
-        if condition {
-            self.pc = self.pc.wrapping_add(offset as u16);
-        }
-        Ok(())
-    }
-
-    fn compare_to(
-        &mut self,
-        bus: &mut dyn SimBus,
-        lhs: u8,
-        mode: AddrMode,
-    ) -> Result<(), SimBreak> {
-        let rhs: u8 = self.read_mode_data(bus, mode)?;
-        self.set_flag(PROC_FLAG_C, lhs >= rhs);
-        self.set_nz_flags(lhs.wrapping_sub(rhs));
-        Ok(())
-    }
-
-    fn pull_byte(&mut self, bus: &mut dyn SimBus) -> Result<u8, SimBreak> {
-        self.reg_s = self.reg_s.wrapping_add(1);
-        let addr: u16 = 0x0100 | (self.reg_s as u16);
-        Ok(bus.read_byte(addr as u32))
-    }
-
-    fn pull_word(&mut self, bus: &mut dyn SimBus) -> Result<u16, SimBreak> {
-        let lo: u8 = self.pull_byte(bus)?;
-        let hi: u8 = self.pull_byte(bus)?;
-        Ok(((hi as u16) << 8) | (lo as u16))
-    }
-
-    fn push_byte(
-        &mut self,
-        bus: &mut dyn SimBus,
-        data: u8,
-    ) -> Result<(), SimBreak> {
-        let addr: u16 = 0x0100 | (self.reg_s as u16);
-        bus.write_byte(addr as u32, data);
-        self.reg_s = self.reg_s.wrapping_sub(1);
-        Ok(())
-    }
-
-    fn push_word(
-        &mut self,
-        bus: &mut dyn SimBus,
-        data: u16,
-    ) -> Result<(), SimBreak> {
-        let lo: u8 = (data & 0xff) as u8;
-        let hi: u8 = (data >> 8) as u8;
-        self.push_byte(bus, hi)?;
-        self.push_byte(bus, lo)
-    }
-
-    fn shift_left(&mut self, lhs: u8, carry_in: bool) -> Result<u8, SimBreak> {
-        self.set_flag(PROC_FLAG_C, (lhs & 0x80) != 0);
-        let mut result: u8 = lhs << 1;
-        if carry_in {
-            result |= 0x01;
-        }
-        self.set_nz_flags(result);
-        Ok(result)
-    }
-
-    fn shift_right(
-        &mut self,
-        lhs: u8,
-        carry_in: bool,
-    ) -> Result<u8, SimBreak> {
-        self.set_flag(PROC_FLAG_C, (lhs & 0x01) != 0);
-        let mut result: u8 = lhs >> 1;
-        if carry_in {
-            result |= 0x80;
-        }
-        self.set_nz_flags(result);
-        Ok(result)
-    }
-
-    fn read_immediate_byte(&mut self, bus: &mut dyn SimBus) -> u8 {
-        let value = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        value
-    }
-
-    fn read_immediate_word(&mut self, bus: &mut dyn SimBus) -> u16 {
-        let lo = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        let hi = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        ((hi as u16) << 8) | (lo as u16)
-    }
-
-    fn read_zeropage_word(&mut self, bus: &mut dyn SimBus, addr: u8) -> u16 {
-        let lo = bus.read_byte(addr as u32);
-        let hi = bus.read_byte(addr.wrapping_add(1) as u32);
-        ((hi as u16) << 8) | (lo as u16)
-    }
-
-    fn read_mode_addr(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<u16, SimBreak> {
-        match mode {
-            AddrMode::Immediate => {
-                let addr: u16 = self.pc;
-                self.pc = self.pc.wrapping_add(1);
-                Ok(addr)
-            }
-            AddrMode::Absolute => Ok(self.read_immediate_word(bus)),
-            AddrMode::AbsoluteIndirect => {
-                let lo_ptr: u16 = self.read_immediate_word(bus);
-                // The 6502 doesn't perform the carry when adding 1 to the base
-                // address to read the hi byte of the pointer.  Therefore, for
-                // example, JMP ($xxFF) will read the destination address from
-                // $xxFF and $xx00.
-                let hi_ptr: u16 = (lo_ptr & 0xff00) | ((lo_ptr + 1) & 0x00ff);
-                let lo = bus.read_byte(lo_ptr as u32);
-                let hi = bus.read_byte(hi_ptr as u32);
-                Ok(((hi as u16) << 8) | (lo as u16))
-            }
-            AddrMode::XIndexedAbsolute => {
-                let base: u16 = self.read_immediate_word(bus);
-                // The value at the base address, ignoring the index offset, is
-                // read and discarded before the final address is read. This
-                // may cause side effects in hardware registers.
-                bus.read_byte(base as u32);
-                Ok(base.wrapping_add(self.reg_x as u16))
-            }
-            AddrMode::YIndexedAbsolute => {
-                let base: u16 = self.read_immediate_word(bus);
-                // The value at the base address, ignoring the index offset, is
-                // read and discarded before the final address is read. This
-                // may cause side effects in hardware registers.
-                bus.read_byte(base as u32);
-                Ok(base.wrapping_add(self.reg_y as u16))
-            }
-            AddrMode::ZeroPage => Ok(self.read_immediate_byte(bus) as u16),
-            AddrMode::XIndexedZeroPage => {
-                let base: u8 = self.read_immediate_byte(bus);
-                let addr: u8 = base.wrapping_add(self.reg_x);
-                Ok(addr as u16)
-            }
-            AddrMode::YIndexedZeroPage => {
-                let base: u8 = self.read_immediate_byte(bus);
-                let addr: u8 = base.wrapping_add(self.reg_y);
-                Ok(addr as u16)
-            }
-            AddrMode::XIndexedZeroPageIndirect => {
-                let base: u8 = self.read_immediate_byte(bus);
-                let ptr: u8 = base.wrapping_add(self.reg_x);
-                Ok(self.read_zeropage_word(bus, ptr))
-            }
-            AddrMode::ZeroPageIndirectYIndexed => {
-                let ptr: u8 = self.read_immediate_byte(bus);
-                let base: u16 = self.read_zeropage_word(bus, ptr);
-                let addr: u16 = base.wrapping_add(self.reg_y as u16);
-                Ok(addr)
-            }
-        }
-    }
-
-    fn read_mode_data(
-        &mut self,
-        bus: &mut dyn SimBus,
-        mode: AddrMode,
-    ) -> Result<u8, SimBreak> {
-        let addr = self.read_mode_addr(bus, mode)?;
-        Ok(bus.read_byte(addr as u32))
     }
 
     fn get_flag(&self, flag: u8) -> bool {
         (self.reg_p & flag) != 0
+    }
+
+    fn rotate_left(&mut self, input: u8) -> u8 {
+        let carry_in = (self.reg_p & PROC_FLAG_C) != 0;
+        let carry_out = (input & 0x80) != 0;
+        let mut output = input << 1;
+        if carry_in {
+            output |= 0x01;
+        }
+        self.set_flag(PROC_FLAG_C, carry_out);
+        self.set_nz_flags(output);
+        output
+    }
+
+    fn rotate_right(&mut self, input: u8) -> u8 {
+        let carry_in = (self.reg_p & PROC_FLAG_C) != 0;
+        let carry_out = (input & 0x01) != 0;
+        let mut output = input >> 1;
+        if carry_in {
+            output |= 0x80;
+        }
+        self.set_flag(PROC_FLAG_C, carry_out);
+        self.set_nz_flags(output);
+        output
     }
 
     fn set_flag(&mut self, flag: u8, value: bool) {
@@ -830,10 +993,11 @@ impl SimProc for Mos6502 {
 
     fn set_pc(&mut self, addr: u32) {
         self.pc = (addr & 0xffff) as u16;
+        self.microcode.clear();
     }
 
     fn register_names(&self) -> &'static [&'static str] {
-        &["A", "X", "Y", "P", "S"]
+        &["A", "X", "Y", "S", "P", "DATA"]
     }
 
     fn get_register(&self, name: &str) -> Option<u32> {
@@ -843,6 +1007,7 @@ impl SimProc for Mos6502 {
             "Y" => Some(u32::from(self.reg_y)),
             "P" => Some(u32::from(self.reg_p)),
             "S" => Some(u32::from(self.reg_s)),
+            "DATA" => Some(u32::from(self.data)),
             _ => None,
         }
     }
@@ -854,205 +1019,24 @@ impl SimProc for Mos6502 {
             "Y" => self.reg_y = (value & 0xff) as u8,
             "P" => self.reg_p = (value & u32::from(REG_P_MASK)) as u8,
             "S" => self.reg_s = (value & 0xff) as u8,
+            "DATA" => self.data = (value & 0xff) as u8,
             _ => {}
         };
     }
 
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let opcode = bus.read_byte(u32::from(self.pc));
-        self.pc = self.pc.wrapping_add(1);
-        match opcode {
-            0x00 => self.op_brk(bus),
-            0x01 => self.op_ora(bus, AddrMode::XIndexedZeroPageIndirect),
-            0x02 | 0x12 | 0x22 | 0x32 | 0x42 | 0x52 | 0x62 | 0x72 | 0x92
-            | 0xb2 | 0xd2 | 0xf2 => self.op_undocumented_jam(opcode),
-            0x04 | 0x44 | 0x64 => {
-                self.op_undocumented_nop(bus, Some(AddrMode::ZeroPage))
-            }
-            0x05 => self.op_ora(bus, AddrMode::ZeroPage),
-            0x06 => self.op_asl(bus, AddrMode::ZeroPage),
-            0x08 => self.op_php(bus),
-            0x09 => self.op_ora(bus, AddrMode::Immediate),
-            0x0a => self.op_asl_a(),
-            0x0b | 0x2b => self.op_undocumented_anc(bus, AddrMode::Immediate),
-            0x0c => self.op_undocumented_nop(bus, Some(AddrMode::Absolute)),
-            0x0d => self.op_ora(bus, AddrMode::Absolute),
-            0x0e => self.op_asl(bus, AddrMode::Absolute),
-            0x10 => self.op_bpl(bus),
-            0x11 => self.op_ora(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0x14 | 0x34 | 0x54 | 0x74 | 0xd4 | 0xf4 => {
-                self.op_undocumented_nop(bus, Some(AddrMode::XIndexedZeroPage))
-            }
-            0x15 => self.op_ora(bus, AddrMode::XIndexedZeroPage),
-            0x16 => self.op_asl(bus, AddrMode::XIndexedZeroPage),
-            0x18 => self.op_clc(),
-            0x19 => self.op_ora(bus, AddrMode::YIndexedAbsolute),
-            0x1a | 0x3a | 0x5a | 0x7a | 0xda | 0xfa => {
-                self.op_undocumented_nop(bus, None)
-            }
-            0x1c | 0x3c | 0x5c | 0x7c | 0xdc | 0xfc => {
-                self.op_undocumented_nop(bus, Some(AddrMode::XIndexedAbsolute))
-            }
-            0x1d => self.op_ora(bus, AddrMode::XIndexedAbsolute),
-            0x1e => self.op_asl(bus, AddrMode::XIndexedAbsolute),
-            0x20 => self.op_jsr(bus, AddrMode::Absolute),
-            0x21 => self.op_and(bus, AddrMode::XIndexedZeroPageIndirect),
-            0x24 => self.op_bit(bus, AddrMode::ZeroPage),
-            0x25 => self.op_and(bus, AddrMode::ZeroPage),
-            0x26 => self.op_rol(bus, AddrMode::ZeroPage),
-            0x28 => self.op_plp(bus),
-            0x29 => self.op_and(bus, AddrMode::Immediate),
-            0x2a => self.op_rol_a(),
-            0x2c => self.op_bit(bus, AddrMode::Absolute),
-            0x2d => self.op_and(bus, AddrMode::Absolute),
-            0x2e => self.op_rol(bus, AddrMode::Absolute),
-            0x30 => self.op_bmi(bus),
-            0x31 => self.op_and(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0x35 => self.op_and(bus, AddrMode::XIndexedZeroPage),
-            0x36 => self.op_rol(bus, AddrMode::XIndexedZeroPage),
-            0x38 => self.op_sec(),
-            0x39 => self.op_and(bus, AddrMode::YIndexedAbsolute),
-            0x3d => self.op_and(bus, AddrMode::XIndexedAbsolute),
-            0x3e => self.op_rol(bus, AddrMode::XIndexedAbsolute),
-            0x40 => self.op_rti(bus),
-            0x41 => self.op_eor(bus, AddrMode::XIndexedZeroPageIndirect),
-            0x45 => self.op_eor(bus, AddrMode::ZeroPage),
-            0x46 => self.op_lsr(bus, AddrMode::ZeroPage),
-            0x48 => self.op_pha(bus),
-            0x49 => self.op_eor(bus, AddrMode::Immediate),
-            0x4a => self.op_lsr_a(),
-            0x4b => self.op_undocumented_alr(bus, AddrMode::Immediate),
-            0x4c => self.op_jmp(bus, AddrMode::Absolute),
-            0x4d => self.op_eor(bus, AddrMode::Absolute),
-            0x4e => self.op_lsr(bus, AddrMode::Absolute),
-            0x50 => self.op_bvc(bus),
-            0x51 => self.op_eor(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0x55 => self.op_eor(bus, AddrMode::XIndexedZeroPage),
-            0x56 => self.op_lsr(bus, AddrMode::XIndexedZeroPage),
-            0x58 => self.op_cli(),
-            0x59 => self.op_eor(bus, AddrMode::YIndexedAbsolute),
-            0x5d => self.op_eor(bus, AddrMode::XIndexedAbsolute),
-            0x5e => self.op_lsr(bus, AddrMode::XIndexedAbsolute),
-            0x60 => self.op_rts(bus),
-            0x61 => self.op_adc(bus, AddrMode::XIndexedZeroPageIndirect),
-            0x65 => self.op_adc(bus, AddrMode::ZeroPage),
-            0x66 => self.op_ror(bus, AddrMode::ZeroPage),
-            0x68 => self.op_pla(bus),
-            0x69 => self.op_adc(bus, AddrMode::Immediate),
-            0x6a => self.op_ror_a(),
-            0x6b => self.op_undocumented_arr(bus, AddrMode::Immediate),
-            0x6c => self.op_jmp(bus, AddrMode::AbsoluteIndirect),
-            0x6d => self.op_adc(bus, AddrMode::Absolute),
-            0x6e => self.op_ror(bus, AddrMode::Absolute),
-            0x70 => self.op_bvs(bus),
-            0x71 => self.op_adc(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0x75 => self.op_adc(bus, AddrMode::XIndexedZeroPage),
-            0x76 => self.op_ror(bus, AddrMode::XIndexedZeroPage),
-            0x78 => self.op_sei(),
-            0x79 => self.op_adc(bus, AddrMode::YIndexedAbsolute),
-            0x7d => self.op_adc(bus, AddrMode::XIndexedAbsolute),
-            0x7e => self.op_ror(bus, AddrMode::XIndexedAbsolute),
-            0x80 | 0x82 | 0x89 | 0xc2 | 0xe2 => {
-                self.op_undocumented_nop(bus, Some(AddrMode::Immediate))
-            }
-            0x81 => self.op_sta(bus, AddrMode::XIndexedZeroPageIndirect),
-            0x84 => self.op_sty(bus, AddrMode::ZeroPage),
-            0x85 => self.op_sta(bus, AddrMode::ZeroPage),
-            0x86 => self.op_stx(bus, AddrMode::ZeroPage),
-            0x88 => self.op_dey(),
-            0x8a => self.op_txa(),
-            0x8c => self.op_sty(bus, AddrMode::Absolute),
-            0x8d => self.op_sta(bus, AddrMode::Absolute),
-            0x8e => self.op_stx(bus, AddrMode::Absolute),
-            0x90 => self.op_bcc(bus),
-            0x91 => self.op_sta(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0x94 => self.op_sty(bus, AddrMode::XIndexedZeroPage),
-            0x95 => self.op_sta(bus, AddrMode::XIndexedZeroPage),
-            0x96 => self.op_stx(bus, AddrMode::YIndexedZeroPage),
-            0x98 => self.op_tya(),
-            0x99 => self.op_sta(bus, AddrMode::YIndexedAbsolute),
-            0x9a => self.op_txs(),
-            0x9d => self.op_sta(bus, AddrMode::XIndexedAbsolute),
-            0xa0 => self.op_ldy(bus, AddrMode::Immediate),
-            0xa1 => self.op_lda(bus, AddrMode::XIndexedZeroPageIndirect),
-            0xa2 => self.op_ldx(bus, AddrMode::Immediate),
-            0xa4 => self.op_ldy(bus, AddrMode::ZeroPage),
-            0xa5 => self.op_lda(bus, AddrMode::ZeroPage),
-            0xa6 => self.op_ldx(bus, AddrMode::ZeroPage),
-            0xa8 => self.op_tay(),
-            0xa9 => self.op_lda(bus, AddrMode::Immediate),
-            0xaa => self.op_tax(),
-            0xac => self.op_ldy(bus, AddrMode::Absolute),
-            0xad => self.op_lda(bus, AddrMode::Absolute),
-            0xae => self.op_ldx(bus, AddrMode::Absolute),
-            0xb0 => self.op_bcs(bus),
-            0xb1 => self.op_lda(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0xb4 => self.op_ldy(bus, AddrMode::XIndexedZeroPage),
-            0xb5 => self.op_lda(bus, AddrMode::XIndexedZeroPage),
-            0xb6 => self.op_ldx(bus, AddrMode::YIndexedZeroPage),
-            0xb8 => self.op_clv(),
-            0xb9 => self.op_lda(bus, AddrMode::YIndexedAbsolute),
-            0xba => self.op_tsx(),
-            0xbc => self.op_ldy(bus, AddrMode::XIndexedAbsolute),
-            0xbd => self.op_lda(bus, AddrMode::XIndexedAbsolute),
-            0xbe => self.op_ldx(bus, AddrMode::YIndexedAbsolute),
-            0xc0 => self.op_cpy(bus, AddrMode::Immediate),
-            0xc1 => self.op_cmp(bus, AddrMode::XIndexedZeroPageIndirect),
-            0xc3 => self
-                .op_undocumented_dcp(bus, AddrMode::XIndexedZeroPageIndirect),
-            0xc4 => self.op_cpy(bus, AddrMode::ZeroPage),
-            0xc5 => self.op_cmp(bus, AddrMode::ZeroPage),
-            0xc6 => self.op_dec(bus, AddrMode::ZeroPage),
-            0xc7 => self.op_undocumented_dcp(bus, AddrMode::ZeroPage),
-            0xc8 => self.op_iny(),
-            0xc9 => self.op_cmp(bus, AddrMode::Immediate),
-            0xca => self.op_dex(),
-            0xcb => self.op_undocumented_sbx(bus, AddrMode::Immediate),
-            0xcc => self.op_cpy(bus, AddrMode::Absolute),
-            0xcd => self.op_cmp(bus, AddrMode::Absolute),
-            0xce => self.op_dec(bus, AddrMode::Absolute),
-            0xcf => self.op_undocumented_dcp(bus, AddrMode::Absolute),
-            0xd0 => self.op_bne(bus),
-            0xd1 => self.op_cmp(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0xd3 => self
-                .op_undocumented_dcp(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0xd5 => self.op_cmp(bus, AddrMode::XIndexedZeroPage),
-            0xd6 => self.op_dec(bus, AddrMode::XIndexedZeroPage),
-            0xd7 => self.op_undocumented_dcp(bus, AddrMode::XIndexedZeroPage),
-            0xd8 => self.op_cld(),
-            0xd9 => self.op_cmp(bus, AddrMode::YIndexedAbsolute),
-            0xdb => self.op_undocumented_dcp(bus, AddrMode::YIndexedAbsolute),
-            0xdd => self.op_cmp(bus, AddrMode::XIndexedAbsolute),
-            0xde => self.op_dec(bus, AddrMode::XIndexedAbsolute),
-            0xdf => self.op_undocumented_dcp(bus, AddrMode::XIndexedAbsolute),
-            0xe0 => self.op_cpx(bus, AddrMode::Immediate),
-            0xe1 => self.op_sbc(bus, AddrMode::XIndexedZeroPageIndirect),
-            0xe4 => self.op_cpx(bus, AddrMode::ZeroPage),
-            0xe5 => self.op_sbc(bus, AddrMode::ZeroPage),
-            0xe6 => self.op_inc(bus, AddrMode::ZeroPage),
-            0xe8 => self.op_inx(),
-            0xe9 => self.op_sbc(bus, AddrMode::Immediate),
-            0xea => self.op_nop(),
-            0xeb => self.op_undocumented_sbc(bus, AddrMode::Immediate),
-            0xec => self.op_cpx(bus, AddrMode::Absolute),
-            0xed => self.op_sbc(bus, AddrMode::Absolute),
-            0xee => self.op_inc(bus, AddrMode::Absolute),
-            0xf0 => self.op_beq(bus),
-            0xf1 => self.op_sbc(bus, AddrMode::ZeroPageIndirectYIndexed),
-            0xf5 => self.op_sbc(bus, AddrMode::XIndexedZeroPage),
-            0xf6 => self.op_inc(bus, AddrMode::XIndexedZeroPage),
-            0xf8 => self.op_sed(),
-            0xf9 => self.op_sbc(bus, AddrMode::YIndexedAbsolute),
-            0xfd => self.op_sbc(bus, AddrMode::XIndexedAbsolute),
-            0xfe => self.op_inc(bus, AddrMode::XIndexedAbsolute),
-            // TODO: implement remaining undocumented opcodes
-            _ => Err(SimBreak::HaltOpcode("unimplemented", opcode)),
-        }?;
+        if self.microcode.is_empty() {
+            self.microcode.push(Microcode::DecodeOpcode);
+            self.microcode.push(Microcode::ReadAtPc);
+        }
+        while let Some(microcode) = self.microcode.pop() {
+            self.execute_microcode(bus, microcode)?;
+        }
         watch(bus, u32::from(self.pc), WatchKind::Pc)
     }
 
     fn is_mid_instruction(&self) -> bool {
-        false
+        !self.microcode.is_empty()
     }
 }
 
@@ -1073,11 +1057,10 @@ fn watch(
 #[cfg(test)]
 mod tests {
     use super::{Mos6502, REG_P_MASK, SimProc};
-    use crate::bus::new_open_bus;
 
     #[test]
     fn get_registers() {
-        let proc = Mos6502::new(&mut *new_open_bus(16));
+        let proc = Mos6502::new();
         for &register in proc.register_names() {
             assert!(proc.get_register(register).is_some());
         }
@@ -1085,7 +1068,7 @@ mod tests {
 
     #[test]
     fn set_registers() {
-        let mut proc = Mos6502::new(&mut *new_open_bus(16));
+        let mut proc = Mos6502::new();
         for &register in proc.register_names() {
             proc.set_register(register, 0);
             assert_eq!(proc.get_register(register), Some(0));
@@ -1097,7 +1080,7 @@ mod tests {
 
     #[test]
     fn set_p_register() {
-        let mut proc = Mos6502::new(&mut *new_open_bus(16));
+        let mut proc = Mos6502::new();
         proc.set_register("P", 0);
         assert_eq!(proc.get_register("P"), Some(0));
         // Invalid bits should get masked off of the P register.

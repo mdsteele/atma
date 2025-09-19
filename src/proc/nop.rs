@@ -12,11 +12,12 @@ enum Cycle {
 
 //===========================================================================//
 
-/// A simulated processor that has no registers and treats every opcode as NOP.
-/// This can be used as a stub for testing.
+/// A simulated processor that treats every opcode as NOP.  This can be used as
+/// a stub for testing.
 #[derive(Default)]
 pub struct NopProc {
     pc: u32,
+    data: u8,
     cycle: Cycle,
 }
 
@@ -46,23 +47,27 @@ impl SimProc for NopProc {
     }
 
     fn register_names(&self) -> &'static [&'static str] {
-        &[]
+        &["DATA"]
     }
 
-    fn get_register(&self, _name: &str) -> Option<u32> {
-        None
+    fn get_register(&self, name: &str) -> Option<u32> {
+        if name == "DATA" { Some(u32::from(self.data)) } else { None }
     }
 
-    fn set_register(&mut self, _name: &str, _value: u32) {}
+    fn set_register(&mut self, name: &str, value: u32) {
+        if name == "DATA" {
+            self.data = value as u8;
+        }
+    }
 
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
         if matches!(self.cycle, Cycle::BetweenInstructions) {
             self.cycle = Cycle::ExecOpcode;
+            self.data = bus.read_byte(self.pc);
             watch(bus, self.pc, WatchKind::Read)?;
         }
         debug_assert!(matches!(self.cycle, Cycle::ExecOpcode));
         self.cycle = Cycle::BetweenInstructions;
-        bus.read_byte(self.pc);
         self.pc += 1;
         watch(bus, self.pc, WatchKind::Pc)
     }

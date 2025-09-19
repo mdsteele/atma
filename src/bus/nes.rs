@@ -78,7 +78,7 @@ impl SimBus for NesBus {
     }
 
     fn peek_byte(&self, addr: u32) -> u8 {
-        match addr & 0x0fff {
+        match addr & 0xffff {
             0x0000..0x2000 => self.ram.peek_byte(addr),
             0x2000..0x4020 => 0, // TODO
             0x4020.. => self.cart.peek_byte(addr),
@@ -86,7 +86,7 @@ impl SimBus for NesBus {
     }
 
     fn read_byte(&mut self, addr: u32) -> u8 {
-        match addr & 0x0fff {
+        match addr & 0xffff {
             0x0000..0x2000 => self.ram.read_byte(addr),
             0x2000..0x4020 => 0, // TODO
             0x4020.. => self.cart.read_byte(addr),
@@ -94,7 +94,7 @@ impl SimBus for NesBus {
     }
 
     fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr & 0x0fff {
+        match addr & 0xffff {
             0x0000..0x2000 => self.ram.write_byte(addr, data),
             0x2000..0x4020 => {} // TODO
             0x4020.. => self.cart.write_byte(addr, data),

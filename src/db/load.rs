@@ -77,8 +77,8 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         // Copy reset_addr into RAM at the reset vector.
         cursor.seek(SeekFrom::Start(0xfffc))?;
         cursor.write_u16::<LittleEndian>(reset_addr)?;
-        let mut bus = new_ram_bus(ram);
-        let cpu = Box::new(Mos6502::new(&mut *bus));
+        let bus = new_ram_bus(ram);
+        let cpu = Box::new(Mos6502::new());
         processors.push(("cpu".to_string(), (cpu, bus)));
     } else {
         reader.seek(SeekFrom::Start(0x0104))?;
@@ -169,8 +169,8 @@ pub fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut prg_rom = vec![0u8; prg_rom_size];
     reader.read_exact(&mut prg_rom)?;
 
-    let mut bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
-    let cpu: Box<dyn SimProc> = Box::new(Mos6502::new(&mut *bus));
+    let bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
+    let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
     let processors = vec![("cpu".to_string(), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
