@@ -1,4 +1,5 @@
 use crate::bus::{SimBus, WatchKind};
+use crate::dis::sm83::{disassemble_instruction, format_instruction};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -376,8 +377,11 @@ impl SimProc for SharpSm83 {
         "Sharp SM83".to_string()
     }
 
-    fn disassemble(&self, _bus: &dyn SimBus, _addr: u32) -> (usize, String) {
-        (0, String::new()) // TODO
+    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (usize, String) {
+        let (_, operation, operand) = disassemble_instruction(bus, addr);
+        let instruction_size = operand.size() + 1;
+        let string = format_instruction(operation, operand, addr as u16, bus);
+        (instruction_size, string)
     }
 
     fn pc(&self) -> u32 {
