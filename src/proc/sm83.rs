@@ -1,3 +1,4 @@
+use super::util::{pack, unpack, watch};
 use crate::bus::{SimBus, WatchKind};
 use crate::dis::sm83::{
     Condition, Operation, Reg8, Reg16, decode_opcode, disassemble_instruction,
@@ -28,14 +29,6 @@ enum Ime {
     Pending1,
     /// Interrupts are enabled.
     Enabled,
-}
-
-fn pack(hi: u8, lo: u8) -> u16 {
-    ((hi as u16) << 8) | (lo as u16)
-}
-
-fn unpack(word: u16) -> (u8, u8) {
-    ((word >> 8) as u8, (word & 0xff) as u8)
 }
 
 //===========================================================================//
@@ -535,18 +528,6 @@ impl SimProc for SharpSm83 {
 
     fn is_mid_instruction(&self) -> bool {
         false
-    }
-}
-
-fn watch(
-    bus: &dyn SimBus,
-    addr: u32,
-    kind: WatchKind,
-) -> Result<(), SimBreak> {
-    if let Some(id) = bus.watchpoint_at(addr, kind) {
-        Err(SimBreak::Watchpoint(kind, id))
-    } else {
-        Ok(())
     }
 }
 

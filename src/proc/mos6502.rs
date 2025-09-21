@@ -1,3 +1,4 @@
+use super::util::watch;
 use crate::bus::{BusPeeker, SimBus, WatchKind};
 use crate::dis::mos6502::{
     AddrMode, Operation, decode_opcode, disassemble_instruction,
@@ -1037,18 +1038,6 @@ impl SimProc for Mos6502 {
 
     fn is_mid_instruction(&self) -> bool {
         !self.microcode.is_empty()
-    }
-}
-
-fn watch(
-    bus: &dyn SimBus,
-    addr: u32,
-    kind: WatchKind,
-) -> Result<(), SimBreak> {
-    if let Some(id) = bus.watchpoint_at(addr, kind) {
-        Err(SimBreak::Watchpoint(kind, id))
-    } else {
-        Ok(())
     }
 }
 

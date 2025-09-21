@@ -1,3 +1,4 @@
+use super::util::watch;
 use crate::bus::{SimBus, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 
@@ -74,18 +75,6 @@ impl SimProc for NopProc {
 
     fn is_mid_instruction(&self) -> bool {
         !matches!(self.cycle, Cycle::BetweenInstructions)
-    }
-}
-
-fn watch(
-    bus: &dyn SimBus,
-    addr: u32,
-    kind: WatchKind,
-) -> Result<(), SimBreak> {
-    if let Some(id) = bus.watchpoint_at(addr, kind) {
-        Err(SimBreak::Watchpoint(kind, id))
-    } else {
-        Ok(())
     }
 }
 
