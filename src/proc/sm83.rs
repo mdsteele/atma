@@ -1,8 +1,8 @@
 use super::util::{pack, unpack, watch};
 use crate::bus::{SimBus, WatchKind};
 use crate::dis::sm83::{
-    Condition, Operation, Reg8, Reg16, decode_opcode, disassemble_instruction,
-    format_instruction,
+    Condition, Operation, Prefixed, Reg8, Reg16, decode_opcode,
+    decode_prefixed, disassemble_instruction, format_instruction,
 };
 use crate::proc::{SimBreak, SimProc};
 
@@ -31,12 +31,53 @@ enum Ime {
     Enabled,
 }
 
+#[derive(Clone, Copy)]
+enum Microcode {
+    Adc,                // A += (DATA + carry), set flags
+    Call(Condition),    // if condition met, push new microcode to call ADDR
+    Compare,            // compare A to DATA and set flags
+    DecodeOpcode,       // decode DATA as opcode, push new microcode
+    DecodePrefixed,     // decode DATA as prefixed, push new microcode
+    Decrement,          // DATA -= 1, set flags
+    GetPcHi,            // DATA = PC.hi
+    GetPcLo,            // DATA = PC.lo
+    GetReg(Reg8),       // DATA = reg
+    GetRegLo(Reg16),    // DATA = reg.lo
+    GetRegHi(Reg16),    // DATA = reg.hi
+    Increment,          // DATA += 1, set flags
+    JumpAbs(Condition), // if condition met, PC = ADDR
+    JumpRel(Condition), // if condition met, PC += (DATA as i8)
+    JumpTo(u16),        // PC = value
+    MakeAddrAbs,        // ADDR = pack(DATA, TEMP)
+    MakeAddrHp,         // ADDR = pack(0xff, DATA)
+    OffsetSp(Reg16),    // reg = SP + DATA, set flags
+    Pop,                // ADDR = SP, SP += 1, DATA = [ADDR], watch(ADDR, Read)
+    PrefixedBit(u8),    // test specified bit in DATA, set flags
+    PrefixedRes(u8),    // reset specified bit in DATA
+    PrefixedSet(u8),    // set specified bit in DATA
+    PrefixedSwap,       // swap nibbles of DATA, set flags
+    Push,               // push Write2, SP -= 1, ADDR = SP, watch(ADDR, Write)
+    Read,               // DATA = [ADDR], watch(ADDR, Read)
+    ReadAtPc,           // DATA = [PC], watch(PC, Read), PC += 1
+    Sbc,                // A -= (DATA + carry), set flags
+    SetReg(Reg8),       // reg = DATA (or for Reg8::M*, watch and push Write2)
+    SetRegHi(Reg16),    // reg.hi = DATA
+    SetRegLo(Reg16),    // reg.lo = DATA
+    SetTemp,            // TEMP = DATA
+    Write,              // push Write2, watch(ADDR, Write)
+    Write2,             // [ADDR] = DATA
+    Xor,                // A ^= DATA, set flags
+}
+
 //===========================================================================//
 
 /// A simulated Sharp SM83 processor.
 pub struct SharpSm83 {
     pc: u16,
     sp: u16,
+    addr: u16,
+    data: u8,
+    temp: u8,
     reg_a: u8,
     reg_f: u8,
     reg_b: u8,
@@ -46,6 +87,7 @@ pub struct SharpSm83 {
     reg_h: u8,
     reg_l: u8,
     ime: Ime,
+    microcode: Vec<Microcode>,
 }
 
 impl Default for SharpSm83 {
@@ -58,8 +100,11 @@ impl SharpSm83 {
     /// Returns a new simulated Sharp SM83 processor.
     pub fn new() -> SharpSm83 {
         SharpSm83 {
-            pc: 0,
+            pc: 0x0100,
             sp: 0xffff,
+            addr: 0,
+            data: 0,
+            temp: 0,
             reg_a: 0xff,
             reg_f: REG_F_MASK,
             reg_b: 0,
@@ -69,36 +114,592 @@ impl SharpSm83 {
             reg_h: 0,
             reg_l: 0,
             ime: Ime::Disabled,
+            microcode: Vec::new(),
         }
     }
 
-    fn op_call(
+    fn execute_microcode(
         &mut self,
         bus: &mut dyn SimBus,
-        cond: Condition,
+        microcode: Microcode,
     ) -> Result<(), SimBreak> {
-        let dest: u16 = self.read_immediate_word(bus);
+        match microcode {
+            Microcode::Adc => self.exec_adc(),
+            Microcode::Call(cond) => self.exec_call(cond),
+            Microcode::Compare => self.exec_compare(),
+            Microcode::DecodeOpcode => self.exec_decode_opcode(),
+            Microcode::DecodePrefixed => self.exec_decode_prefixed(),
+            Microcode::Decrement => self.exec_decrement(),
+            Microcode::GetPcHi => self.exec_get_pc_hi(),
+            Microcode::GetPcLo => self.exec_get_pc_lo(),
+            Microcode::GetReg(reg) => self.exec_get_reg(bus, reg),
+            Microcode::GetRegHi(reg) => self.exec_get_reg_hi(reg),
+            Microcode::GetRegLo(reg) => self.exec_get_reg_lo(reg),
+            Microcode::Increment => self.exec_increment(),
+            Microcode::JumpAbs(cond) => self.exec_jump_abs(cond),
+            Microcode::JumpRel(cond) => self.exec_jump_rel(cond),
+            Microcode::JumpTo(dest) => self.exec_jump_to(dest),
+            Microcode::MakeAddrAbs => self.exec_make_addr_abs(),
+            Microcode::MakeAddrHp => self.exec_make_addr_hp(),
+            Microcode::OffsetSp(reg) => self.exec_offset_sp(reg),
+            Microcode::Pop => self.exec_pop(bus),
+            Microcode::PrefixedBit(bit) => self.exec_prefixed_bit(bit),
+            Microcode::PrefixedRes(bit) => self.exec_prefixed_res(bit),
+            Microcode::PrefixedSet(bit) => self.exec_prefixed_set(bit),
+            Microcode::PrefixedSwap => self.exec_prefixed_swap(),
+            Microcode::Push => self.exec_push(bus),
+            Microcode::Read => self.exec_read(bus),
+            Microcode::ReadAtPc => self.exec_read_at_pc(bus),
+            Microcode::Sbc => self.exec_sbc(),
+            Microcode::SetReg(reg) => self.exec_set_reg(bus, reg),
+            Microcode::SetRegHi(reg) => self.exec_set_reg_hi(reg),
+            Microcode::SetRegLo(reg) => self.exec_set_reg_lo(reg),
+            Microcode::SetTemp => self.exec_set_temp(),
+            Microcode::Write => self.exec_write(bus),
+            Microcode::Write2 => self.exec_write2(bus),
+            Microcode::Xor => self.exec_xor(),
+        }
+    }
+
+    fn exec_decode_opcode(&mut self) -> Result<(), SimBreak> {
+        let opcode = self.data;
+        match decode_opcode(opcode) {
+            Operation::AdcAI8 => self.decode_op_adc_a_i8(),
+            Operation::AdcAR8(reg) => self.decode_op_adc_a_r8(reg),
+            Operation::AddHlR16(reg) => self.decode_op_add_hl_r16(reg),
+            Operation::AddAI8 => self.decode_op_add_a_i8(),
+            Operation::AddAR8(reg) => self.decode_op_add_a_r8(reg),
+            Operation::AddSpI8 => self.decode_op_add_sp_i8(),
+            Operation::AndAI8 => todo!(),
+            Operation::AndAR8(_reg) => todo!(),
+            Operation::CallM16(cond) => self.decode_op_call(cond),
+            Operation::Ccf => self.decode_op_ccf(),
+            Operation::CpAI8 => self.decode_op_cp_a_i8(),
+            Operation::CpAR8(reg) => self.decode_op_cp_a_r8(reg),
+            Operation::Cpl => self.decode_op_cpl(),
+            Operation::Daa => self.decode_op_daa(),
+            Operation::DecR16(reg) => self.decode_op_dec_r16(reg),
+            Operation::DecR8(reg) => self.decode_op_dec_r8(reg),
+            Operation::Di => self.decode_op_di(),
+            Operation::Ei => self.decode_op_ei(),
+            Operation::Halt => {
+                return Err(SimBreak::HaltOpcode("HALT", opcode));
+            }
+            Operation::IncR16(reg) => self.decode_op_inc_r16(reg),
+            Operation::IncR8(reg) => self.decode_op_inc_r8(reg),
+            Operation::Invalid => return self.op_invalid(opcode),
+            Operation::JpI16(cond) => self.decode_op_jp_i16(cond),
+            Operation::JpHl => self.decode_op_jp_hl(),
+            Operation::JrI8(cond) => self.decode_op_jr_i8(cond),
+            Operation::LdAM16 => self.decode_op_ld_a_m16(),
+            Operation::LdAMhld => self.decode_op_ld_a_mhld(),
+            Operation::LdAMhli => self.decode_op_ld_a_mhli(),
+            Operation::LdHlSpI8 => self.decode_op_ld_hl_sp_i8(),
+            Operation::LdM16A => self.decode_op_ld_m16_a(),
+            Operation::LdM16Sp => todo!(),
+            Operation::LdMhldA => self.decode_op_ld_mhld_a(),
+            Operation::LdMhliA => self.decode_op_ld_mhli_a(),
+            Operation::LdR16I16(reg) => self.decode_op_ld_r16_i16(reg),
+            Operation::LdR8I8(reg) => self.decode_op_ld_r8_i8(reg),
+            Operation::LdR8R8(r1, r2) => self.decode_op_ld_r8_r8(r1, r2),
+            Operation::LdSpHl => self.decode_op_ld_sp_hl(),
+            Operation::LdhAM8 => self.decode_op_ldh_a_m8(),
+            Operation::LdhAMc => self.decode_op_ldh_a_mc(),
+            Operation::LdhM8A => self.decode_op_ldh_m8_a(),
+            Operation::LdhMcA => self.decode_op_ldh_mc_a(),
+            Operation::Nop => {}
+            Operation::OrAI8 => todo!(),
+            Operation::OrAR8(_reg) => todo!(),
+            Operation::Pop(reg) => self.decode_op_pop_r16(reg),
+            Operation::Prefix => self.decode_op_prefix(),
+            Operation::Push(reg) => self.decode_op_push_r16(reg),
+            Operation::Ret(cond) => self.decode_op_ret(cond),
+            Operation::Reti => self.decode_op_reti(),
+            Operation::Rla => todo!(),
+            Operation::Rlca => todo!(),
+            Operation::Rra => todo!(),
+            Operation::Rrca => todo!(),
+            Operation::Rst(zp) => self.decode_op_rst(zp),
+            Operation::SbcAI8 => self.decode_op_sbc_a_i8(),
+            Operation::SbcAR8(reg) => self.decode_op_sbc_a_r8(reg),
+            Operation::Scf => self.decode_op_scf(),
+            Operation::Stop => {
+                return Err(SimBreak::HaltOpcode("STOP", opcode));
+            }
+            Operation::SubAI8 => self.decode_op_sub_a_i8(),
+            Operation::SubAR8(reg) => self.decode_op_sub_a_r8(reg),
+            Operation::XorAI8 => self.decode_op_xor_a_i8(),
+            Operation::XorAR8(reg) => self.decode_op_xor_a_r8(reg),
+        };
+        Ok(())
+    }
+
+    fn exec_decode_prefixed(&mut self) -> Result<(), SimBreak> {
+        let (prefixed, reg) = decode_prefixed(self.data);
+        self.microcode.push(Microcode::SetReg(reg));
+        self.microcode.push(match prefixed {
+            Prefixed::Rl => todo!(),
+            Prefixed::Rlc => todo!(),
+            Prefixed::Rr => todo!(),
+            Prefixed::Rrc => todo!(),
+            Prefixed::Sla => todo!(),
+            Prefixed::Sra => todo!(),
+            Prefixed::Srl => todo!(),
+            Prefixed::Swap => Microcode::PrefixedSwap,
+            Prefixed::Bit(bit) => Microcode::PrefixedBit(bit),
+            Prefixed::Res(bit) => Microcode::PrefixedRes(bit),
+            Prefixed::Set(bit) => Microcode::PrefixedSet(bit),
+        });
+        self.microcode.push(Microcode::GetReg(reg));
+        Ok(())
+    }
+
+    fn exec_adc(&mut self) -> Result<(), SimBreak> {
+        let lhs = i16::from(self.reg_a);
+        let rhs = i16::from(self.data);
+        let carry = i16::from(self.get_flag(PROC_FLAG_C));
+        self.set_flag(PROC_FLAG_H, (lhs & 0xf) + (rhs & 0xf) + carry > 0xf);
+        let result = lhs + rhs + carry;
+        self.set_flag(PROC_FLAG_C, result >= 0x100);
+        self.reg_a = result as u8;
+        self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        Ok(())
+    }
+
+    fn exec_call(&mut self, cond: Condition) -> Result<(), SimBreak> {
         if self.condition_met(cond) {
-            self.push_word(bus, self.pc)?;
-            self.pc = dest;
+            self.microcode.push(Microcode::JumpTo(self.addr));
+            self.microcode.push(Microcode::Push);
+            self.microcode.push(Microcode::GetPcLo);
+            self.microcode.push(Microcode::Push);
+            self.microcode.push(Microcode::GetPcHi);
         }
         Ok(())
     }
 
-    fn op_ccf(&mut self) -> Result<(), SimBreak> {
+    fn exec_compare(&mut self) -> Result<(), SimBreak> {
+        let lhs = self.reg_a;
+        let rhs = self.data;
+        self.set_flag(PROC_FLAG_H, (lhs & 0xf) < (rhs & 0xf));
+        self.set_flag(PROC_FLAG_C, lhs < rhs);
+        self.set_flag(PROC_FLAG_Z, lhs == rhs);
+        self.set_flag(PROC_FLAG_N, true);
+        Ok(())
+    }
+
+    fn exec_decrement(&mut self) -> Result<(), SimBreak> {
+        self.set_flag(PROC_FLAG_H, (self.data & 0xf) == 0);
+        self.data = self.data.wrapping_sub(1);
+        self.set_flag(PROC_FLAG_Z, self.data == 0);
+        self.set_flag(PROC_FLAG_N, true);
+        Ok(())
+    }
+
+    fn exec_get_pc_hi(&mut self) -> Result<(), SimBreak> {
+        self.data = (self.pc >> 8) as u8;
+        Ok(())
+    }
+
+    fn exec_get_pc_lo(&mut self) -> Result<(), SimBreak> {
+        self.data = self.pc as u8;
+        Ok(())
+    }
+
+    fn exec_get_reg(
+        &mut self,
+        bus: &mut dyn SimBus,
+        reg: Reg8,
+    ) -> Result<(), SimBreak> {
+        let addr = u32::from(match reg {
+            Reg8::A => {
+                self.data = self.reg_a;
+                return Ok(());
+            }
+            Reg8::B => {
+                self.data = self.reg_b;
+                return Ok(());
+            }
+            Reg8::C => {
+                self.data = self.reg_c;
+                return Ok(());
+            }
+            Reg8::D => {
+                self.data = self.reg_d;
+                return Ok(());
+            }
+            Reg8::E => {
+                self.data = self.reg_e;
+                return Ok(());
+            }
+            Reg8::H => {
+                self.data = self.reg_h;
+                return Ok(());
+            }
+            Reg8::L => {
+                self.data = self.reg_l;
+                return Ok(());
+            }
+            Reg8::Mbc => self.get_r16(Reg16::Bc),
+            Reg8::Mde => self.get_r16(Reg16::De),
+            Reg8::Mhl => self.get_r16(Reg16::Hl),
+        });
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
+    }
+
+    fn exec_get_reg_hi(&mut self, reg: Reg16) -> Result<(), SimBreak> {
+        self.data = match reg {
+            Reg16::Af => self.reg_a,
+            Reg16::Bc => self.reg_b,
+            Reg16::De => self.reg_d,
+            Reg16::Hl => self.reg_h,
+            Reg16::Sp => (self.sp >> 8) as u8,
+        };
+        Ok(())
+    }
+
+    fn exec_get_reg_lo(&mut self, reg: Reg16) -> Result<(), SimBreak> {
+        self.data = match reg {
+            Reg16::Af => self.reg_f,
+            Reg16::Bc => self.reg_c,
+            Reg16::De => self.reg_e,
+            Reg16::Hl => self.reg_l,
+            Reg16::Sp => self.sp as u8,
+        };
+        Ok(())
+    }
+
+    fn exec_increment(&mut self) -> Result<(), SimBreak> {
+        self.data = self.data.wrapping_add(1);
+        self.set_flag(PROC_FLAG_Z, self.data == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, (self.data & 0xf) == 0);
+        Ok(())
+    }
+
+    fn exec_jump_abs(&mut self, cond: Condition) -> Result<(), SimBreak> {
+        if self.condition_met(cond) {
+            self.pc = self.addr;
+        }
+        Ok(())
+    }
+
+    fn exec_jump_rel(&mut self, cond: Condition) -> Result<(), SimBreak> {
+        if self.condition_met(cond) {
+            let offset = self.data as i8;
+            self.pc = self.pc.wrapping_add(offset as u16);
+        }
+        Ok(())
+    }
+
+    fn exec_jump_to(&mut self, dest: u16) -> Result<(), SimBreak> {
+        self.pc = dest;
+        Ok(())
+    }
+
+    fn exec_offset_sp(&mut self, reg: Reg16) -> Result<(), SimBreak> {
+        self.set_flag(
+            PROC_FLAG_H,
+            (self.sp & 0xf) + u16::from(self.data & 0xf) > 0xf,
+        );
+        self.set_flag(
+            PROC_FLAG_C,
+            (self.sp & 0xff) + u16::from(self.data) > 0xff,
+        );
+        self.set_flag(PROC_FLAG_Z, false);
+        self.set_flag(PROC_FLAG_N, false);
+        let offset = self.data as i8;
+        let result = self.sp.wrapping_add(offset as u16);
+        self.set_r16(reg, result);
+        Ok(())
+    }
+
+    fn exec_make_addr_abs(&mut self) -> Result<(), SimBreak> {
+        self.addr = pack(self.data, self.temp);
+        Ok(())
+    }
+
+    fn exec_make_addr_hp(&mut self) -> Result<(), SimBreak> {
+        self.addr = pack(0xff, self.data);
+        Ok(())
+    }
+
+    fn exec_pop(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        self.addr = self.sp;
+        self.sp = self.sp.wrapping_add(1);
+        self.exec_read(bus)
+    }
+
+    fn exec_push(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        self.sp = self.sp.wrapping_sub(1);
+        self.addr = self.sp;
+        self.exec_write(bus)
+    }
+
+    fn exec_prefixed_bit(&mut self, bit: u8) -> Result<(), SimBreak> {
+        self.set_flag(PROC_FLAG_Z, (self.data & (1 << bit)) == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, true);
+        Ok(())
+    }
+
+    fn exec_prefixed_res(&mut self, bit: u8) -> Result<(), SimBreak> {
+        self.data &= !(1 << bit);
+        Ok(())
+    }
+
+    fn exec_prefixed_set(&mut self, bit: u8) -> Result<(), SimBreak> {
+        self.data |= 1 << bit;
+        Ok(())
+    }
+
+    fn exec_prefixed_swap(&mut self) -> Result<(), SimBreak> {
+        self.data = self.data.rotate_right(4);
+        self.set_flag(PROC_FLAG_Z, self.data == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, false);
+        self.set_flag(PROC_FLAG_C, false);
+        Ok(())
+    }
+
+    fn exec_read(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        let addr = u32::from(self.addr);
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
+    }
+
+    fn exec_read_at_pc(
+        &mut self,
+        bus: &mut dyn SimBus,
+    ) -> Result<(), SimBreak> {
+        let addr = u32::from(self.pc);
+        self.pc += 1;
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
+    }
+
+    fn exec_sbc(&mut self) -> Result<(), SimBreak> {
+        let lhs = i16::from(self.reg_a);
+        let rhs = i16::from(self.data);
+        let carry = i16::from(self.get_flag(PROC_FLAG_C));
+        self.set_flag(PROC_FLAG_H, (lhs & 0xf) - (rhs & 0xf) - carry < 0);
+        let result = lhs - rhs - carry;
+        self.set_flag(PROC_FLAG_C, result < 0);
+        self.reg_a = result as u8;
+        self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
+        self.set_flag(PROC_FLAG_N, true);
+        Ok(())
+    }
+
+    fn exec_set_reg(
+        &mut self,
+        bus: &mut dyn SimBus,
+        reg: Reg8,
+    ) -> Result<(), SimBreak> {
+        match reg {
+            Reg8::A => {
+                self.reg_a = self.data;
+                return Ok(());
+            }
+            Reg8::B => {
+                self.reg_b = self.data;
+                return Ok(());
+            }
+            Reg8::C => {
+                self.reg_c = self.data;
+                return Ok(());
+            }
+            Reg8::D => {
+                self.reg_d = self.data;
+                return Ok(());
+            }
+            Reg8::E => {
+                self.reg_e = self.data;
+                return Ok(());
+            }
+            Reg8::H => {
+                self.reg_h = self.data;
+                return Ok(());
+            }
+            Reg8::L => {
+                self.reg_l = self.data;
+                return Ok(());
+            }
+            Reg8::Mbc => self.addr = self.get_r16(Reg16::Bc),
+            Reg8::Mde => self.addr = self.get_r16(Reg16::De),
+            Reg8::Mhl => self.addr = self.get_r16(Reg16::Hl),
+        }
+        self.microcode.push(Microcode::Write2);
+        watch(bus, u32::from(self.addr), WatchKind::Write)
+    }
+
+    fn exec_set_reg_hi(&mut self, reg: Reg16) -> Result<(), SimBreak> {
+        match reg {
+            Reg16::Af => self.reg_a = self.data,
+            Reg16::Bc => self.reg_b = self.data,
+            Reg16::De => self.reg_d = self.data,
+            Reg16::Hl => self.reg_h = self.data,
+            Reg16::Sp => self.sp = pack(self.data, self.sp as u8),
+        }
+        Ok(())
+    }
+
+    fn exec_set_reg_lo(&mut self, reg: Reg16) -> Result<(), SimBreak> {
+        match reg {
+            Reg16::Af => self.reg_f = self.data,
+            Reg16::Bc => self.reg_c = self.data,
+            Reg16::De => self.reg_e = self.data,
+            Reg16::Hl => self.reg_l = self.data,
+            Reg16::Sp => self.sp = (self.sp & 0xff00) | u16::from(self.data),
+        }
+        Ok(())
+    }
+
+    fn exec_set_temp(&mut self) -> Result<(), SimBreak> {
+        self.temp = self.data;
+        Ok(())
+    }
+
+    fn exec_write(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        self.microcode.push(Microcode::Write2);
+        watch(bus, u32::from(self.addr), WatchKind::Write)
+    }
+
+    fn exec_write2(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
+        bus.write_byte(u32::from(self.addr), self.data);
+        Ok(())
+    }
+
+    fn exec_xor(&mut self) -> Result<(), SimBreak> {
+        self.reg_a ^= self.data;
+        self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, false);
+        self.set_flag(PROC_FLAG_C, false);
+        Ok(())
+    }
+
+    fn decode_op_adc_a_i8(&mut self) {
+        self.microcode.push(Microcode::Adc);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_adc_a_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::Adc);
+        self.microcode.push(Microcode::GetReg(reg));
+    }
+
+    fn decode_op_add_hl_r16(&mut self, reg: Reg16) {
+        let lhs = u32::from(self.get_r16(Reg16::Hl));
+        let rhs = u32::from(self.get_r16(reg));
+        let result = lhs + rhs;
+        self.set_r16(Reg16::Hl, result as u16);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, (lhs & 0xfff) + (rhs & 0xfff) > 0xfff);
+        self.set_flag(PROC_FLAG_C, result > 0xffff);
+    }
+
+    fn decode_op_add_a_i8(&mut self) {
+        self.set_flag(PROC_FLAG_C, false);
+        self.decode_op_adc_a_i8();
+    }
+
+    fn decode_op_add_a_r8(&mut self, reg: Reg8) {
+        self.set_flag(PROC_FLAG_C, false);
+        self.decode_op_adc_a_r8(reg);
+    }
+
+    fn decode_op_add_sp_i8(&mut self) {
+        self.microcode.push(Microcode::OffsetSp(Reg16::Sp));
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_call(&mut self, cond: Condition) {
+        self.microcode.push(Microcode::Call(cond));
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_ccf(&mut self) {
         self.reg_f &= !(PROC_FLAG_N | PROC_FLAG_H);
         self.reg_f ^= PROC_FLAG_C;
-        Ok(())
     }
 
-    fn op_di(&mut self) -> Result<(), SimBreak> {
+    fn decode_op_cp_a_i8(&mut self) {
+        self.microcode.push(Microcode::Compare);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_cp_a_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::Compare);
+        self.microcode.push(Microcode::GetReg(reg));
+    }
+
+    fn decode_op_cpl(&mut self) {
+        self.reg_a = !self.reg_a;
+        self.reg_f |= PROC_FLAG_N | PROC_FLAG_H;
+    }
+
+    fn decode_op_daa(&mut self) {
+        let mut adjust: i16 = 0;
+        if self.get_flag(PROC_FLAG_N) {
+            if self.get_flag(PROC_FLAG_H) {
+                adjust += 0x06;
+            }
+            if self.get_flag(PROC_FLAG_C) {
+                adjust += 0x60;
+            }
+            let result = i16::from(self.reg_a) - adjust;
+            self.set_flag(PROC_FLAG_C, result < 0);
+            self.reg_a = result as u8;
+        } else {
+            if self.get_flag(PROC_FLAG_H) || (self.reg_a & 0x0f) > 0x09 {
+                adjust += 0x06;
+            }
+            if self.get_flag(PROC_FLAG_C) || self.reg_a > 0x99 {
+                adjust += 0x60;
+                self.set_flag(PROC_FLAG_C, true)
+            }
+            if self.get_flag(PROC_FLAG_C) {
+                adjust += 1;
+            }
+            let result = i16::from(self.reg_a) + adjust;
+            self.set_flag(PROC_FLAG_C, result > 0xff);
+            self.reg_a = result as u8;
+        }
+        self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
+        self.set_flag(PROC_FLAG_H, false);
+    }
+
+    fn decode_op_dec_r16(&mut self, reg: Reg16) {
+        self.set_r16(reg, self.get_r16(reg).wrapping_sub(1));
+    }
+
+    fn decode_op_dec_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::SetReg(reg));
+        self.microcode.push(Microcode::Decrement);
+        self.microcode.push(Microcode::GetReg(reg));
+    }
+
+    fn decode_op_di(&mut self) {
         self.ime = Ime::Disabled;
-        Ok(())
     }
 
-    fn op_ei(&mut self) -> Result<(), SimBreak> {
+    fn decode_op_ei(&mut self) {
         self.ime = Ime::Pending2;
-        Ok(())
+    }
+
+    fn decode_op_inc_r16(&mut self, reg: Reg16) {
+        self.set_r16(reg, self.get_r16(reg).wrapping_add(1));
+    }
+
+    fn decode_op_inc_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::SetReg(reg));
+        self.microcode.push(Microcode::Increment);
+        self.microcode.push(Microcode::GetReg(reg));
     }
 
     fn op_invalid(&mut self, opcode: u8) -> Result<(), SimBreak> {
@@ -109,144 +710,200 @@ impl SharpSm83 {
         Err(SimBreak::HaltOpcode("invalid", opcode))
     }
 
-    fn op_jp_u16(
-        &mut self,
-        bus: &mut dyn SimBus,
-        cond: Condition,
-    ) -> Result<(), SimBreak> {
-        let dest: u16 = self.read_immediate_word(bus);
-        if self.condition_met(cond) {
-            self.pc = dest;
-        }
-        Ok(())
+    fn decode_op_jp_i16(&mut self, cond: Condition) {
+        self.microcode.push(Microcode::JumpAbs(cond));
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::ReadAtPc);
     }
 
-    fn op_jp_hl(&mut self) -> Result<(), SimBreak> {
-        self.pc = pack(self.reg_h, self.reg_l);
-        Ok(())
+    fn decode_op_jp_hl(&mut self) {
+        self.pc = self.get_r16(Reg16::Hl);
     }
 
-    fn op_jr(
-        &mut self,
-        bus: &mut dyn SimBus,
-        cond: Condition,
-    ) -> Result<(), SimBreak> {
-        let offset: i8 = self.read_immediate_byte(bus) as i8;
-        if self.condition_met(cond) {
-            self.pc = self.pc.wrapping_add(offset as u16);
-        }
-        Ok(())
+    fn decode_op_jr_i8(&mut self, cond: Condition) {
+        self.microcode.push(Microcode::JumpRel(cond));
+        self.microcode.push(Microcode::ReadAtPc);
     }
 
-    fn op_ld_r8_r8(
-        &mut self,
-        bus: &mut dyn SimBus,
-        dst: Reg8,
-        src: Reg8,
-    ) -> Result<(), SimBreak> {
-        let byte = self.get_r8(bus, src);
-        self.set_r8(bus, dst, byte);
-        Ok(())
+    fn decode_op_ld_a_m16(&mut self) {
+        self.microcode.push(Microcode::SetReg(Reg8::A));
+        self.microcode.push(Microcode::Read);
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::ReadAtPc);
     }
 
-    fn op_ld_r8_u8(
-        &mut self,
-        bus: &mut dyn SimBus,
-        dst: Reg8,
-    ) -> Result<(), SimBreak> {
-        let byte = self.read_immediate_byte(bus);
-        self.set_r8(bus, dst, byte);
-        Ok(())
+    fn decode_op_ld_a_mhld(&mut self) {
+        self.microcode.push(Microcode::SetReg(Reg8::A));
+        self.microcode.push(Microcode::Read);
+        self.addr = self.get_r16(Reg16::Hl);
+        self.set_r16(Reg16::Hl, self.addr.wrapping_sub(1));
     }
 
-    fn op_ld_r16_u16(
-        &mut self,
-        bus: &mut dyn SimBus,
-        dst: Reg16,
-    ) -> Result<(), SimBreak> {
-        let word = self.read_immediate_word(bus);
-        self.set_r16(dst, word);
-        Ok(())
+    fn decode_op_ld_a_mhli(&mut self) {
+        self.microcode.push(Microcode::SetReg(Reg8::A));
+        self.microcode.push(Microcode::Read);
+        self.addr = self.get_r16(Reg16::Hl);
+        self.set_r16(Reg16::Hl, self.addr.wrapping_add(1));
     }
 
-    fn op_ld_sp_hl(&mut self) -> Result<(), SimBreak> {
+    fn decode_op_ld_hl_sp_i8(&mut self) {
+        self.microcode.push(Microcode::OffsetSp(Reg16::Hl));
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_ld_m16_a(&mut self) {
+        self.microcode.push(Microcode::Write);
+        self.microcode.push(Microcode::GetReg(Reg8::A));
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_ld_mhld_a(&mut self) {
+        self.microcode.push(Microcode::Write);
+        self.data = self.reg_a;
+        self.addr = self.get_r16(Reg16::Hl);
+        self.set_r16(Reg16::Hl, self.addr.wrapping_sub(1));
+    }
+
+    fn decode_op_ld_mhli_a(&mut self) {
+        self.microcode.push(Microcode::Write);
+        self.data = self.reg_a;
+        self.addr = self.get_r16(Reg16::Hl);
+        self.set_r16(Reg16::Hl, self.addr.wrapping_add(1));
+    }
+
+    fn decode_op_ld_r8_r8(&mut self, dst: Reg8, src: Reg8) {
+        self.microcode.push(Microcode::SetReg(dst));
+        self.microcode.push(Microcode::GetReg(src));
+    }
+
+    fn decode_op_ld_r8_i8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::SetReg(reg));
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_ld_r16_i16(&mut self, reg: Reg16) {
+        self.microcode.push(Microcode::SetRegHi(reg));
+        self.microcode.push(Microcode::ReadAtPc);
+        self.microcode.push(Microcode::SetRegLo(reg));
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_ld_sp_hl(&mut self) {
         self.sp = pack(self.reg_h, self.reg_l);
-        Ok(())
     }
 
-    fn op_ldh_a_mc(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let addr: u16 = pack(0xff, self.reg_c);
-        self.reg_a = bus.read_byte(addr as u32);
-        Ok(())
+    fn decode_op_ldh_a_mc(&mut self) {
+        self.microcode.push(Microcode::SetReg(Reg8::A));
+        self.microcode.push(Microcode::Read);
+        self.addr = pack(0xff, self.reg_c);
     }
 
-    fn op_ldh_a_u8(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let lo: u8 = self.read_immediate_byte(bus);
-        let addr: u16 = pack(0xff, lo);
-        self.reg_a = bus.read_byte(addr as u32);
-        Ok(())
+    fn decode_op_ldh_a_m8(&mut self) {
+        self.microcode.push(Microcode::SetReg(Reg8::A));
+        self.microcode.push(Microcode::Read);
+        self.microcode.push(Microcode::MakeAddrHp);
+        self.microcode.push(Microcode::ReadAtPc);
     }
 
-    fn op_ldh_mc_a(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let addr: u16 = pack(0xff, self.reg_c);
-        bus.write_byte(addr as u32, self.reg_a);
-        Ok(())
+    fn decode_op_ldh_mc_a(&mut self) {
+        self.microcode.push(Microcode::Write);
+        self.addr = pack(0xff, self.reg_c);
+        self.data = self.reg_a;
     }
 
-    fn op_ldh_u8_a(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let lo: u8 = self.read_immediate_byte(bus);
-        let addr: u16 = pack(0xff, lo);
-        bus.write_byte(addr as u32, self.reg_a);
-        Ok(())
+    fn decode_op_ldh_m8_a(&mut self) {
+        self.microcode.push(Microcode::Write);
+        self.microcode.push(Microcode::GetReg(Reg8::A));
+        self.microcode.push(Microcode::MakeAddrHp);
+        self.microcode.push(Microcode::ReadAtPc);
     }
 
-    fn op_nop(&mut self) -> Result<(), SimBreak> {
-        Ok(())
+    fn decode_op_pop_r16(&mut self, reg: Reg16) {
+        self.microcode.push(Microcode::SetRegHi(reg));
+        self.microcode.push(Microcode::Pop);
+        self.microcode.push(Microcode::SetRegLo(reg));
+        self.microcode.push(Microcode::Pop);
     }
 
-    fn op_pop_r16(
-        &mut self,
-        bus: &mut dyn SimBus,
-        reg: Reg16,
-    ) -> Result<(), SimBreak> {
-        let word = self.pop_word(bus)?;
-        self.set_r16(reg, word);
-        Ok(())
+    fn decode_op_prefix(&mut self) {
+        self.microcode.push(Microcode::DecodePrefixed);
+        self.microcode.push(Microcode::ReadAtPc);
     }
 
-    fn op_push_r16(
-        &mut self,
-        bus: &mut dyn SimBus,
-        reg: Reg16,
-    ) -> Result<(), SimBreak> {
-        self.push_word(bus, self.get_r16(reg))
+    fn decode_op_push_r16(&mut self, reg: Reg16) {
+        self.microcode.push(Microcode::Push);
+        self.microcode.push(Microcode::GetRegLo(reg));
+        self.microcode.push(Microcode::Push);
+        self.microcode.push(Microcode::GetRegHi(reg));
     }
 
-    fn op_ret(
-        &mut self,
-        bus: &mut dyn SimBus,
-        cond: Condition,
-    ) -> Result<(), SimBreak> {
+    fn decode_op_ret(&mut self, cond: Condition) {
         if self.condition_met(cond) {
-            self.pc = self.pop_word(bus)?;
+            self.microcode.push(Microcode::JumpAbs(Condition::Always));
+            self.microcode.push(Microcode::MakeAddrAbs);
+            self.microcode.push(Microcode::Pop);
+            self.microcode.push(Microcode::SetTemp);
+            self.microcode.push(Microcode::Pop);
         }
-        Ok(())
     }
 
-    fn op_rst(
-        &mut self,
-        bus: &mut dyn SimBus,
-        zp: u8,
-    ) -> Result<(), SimBreak> {
-        self.push_word(bus, self.pc)?;
-        self.pc = u16::from(zp);
-        Ok(())
+    fn decode_op_reti(&mut self) {
+        self.microcode.push(Microcode::JumpAbs(Condition::Always));
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::Pop);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::Pop);
+        self.ime = Ime::Pending1;
     }
 
-    fn op_scf(&mut self) -> Result<(), SimBreak> {
+    fn decode_op_rst(&mut self, zp: u8) {
+        self.microcode.push(Microcode::JumpTo(u16::from(zp)));
+        self.microcode.push(Microcode::Push);
+        self.microcode.push(Microcode::GetPcLo);
+        self.microcode.push(Microcode::Push);
+        self.microcode.push(Microcode::GetPcHi);
+    }
+
+    fn decode_op_sbc_a_i8(&mut self) {
+        self.microcode.push(Microcode::Sbc);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_sbc_a_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::Sbc);
+        self.microcode.push(Microcode::GetReg(reg));
+    }
+
+    fn decode_op_scf(&mut self) {
         self.reg_f &= !(PROC_FLAG_N | PROC_FLAG_H);
         self.reg_f |= PROC_FLAG_C;
-        Ok(())
+    }
+
+    fn decode_op_sub_a_i8(&mut self) {
+        self.set_flag(PROC_FLAG_C, false);
+        self.decode_op_sbc_a_i8();
+    }
+
+    fn decode_op_sub_a_r8(&mut self, reg: Reg8) {
+        self.set_flag(PROC_FLAG_C, false);
+        self.decode_op_sbc_a_r8(reg);
+    }
+
+    fn decode_op_xor_a_i8(&mut self) {
+        self.microcode.push(Microcode::Xor);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_xor_a_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::Xor);
+        self.microcode.push(Microcode::GetReg(reg));
     }
 
     fn condition_met(&self, cond: Condition) -> bool {
@@ -256,109 +913,6 @@ impl SharpSm83 {
             Condition::Nc => (self.reg_f & PROC_FLAG_C) == 0,
             Condition::Z => (self.reg_f & PROC_FLAG_Z) != 0,
             Condition::Nz => (self.reg_f & PROC_FLAG_Z) == 0,
-        }
-    }
-
-    fn pop_word(&mut self, bus: &mut dyn SimBus) -> Result<u16, SimBreak> {
-        let lo = bus.read_byte(self.sp as u32);
-        self.sp = self.sp.wrapping_add(1);
-        let hi = bus.read_byte(self.sp as u32);
-        self.sp = self.sp.wrapping_add(1);
-        Ok(pack(hi, lo))
-    }
-
-    fn push_word(
-        &mut self,
-        bus: &mut dyn SimBus,
-        word: u16,
-    ) -> Result<(), SimBreak> {
-        let (hi, lo) = unpack(word);
-        self.sp = self.sp.wrapping_sub(1);
-        bus.write_byte(self.sp as u32, hi);
-        self.sp = self.sp.wrapping_sub(1);
-        bus.write_byte(self.sp as u32, lo);
-        Ok(())
-    }
-
-    fn read_immediate_byte(&mut self, bus: &mut dyn SimBus) -> u8 {
-        let byte = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        byte
-    }
-
-    fn read_immediate_word(&mut self, bus: &mut dyn SimBus) -> u16 {
-        let lo = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        let hi = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        pack(hi, lo)
-    }
-
-    fn get_r8(&mut self, bus: &mut dyn SimBus, reg: Reg8) -> u8 {
-        match reg {
-            Reg8::A => self.reg_a,
-            Reg8::B => self.reg_b,
-            Reg8::C => self.reg_c,
-            Reg8::D => self.reg_d,
-            Reg8::E => self.reg_e,
-            Reg8::H => self.reg_h,
-            Reg8::L => self.reg_l,
-            Reg8::Mbc => {
-                let addr = self.get_r16(Reg16::Bc);
-                bus.read_byte(u32::from(addr))
-            }
-            Reg8::Mde => {
-                let addr = self.get_r16(Reg16::De);
-                bus.read_byte(u32::from(addr))
-            }
-            Reg8::Mhl => {
-                let addr = self.get_r16(Reg16::Hl);
-                bus.read_byte(u32::from(addr))
-            }
-            Reg8::Mhli => {
-                let addr = self.get_r16(Reg16::Hl);
-                self.set_r16(Reg16::Hl, addr.wrapping_add(1));
-                bus.read_byte(u32::from(addr))
-            }
-            Reg8::Mhld => {
-                let addr = self.get_r16(Reg16::Hl);
-                self.set_r16(Reg16::Hl, addr.wrapping_sub(1));
-                bus.read_byte(u32::from(addr))
-            }
-        }
-    }
-
-    fn set_r8(&mut self, bus: &mut dyn SimBus, reg: Reg8, byte: u8) {
-        match reg {
-            Reg8::A => self.reg_a = byte,
-            Reg8::B => self.reg_b = byte,
-            Reg8::C => self.reg_c = byte,
-            Reg8::D => self.reg_d = byte,
-            Reg8::E => self.reg_e = byte,
-            Reg8::H => self.reg_h = byte,
-            Reg8::L => self.reg_l = byte,
-            Reg8::Mbc => {
-                let addr = self.get_r16(Reg16::Bc);
-                bus.write_byte(u32::from(addr), byte);
-            }
-            Reg8::Mde => {
-                let addr = self.get_r16(Reg16::De);
-                bus.write_byte(u32::from(addr), byte);
-            }
-            Reg8::Mhl => {
-                let addr = self.get_r16(Reg16::Hl);
-                bus.write_byte(u32::from(addr), byte);
-            }
-            Reg8::Mhli => {
-                let addr = self.get_r16(Reg16::Hl);
-                self.set_r16(Reg16::Hl, addr.wrapping_add(1));
-                bus.write_byte(u32::from(addr), byte);
-            }
-            Reg8::Mhld => {
-                let addr = self.get_r16(Reg16::Hl);
-                self.set_r16(Reg16::Hl, addr.wrapping_sub(1));
-                bus.write_byte(u32::from(addr), byte);
-            }
         }
     }
 
@@ -382,6 +936,18 @@ impl SharpSm83 {
             Reg16::De => (self.reg_d, self.reg_e) = unpack(word),
             Reg16::Hl => (self.reg_h, self.reg_l) = unpack(word),
             Reg16::Sp => self.sp = word,
+        }
+    }
+
+    fn get_flag(&mut self, flag: u8) -> bool {
+        (self.reg_f & flag) != 0
+    }
+
+    fn set_flag(&mut self, flag: u8, value: bool) {
+        if value {
+            self.reg_f |= flag;
+        } else {
+            self.reg_f &= !flag;
         }
     }
 }
@@ -408,10 +974,14 @@ impl SimProc for SharpSm83 {
             Ime::Pending1 | Ime::Pending2 => self.ime = Ime::Enabled,
             Ime::Disabled | Ime::Enabled => {}
         }
+        self.microcode.clear();
     }
 
     fn register_names(&self) -> &'static [&'static str] {
-        &["A", "F", "B", "C", "D", "E", "H", "L", "AF", "BC", "DE", "HL", "SP"]
+        &[
+            "A", "F", "B", "C", "D", "E", "H", "L", "BC", "DE", "HL", "SP",
+            "DATA",
+        ]
     }
 
     fn get_register(&self, name: &str) -> Option<u32> {
@@ -424,11 +994,11 @@ impl SimProc for SharpSm83 {
             "E" => Some(u32::from(self.reg_e)),
             "H" => Some(u32::from(self.reg_h)),
             "L" => Some(u32::from(self.reg_l)),
-            "AF" => Some(u32::from(pack(self.reg_a, self.reg_f))),
             "BC" => Some(u32::from(pack(self.reg_b, self.reg_c))),
             "DE" => Some(u32::from(pack(self.reg_d, self.reg_e))),
             "HL" => Some(u32::from(pack(self.reg_h, self.reg_l))),
             "SP" => Some(u32::from(self.sp)),
+            "DATA" => Some(u32::from(self.data)),
             _ => None,
         }
     }
@@ -443,81 +1013,23 @@ impl SimProc for SharpSm83 {
             "E" => self.reg_e = (value & 0xff) as u8,
             "H" => self.reg_h = (value & 0xff) as u8,
             "L" => self.reg_l = (value & 0xff) as u8,
-            "AF" => {
-                (self.reg_a, self.reg_f) = unpack((value & 0xffff) as u16);
-                self.reg_f &= REG_F_MASK;
-            }
             "BC" => (self.reg_b, self.reg_c) = unpack((value & 0xffff) as u16),
             "DE" => (self.reg_d, self.reg_e) = unpack((value & 0xffff) as u16),
             "HL" => (self.reg_h, self.reg_l) = unpack((value & 0xffff) as u16),
             "SP" => self.sp = value as u16,
+            "DATA" => self.data = value as u8,
             _ => {}
         };
     }
 
     fn step(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let opcode = bus.read_byte(self.pc as u32);
-        self.pc = self.pc.wrapping_add(1);
-        match decode_opcode(opcode) {
-            Operation::AdcAI8 => todo!(),
-            Operation::AdcAR8(_reg) => todo!(),
-            Operation::AddHlR16(_reg) => todo!(),
-            Operation::AddAI8 => todo!(),
-            Operation::AddAR8(_reg) => todo!(),
-            Operation::AddSpI8 => todo!(),
-            Operation::AndAI8 => todo!(),
-            Operation::AndAR8(_reg) => todo!(),
-            Operation::CallM16(cond) => self.op_call(bus, cond),
-            Operation::Ccf => self.op_ccf(),
-            Operation::CpAI8 => todo!(),
-            Operation::CpAR8(_reg) => todo!(),
-            Operation::Cpl => todo!(),
-            Operation::Daa => todo!(),
-            Operation::DecR16(_reg) => todo!(),
-            Operation::DecR8(_reg) => todo!(),
-            Operation::Di => self.op_di(),
-            Operation::Ei => self.op_ei(),
-            Operation::Halt => todo!(),
-            Operation::IncR16(_reg) => todo!(),
-            Operation::IncR8(_reg) => todo!(),
-            Operation::Invalid => self.op_invalid(opcode),
-            Operation::JpI16(cond) => self.op_jp_u16(bus, cond),
-            Operation::JpHl => self.op_jp_hl(),
-            Operation::JrI8(cond) => self.op_jr(bus, cond),
-            Operation::LdAM16 => todo!(),
-            Operation::LdM16A => todo!(),
-            Operation::LdM16Sp => todo!(),
-            Operation::LdHlSpI8 => todo!(),
-            Operation::LdR16I16(reg) => self.op_ld_r16_u16(bus, reg),
-            Operation::LdR8I8(reg) => self.op_ld_r8_u8(bus, reg),
-            Operation::LdR8R8(r1, r2) => self.op_ld_r8_r8(bus, r1, r2),
-            Operation::LdSpHl => self.op_ld_sp_hl(),
-            Operation::LdhAM8 => self.op_ldh_a_u8(bus),
-            Operation::LdhAMc => self.op_ldh_a_mc(bus),
-            Operation::LdhM8A => self.op_ldh_u8_a(bus),
-            Operation::LdhMcA => self.op_ldh_mc_a(bus),
-            Operation::Nop => self.op_nop(),
-            Operation::OrAI8 => todo!(),
-            Operation::OrAR8(_reg) => todo!(),
-            Operation::Pop(reg) => self.op_pop_r16(bus, reg),
-            Operation::Prefix => todo!(),
-            Operation::Push(reg) => self.op_push_r16(bus, reg),
-            Operation::Ret(cond) => self.op_ret(bus, cond),
-            Operation::Reti => todo!(),
-            Operation::Rla => todo!(),
-            Operation::Rlca => todo!(),
-            Operation::Rra => todo!(),
-            Operation::Rrca => todo!(),
-            Operation::Rst(zp) => self.op_rst(bus, zp),
-            Operation::SbcAI8 => todo!(),
-            Operation::SbcAR8(_reg) => todo!(),
-            Operation::Scf => self.op_scf(),
-            Operation::Stop => todo!(),
-            Operation::SubAI8 => todo!(),
-            Operation::SubAR8(_reg) => todo!(),
-            Operation::XorAI8 => todo!(),
-            Operation::XorAR8(_reg) => todo!(),
-        }?;
+        if self.microcode.is_empty() {
+            self.microcode.push(Microcode::DecodeOpcode);
+            self.microcode.push(Microcode::ReadAtPc);
+        }
+        while let Some(microcode) = self.microcode.pop() {
+            self.execute_microcode(bus, microcode)?;
+        }
         if let Ime::Pending1 = self.ime {
             self.ime = Ime::Enabled;
         } else if let Ime::Pending2 = self.ime {
@@ -527,7 +1039,7 @@ impl SimProc for SharpSm83 {
     }
 
     fn is_mid_instruction(&self) -> bool {
-        false
+        !self.microcode.is_empty()
     }
 }
 

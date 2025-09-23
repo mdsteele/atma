@@ -54,12 +54,6 @@ pub enum Reg8 {
     Mde,
     /// The memory location pointed to by the combined HL register.
     Mhl,
-    /// The memory location pointed to by the combined HL register, which
-    /// should also be incremented.
-    Mhli,
-    /// The memory location pointed to by the combined HL register, which
-    /// should also be decremented.
-    Mhld,
 }
 
 impl Reg8 {
@@ -75,8 +69,6 @@ impl Reg8 {
             Reg8::Mbc => "[BC]",
             Reg8::Mde => "[DE]",
             Reg8::Mhl => "[HL]",
-            Reg8::Mhli => "[HL+]",
-            Reg8::Mhld => "[HL-]",
         }
     }
 }
@@ -164,13 +156,25 @@ pub enum Operation {
     JrI8(Condition),
     /// Load from memory at a 16-bit immediate address into the A register.
     LdAM16,
+    /// Load from memory at the location pointed to by the HL register into the
+    /// A register, then decrement the HL register.
+    LdAMhld,
+    /// Load from memory at the location pointed to by the HL register into the
+    /// A register, then increment the HL register.
+    LdAMhli,
+    /// Load the stack pointer plus a signed 8-bit immediate offset into the HL
+    /// register.
+    LdHlSpI8,
     /// Load the A register into memory at a 16-bit immediate address.
     LdM16A,
     /// Load the stack pointer into memory at a 16-bit immediate address.
     LdM16Sp,
-    /// Load the stack pointer plus a signed 8-bit immediate offset into the HL
-    /// register.
-    LdHlSpI8,
+    /// Load the A register into the memory location pointed to by the HL
+    /// register, then decrement the HL register.
+    LdMhldA,
+    /// Load the A register into the memory location pointed to by the HL
+    /// register, then increment the HL register.
+    LdMhliA,
     /// Load a 16-bit immediate value into a 16-bit register.
     LdR16I16(Reg16),
     /// Load an 8-bit immediate value into an 8-bit register.
@@ -321,10 +325,10 @@ pub fn decode_opcode(opcode: u8) -> Operation {
         0x0a => Operation::LdR8R8(Reg8::A, Reg8::Mbc),
         0x12 => Operation::LdR8R8(Reg8::Mde, Reg8::A),
         0x1a => Operation::LdR8R8(Reg8::A, Reg8::Mde),
-        0x22 => Operation::LdR8R8(Reg8::Mhli, Reg8::A),
-        0x2a => Operation::LdR8R8(Reg8::A, Reg8::Mhli),
-        0x32 => Operation::LdR8R8(Reg8::Mhld, Reg8::A),
-        0x3a => Operation::LdR8R8(Reg8::A, Reg8::Mhld),
+        0x22 => Operation::LdMhliA,
+        0x2a => Operation::LdAMhli,
+        0x32 => Operation::LdMhldA,
+        0x3a => Operation::LdAMhld,
 
         0x03 => Operation::IncR16(Reg16::Bc),
         0x0b => Operation::DecR16(Reg16::Bc),
@@ -648,6 +652,10 @@ pub fn disassemble_instruction(
         | Operation::IncR8(_)
         | Operation::Invalid
         | Operation::JpHl
+        | Operation::LdAMhld
+        | Operation::LdAMhli
+        | Operation::LdMhldA
+        | Operation::LdMhliA
         | Operation::LdR8R8(_, _)
         | Operation::LdSpHl
         | Operation::LdhAMc
@@ -761,12 +769,8 @@ pub fn format_instruction(
         Operation::LdAM16 => {
             format!("LD A, [{}]", format_absolute(bus, operand))
         }
-        Operation::LdM16A => {
-            format!("LD [{}], A", format_absolute(bus, operand))
-        }
-        Operation::LdM16Sp => {
-            format!("LD [{}], SP", format_absolute(bus, operand))
-        }
+        Operation::LdAMhld => "LD A, [HL-]".to_string(),
+        Operation::LdAMhli => "LD A, [HL+]".to_string(),
         Operation::LdHlSpI8 => {
             let offset = operand.as_i32();
             if offset < 0 {
@@ -775,6 +779,14 @@ pub fn format_instruction(
                 format!("LD HL, SP + {}", offset)
             }
         }
+        Operation::LdM16A => {
+            format!("LD [{}], A", format_absolute(bus, operand))
+        }
+        Operation::LdM16Sp => {
+            format!("LD [{}], SP", format_absolute(bus, operand))
+        }
+        Operation::LdMhldA => "LD [HL-], A".to_string(),
+        Operation::LdMhliA => "LD [HL+], A".to_string(),
         Operation::LdR16I16(reg) => {
             format!("LD {}, ${:04x}", reg.format(), operand.as_i32())
         }

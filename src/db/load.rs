@@ -1,6 +1,7 @@
 use super::env::SimEnv;
 use crate::bus::{
-    Mmc3Bus, NesBus, SimBus, new_open_bus, new_ram_bus, new_rom_bus,
+    DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_open_bus, new_ram_bus,
+    new_rom_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -35,11 +36,12 @@ const GB_HEADER_LOGO: &[u8; 0x30] = &[
 ///
 /// The following binary formats are currently supported:
 /// * GB/GBC
+/// * iNES
+/// * NES 2.0
 /// * sim65 (6502 mode only)
 ///
 /// The following binary formats will be supported in the future:
-/// * iNES
-/// * NES 2.0
+/// * NSF
 /// * sim65 (65C02 mode)
 /// * SFC/SMC
 /// * SPC
@@ -85,15 +87,87 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         let mut logo = [0u8; 0x30];
         reader.read_exact(&mut logo)?;
         if &logo == GB_HEADER_LOGO {
-            // TODO: Emulate memory bus based on mapper byte.
-            let ram = Box::new([0u8; 0x10000]);
-            let bus = new_ram_bus(ram);
-            let cpu = Box::new(SharpSm83::new());
-            processors.push(("cpu".to_string(), (cpu, bus)));
+            reader.rewind()?;
+            return load_gb_binary(reader);
         } else {
             invalid_data!("unsupported binary file type");
         }
     }
+    Ok(SimEnv::new(processors))
+}
+
+//===========================================================================//
+
+/// Game Boy mappers that are currently supported by this crate.
+enum GbMapper {
+    RomOnly,
+    Mbc5,
+}
+
+impl GbMapper {
+    fn from_cart_type(cart_type: u8) -> Option<GbMapper> {
+        match cart_type {
+            0x00 => Some(GbMapper::RomOnly),
+            0x19..0x1f => Some(GbMapper::Mbc5),
+            _ => None,
+        }
+    }
+
+    fn make_cpu_bus(
+        &self,
+        sram_size: usize,
+        rom: Box<[u8]>,
+    ) -> Box<dyn SimBus> {
+        let ram_bus = if sram_size == 0 {
+            new_open_bus(16)
+        } else {
+            new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
+        };
+        let rom_bus: Box<dyn SimBus> = new_rom_bus(rom);
+        let cart = match *self {
+            GbMapper::RomOnly => rom_bus,
+            GbMapper::Mbc5 => Box::new(Mbc5Bus::new(ram_bus, rom_bus)),
+        };
+        Box::new(DmgBus::with_cartridge(cart))
+    }
+}
+
+fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+    // See https://gbdev.io/pandocs/The_Cartridge_Header.html
+    reader.seek(SeekFrom::Start(0x0147))?;
+    let mut metadata = [0u8; 3];
+    reader.read_exact(&mut metadata)?;
+
+    let cart_type_byte = metadata[0]; // address 0x0147
+    let mapper = match GbMapper::from_cart_type(cart_type_byte) {
+        Some(mapper) => mapper,
+        None => invalid_data!("unsupported cart type: 0x{cart_type_byte:02x}"),
+    };
+
+    let rom_size_byte = metadata[1]; // address 0x0148
+    let rom_size: usize = if rom_size_byte <= 0x08 {
+        (1 << 15) << rom_size_byte
+    } else {
+        invalid_data!("invalid GB ROM size byte: 0x{rom_size_byte:02x}");
+    };
+
+    let ram_size_byte = metadata[2]; // address 0x0149
+    let ram_size: usize = match ram_size_byte {
+        0 => 0,
+        2 => 1 << 13,
+        3 => 1 << 15,
+        4 => 1 << 17,
+        5 => 1 << 16,
+        _ => invalid_data!("invalid GB RAM size byte: 0x{ram_size_byte:02x}"),
+    };
+
+    // TODO: Emulate memory bus based on cart_type_byte.
+    let mut rom_data = vec![0u8; rom_size];
+    reader.rewind()?;
+    reader.read_exact(&mut rom_data)?;
+    let bus = mapper.make_cpu_bus(ram_size, rom_data.into_boxed_slice());
+    let cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
+    let processors = vec![("cpu".to_string(), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 
@@ -133,7 +207,7 @@ impl NesMapper {
     }
 }
 
-pub fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut header = [0u8; 16];
     reader.read_exact(&mut header)?;
     if &header[..4] != b"NES\x1a" {
