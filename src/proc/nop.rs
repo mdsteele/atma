@@ -34,7 +34,7 @@ impl SimProc for NopProc {
         "null processor".to_string()
     }
 
-    fn disassemble(&self, _bus: &dyn SimBus, _addr: u32) -> (usize, String) {
+    fn disassemble(&self, _bus: &dyn SimBus, _addr: u32) -> (u32, String) {
         (1, "NOP".to_string())
     }
 

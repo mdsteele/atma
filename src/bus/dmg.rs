@@ -4,7 +4,7 @@ use super::{SimBus, WatchId, WatchKind, new_open_bus, new_ram_bus};
 
 /// A simulated classic Game Boy (DMG) CPU memory bus.
 ///
-/// See https://gbdev.io/pandocs/Memory_Map.html
+/// See <https://gbdev.io/pandocs/Memory_Map.html> for details.
 pub struct DmgBus {
     cart: Box<dyn SimBus>,
     vram: Box<dyn SimBus>,

@@ -5,7 +5,7 @@ use bimap::BiHashMap;
 
 /// A simulated NES CPU memory bus.
 ///
-/// See https://www.nesdev.org/wiki/CPU_memory_map
+/// See <https://www.nesdev.org/wiki/CPU_memory_map> for details.
 pub struct NesBus {
     ram: Box<dyn SimBus>,
     ppu_regs: PpuRegBus,

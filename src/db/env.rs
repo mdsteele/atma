@@ -22,7 +22,7 @@ impl EnvProc {
         format!("{} with {}", self.proc.description(), self.bus.description())
     }
 
-    fn disassemble(&self, addr: u32) -> (usize, String) {
+    fn disassemble(&self, addr: u32) -> (u32, String) {
         self.proc.disassemble(&*self.bus, addr)
     }
 
@@ -124,7 +124,7 @@ impl SimEnv {
     /// currently selected processor, returning the length of the instruction
     /// in bytes, and a human-readable string with the assembly code for that
     /// instruction.
-    pub fn disassemble(&self, addr: u32) -> (usize, String) {
+    pub fn disassemble(&self, addr: u32) -> (u32, String) {
         self.current_processor().disassemble(addr)
     }
 

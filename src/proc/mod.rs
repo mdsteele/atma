@@ -34,7 +34,7 @@ pub trait SimProc {
     /// Disassembles the instruction starting at the given address, returning
     /// the length of the instruction in bytes, and a human-readable string
     /// with the assembly code for that instruction.
-    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (usize, String);
+    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (u32, String);
 
     /// Returns the current address of the program counter.
     fn pc(&self) -> u32;

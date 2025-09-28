@@ -1,6 +1,5 @@
 //! Facilities for representing a memory mapping and simulating a memory bus.
 
-use std::io::{self, Read};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod dmg;
@@ -91,29 +90,6 @@ pub trait SimBus {
     /// Depending on the implementation, the write may be ignored (e.g. if this
     /// bus represents read-only memory), and/or have other side effects.
     fn write_byte(&mut self, addr: u32, data: u8);
-}
-
-//===========================================================================//
-
-pub(crate) struct BusPeeker<'a> {
-    bus: &'a dyn SimBus,
-    addr: u32,
-}
-
-impl<'a> BusPeeker<'a> {
-    pub fn new(bus: &'a dyn SimBus, start_addr: u32) -> BusPeeker<'a> {
-        BusPeeker { bus, addr: start_addr }
-    }
-}
-
-impl Read for BusPeeker<'_> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        for byte in buf.iter_mut() {
-            *byte = self.bus.peek_byte(self.addr);
-            self.addr = self.addr.wrapping_add(1);
-        }
-        Ok(buf.len())
-    }
 }
 
 //===========================================================================//

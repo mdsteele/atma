@@ -1,8 +1,7 @@
 use super::util::{pack, unpack, watch};
 use crate::bus::{SimBus, WatchKind};
 use crate::dis::sm83::{
-    Condition, Operation, Prefixed, Reg8, Reg16, decode_opcode,
-    decode_prefixed, disassemble_instruction, format_instruction,
+    Condition, Instruction, Operation, Prefixed, Reg8, Reg16,
 };
 use crate::proc::{SimBreak, SimProc};
 
@@ -163,7 +162,7 @@ impl SharpSm83 {
 
     fn exec_decode_opcode(&mut self) -> Result<(), SimBreak> {
         let opcode = self.data;
-        match decode_opcode(opcode) {
+        match Operation::from_opcode(opcode) {
             Operation::AdcAI8 => self.decode_op_adc_a_i8(),
             Operation::AdcAR8(reg) => self.decode_op_adc_a_r8(reg),
             Operation::AddHlR16(reg) => self.decode_op_add_hl_r16(reg),
@@ -235,7 +234,7 @@ impl SharpSm83 {
     }
 
     fn exec_decode_prefixed(&mut self) -> Result<(), SimBreak> {
-        let (prefixed, reg) = decode_prefixed(self.data);
+        let (prefixed, reg) = Prefixed::decode(self.data);
         self.microcode.push(Microcode::SetReg(reg));
         self.microcode.push(match prefixed {
             Prefixed::Rl => todo!(),
@@ -957,11 +956,10 @@ impl SimProc for SharpSm83 {
         "Sharp SM83".to_string()
     }
 
-    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (usize, String) {
-        let (_, operation, operand) = disassemble_instruction(bus, addr);
-        let instruction_size = operand.size() + 1;
-        let string = format_instruction(operation, operand, addr as u16, bus);
-        (instruction_size, string)
+    fn disassemble(&self, bus: &dyn SimBus, pc: u32) -> (u32, String) {
+        let pc = pc as u16;
+        let instruction = Instruction::decode(bus, pc);
+        (instruction.size(), instruction.format(pc, bus))
     }
 
     fn pc(&self) -> u32 {

@@ -1,6 +1,7 @@
 //! Facilities for disassembling SM83 machine code.
 
 use crate::bus::SimBus;
+use std::fmt;
 
 //===========================================================================//
 
@@ -31,6 +32,8 @@ impl Condition {
     }
 }
 
+//===========================================================================//
+
 /// An 8-bit register for an SM83 processor.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Reg8 {
@@ -56,9 +59,9 @@ pub enum Reg8 {
     Mhl,
 }
 
-impl Reg8 {
-    fn format(self) -> &'static str {
-        match self {
+impl fmt::Display for Reg8 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(match self {
             Reg8::A => "A",
             Reg8::B => "B",
             Reg8::C => "C",
@@ -69,9 +72,11 @@ impl Reg8 {
             Reg8::Mbc => "[BC]",
             Reg8::Mde => "[DE]",
             Reg8::Mhl => "[HL]",
-        }
+        })
     }
 }
+
+//===========================================================================//
 
 /// A 16-bit register for an SM83 processor.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -88,20 +93,21 @@ pub enum Reg16 {
     Sp,
 }
 
-impl Reg16 {
-    fn format(self) -> &'static str {
-        match self {
+impl fmt::Display for Reg16 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(match self {
             Reg16::Af => "AF",
             Reg16::Bc => "BC",
             Reg16::De => "DE",
             Reg16::Hl => "HL",
             Reg16::Sp => "SP",
-        }
+        })
     }
 }
 
-/// An operation (ignoring the addressing mode) that can be executed by an SM83
-/// processor.
+//===========================================================================//
+
+/// An operation that can be executed by an SM83 processor.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Operation {
     /// Add an 8-bit immediate value to the A register with carry.
@@ -238,6 +244,303 @@ pub enum Operation {
     XorAR8(Reg8),
 }
 
+impl Operation {
+    /// Decodes an SM83 opcode.
+    pub fn from_opcode(opcode: u8) -> Operation {
+        match opcode {
+            0x00 => Operation::Nop,
+            0x08 => Operation::LdM16Sp,
+            0x10 => Operation::Stop,
+            0x18 => Operation::JrI8(Condition::Always),
+            0x20 => Operation::JrI8(Condition::Nz),
+            0x28 => Operation::JrI8(Condition::Z),
+            0x30 => Operation::JrI8(Condition::Nc),
+            0x38 => Operation::JrI8(Condition::C),
+
+            0x01 => Operation::LdR16I16(Reg16::Bc),
+            0x09 => Operation::AddHlR16(Reg16::Bc),
+            0x11 => Operation::LdR16I16(Reg16::De),
+            0x19 => Operation::AddHlR16(Reg16::De),
+            0x21 => Operation::LdR16I16(Reg16::Hl),
+            0x29 => Operation::AddHlR16(Reg16::Hl),
+            0x31 => Operation::LdR16I16(Reg16::Sp),
+            0x39 => Operation::AddHlR16(Reg16::Sp),
+
+            0x02 => Operation::LdR8R8(Reg8::Mbc, Reg8::A),
+            0x0a => Operation::LdR8R8(Reg8::A, Reg8::Mbc),
+            0x12 => Operation::LdR8R8(Reg8::Mde, Reg8::A),
+            0x1a => Operation::LdR8R8(Reg8::A, Reg8::Mde),
+            0x22 => Operation::LdMhliA,
+            0x2a => Operation::LdAMhli,
+            0x32 => Operation::LdMhldA,
+            0x3a => Operation::LdAMhld,
+
+            0x03 => Operation::IncR16(Reg16::Bc),
+            0x0b => Operation::DecR16(Reg16::Bc),
+            0x13 => Operation::IncR16(Reg16::De),
+            0x1b => Operation::DecR16(Reg16::De),
+            0x23 => Operation::IncR16(Reg16::Hl),
+            0x2b => Operation::DecR16(Reg16::Hl),
+            0x33 => Operation::IncR16(Reg16::Sp),
+            0x3b => Operation::DecR16(Reg16::Sp),
+
+            0x04 => Operation::IncR8(Reg8::B),
+            0x0c => Operation::IncR8(Reg8::C),
+            0x14 => Operation::IncR8(Reg8::D),
+            0x1c => Operation::IncR8(Reg8::E),
+            0x24 => Operation::IncR8(Reg8::H),
+            0x2c => Operation::IncR8(Reg8::L),
+            0x34 => Operation::IncR8(Reg8::Mhl),
+            0x3c => Operation::IncR8(Reg8::A),
+
+            0x05 => Operation::DecR8(Reg8::B),
+            0x0d => Operation::DecR8(Reg8::C),
+            0x15 => Operation::DecR8(Reg8::D),
+            0x1d => Operation::DecR8(Reg8::E),
+            0x25 => Operation::DecR8(Reg8::H),
+            0x2d => Operation::DecR8(Reg8::L),
+            0x35 => Operation::DecR8(Reg8::Mhl),
+            0x3d => Operation::DecR8(Reg8::A),
+
+            0x06 => Operation::LdR8I8(Reg8::B),
+            0x0e => Operation::LdR8I8(Reg8::C),
+            0x16 => Operation::LdR8I8(Reg8::D),
+            0x1e => Operation::LdR8I8(Reg8::E),
+            0x26 => Operation::LdR8I8(Reg8::H),
+            0x2e => Operation::LdR8I8(Reg8::L),
+            0x36 => Operation::LdR8I8(Reg8::Mhl),
+            0x3e => Operation::LdR8I8(Reg8::A),
+
+            0x07 => Operation::Rlca,
+            0x0f => Operation::Rrca,
+            0x17 => Operation::Rla,
+            0x1f => Operation::Rra,
+            0x27 => Operation::Daa,
+            0x2f => Operation::Cpl,
+            0x37 => Operation::Scf,
+            0x3f => Operation::Ccf,
+
+            0x40 => Operation::LdR8R8(Reg8::B, Reg8::B),
+            0x48 => Operation::LdR8R8(Reg8::C, Reg8::B),
+            0x50 => Operation::LdR8R8(Reg8::D, Reg8::B),
+            0x58 => Operation::LdR8R8(Reg8::E, Reg8::B),
+            0x60 => Operation::LdR8R8(Reg8::H, Reg8::B),
+            0x68 => Operation::LdR8R8(Reg8::L, Reg8::B),
+            0x70 => Operation::LdR8R8(Reg8::Mhl, Reg8::B),
+            0x78 => Operation::LdR8R8(Reg8::A, Reg8::B),
+
+            0x41 => Operation::LdR8R8(Reg8::B, Reg8::C),
+            0x49 => Operation::LdR8R8(Reg8::C, Reg8::C),
+            0x51 => Operation::LdR8R8(Reg8::D, Reg8::C),
+            0x59 => Operation::LdR8R8(Reg8::E, Reg8::C),
+            0x61 => Operation::LdR8R8(Reg8::H, Reg8::C),
+            0x69 => Operation::LdR8R8(Reg8::L, Reg8::C),
+            0x71 => Operation::LdR8R8(Reg8::Mhl, Reg8::C),
+            0x79 => Operation::LdR8R8(Reg8::A, Reg8::C),
+
+            0x42 => Operation::LdR8R8(Reg8::B, Reg8::D),
+            0x4a => Operation::LdR8R8(Reg8::C, Reg8::D),
+            0x52 => Operation::LdR8R8(Reg8::D, Reg8::D),
+            0x5a => Operation::LdR8R8(Reg8::E, Reg8::D),
+            0x62 => Operation::LdR8R8(Reg8::H, Reg8::D),
+            0x6a => Operation::LdR8R8(Reg8::L, Reg8::D),
+            0x72 => Operation::LdR8R8(Reg8::Mhl, Reg8::D),
+            0x7a => Operation::LdR8R8(Reg8::A, Reg8::D),
+
+            0x43 => Operation::LdR8R8(Reg8::B, Reg8::E),
+            0x4b => Operation::LdR8R8(Reg8::C, Reg8::E),
+            0x53 => Operation::LdR8R8(Reg8::D, Reg8::E),
+            0x5b => Operation::LdR8R8(Reg8::E, Reg8::E),
+            0x63 => Operation::LdR8R8(Reg8::H, Reg8::E),
+            0x6b => Operation::LdR8R8(Reg8::L, Reg8::E),
+            0x73 => Operation::LdR8R8(Reg8::Mhl, Reg8::E),
+            0x7b => Operation::LdR8R8(Reg8::A, Reg8::E),
+
+            0x44 => Operation::LdR8R8(Reg8::B, Reg8::H),
+            0x4c => Operation::LdR8R8(Reg8::C, Reg8::H),
+            0x54 => Operation::LdR8R8(Reg8::D, Reg8::H),
+            0x5c => Operation::LdR8R8(Reg8::E, Reg8::H),
+            0x64 => Operation::LdR8R8(Reg8::H, Reg8::H),
+            0x6c => Operation::LdR8R8(Reg8::L, Reg8::H),
+            0x74 => Operation::LdR8R8(Reg8::Mhl, Reg8::H),
+            0x7c => Operation::LdR8R8(Reg8::A, Reg8::H),
+
+            0x45 => Operation::LdR8R8(Reg8::B, Reg8::L),
+            0x4d => Operation::LdR8R8(Reg8::C, Reg8::L),
+            0x55 => Operation::LdR8R8(Reg8::D, Reg8::L),
+            0x5d => Operation::LdR8R8(Reg8::E, Reg8::L),
+            0x65 => Operation::LdR8R8(Reg8::H, Reg8::L),
+            0x6d => Operation::LdR8R8(Reg8::L, Reg8::L),
+            0x75 => Operation::LdR8R8(Reg8::Mhl, Reg8::L),
+            0x7d => Operation::LdR8R8(Reg8::A, Reg8::L),
+
+            0x46 => Operation::LdR8R8(Reg8::B, Reg8::Mhl),
+            0x4e => Operation::LdR8R8(Reg8::C, Reg8::Mhl),
+            0x56 => Operation::LdR8R8(Reg8::D, Reg8::Mhl),
+            0x5e => Operation::LdR8R8(Reg8::E, Reg8::Mhl),
+            0x66 => Operation::LdR8R8(Reg8::H, Reg8::Mhl),
+            0x6e => Operation::LdR8R8(Reg8::L, Reg8::Mhl),
+            0x76 => Operation::Halt,
+            0x7e => Operation::LdR8R8(Reg8::A, Reg8::Mhl),
+
+            0x47 => Operation::LdR8R8(Reg8::B, Reg8::A),
+            0x4f => Operation::LdR8R8(Reg8::C, Reg8::A),
+            0x57 => Operation::LdR8R8(Reg8::D, Reg8::A),
+            0x5f => Operation::LdR8R8(Reg8::E, Reg8::A),
+            0x67 => Operation::LdR8R8(Reg8::H, Reg8::A),
+            0x6f => Operation::LdR8R8(Reg8::L, Reg8::A),
+            0x77 => Operation::LdR8R8(Reg8::Mhl, Reg8::A),
+            0x7f => Operation::LdR8R8(Reg8::A, Reg8::A),
+
+            0x80 => Operation::AddAR8(Reg8::B),
+            0x88 => Operation::AdcAR8(Reg8::B),
+            0x90 => Operation::SubAR8(Reg8::B),
+            0x98 => Operation::SbcAR8(Reg8::B),
+            0xa0 => Operation::AndAR8(Reg8::B),
+            0xa8 => Operation::XorAR8(Reg8::B),
+            0xb0 => Operation::OrAR8(Reg8::B),
+            0xb8 => Operation::CpAR8(Reg8::B),
+
+            0x81 => Operation::AddAR8(Reg8::C),
+            0x89 => Operation::AdcAR8(Reg8::C),
+            0x91 => Operation::SubAR8(Reg8::C),
+            0x99 => Operation::SbcAR8(Reg8::C),
+            0xa1 => Operation::AndAR8(Reg8::C),
+            0xa9 => Operation::XorAR8(Reg8::C),
+            0xb1 => Operation::OrAR8(Reg8::C),
+            0xb9 => Operation::CpAR8(Reg8::C),
+
+            0x82 => Operation::AddAR8(Reg8::D),
+            0x8a => Operation::AdcAR8(Reg8::D),
+            0x92 => Operation::SubAR8(Reg8::D),
+            0x9a => Operation::SbcAR8(Reg8::D),
+            0xa2 => Operation::AndAR8(Reg8::D),
+            0xaa => Operation::XorAR8(Reg8::D),
+            0xb2 => Operation::OrAR8(Reg8::D),
+            0xba => Operation::CpAR8(Reg8::D),
+
+            0x83 => Operation::AddAR8(Reg8::E),
+            0x8b => Operation::AdcAR8(Reg8::E),
+            0x93 => Operation::SubAR8(Reg8::E),
+            0x9b => Operation::SbcAR8(Reg8::E),
+            0xa3 => Operation::AndAR8(Reg8::E),
+            0xab => Operation::XorAR8(Reg8::E),
+            0xb3 => Operation::OrAR8(Reg8::E),
+            0xbb => Operation::CpAR8(Reg8::E),
+
+            0x84 => Operation::AddAR8(Reg8::H),
+            0x8c => Operation::AdcAR8(Reg8::H),
+            0x94 => Operation::SubAR8(Reg8::H),
+            0x9c => Operation::SbcAR8(Reg8::H),
+            0xa4 => Operation::AndAR8(Reg8::H),
+            0xac => Operation::XorAR8(Reg8::H),
+            0xb4 => Operation::OrAR8(Reg8::H),
+            0xbc => Operation::CpAR8(Reg8::H),
+
+            0x85 => Operation::AddAR8(Reg8::L),
+            0x8d => Operation::AdcAR8(Reg8::L),
+            0x95 => Operation::SubAR8(Reg8::L),
+            0x9d => Operation::SbcAR8(Reg8::L),
+            0xa5 => Operation::AndAR8(Reg8::L),
+            0xad => Operation::XorAR8(Reg8::L),
+            0xb5 => Operation::OrAR8(Reg8::L),
+            0xbd => Operation::CpAR8(Reg8::L),
+
+            0x86 => Operation::AddAR8(Reg8::Mhl),
+            0x8e => Operation::AdcAR8(Reg8::Mhl),
+            0x96 => Operation::SubAR8(Reg8::Mhl),
+            0x9e => Operation::SbcAR8(Reg8::Mhl),
+            0xa6 => Operation::AndAR8(Reg8::Mhl),
+            0xae => Operation::XorAR8(Reg8::Mhl),
+            0xb6 => Operation::OrAR8(Reg8::Mhl),
+            0xbe => Operation::CpAR8(Reg8::Mhl),
+
+            0x87 => Operation::AddAR8(Reg8::A),
+            0x8f => Operation::AdcAR8(Reg8::A),
+            0x97 => Operation::SubAR8(Reg8::A),
+            0x9f => Operation::SbcAR8(Reg8::A),
+            0xa7 => Operation::AndAR8(Reg8::A),
+            0xaf => Operation::XorAR8(Reg8::A),
+            0xb7 => Operation::OrAR8(Reg8::A),
+            0xbf => Operation::CpAR8(Reg8::A),
+
+            0xc0 => Operation::Ret(Condition::Nz),
+            0xc8 => Operation::Ret(Condition::Z),
+            0xd0 => Operation::Ret(Condition::Nc),
+            0xd8 => Operation::Ret(Condition::C),
+            0xe0 => Operation::LdhM8A,
+            0xe8 => Operation::AddSpI8,
+            0xf0 => Operation::LdhAM8,
+            0xf8 => Operation::LdHlSpI8,
+
+            0xc1 => Operation::Pop(Reg16::Bc),
+            0xc9 => Operation::Ret(Condition::Always),
+            0xd1 => Operation::Pop(Reg16::De),
+            0xd9 => Operation::Reti,
+            0xe1 => Operation::Pop(Reg16::Hl),
+            0xe9 => Operation::JpHl,
+            0xf1 => Operation::Pop(Reg16::Af),
+            0xf9 => Operation::LdSpHl,
+
+            0xc2 => Operation::JpI16(Condition::Nz),
+            0xca => Operation::JpI16(Condition::Z),
+            0xd2 => Operation::JpI16(Condition::Nc),
+            0xda => Operation::JpI16(Condition::C),
+            0xe2 => Operation::LdhMcA,
+            0xea => Operation::LdM16A,
+            0xf2 => Operation::LdhAMc,
+            0xfa => Operation::LdAM16,
+
+            0xc3 => Operation::JpI16(Condition::Always),
+            0xcb => Operation::Prefix,
+            0xd3 => Operation::Invalid,
+            0xdb => Operation::Invalid,
+            0xe3 => Operation::Invalid,
+            0xeb => Operation::Invalid,
+            0xf3 => Operation::Di,
+            0xfb => Operation::Ei,
+
+            0xc4 => Operation::CallM16(Condition::Nz),
+            0xcc => Operation::CallM16(Condition::Z),
+            0xd4 => Operation::CallM16(Condition::Nc),
+            0xdc => Operation::CallM16(Condition::C),
+            0xe4 => Operation::Invalid,
+            0xec => Operation::Invalid,
+            0xf4 => Operation::Invalid,
+            0xfc => Operation::Invalid,
+
+            0xc5 => Operation::Push(Reg16::Bc),
+            0xcd => Operation::CallM16(Condition::Always),
+            0xd5 => Operation::Push(Reg16::De),
+            0xdd => Operation::Invalid,
+            0xe5 => Operation::Push(Reg16::Hl),
+            0xed => Operation::Invalid,
+            0xf5 => Operation::Push(Reg16::Af),
+            0xfd => Operation::Invalid,
+
+            0xc6 => Operation::AddAI8,
+            0xce => Operation::AdcAI8,
+            0xd6 => Operation::SubAI8,
+            0xde => Operation::SbcAI8,
+            0xe6 => Operation::AndAI8,
+            0xee => Operation::XorAI8,
+            0xf6 => Operation::OrAI8,
+            0xfe => Operation::CpAI8,
+
+            0xc7 => Operation::Rst(0x00),
+            0xcf => Operation::Rst(0x08),
+            0xd7 => Operation::Rst(0x10),
+            0xdf => Operation::Rst(0x18),
+            0xe7 => Operation::Rst(0x20),
+            0xef => Operation::Rst(0x28),
+            0xf7 => Operation::Rst(0x30),
+            0xff => Operation::Rst(0x38),
+        }
+    }
+}
+
+//===========================================================================//
+
 /// An argument value for an SM83 processor instruction.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Operand {
@@ -253,7 +556,7 @@ pub enum Operand {
 
 impl Operand {
     /// The size of this operand, in bytes.
-    pub fn size(self) -> usize {
+    pub fn size(self) -> u32 {
         match self {
             Operand::None => 0,
             Operand::I8(_) | Operand::U8(_) => 1,
@@ -270,6 +573,8 @@ impl Operand {
         }
     }
 }
+
+//===========================================================================//
 
 /// A prefixed operation.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -298,558 +603,278 @@ pub enum Prefixed {
     Set(u8),
 }
 
+impl Prefixed {
+    /// Decodes the second byte of an SM83 prefixed instruction.
+    pub fn decode(byte: u8) -> (Prefixed, Reg8) {
+        let (hi, mid, lo) = (byte >> 6, (byte >> 3) & 0x7, byte & 0x7);
+        let prefixed = match hi {
+            0 => match mid {
+                0 => Prefixed::Rlc,
+                1 => Prefixed::Rrc,
+                2 => Prefixed::Rl,
+                3 => Prefixed::Rr,
+                4 => Prefixed::Sla,
+                5 => Prefixed::Sra,
+                6 => Prefixed::Swap,
+                7 => Prefixed::Srl,
+                _ => unreachable!(),
+            },
+            1 => Prefixed::Bit(mid),
+            2 => Prefixed::Res(mid),
+            3 => Prefixed::Set(mid),
+            _ => unreachable!(),
+        };
+        let reg = match lo {
+            0 => Reg8::B,
+            1 => Reg8::C,
+            2 => Reg8::D,
+            3 => Reg8::E,
+            4 => Reg8::H,
+            5 => Reg8::L,
+            6 => Reg8::Mhl,
+            7 => Reg8::A,
+            _ => unreachable!(),
+        };
+        (prefixed, reg)
+    }
+
+    /// Formats a prefixed SM83 instruction as a human-readable string.
+    pub fn format(self, reg: Reg8) -> String {
+        match self {
+            Prefixed::Rl => format!("RL {reg}"),
+            Prefixed::Rlc => format!("RLC {reg}"),
+            Prefixed::Rr => format!("RR {reg}"),
+            Prefixed::Rrc => format!("RRC {reg}"),
+            Prefixed::Sla => format!("SLA {reg}"),
+            Prefixed::Sra => format!("SRA {reg}"),
+            Prefixed::Srl => format!("SRL {reg}"),
+            Prefixed::Swap => format!("SWAP {reg}"),
+            Prefixed::Bit(bit) => format!("BIT {bit}, {reg}"),
+            Prefixed::Res(bit) => format!("RES {bit}, {reg}"),
+            Prefixed::Set(bit) => format!("SET {bit}, {reg}"),
+        }
+    }
+}
+
 //===========================================================================//
 
-/// Decodes an SM83 opcode.
-pub fn decode_opcode(opcode: u8) -> Operation {
-    match opcode {
-        0x00 => Operation::Nop,
-        0x08 => Operation::LdM16Sp,
-        0x10 => Operation::Stop,
-        0x18 => Operation::JrI8(Condition::Always),
-        0x20 => Operation::JrI8(Condition::Nz),
-        0x28 => Operation::JrI8(Condition::Z),
-        0x30 => Operation::JrI8(Condition::Nc),
-        0x38 => Operation::JrI8(Condition::C),
+/// A complete instruction, including parameter values, for an SM83 processor.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Instruction {
+    /// The operation to be performed.
+    pub operation: Operation,
+    /// The parameter value.
+    pub operand: Operand,
+}
 
-        0x01 => Operation::LdR16I16(Reg16::Bc),
-        0x09 => Operation::AddHlR16(Reg16::Bc),
-        0x11 => Operation::LdR16I16(Reg16::De),
-        0x19 => Operation::AddHlR16(Reg16::De),
-        0x21 => Operation::LdR16I16(Reg16::Hl),
-        0x29 => Operation::AddHlR16(Reg16::Hl),
-        0x31 => Operation::LdR16I16(Reg16::Sp),
-        0x39 => Operation::AddHlR16(Reg16::Sp),
-
-        0x02 => Operation::LdR8R8(Reg8::Mbc, Reg8::A),
-        0x0a => Operation::LdR8R8(Reg8::A, Reg8::Mbc),
-        0x12 => Operation::LdR8R8(Reg8::Mde, Reg8::A),
-        0x1a => Operation::LdR8R8(Reg8::A, Reg8::Mde),
-        0x22 => Operation::LdMhliA,
-        0x2a => Operation::LdAMhli,
-        0x32 => Operation::LdMhldA,
-        0x3a => Operation::LdAMhld,
-
-        0x03 => Operation::IncR16(Reg16::Bc),
-        0x0b => Operation::DecR16(Reg16::Bc),
-        0x13 => Operation::IncR16(Reg16::De),
-        0x1b => Operation::DecR16(Reg16::De),
-        0x23 => Operation::IncR16(Reg16::Hl),
-        0x2b => Operation::DecR16(Reg16::Hl),
-        0x33 => Operation::IncR16(Reg16::Sp),
-        0x3b => Operation::DecR16(Reg16::Sp),
-
-        0x04 => Operation::IncR8(Reg8::B),
-        0x0c => Operation::IncR8(Reg8::C),
-        0x14 => Operation::IncR8(Reg8::D),
-        0x1c => Operation::IncR8(Reg8::E),
-        0x24 => Operation::IncR8(Reg8::H),
-        0x2c => Operation::IncR8(Reg8::L),
-        0x34 => Operation::IncR8(Reg8::Mhl),
-        0x3c => Operation::IncR8(Reg8::A),
-
-        0x05 => Operation::DecR8(Reg8::B),
-        0x0d => Operation::DecR8(Reg8::C),
-        0x15 => Operation::DecR8(Reg8::D),
-        0x1d => Operation::DecR8(Reg8::E),
-        0x25 => Operation::DecR8(Reg8::H),
-        0x2d => Operation::DecR8(Reg8::L),
-        0x35 => Operation::DecR8(Reg8::Mhl),
-        0x3d => Operation::DecR8(Reg8::A),
-
-        0x06 => Operation::LdR8I8(Reg8::B),
-        0x0e => Operation::LdR8I8(Reg8::C),
-        0x16 => Operation::LdR8I8(Reg8::D),
-        0x1e => Operation::LdR8I8(Reg8::E),
-        0x26 => Operation::LdR8I8(Reg8::H),
-        0x2e => Operation::LdR8I8(Reg8::L),
-        0x36 => Operation::LdR8I8(Reg8::Mhl),
-        0x3e => Operation::LdR8I8(Reg8::A),
-
-        0x07 => Operation::Rlca,
-        0x0f => Operation::Rrca,
-        0x17 => Operation::Rla,
-        0x1f => Operation::Rra,
-        0x27 => Operation::Daa,
-        0x2f => Operation::Cpl,
-        0x37 => Operation::Scf,
-        0x3f => Operation::Ccf,
-
-        0x40 => Operation::LdR8R8(Reg8::B, Reg8::B),
-        0x48 => Operation::LdR8R8(Reg8::C, Reg8::B),
-        0x50 => Operation::LdR8R8(Reg8::D, Reg8::B),
-        0x58 => Operation::LdR8R8(Reg8::E, Reg8::B),
-        0x60 => Operation::LdR8R8(Reg8::H, Reg8::B),
-        0x68 => Operation::LdR8R8(Reg8::L, Reg8::B),
-        0x70 => Operation::LdR8R8(Reg8::Mhl, Reg8::B),
-        0x78 => Operation::LdR8R8(Reg8::A, Reg8::B),
-
-        0x41 => Operation::LdR8R8(Reg8::B, Reg8::C),
-        0x49 => Operation::LdR8R8(Reg8::C, Reg8::C),
-        0x51 => Operation::LdR8R8(Reg8::D, Reg8::C),
-        0x59 => Operation::LdR8R8(Reg8::E, Reg8::C),
-        0x61 => Operation::LdR8R8(Reg8::H, Reg8::C),
-        0x69 => Operation::LdR8R8(Reg8::L, Reg8::C),
-        0x71 => Operation::LdR8R8(Reg8::Mhl, Reg8::C),
-        0x79 => Operation::LdR8R8(Reg8::A, Reg8::C),
-
-        0x42 => Operation::LdR8R8(Reg8::B, Reg8::D),
-        0x4a => Operation::LdR8R8(Reg8::C, Reg8::D),
-        0x52 => Operation::LdR8R8(Reg8::D, Reg8::D),
-        0x5a => Operation::LdR8R8(Reg8::E, Reg8::D),
-        0x62 => Operation::LdR8R8(Reg8::H, Reg8::D),
-        0x6a => Operation::LdR8R8(Reg8::L, Reg8::D),
-        0x72 => Operation::LdR8R8(Reg8::Mhl, Reg8::D),
-        0x7a => Operation::LdR8R8(Reg8::A, Reg8::D),
-
-        0x43 => Operation::LdR8R8(Reg8::B, Reg8::E),
-        0x4b => Operation::LdR8R8(Reg8::C, Reg8::E),
-        0x53 => Operation::LdR8R8(Reg8::D, Reg8::E),
-        0x5b => Operation::LdR8R8(Reg8::E, Reg8::E),
-        0x63 => Operation::LdR8R8(Reg8::H, Reg8::E),
-        0x6b => Operation::LdR8R8(Reg8::L, Reg8::E),
-        0x73 => Operation::LdR8R8(Reg8::Mhl, Reg8::E),
-        0x7b => Operation::LdR8R8(Reg8::A, Reg8::E),
-
-        0x44 => Operation::LdR8R8(Reg8::B, Reg8::H),
-        0x4c => Operation::LdR8R8(Reg8::C, Reg8::H),
-        0x54 => Operation::LdR8R8(Reg8::D, Reg8::H),
-        0x5c => Operation::LdR8R8(Reg8::E, Reg8::H),
-        0x64 => Operation::LdR8R8(Reg8::H, Reg8::H),
-        0x6c => Operation::LdR8R8(Reg8::L, Reg8::H),
-        0x74 => Operation::LdR8R8(Reg8::Mhl, Reg8::H),
-        0x7c => Operation::LdR8R8(Reg8::A, Reg8::H),
-
-        0x45 => Operation::LdR8R8(Reg8::B, Reg8::L),
-        0x4d => Operation::LdR8R8(Reg8::C, Reg8::L),
-        0x55 => Operation::LdR8R8(Reg8::D, Reg8::L),
-        0x5d => Operation::LdR8R8(Reg8::E, Reg8::L),
-        0x65 => Operation::LdR8R8(Reg8::H, Reg8::L),
-        0x6d => Operation::LdR8R8(Reg8::L, Reg8::L),
-        0x75 => Operation::LdR8R8(Reg8::Mhl, Reg8::L),
-        0x7d => Operation::LdR8R8(Reg8::A, Reg8::L),
-
-        0x46 => Operation::LdR8R8(Reg8::B, Reg8::Mhl),
-        0x4e => Operation::LdR8R8(Reg8::C, Reg8::Mhl),
-        0x56 => Operation::LdR8R8(Reg8::D, Reg8::Mhl),
-        0x5e => Operation::LdR8R8(Reg8::E, Reg8::Mhl),
-        0x66 => Operation::LdR8R8(Reg8::H, Reg8::Mhl),
-        0x6e => Operation::LdR8R8(Reg8::L, Reg8::Mhl),
-        0x76 => Operation::Halt,
-        0x7e => Operation::LdR8R8(Reg8::A, Reg8::Mhl),
-
-        0x47 => Operation::LdR8R8(Reg8::B, Reg8::A),
-        0x4f => Operation::LdR8R8(Reg8::C, Reg8::A),
-        0x57 => Operation::LdR8R8(Reg8::D, Reg8::A),
-        0x5f => Operation::LdR8R8(Reg8::E, Reg8::A),
-        0x67 => Operation::LdR8R8(Reg8::H, Reg8::A),
-        0x6f => Operation::LdR8R8(Reg8::L, Reg8::A),
-        0x77 => Operation::LdR8R8(Reg8::Mhl, Reg8::A),
-        0x7f => Operation::LdR8R8(Reg8::A, Reg8::A),
-
-        0x80 => Operation::AddAR8(Reg8::B),
-        0x88 => Operation::AdcAR8(Reg8::B),
-        0x90 => Operation::SubAR8(Reg8::B),
-        0x98 => Operation::SbcAR8(Reg8::B),
-        0xa0 => Operation::AndAR8(Reg8::B),
-        0xa8 => Operation::XorAR8(Reg8::B),
-        0xb0 => Operation::OrAR8(Reg8::B),
-        0xb8 => Operation::CpAR8(Reg8::B),
-
-        0x81 => Operation::AddAR8(Reg8::C),
-        0x89 => Operation::AdcAR8(Reg8::C),
-        0x91 => Operation::SubAR8(Reg8::C),
-        0x99 => Operation::SbcAR8(Reg8::C),
-        0xa1 => Operation::AndAR8(Reg8::C),
-        0xa9 => Operation::XorAR8(Reg8::C),
-        0xb1 => Operation::OrAR8(Reg8::C),
-        0xb9 => Operation::CpAR8(Reg8::C),
-
-        0x82 => Operation::AddAR8(Reg8::D),
-        0x8a => Operation::AdcAR8(Reg8::D),
-        0x92 => Operation::SubAR8(Reg8::D),
-        0x9a => Operation::SbcAR8(Reg8::D),
-        0xa2 => Operation::AndAR8(Reg8::D),
-        0xaa => Operation::XorAR8(Reg8::D),
-        0xb2 => Operation::OrAR8(Reg8::D),
-        0xba => Operation::CpAR8(Reg8::D),
-
-        0x83 => Operation::AddAR8(Reg8::E),
-        0x8b => Operation::AdcAR8(Reg8::E),
-        0x93 => Operation::SubAR8(Reg8::E),
-        0x9b => Operation::SbcAR8(Reg8::E),
-        0xa3 => Operation::AndAR8(Reg8::E),
-        0xab => Operation::XorAR8(Reg8::E),
-        0xb3 => Operation::OrAR8(Reg8::E),
-        0xbb => Operation::CpAR8(Reg8::E),
-
-        0x84 => Operation::AddAR8(Reg8::H),
-        0x8c => Operation::AdcAR8(Reg8::H),
-        0x94 => Operation::SubAR8(Reg8::H),
-        0x9c => Operation::SbcAR8(Reg8::H),
-        0xa4 => Operation::AndAR8(Reg8::H),
-        0xac => Operation::XorAR8(Reg8::H),
-        0xb4 => Operation::OrAR8(Reg8::H),
-        0xbc => Operation::CpAR8(Reg8::H),
-
-        0x85 => Operation::AddAR8(Reg8::L),
-        0x8d => Operation::AdcAR8(Reg8::L),
-        0x95 => Operation::SubAR8(Reg8::L),
-        0x9d => Operation::SbcAR8(Reg8::L),
-        0xa5 => Operation::AndAR8(Reg8::L),
-        0xad => Operation::XorAR8(Reg8::L),
-        0xb5 => Operation::OrAR8(Reg8::L),
-        0xbd => Operation::CpAR8(Reg8::L),
-
-        0x86 => Operation::AddAR8(Reg8::Mhl),
-        0x8e => Operation::AdcAR8(Reg8::Mhl),
-        0x96 => Operation::SubAR8(Reg8::Mhl),
-        0x9e => Operation::SbcAR8(Reg8::Mhl),
-        0xa6 => Operation::AndAR8(Reg8::Mhl),
-        0xae => Operation::XorAR8(Reg8::Mhl),
-        0xb6 => Operation::OrAR8(Reg8::Mhl),
-        0xbe => Operation::CpAR8(Reg8::Mhl),
-
-        0x87 => Operation::AddAR8(Reg8::A),
-        0x8f => Operation::AdcAR8(Reg8::A),
-        0x97 => Operation::SubAR8(Reg8::A),
-        0x9f => Operation::SbcAR8(Reg8::A),
-        0xa7 => Operation::AndAR8(Reg8::A),
-        0xaf => Operation::XorAR8(Reg8::A),
-        0xb7 => Operation::OrAR8(Reg8::A),
-        0xbf => Operation::CpAR8(Reg8::A),
-
-        0xc0 => Operation::Ret(Condition::Nz),
-        0xc8 => Operation::Ret(Condition::Z),
-        0xd0 => Operation::Ret(Condition::Nc),
-        0xd8 => Operation::Ret(Condition::C),
-        0xe0 => Operation::LdhM8A,
-        0xe8 => Operation::AddSpI8,
-        0xf0 => Operation::LdhAM8,
-        0xf8 => Operation::LdHlSpI8,
-
-        0xc1 => Operation::Pop(Reg16::Bc),
-        0xc9 => Operation::Ret(Condition::Always),
-        0xd1 => Operation::Pop(Reg16::De),
-        0xd9 => Operation::Reti,
-        0xe1 => Operation::Pop(Reg16::Hl),
-        0xe9 => Operation::JpHl,
-        0xf1 => Operation::Pop(Reg16::Af),
-        0xf9 => Operation::LdSpHl,
-
-        0xc2 => Operation::JpI16(Condition::Nz),
-        0xca => Operation::JpI16(Condition::Z),
-        0xd2 => Operation::JpI16(Condition::Nc),
-        0xda => Operation::JpI16(Condition::C),
-        0xe2 => Operation::LdhMcA,
-        0xea => Operation::LdM16A,
-        0xf2 => Operation::LdhAMc,
-        0xfa => Operation::LdAM16,
-
-        0xc3 => Operation::JpI16(Condition::Always),
-        0xcb => Operation::Prefix,
-        0xd3 => Operation::Invalid,
-        0xdb => Operation::Invalid,
-        0xe3 => Operation::Invalid,
-        0xeb => Operation::Invalid,
-        0xf3 => Operation::Di,
-        0xfb => Operation::Ei,
-
-        0xc4 => Operation::CallM16(Condition::Nz),
-        0xcc => Operation::CallM16(Condition::Z),
-        0xd4 => Operation::CallM16(Condition::Nc),
-        0xdc => Operation::CallM16(Condition::C),
-        0xe4 => Operation::Invalid,
-        0xec => Operation::Invalid,
-        0xf4 => Operation::Invalid,
-        0xfc => Operation::Invalid,
-
-        0xc5 => Operation::Push(Reg16::Bc),
-        0xcd => Operation::CallM16(Condition::Always),
-        0xd5 => Operation::Push(Reg16::De),
-        0xdd => Operation::Invalid,
-        0xe5 => Operation::Push(Reg16::Hl),
-        0xed => Operation::Invalid,
-        0xf5 => Operation::Push(Reg16::Af),
-        0xfd => Operation::Invalid,
-
-        0xc6 => Operation::AddAI8,
-        0xce => Operation::AdcAI8,
-        0xd6 => Operation::SubAI8,
-        0xde => Operation::SbcAI8,
-        0xe6 => Operation::AndAI8,
-        0xee => Operation::XorAI8,
-        0xf6 => Operation::OrAI8,
-        0xfe => Operation::CpAI8,
-
-        0xc7 => Operation::Rst(0x00),
-        0xcf => Operation::Rst(0x08),
-        0xd7 => Operation::Rst(0x10),
-        0xdf => Operation::Rst(0x18),
-        0xe7 => Operation::Rst(0x20),
-        0xef => Operation::Rst(0x28),
-        0xf7 => Operation::Rst(0x30),
-        0xff => Operation::Rst(0x38),
+impl Instruction {
+    /// Returns the size of this instruction, in bytes.
+    pub fn size(self) -> u32 {
+        1 + self.operand.size()
     }
-}
 
-/// Decodes the second byte of an SM83 prefixed instruction.
-pub fn decode_prefixed(byte: u8) -> (Prefixed, Reg8) {
-    let (hi, mid, lo) = (byte >> 6, (byte >> 3) & 0x7, byte & 0x7);
-    let prefixed = match hi {
-        0 => match mid {
-            0 => Prefixed::Rlc,
-            1 => Prefixed::Rrc,
-            2 => Prefixed::Rl,
-            3 => Prefixed::Rr,
-            4 => Prefixed::Sla,
-            5 => Prefixed::Sra,
-            6 => Prefixed::Swap,
-            7 => Prefixed::Srl,
-            _ => unreachable!(),
-        },
-        1 => Prefixed::Bit(mid),
-        2 => Prefixed::Res(mid),
-        3 => Prefixed::Set(mid),
-        _ => unreachable!(),
-    };
-    let reg = match lo {
-        0 => Reg8::B,
-        1 => Reg8::C,
-        2 => Reg8::D,
-        3 => Reg8::E,
-        4 => Reg8::H,
-        5 => Reg8::L,
-        6 => Reg8::Mhl,
-        7 => Reg8::A,
-        _ => unreachable!(),
-    };
-    (prefixed, reg)
-}
-
-/// Reads and disassembles a single SM83 instruction.
-pub fn disassemble_instruction(
-    bus: &dyn SimBus,
-    addr: u32,
-) -> (u8, Operation, Operand) {
-    let opcode = bus.peek_byte(addr);
-    let operation = decode_opcode(opcode);
-    let operand = match operation {
-        Operation::AdcAR8(_)
-        | Operation::AddHlR16(_)
-        | Operation::AddAR8(_)
-        | Operation::AndAR8(_)
-        | Operation::Ccf
-        | Operation::CpAR8(_)
-        | Operation::Cpl
-        | Operation::Daa
-        | Operation::DecR16(_)
-        | Operation::DecR8(_)
-        | Operation::Di
-        | Operation::Ei
-        | Operation::Halt
-        | Operation::IncR16(_)
-        | Operation::IncR8(_)
-        | Operation::Invalid
-        | Operation::JpHl
-        | Operation::LdAMhld
-        | Operation::LdAMhli
-        | Operation::LdMhldA
-        | Operation::LdMhliA
-        | Operation::LdR8R8(_, _)
-        | Operation::LdSpHl
-        | Operation::LdhAMc
-        | Operation::LdhMcA
-        | Operation::Nop
-        | Operation::OrAR8(_)
-        | Operation::Pop(_)
-        | Operation::Push(_)
-        | Operation::Ret(_)
-        | Operation::Reti
-        | Operation::Rla
-        | Operation::Rlca
-        | Operation::Rra
-        | Operation::Rrca
-        | Operation::Rst(_)
-        | Operation::SbcAR8(_)
-        | Operation::Scf
-        | Operation::Stop
-        | Operation::SubAR8(_)
-        | Operation::XorAR8(_) => Operand::None,
-        Operation::AddSpI8 | Operation::JrI8(_) | Operation::LdHlSpI8 => {
-            Operand::I8(bus.peek_byte(addr.wrapping_add(1)) as i8)
-        }
-        Operation::AdcAI8
-        | Operation::AddAI8
-        | Operation::AndAI8
-        | Operation::CpAI8
-        | Operation::LdhAM8
-        | Operation::LdhM8A
-        | Operation::LdR8I8(_)
-        | Operation::OrAI8
-        | Operation::Prefix
-        | Operation::SbcAI8
-        | Operation::SubAI8
-        | Operation::XorAI8 => {
-            Operand::U8(bus.peek_byte(addr.wrapping_add(1)))
-        }
-        Operation::CallM16(_)
-        | Operation::JpI16(_)
-        | Operation::LdAM16
-        | Operation::LdM16A
-        | Operation::LdM16Sp
-        | Operation::LdR16I16(_) => {
-            let lo = bus.peek_byte(addr.wrapping_add(1));
-            let hi = bus.peek_byte(addr.wrapping_add(2));
-            Operand::U16((u16::from(hi) << 8) | u16::from(lo))
-        }
-    };
-    (opcode, operation, operand)
-}
-
-/// Formats a disassembled SM83 instruction as a human-readable string.  `addr`
-/// specifies the address of the start of the instruction.  `bus` is required
-/// for providing labels for addresses; if no labels are needed, a `null_bus()`
-/// can be used.
-pub fn format_instruction(
-    operation: Operation,
-    operand: Operand,
-    addr: u16,
-    bus: &dyn SimBus,
-) -> String {
-    match operation {
-        Operation::AdcAI8 => format!("ADC A, ${:02x}", operand.as_i32()),
-        Operation::AdcAR8(reg) => format!("ADC A, {}", reg.format()),
-        Operation::AddHlR16(reg) => format!("ADD HL, {}", reg.format()),
-        Operation::AddAI8 => format!("ADD A, ${:02x}", operand.as_i32()),
-        Operation::AddAR8(reg) => format!("ADD A, {}", reg.format()),
-        Operation::AddSpI8 => format!("ADD SP, {}", operand.as_i32()),
-        Operation::AndAI8 => format!("AND A, ${:02x}", operand.as_i32()),
-        Operation::AndAR8(reg) => format!("AND A, {}", reg.format()),
-        Operation::CallM16(Condition::Always) => {
-            format!("CALL {}", format_absolute(bus, operand))
-        }
-        Operation::CallM16(cond) => {
-            format!(
-                "CALL {}, {}",
-                cond.format(),
-                format_absolute(bus, operand)
-            )
-        }
-        Operation::Ccf => "CCF".to_string(),
-        Operation::CpAI8 => format!("CP A, ${:02x}", operand.as_i32()),
-        Operation::CpAR8(reg) => format!("CP A, {}", reg.format()),
-        Operation::Cpl => "CPL".to_string(),
-        Operation::Daa => "DAA".to_string(),
-        Operation::DecR16(reg) => format!("DEC {}", reg.format()),
-        Operation::DecR8(reg) => format!("DEC {}", reg.format()),
-        Operation::Di => "DI".to_string(),
-        Operation::Ei => "EI".to_string(),
-        Operation::Halt => "HALT".to_string(),
-        Operation::IncR16(reg) => format!("INC {}", reg.format()),
-        Operation::IncR8(reg) => format!("INC {}", reg.format()),
-        Operation::Invalid => "invalid".to_string(),
-        Operation::JpI16(Condition::Always) => {
-            format!("JP {}", format_absolute(bus, operand))
-        }
-        Operation::JpI16(cond) => {
-            format!("JP {}, {}", cond.format(), format_absolute(bus, operand))
-        }
-        Operation::JpHl => "JP HL".to_string(),
-        Operation::JrI8(Condition::Always) => {
-            format!("JR {}", format_relative(bus, addr, operand))
-        }
-        Operation::JrI8(cond) => {
-            format!(
-                "JR {}, {}",
-                cond.format(),
-                format_relative(bus, addr, operand)
-            )
-        }
-        Operation::LdAM16 => {
-            format!("LD A, [{}]", format_absolute(bus, operand))
-        }
-        Operation::LdAMhld => "LD A, [HL-]".to_string(),
-        Operation::LdAMhli => "LD A, [HL+]".to_string(),
-        Operation::LdHlSpI8 => {
-            let offset = operand.as_i32();
-            if offset < 0 {
-                format!("LD HL, SP - {}", -offset)
-            } else {
-                format!("LD HL, SP + {}", offset)
+    /// Reads and decodes a single SM83 instruction.
+    pub fn decode(bus: &dyn SimBus, pc: u16) -> Instruction {
+        let opcode = bus.peek_byte(u32::from(pc));
+        let operation = Operation::from_opcode(opcode);
+        let operand = match operation {
+            Operation::AdcAR8(_)
+            | Operation::AddHlR16(_)
+            | Operation::AddAR8(_)
+            | Operation::AndAR8(_)
+            | Operation::Ccf
+            | Operation::CpAR8(_)
+            | Operation::Cpl
+            | Operation::Daa
+            | Operation::DecR16(_)
+            | Operation::DecR8(_)
+            | Operation::Di
+            | Operation::Ei
+            | Operation::Halt
+            | Operation::IncR16(_)
+            | Operation::IncR8(_)
+            | Operation::Invalid
+            | Operation::JpHl
+            | Operation::LdAMhld
+            | Operation::LdAMhli
+            | Operation::LdMhldA
+            | Operation::LdMhliA
+            | Operation::LdR8R8(_, _)
+            | Operation::LdSpHl
+            | Operation::LdhAMc
+            | Operation::LdhMcA
+            | Operation::Nop
+            | Operation::OrAR8(_)
+            | Operation::Pop(_)
+            | Operation::Push(_)
+            | Operation::Ret(_)
+            | Operation::Reti
+            | Operation::Rla
+            | Operation::Rlca
+            | Operation::Rra
+            | Operation::Rrca
+            | Operation::Rst(_)
+            | Operation::SbcAR8(_)
+            | Operation::Scf
+            | Operation::Stop
+            | Operation::SubAR8(_)
+            | Operation::XorAR8(_) => Operand::None,
+            Operation::AddSpI8 | Operation::JrI8(_) | Operation::LdHlSpI8 => {
+                Operand::I8(bus.peek_byte(u32::from(pc.wrapping_add(1))) as i8)
             }
-        }
-        Operation::LdM16A => {
-            format!("LD [{}], A", format_absolute(bus, operand))
-        }
-        Operation::LdM16Sp => {
-            format!("LD [{}], SP", format_absolute(bus, operand))
-        }
-        Operation::LdMhldA => "LD [HL-], A".to_string(),
-        Operation::LdMhliA => "LD [HL+], A".to_string(),
-        Operation::LdR16I16(reg) => {
-            format!("LD {}, ${:04x}", reg.format(), operand.as_i32())
-        }
-        Operation::LdR8I8(reg) => {
-            format!("LD {}, ${:02x}", reg.format(), operand.as_i32())
-        }
-        Operation::LdR8R8(r1, r2) => {
-            format!("LD {}, {}", r1.format(), r2.format())
-        }
-        Operation::LdSpHl => "LD SP, HL".to_string(),
-        Operation::LdhAM8 => {
-            format!("LDH A, [{}]", format_high_page(bus, operand))
-        }
-        Operation::LdhAMc => "LDH A, [C]".to_string(),
-        Operation::LdhM8A => {
-            format!("LDH [{}], A", format_high_page(bus, operand))
-        }
-        Operation::LdhMcA => "LDH [C], A".to_string(),
-        Operation::Nop => "NOP".to_string(),
-        Operation::OrAI8 => format!("OR A, ${:02x}", operand.as_i32()),
-        Operation::OrAR8(reg) => format!("OR A, {}", reg.format()),
-        Operation::Pop(reg) => format!("POP {}", reg.format()),
-        Operation::Prefix => {
-            let (prefixed, reg) = decode_prefixed(operand.as_i32() as u8);
-            format_prefixed(prefixed, reg)
-        }
-        Operation::Push(reg) => format!("PUSH {}", reg.format()),
-        Operation::Ret(Condition::Always) => "RET".to_string(),
-        Operation::Ret(cond) => format!("RET {}", cond.format()),
-        Operation::Reti => "RETI".to_string(),
-        Operation::Rla => "RLA".to_string(),
-        Operation::Rlca => "RLCA".to_string(),
-        Operation::Rra => "RRA".to_string(),
-        Operation::Rrca => "RRCA".to_string(),
-        Operation::Rst(zp) => match bus.label_at(u32::from(zp)) {
-            None => format!("RST ${zp:02x}"),
-            Some(label) => format!("RST {label}"),
-        },
-        Operation::SbcAI8 => format!("SBC A, ${:02x}", operand.as_i32()),
-        Operation::SbcAR8(reg) => format!("SBC A, {}", reg.format()),
-        Operation::Scf => "SCF".to_string(),
-        Operation::Stop => "STOP".to_string(),
-        Operation::SubAI8 => format!("SUB A, ${:02x}", operand.as_i32()),
-        Operation::SubAR8(reg) => format!("SUB A, {}", reg.format()),
-        Operation::XorAI8 => format!("XOR A, ${:02x}", operand.as_i32()),
-        Operation::XorAR8(reg) => format!("XOR A, {}", reg.format()),
+            Operation::AdcAI8
+            | Operation::AddAI8
+            | Operation::AndAI8
+            | Operation::CpAI8
+            | Operation::LdhAM8
+            | Operation::LdhM8A
+            | Operation::LdR8I8(_)
+            | Operation::OrAI8
+            | Operation::Prefix
+            | Operation::SbcAI8
+            | Operation::SubAI8
+            | Operation::XorAI8 => {
+                Operand::U8(bus.peek_byte(u32::from(pc.wrapping_add(1))))
+            }
+            Operation::CallM16(_)
+            | Operation::JpI16(_)
+            | Operation::LdAM16
+            | Operation::LdM16A
+            | Operation::LdM16Sp
+            | Operation::LdR16I16(_) => {
+                let lo = bus.peek_byte(u32::from(pc.wrapping_add(1)));
+                let hi = bus.peek_byte(u32::from(pc.wrapping_add(2)));
+                Operand::U16((u16::from(hi) << 8) | u16::from(lo))
+            }
+        };
+        Instruction { operation, operand }
     }
-}
 
-/// Formats a prefixed SM83 instruction as a human-readable string.
-pub fn format_prefixed(prefixed: Prefixed, reg: Reg8) -> String {
-    match prefixed {
-        Prefixed::Rl => format!("RL {}", reg.format()),
-        Prefixed::Rlc => format!("RLC {}", reg.format()),
-        Prefixed::Rr => format!("RR {}", reg.format()),
-        Prefixed::Rrc => format!("RRC {}", reg.format()),
-        Prefixed::Sla => format!("SLA {}", reg.format()),
-        Prefixed::Sra => format!("SRA {}", reg.format()),
-        Prefixed::Srl => format!("SRL {}", reg.format()),
-        Prefixed::Swap => format!("SWAP {}", reg.format()),
-        Prefixed::Bit(bit) => format!("BIT {bit}, {}", reg.format()),
-        Prefixed::Res(bit) => format!("RES {bit}, {}", reg.format()),
-        Prefixed::Set(bit) => format!("SET {bit}, {}", reg.format()),
+    /// Formats a disassembled SM83 instruction as a human-readable string.
+    /// `addr` specifies the address of the start of the instruction.  `bus` is
+    /// required for providing labels for addresses; if no labels are needed, a
+    /// `new_open_bus` can be used.
+    pub fn format(self, addr: u16, bus: &dyn SimBus) -> String {
+        let operand = self.operand;
+        match self.operation {
+            Operation::AdcAI8 => format!("ADC A, ${:02x}", operand.as_i32()),
+            Operation::AdcAR8(reg) => format!("ADC A, {reg}"),
+            Operation::AddHlR16(reg) => format!("ADD HL, {reg}"),
+            Operation::AddAI8 => format!("ADD A, ${:02x}", operand.as_i32()),
+            Operation::AddAR8(reg) => format!("ADD A, {reg}"),
+            Operation::AddSpI8 => format!("ADD SP, {}", operand.as_i32()),
+            Operation::AndAI8 => format!("AND A, ${:02x}", operand.as_i32()),
+            Operation::AndAR8(reg) => format!("AND A, {reg}"),
+            Operation::CallM16(Condition::Always) => {
+                format!("CALL {}", format_absolute(bus, operand))
+            }
+            Operation::CallM16(cond) => {
+                format!(
+                    "CALL {}, {}",
+                    cond.format(),
+                    format_absolute(bus, operand)
+                )
+            }
+            Operation::Ccf => "CCF".to_string(),
+            Operation::CpAI8 => format!("CP A, ${:02x}", operand.as_i32()),
+            Operation::CpAR8(reg) => format!("CP A, {reg}"),
+            Operation::Cpl => "CPL".to_string(),
+            Operation::Daa => "DAA".to_string(),
+            Operation::DecR16(reg) => format!("DEC {reg}"),
+            Operation::DecR8(reg) => format!("DEC {reg}"),
+            Operation::Di => "DI".to_string(),
+            Operation::Ei => "EI".to_string(),
+            Operation::Halt => "HALT".to_string(),
+            Operation::IncR16(reg) => format!("INC {reg}"),
+            Operation::IncR8(reg) => format!("INC {reg}"),
+            Operation::Invalid => "invalid".to_string(),
+            Operation::JpI16(Condition::Always) => {
+                format!("JP {}", format_absolute(bus, operand))
+            }
+            Operation::JpI16(cond) => {
+                format!(
+                    "JP {}, {}",
+                    cond.format(),
+                    format_absolute(bus, operand)
+                )
+            }
+            Operation::JpHl => "JP HL".to_string(),
+            Operation::JrI8(Condition::Always) => {
+                format!("JR {}", format_relative(bus, addr, operand))
+            }
+            Operation::JrI8(cond) => {
+                format!(
+                    "JR {}, {}",
+                    cond.format(),
+                    format_relative(bus, addr, operand)
+                )
+            }
+            Operation::LdAM16 => {
+                format!("LD A, [{}]", format_absolute(bus, operand))
+            }
+            Operation::LdAMhld => "LD A, [HL-]".to_string(),
+            Operation::LdAMhli => "LD A, [HL+]".to_string(),
+            Operation::LdHlSpI8 => {
+                let offset = operand.as_i32();
+                if offset < 0 {
+                    format!("LD HL, SP - {}", -offset)
+                } else {
+                    format!("LD HL, SP + {}", offset)
+                }
+            }
+            Operation::LdM16A => {
+                format!("LD [{}], A", format_absolute(bus, operand))
+            }
+            Operation::LdM16Sp => {
+                format!("LD [{}], SP", format_absolute(bus, operand))
+            }
+            Operation::LdMhldA => "LD [HL-], A".to_string(),
+            Operation::LdMhliA => "LD [HL+], A".to_string(),
+            Operation::LdR16I16(reg) => {
+                format!("LD {}, ${:04x}", reg, operand.as_i32())
+            }
+            Operation::LdR8I8(reg) => {
+                format!("LD {}, ${:02x}", reg, operand.as_i32())
+            }
+            Operation::LdR8R8(r1, r2) => format!("LD {r1}, {r2}"),
+            Operation::LdSpHl => "LD SP, HL".to_string(),
+            Operation::LdhAM8 => {
+                format!("LDH A, [{}]", format_high_page(bus, operand))
+            }
+            Operation::LdhAMc => "LDH A, [C]".to_string(),
+            Operation::LdhM8A => {
+                format!("LDH [{}], A", format_high_page(bus, operand))
+            }
+            Operation::LdhMcA => "LDH [C], A".to_string(),
+            Operation::Nop => "NOP".to_string(),
+            Operation::OrAI8 => format!("OR A, ${:02x}", operand.as_i32()),
+            Operation::OrAR8(reg) => format!("OR A, {reg}"),
+            Operation::Pop(reg) => format!("POP {reg}"),
+            Operation::Prefix => {
+                let (prefixed, reg) = Prefixed::decode(operand.as_i32() as u8);
+                prefixed.format(reg)
+            }
+            Operation::Push(reg) => format!("PUSH {reg}"),
+            Operation::Ret(Condition::Always) => "RET".to_string(),
+            Operation::Ret(cond) => format!("RET {}", cond.format()),
+            Operation::Reti => "RETI".to_string(),
+            Operation::Rla => "RLA".to_string(),
+            Operation::Rlca => "RLCA".to_string(),
+            Operation::Rra => "RRA".to_string(),
+            Operation::Rrca => "RRCA".to_string(),
+            Operation::Rst(zp) => match bus.label_at(u32::from(zp)) {
+                None => format!("RST ${zp:02x}"),
+                Some(label) => format!("RST {label}"),
+            },
+            Operation::SbcAI8 => format!("SBC A, ${:02x}", operand.as_i32()),
+            Operation::SbcAR8(reg) => format!("SBC A, {reg}"),
+            Operation::Scf => "SCF".to_string(),
+            Operation::Stop => "STOP".to_string(),
+            Operation::SubAI8 => format!("SUB A, ${:02x}", operand.as_i32()),
+            Operation::SubAR8(reg) => format!("SUB A, {reg}"),
+            Operation::XorAI8 => format!("XOR A, ${:02x}", operand.as_i32()),
+            Operation::XorAR8(reg) => format!("XOR A, {reg}"),
+        }
     }
 }
 
@@ -882,7 +907,7 @@ fn format_address(bus: &dyn SimBus, addr: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{disassemble_instruction, format_instruction};
+    use super::Instruction;
     use crate::bus::{LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
@@ -903,8 +928,7 @@ mod tests {
     }
 
     fn disassemble_with_bus(bus: &dyn SimBus) -> String {
-        let (_opcode, operation, operand) = disassemble_instruction(bus, 0);
-        format_instruction(operation, operand, 0, bus)
+        Instruction::decode(bus, 0).format(0, bus)
     }
 
     #[test]

@@ -1,14 +1,290 @@
 //! Facilities for disassembling 6502 machine code.
 
 use crate::bus::SimBus;
-use std::io::{self, Read};
+use std::fmt;
 
 //===========================================================================//
 
-/// An operation (ignoring the addressing mode) that can be executed by a 6502
-/// processor.
+/// An operation (as defined by the instruction opcode, but without the
+/// parameter values) that can be performed on a 6502 processor.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Operation {
+pub struct Operation {
+    /// The kind of operation to be performed.
+    pub mnemonic: Mnemonic,
+    /// The addressing mode to use for this operation.
+    pub addr_mode: AddrMode,
+}
+
+impl Operation {
+    /// Decodes a 6502 opcode into its mnemonic and addressing mode.
+    pub fn from_opcode(opcode: u8) -> Operation {
+        let (mnemonic, addr_mode) = match opcode {
+            0x00 => (Mnemonic::Brk, AddrMode::Immediate),
+            0x01 => (Mnemonic::Ora, AddrMode::XIndexedZeroPageIndirect),
+            0x02 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x03 => (Mnemonic::UndocSlo, AddrMode::XIndexedZeroPageIndirect),
+            0x04 => (Mnemonic::UndocNop, AddrMode::ZeroPage),
+            0x05 => (Mnemonic::Ora, AddrMode::ZeroPage),
+            0x06 => (Mnemonic::Asl, AddrMode::ZeroPage),
+            0x07 => (Mnemonic::UndocSlo, AddrMode::ZeroPage),
+            0x08 => (Mnemonic::Php, AddrMode::Implied),
+            0x09 => (Mnemonic::Ora, AddrMode::Immediate),
+            0x0a => (Mnemonic::Asl, AddrMode::Accumulator),
+            0x0b => (Mnemonic::UndocAnc, AddrMode::Immediate),
+            0x0c => (Mnemonic::UndocNop, AddrMode::Absolute),
+            0x0d => (Mnemonic::Ora, AddrMode::Absolute),
+            0x0e => (Mnemonic::Asl, AddrMode::Absolute),
+            0x0f => (Mnemonic::UndocSlo, AddrMode::Absolute),
+            0x10 => (Mnemonic::Bpl, AddrMode::Relative),
+            0x11 => (Mnemonic::Ora, AddrMode::ZeroPageIndirectYIndexed),
+            0x12 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x13 => (Mnemonic::UndocSlo, AddrMode::ZeroPageIndirectYIndexed),
+            0x14 => (Mnemonic::UndocNop, AddrMode::XIndexedZeroPage),
+            0x15 => (Mnemonic::Ora, AddrMode::XIndexedZeroPage),
+            0x16 => (Mnemonic::Asl, AddrMode::XIndexedZeroPage),
+            0x17 => (Mnemonic::UndocSlo, AddrMode::XIndexedZeroPage),
+            0x18 => (Mnemonic::Clc, AddrMode::Implied),
+            0x19 => (Mnemonic::Ora, AddrMode::YIndexedAbsolute),
+            0x1a => (Mnemonic::UndocNop, AddrMode::Implied),
+            0x1b => (Mnemonic::UndocSlo, AddrMode::YIndexedAbsolute),
+            0x1c => (Mnemonic::UndocNop, AddrMode::XIndexedAbsolute),
+            0x1d => (Mnemonic::Ora, AddrMode::XIndexedAbsolute),
+            0x1e => (Mnemonic::Asl, AddrMode::XIndexedAbsolute),
+            0x1f => (Mnemonic::UndocSlo, AddrMode::XIndexedAbsolute),
+            0x20 => (Mnemonic::Jsr, AddrMode::Absolute),
+            0x21 => (Mnemonic::And, AddrMode::XIndexedZeroPageIndirect),
+            0x22 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x23 => (Mnemonic::UndocRla, AddrMode::XIndexedZeroPageIndirect),
+            0x24 => (Mnemonic::Bit, AddrMode::ZeroPage),
+            0x25 => (Mnemonic::And, AddrMode::ZeroPage),
+            0x26 => (Mnemonic::Rol, AddrMode::ZeroPage),
+            0x27 => (Mnemonic::UndocRla, AddrMode::ZeroPage),
+            0x28 => (Mnemonic::Plp, AddrMode::Implied),
+            0x29 => (Mnemonic::And, AddrMode::Immediate),
+            0x2a => (Mnemonic::Rol, AddrMode::Accumulator),
+            0x2b => (Mnemonic::UndocAnc, AddrMode::Immediate),
+            0x2c => (Mnemonic::Bit, AddrMode::Absolute),
+            0x2d => (Mnemonic::And, AddrMode::Absolute),
+            0x2e => (Mnemonic::Rol, AddrMode::Absolute),
+            0x2f => (Mnemonic::UndocRla, AddrMode::Absolute),
+            0x30 => (Mnemonic::Bmi, AddrMode::Relative),
+            0x31 => (Mnemonic::And, AddrMode::ZeroPageIndirectYIndexed),
+            0x32 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x33 => (Mnemonic::UndocRla, AddrMode::ZeroPageIndirectYIndexed),
+            0x34 => (Mnemonic::UndocNop, AddrMode::XIndexedZeroPage),
+            0x35 => (Mnemonic::And, AddrMode::XIndexedZeroPage),
+            0x36 => (Mnemonic::Rol, AddrMode::XIndexedZeroPage),
+            0x37 => (Mnemonic::UndocRla, AddrMode::XIndexedZeroPage),
+            0x38 => (Mnemonic::Sec, AddrMode::Implied),
+            0x39 => (Mnemonic::And, AddrMode::YIndexedAbsolute),
+            0x3a => (Mnemonic::UndocNop, AddrMode::Implied),
+            0x3b => (Mnemonic::UndocRla, AddrMode::YIndexedAbsolute),
+            0x3c => (Mnemonic::UndocNop, AddrMode::XIndexedAbsolute),
+            0x3d => (Mnemonic::And, AddrMode::XIndexedAbsolute),
+            0x3e => (Mnemonic::Rol, AddrMode::XIndexedAbsolute),
+            0x3f => (Mnemonic::UndocRla, AddrMode::XIndexedAbsolute),
+            0x40 => (Mnemonic::Rti, AddrMode::Implied),
+            0x41 => (Mnemonic::Eor, AddrMode::XIndexedZeroPageIndirect),
+            0x42 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x43 => (Mnemonic::UndocSre, AddrMode::XIndexedZeroPageIndirect),
+            0x44 => (Mnemonic::UndocNop, AddrMode::ZeroPage),
+            0x45 => (Mnemonic::Eor, AddrMode::ZeroPage),
+            0x46 => (Mnemonic::Lsr, AddrMode::ZeroPage),
+            0x47 => (Mnemonic::UndocSre, AddrMode::ZeroPage),
+            0x48 => (Mnemonic::Pha, AddrMode::Implied),
+            0x49 => (Mnemonic::Eor, AddrMode::Immediate),
+            0x4a => (Mnemonic::Lsr, AddrMode::Accumulator),
+            0x4b => (Mnemonic::UndocAsr, AddrMode::Immediate),
+            0x4c => (Mnemonic::Jmp, AddrMode::Absolute),
+            0x4d => (Mnemonic::Eor, AddrMode::Absolute),
+            0x4e => (Mnemonic::Lsr, AddrMode::Absolute),
+            0x4f => (Mnemonic::UndocSre, AddrMode::Absolute),
+            0x50 => (Mnemonic::Bvc, AddrMode::Relative),
+            0x51 => (Mnemonic::Eor, AddrMode::ZeroPageIndirectYIndexed),
+            0x52 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x53 => (Mnemonic::UndocSre, AddrMode::ZeroPageIndirectYIndexed),
+            0x54 => (Mnemonic::UndocNop, AddrMode::XIndexedZeroPage),
+            0x55 => (Mnemonic::Eor, AddrMode::XIndexedZeroPage),
+            0x56 => (Mnemonic::Lsr, AddrMode::XIndexedZeroPage),
+            0x57 => (Mnemonic::UndocSre, AddrMode::XIndexedZeroPage),
+            0x58 => (Mnemonic::Cli, AddrMode::Implied),
+            0x59 => (Mnemonic::Eor, AddrMode::YIndexedAbsolute),
+            0x5a => (Mnemonic::UndocNop, AddrMode::Implied),
+            0x5b => (Mnemonic::UndocSre, AddrMode::YIndexedAbsolute),
+            0x5c => (Mnemonic::UndocNop, AddrMode::XIndexedAbsolute),
+            0x5d => (Mnemonic::Eor, AddrMode::XIndexedAbsolute),
+            0x5e => (Mnemonic::Lsr, AddrMode::XIndexedAbsolute),
+            0x5f => (Mnemonic::UndocSre, AddrMode::XIndexedAbsolute),
+            0x60 => (Mnemonic::Rts, AddrMode::Implied),
+            0x61 => (Mnemonic::Adc, AddrMode::XIndexedZeroPageIndirect),
+            0x62 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x63 => (Mnemonic::UndocRra, AddrMode::XIndexedZeroPageIndirect),
+            0x64 => (Mnemonic::UndocNop, AddrMode::ZeroPage),
+            0x65 => (Mnemonic::Adc, AddrMode::ZeroPage),
+            0x66 => (Mnemonic::Ror, AddrMode::ZeroPage),
+            0x67 => (Mnemonic::UndocRra, AddrMode::ZeroPage),
+            0x68 => (Mnemonic::Pla, AddrMode::Implied),
+            0x69 => (Mnemonic::Adc, AddrMode::Immediate),
+            0x6a => (Mnemonic::Ror, AddrMode::Accumulator),
+            0x6b => (Mnemonic::UndocArr, AddrMode::Immediate),
+            0x6c => (Mnemonic::Jmp, AddrMode::AbsoluteIndirect),
+            0x6d => (Mnemonic::Adc, AddrMode::Absolute),
+            0x6e => (Mnemonic::Ror, AddrMode::Absolute),
+            0x6f => (Mnemonic::UndocRra, AddrMode::Absolute),
+            0x70 => (Mnemonic::Bvs, AddrMode::Relative),
+            0x71 => (Mnemonic::Adc, AddrMode::ZeroPageIndirectYIndexed),
+            0x72 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x73 => (Mnemonic::UndocRra, AddrMode::ZeroPageIndirectYIndexed),
+            0x74 => (Mnemonic::UndocNop, AddrMode::XIndexedZeroPage),
+            0x75 => (Mnemonic::Adc, AddrMode::XIndexedZeroPage),
+            0x76 => (Mnemonic::Ror, AddrMode::XIndexedZeroPage),
+            0x77 => (Mnemonic::UndocRra, AddrMode::XIndexedZeroPage),
+            0x78 => (Mnemonic::Sei, AddrMode::Implied),
+            0x79 => (Mnemonic::Adc, AddrMode::YIndexedAbsolute),
+            0x7a => (Mnemonic::UndocNop, AddrMode::Implied),
+            0x7b => (Mnemonic::UndocRra, AddrMode::YIndexedAbsolute),
+            0x7c => (Mnemonic::UndocNop, AddrMode::XIndexedAbsolute),
+            0x7d => (Mnemonic::Adc, AddrMode::XIndexedAbsolute),
+            0x7e => (Mnemonic::Ror, AddrMode::XIndexedAbsolute),
+            0x7f => (Mnemonic::UndocRra, AddrMode::XIndexedAbsolute),
+            0x80 => (Mnemonic::UndocNop, AddrMode::Immediate),
+            0x81 => (Mnemonic::Sta, AddrMode::XIndexedZeroPageIndirect),
+            0x82 => (Mnemonic::UndocNop, AddrMode::Immediate),
+            0x83 => (Mnemonic::UndocSax, AddrMode::XIndexedZeroPageIndirect),
+            0x84 => (Mnemonic::Sty, AddrMode::ZeroPage),
+            0x85 => (Mnemonic::Sta, AddrMode::ZeroPage),
+            0x86 => (Mnemonic::Stx, AddrMode::ZeroPage),
+            0x87 => (Mnemonic::UndocSax, AddrMode::ZeroPage),
+            0x88 => (Mnemonic::Dey, AddrMode::Implied),
+            0x89 => (Mnemonic::UndocNop, AddrMode::Immediate),
+            0x8a => (Mnemonic::Txa, AddrMode::Implied),
+            0x8b => (Mnemonic::UndocXaa, AddrMode::Immediate),
+            0x8c => (Mnemonic::Sty, AddrMode::Absolute),
+            0x8d => (Mnemonic::Sta, AddrMode::Absolute),
+            0x8e => (Mnemonic::Stx, AddrMode::Absolute),
+            0x8f => (Mnemonic::UndocSax, AddrMode::Absolute),
+            0x90 => (Mnemonic::Bcc, AddrMode::Relative),
+            0x91 => (Mnemonic::Sta, AddrMode::ZeroPageIndirectYIndexed),
+            0x92 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0x93 => (Mnemonic::UndocSha, AddrMode::ZeroPageIndirectYIndexed),
+            0x94 => (Mnemonic::Sty, AddrMode::XIndexedZeroPage),
+            0x95 => (Mnemonic::Sta, AddrMode::XIndexedZeroPage),
+            0x96 => (Mnemonic::Stx, AddrMode::YIndexedZeroPage),
+            0x97 => (Mnemonic::UndocSax, AddrMode::YIndexedZeroPage),
+            0x98 => (Mnemonic::Tya, AddrMode::Implied),
+            0x99 => (Mnemonic::Sta, AddrMode::YIndexedAbsolute),
+            0x9a => (Mnemonic::Txs, AddrMode::Implied),
+            0x9b => (Mnemonic::UndocShs, AddrMode::YIndexedAbsolute),
+            0x9c => (Mnemonic::UndocShy, AddrMode::XIndexedAbsolute),
+            0x9d => (Mnemonic::Sta, AddrMode::XIndexedAbsolute),
+            0x9e => (Mnemonic::UndocShx, AddrMode::YIndexedAbsolute),
+            0x9f => (Mnemonic::UndocSha, AddrMode::YIndexedAbsolute),
+            0xa0 => (Mnemonic::Ldy, AddrMode::Immediate),
+            0xa1 => (Mnemonic::Lda, AddrMode::XIndexedZeroPageIndirect),
+            0xa2 => (Mnemonic::Ldx, AddrMode::Immediate),
+            0xa3 => (Mnemonic::UndocLax, AddrMode::XIndexedZeroPageIndirect),
+            0xa4 => (Mnemonic::Ldy, AddrMode::ZeroPage),
+            0xa5 => (Mnemonic::Lda, AddrMode::ZeroPage),
+            0xa6 => (Mnemonic::Ldx, AddrMode::ZeroPage),
+            0xa7 => (Mnemonic::UndocLax, AddrMode::ZeroPage),
+            0xa8 => (Mnemonic::Tay, AddrMode::Implied),
+            0xa9 => (Mnemonic::Lda, AddrMode::Immediate),
+            0xaa => (Mnemonic::Tax, AddrMode::Implied),
+            0xab => (Mnemonic::UndocLax, AddrMode::Immediate),
+            0xac => (Mnemonic::Ldy, AddrMode::Absolute),
+            0xad => (Mnemonic::Lda, AddrMode::Absolute),
+            0xae => (Mnemonic::Ldx, AddrMode::Absolute),
+            0xaf => (Mnemonic::UndocLax, AddrMode::Absolute),
+            0xb0 => (Mnemonic::Bcs, AddrMode::Relative),
+            0xb1 => (Mnemonic::Lda, AddrMode::ZeroPageIndirectYIndexed),
+            0xb2 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0xb3 => (Mnemonic::UndocLax, AddrMode::ZeroPageIndirectYIndexed),
+            0xb4 => (Mnemonic::Ldy, AddrMode::XIndexedZeroPage),
+            0xb5 => (Mnemonic::Lda, AddrMode::XIndexedZeroPage),
+            0xb6 => (Mnemonic::Ldx, AddrMode::YIndexedZeroPage),
+            0xb7 => (Mnemonic::UndocLax, AddrMode::YIndexedZeroPage),
+            0xb8 => (Mnemonic::Clv, AddrMode::Implied),
+            0xb9 => (Mnemonic::Lda, AddrMode::YIndexedAbsolute),
+            0xba => (Mnemonic::Tsx, AddrMode::Implied),
+            0xbb => (Mnemonic::UndocLas, AddrMode::YIndexedAbsolute),
+            0xbc => (Mnemonic::Ldy, AddrMode::XIndexedAbsolute),
+            0xbd => (Mnemonic::Lda, AddrMode::XIndexedAbsolute),
+            0xbe => (Mnemonic::Ldx, AddrMode::YIndexedAbsolute),
+            0xbf => (Mnemonic::UndocLax, AddrMode::YIndexedAbsolute),
+            0xc0 => (Mnemonic::Cpy, AddrMode::Immediate),
+            0xc1 => (Mnemonic::Cmp, AddrMode::XIndexedZeroPageIndirect),
+            0xc2 => (Mnemonic::UndocNop, AddrMode::Immediate),
+            0xc3 => (Mnemonic::UndocDcp, AddrMode::XIndexedZeroPageIndirect),
+            0xc4 => (Mnemonic::Cpy, AddrMode::ZeroPage),
+            0xc5 => (Mnemonic::Cmp, AddrMode::ZeroPage),
+            0xc6 => (Mnemonic::Dec, AddrMode::ZeroPage),
+            0xc7 => (Mnemonic::UndocDcp, AddrMode::ZeroPage),
+            0xc8 => (Mnemonic::Iny, AddrMode::Implied),
+            0xc9 => (Mnemonic::Cmp, AddrMode::Immediate),
+            0xca => (Mnemonic::Dex, AddrMode::Implied),
+            0xcb => (Mnemonic::UndocSbx, AddrMode::Immediate),
+            0xcc => (Mnemonic::Cpy, AddrMode::Absolute),
+            0xcd => (Mnemonic::Cmp, AddrMode::Absolute),
+            0xce => (Mnemonic::Dec, AddrMode::Absolute),
+            0xcf => (Mnemonic::UndocDcp, AddrMode::Absolute),
+            0xd0 => (Mnemonic::Bne, AddrMode::Relative),
+            0xd1 => (Mnemonic::Cmp, AddrMode::ZeroPageIndirectYIndexed),
+            0xd2 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0xd3 => (Mnemonic::UndocDcp, AddrMode::ZeroPageIndirectYIndexed),
+            0xd4 => (Mnemonic::UndocNop, AddrMode::XIndexedZeroPage),
+            0xd5 => (Mnemonic::Cmp, AddrMode::XIndexedZeroPage),
+            0xd6 => (Mnemonic::Dec, AddrMode::XIndexedZeroPage),
+            0xd7 => (Mnemonic::UndocDcp, AddrMode::XIndexedZeroPage),
+            0xd8 => (Mnemonic::Cld, AddrMode::Implied),
+            0xd9 => (Mnemonic::Cmp, AddrMode::YIndexedAbsolute),
+            0xda => (Mnemonic::UndocNop, AddrMode::Implied),
+            0xdb => (Mnemonic::UndocDcp, AddrMode::YIndexedAbsolute),
+            0xdc => (Mnemonic::UndocNop, AddrMode::XIndexedAbsolute),
+            0xdd => (Mnemonic::Cmp, AddrMode::XIndexedAbsolute),
+            0xde => (Mnemonic::Dec, AddrMode::XIndexedAbsolute),
+            0xdf => (Mnemonic::UndocDcp, AddrMode::XIndexedAbsolute),
+            0xe0 => (Mnemonic::Cpx, AddrMode::Immediate),
+            0xe1 => (Mnemonic::Sbc, AddrMode::XIndexedZeroPageIndirect),
+            0xe2 => (Mnemonic::UndocNop, AddrMode::Immediate),
+            0xe3 => (Mnemonic::UndocIsc, AddrMode::XIndexedZeroPageIndirect),
+            0xe4 => (Mnemonic::Cpx, AddrMode::ZeroPage),
+            0xe5 => (Mnemonic::Sbc, AddrMode::ZeroPage),
+            0xe6 => (Mnemonic::Inc, AddrMode::ZeroPage),
+            0xe7 => (Mnemonic::UndocIsc, AddrMode::ZeroPage),
+            0xe8 => (Mnemonic::Inx, AddrMode::Implied),
+            0xe9 => (Mnemonic::Sbc, AddrMode::Immediate),
+            0xea => (Mnemonic::Nop, AddrMode::Implied),
+            0xeb => (Mnemonic::UndocSbc, AddrMode::Immediate),
+            0xec => (Mnemonic::Cpx, AddrMode::Absolute),
+            0xed => (Mnemonic::Sbc, AddrMode::Absolute),
+            0xee => (Mnemonic::Inc, AddrMode::Absolute),
+            0xef => (Mnemonic::UndocIsc, AddrMode::Absolute),
+            0xf0 => (Mnemonic::Beq, AddrMode::Relative),
+            0xf1 => (Mnemonic::Sbc, AddrMode::ZeroPageIndirectYIndexed),
+            0xf2 => (Mnemonic::UndocJam, AddrMode::Implied),
+            0xf3 => (Mnemonic::UndocIsc, AddrMode::ZeroPageIndirectYIndexed),
+            0xf4 => (Mnemonic::UndocNop, AddrMode::XIndexedZeroPage),
+            0xf5 => (Mnemonic::Sbc, AddrMode::XIndexedZeroPage),
+            0xf6 => (Mnemonic::Inc, AddrMode::XIndexedZeroPage),
+            0xf7 => (Mnemonic::UndocIsc, AddrMode::XIndexedZeroPage),
+            0xf8 => (Mnemonic::Sed, AddrMode::Implied),
+            0xf9 => (Mnemonic::Sbc, AddrMode::YIndexedAbsolute),
+            0xfa => (Mnemonic::UndocNop, AddrMode::Implied),
+            0xfb => (Mnemonic::UndocIsc, AddrMode::YIndexedAbsolute),
+            0xfc => (Mnemonic::UndocNop, AddrMode::XIndexedAbsolute),
+            0xfd => (Mnemonic::Sbc, AddrMode::XIndexedAbsolute),
+            0xfe => (Mnemonic::Inc, AddrMode::XIndexedAbsolute),
+            0xff => (Mnemonic::UndocIsc, AddrMode::XIndexedAbsolute),
+        };
+        Operation { mnemonic, addr_mode }
+    }
+}
+
+//===========================================================================//
+
+/// An operation mnemonic (ignoring the addressing mode) for a 6502 processor.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Mnemonic {
     /// An ADC (add to accumulator with carry) operation.
     Adc,
     /// An AND (binary AND with accumulator) operation.
@@ -171,92 +447,100 @@ pub enum Operation {
     UndocXaa,
 }
 
-impl Operation {
-    /// Returns the assembler mnemonic for this operation.
-    pub fn mnemonic(self) -> &'static str {
+impl Mnemonic {
+    /// Returns the assembler string for this mnemonic.
+    pub fn string(self) -> &'static str {
         match self {
-            Operation::Adc => "ADC",
-            Operation::And => "AND",
-            Operation::Asl => "ASL",
-            Operation::Bcc => "BCC",
-            Operation::Bcs => "BCS",
-            Operation::Beq => "BEQ",
-            Operation::Bit => "BIT",
-            Operation::Bmi => "BMI",
-            Operation::Bne => "BNE",
-            Operation::Bpl => "BPL",
-            Operation::Brk => "BRK",
-            Operation::Bvc => "BVC",
-            Operation::Bvs => "BVS",
-            Operation::Clc => "CLC",
-            Operation::Cld => "CLD",
-            Operation::Cli => "CLI",
-            Operation::Clv => "CLV",
-            Operation::Cmp => "CMP",
-            Operation::Cpx => "CPX",
-            Operation::Cpy => "CPY",
-            Operation::Dec => "DEC",
-            Operation::Dex => "DEX",
-            Operation::Dey => "DEY",
-            Operation::Eor => "EOR",
-            Operation::Inc => "INC",
-            Operation::Inx => "INX",
-            Operation::Iny => "INY",
-            Operation::Jmp => "JMP",
-            Operation::Jsr => "JSR",
-            Operation::Lda => "LDA",
-            Operation::Ldx => "LDX",
-            Operation::Ldy => "LDY",
-            Operation::Lsr => "LSR",
-            Operation::Nop => "NOP",
-            Operation::Ora => "ORA",
-            Operation::Pha => "PHA",
-            Operation::Php => "PHP",
-            Operation::Pla => "PLA",
-            Operation::Plp => "PLP",
-            Operation::Rol => "ROL",
-            Operation::Ror => "ROR",
-            Operation::Rti => "RTI",
-            Operation::Rts => "RTS",
-            Operation::Sbc => "SBC",
-            Operation::Sec => "SEC",
-            Operation::Sed => "SED",
-            Operation::Sei => "SEI",
-            Operation::Sta => "STA",
-            Operation::Stx => "STX",
-            Operation::Sty => "STY",
-            Operation::Tax => "TAX",
-            Operation::Tay => "TAY",
-            Operation::Tsx => "TSX",
-            Operation::Txa => "TXA",
-            Operation::Txs => "TXS",
-            Operation::Tya => "TYA",
-            Operation::UndocAnc => "anc",
-            Operation::UndocArr => "arr",
-            Operation::UndocAsr => "asr",
-            Operation::UndocDcp => "dcp",
-            Operation::UndocIsc => "isc",
-            Operation::UndocJam => "jam",
-            Operation::UndocLas => "las",
-            Operation::UndocLax => "lax",
-            Operation::UndocNop => "nop",
-            Operation::UndocRla => "rla",
-            Operation::UndocRra => "rra",
-            Operation::UndocSax => "sax",
-            Operation::UndocSbc => "sbc",
-            Operation::UndocSbx => "sbx",
-            Operation::UndocSha => "sha",
-            Operation::UndocShs => "shs",
-            Operation::UndocShx => "shx",
-            Operation::UndocShy => "shy",
-            Operation::UndocSlo => "slo",
-            Operation::UndocSre => "sre",
-            Operation::UndocXaa => "xaa",
+            Mnemonic::Adc => "ADC",
+            Mnemonic::And => "AND",
+            Mnemonic::Asl => "ASL",
+            Mnemonic::Bcc => "BCC",
+            Mnemonic::Bcs => "BCS",
+            Mnemonic::Beq => "BEQ",
+            Mnemonic::Bit => "BIT",
+            Mnemonic::Bmi => "BMI",
+            Mnemonic::Bne => "BNE",
+            Mnemonic::Bpl => "BPL",
+            Mnemonic::Brk => "BRK",
+            Mnemonic::Bvc => "BVC",
+            Mnemonic::Bvs => "BVS",
+            Mnemonic::Clc => "CLC",
+            Mnemonic::Cld => "CLD",
+            Mnemonic::Cli => "CLI",
+            Mnemonic::Clv => "CLV",
+            Mnemonic::Cmp => "CMP",
+            Mnemonic::Cpx => "CPX",
+            Mnemonic::Cpy => "CPY",
+            Mnemonic::Dec => "DEC",
+            Mnemonic::Dex => "DEX",
+            Mnemonic::Dey => "DEY",
+            Mnemonic::Eor => "EOR",
+            Mnemonic::Inc => "INC",
+            Mnemonic::Inx => "INX",
+            Mnemonic::Iny => "INY",
+            Mnemonic::Jmp => "JMP",
+            Mnemonic::Jsr => "JSR",
+            Mnemonic::Lda => "LDA",
+            Mnemonic::Ldx => "LDX",
+            Mnemonic::Ldy => "LDY",
+            Mnemonic::Lsr => "LSR",
+            Mnemonic::Nop => "NOP",
+            Mnemonic::Ora => "ORA",
+            Mnemonic::Pha => "PHA",
+            Mnemonic::Php => "PHP",
+            Mnemonic::Pla => "PLA",
+            Mnemonic::Plp => "PLP",
+            Mnemonic::Rol => "ROL",
+            Mnemonic::Ror => "ROR",
+            Mnemonic::Rti => "RTI",
+            Mnemonic::Rts => "RTS",
+            Mnemonic::Sbc => "SBC",
+            Mnemonic::Sec => "SEC",
+            Mnemonic::Sed => "SED",
+            Mnemonic::Sei => "SEI",
+            Mnemonic::Sta => "STA",
+            Mnemonic::Stx => "STX",
+            Mnemonic::Sty => "STY",
+            Mnemonic::Tax => "TAX",
+            Mnemonic::Tay => "TAY",
+            Mnemonic::Tsx => "TSX",
+            Mnemonic::Txa => "TXA",
+            Mnemonic::Txs => "TXS",
+            Mnemonic::Tya => "TYA",
+            Mnemonic::UndocAnc => "anc",
+            Mnemonic::UndocArr => "arr",
+            Mnemonic::UndocAsr => "asr",
+            Mnemonic::UndocDcp => "dcp",
+            Mnemonic::UndocIsc => "isc",
+            Mnemonic::UndocJam => "jam",
+            Mnemonic::UndocLas => "las",
+            Mnemonic::UndocLax => "lax",
+            Mnemonic::UndocNop => "nop",
+            Mnemonic::UndocRla => "rla",
+            Mnemonic::UndocRra => "rra",
+            Mnemonic::UndocSax => "sax",
+            Mnemonic::UndocSbc => "sbc",
+            Mnemonic::UndocSbx => "sbx",
+            Mnemonic::UndocSha => "sha",
+            Mnemonic::UndocShs => "shs",
+            Mnemonic::UndocShx => "shx",
+            Mnemonic::UndocShy => "shy",
+            Mnemonic::UndocSlo => "slo",
+            Mnemonic::UndocSre => "sre",
+            Mnemonic::UndocXaa => "xaa",
         }
     }
 }
 
-/// An instruction addressing mode for a 6502 processor instruction.
+impl fmt::Display for Mnemonic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str(self.string())
+    }
+}
+
+//===========================================================================//
+
+/// An addressing mode for a 6502 processor instruction.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum AddrMode {
     /// No additional arguments to the opcode.
@@ -268,7 +552,7 @@ pub enum AddrMode {
     /// Operate on an address that is offset (by the signed byte following the
     /// opcode) from the address of this instruction.
     Relative,
-    /// Operate on a the absolute 16-bit address following the opcode.
+    /// Operate on the absolute 16-bit address following the opcode.
     Absolute,
     /// Treat the 16-bit address following the opcode as a pointer to the
     /// address to operate on.
@@ -294,6 +578,8 @@ pub enum AddrMode {
     /// zero page address following the opcode, offset by index Y.
     ZeroPageIndirectYIndexed,
 }
+
+//===========================================================================//
 
 /// An addressing mode and argument value for a 6502 processor instruction.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -331,8 +617,8 @@ pub enum Operand {
 }
 
 impl Operand {
-    /// The size of this operand, in bytes.
-    pub fn size(self) -> usize {
+    /// Returns the size of this operand, in bytes.
+    pub fn size(self) -> u32 {
         match self {
             Operand::Implied => 0,
             Operand::Accumulator => 0,
@@ -352,7 +638,7 @@ impl Operand {
 
     /// Formats this operand.  `pc` gives the address of the start of the
     /// instruction.
-    fn format(self, pc: u16, bus: &dyn SimBus) -> String {
+    fn format(self, bus: &dyn SimBus, pc: u16) -> String {
         match self {
             Operand::Implied => String::new(),
             Operand::Accumulator => " A".to_string(),
@@ -404,354 +690,102 @@ fn format_abs(abs: u16, bus: &dyn SimBus) -> String {
 
 //===========================================================================//
 
-/// Decodes a 6502 opcode into its operation and addressing mode.
-pub fn decode_opcode(opcode: u8) -> (Operation, AddrMode) {
-    match opcode {
-        0x00 => (Operation::Brk, AddrMode::Immediate),
-        0x01 => (Operation::Ora, AddrMode::XIndexedZeroPageIndirect),
-        0x02 => (Operation::UndocJam, AddrMode::Implied),
-        0x03 => (Operation::UndocSlo, AddrMode::XIndexedZeroPageIndirect),
-        0x04 => (Operation::UndocNop, AddrMode::ZeroPage),
-        0x05 => (Operation::Ora, AddrMode::ZeroPage),
-        0x06 => (Operation::Asl, AddrMode::ZeroPage),
-        0x07 => (Operation::UndocSlo, AddrMode::ZeroPage),
-        0x08 => (Operation::Php, AddrMode::Implied),
-        0x09 => (Operation::Ora, AddrMode::Immediate),
-        0x0a => (Operation::Asl, AddrMode::Accumulator),
-        0x0b => (Operation::UndocAnc, AddrMode::Immediate),
-        0x0c => (Operation::UndocNop, AddrMode::Absolute),
-        0x0d => (Operation::Ora, AddrMode::Absolute),
-        0x0e => (Operation::Asl, AddrMode::Absolute),
-        0x0f => (Operation::UndocSlo, AddrMode::Absolute),
-        0x10 => (Operation::Bpl, AddrMode::Relative),
-        0x11 => (Operation::Ora, AddrMode::ZeroPageIndirectYIndexed),
-        0x12 => (Operation::UndocJam, AddrMode::Implied),
-        0x13 => (Operation::UndocSlo, AddrMode::ZeroPageIndirectYIndexed),
-        0x14 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
-        0x15 => (Operation::Ora, AddrMode::XIndexedZeroPage),
-        0x16 => (Operation::Asl, AddrMode::XIndexedZeroPage),
-        0x17 => (Operation::UndocSlo, AddrMode::XIndexedZeroPage),
-        0x18 => (Operation::Clc, AddrMode::Implied),
-        0x19 => (Operation::Ora, AddrMode::YIndexedAbsolute),
-        0x1a => (Operation::UndocNop, AddrMode::Implied),
-        0x1b => (Operation::UndocSlo, AddrMode::YIndexedAbsolute),
-        0x1c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
-        0x1d => (Operation::Ora, AddrMode::XIndexedAbsolute),
-        0x1e => (Operation::Asl, AddrMode::XIndexedAbsolute),
-        0x1f => (Operation::UndocSlo, AddrMode::XIndexedAbsolute),
-        0x20 => (Operation::Jsr, AddrMode::Absolute),
-        0x21 => (Operation::And, AddrMode::XIndexedZeroPageIndirect),
-        0x22 => (Operation::UndocJam, AddrMode::Implied),
-        0x23 => (Operation::UndocRla, AddrMode::XIndexedZeroPageIndirect),
-        0x24 => (Operation::Bit, AddrMode::ZeroPage),
-        0x25 => (Operation::And, AddrMode::ZeroPage),
-        0x26 => (Operation::Rol, AddrMode::ZeroPage),
-        0x27 => (Operation::UndocRla, AddrMode::ZeroPage),
-        0x28 => (Operation::Plp, AddrMode::Implied),
-        0x29 => (Operation::And, AddrMode::Immediate),
-        0x2a => (Operation::Rol, AddrMode::Accumulator),
-        0x2b => (Operation::UndocAnc, AddrMode::Immediate),
-        0x2c => (Operation::Bit, AddrMode::Absolute),
-        0x2d => (Operation::And, AddrMode::Absolute),
-        0x2e => (Operation::Rol, AddrMode::Absolute),
-        0x2f => (Operation::UndocRla, AddrMode::Absolute),
-        0x30 => (Operation::Bmi, AddrMode::Relative),
-        0x31 => (Operation::And, AddrMode::ZeroPageIndirectYIndexed),
-        0x32 => (Operation::UndocJam, AddrMode::Implied),
-        0x33 => (Operation::UndocRla, AddrMode::ZeroPageIndirectYIndexed),
-        0x34 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
-        0x35 => (Operation::And, AddrMode::XIndexedZeroPage),
-        0x36 => (Operation::Rol, AddrMode::XIndexedZeroPage),
-        0x37 => (Operation::UndocRla, AddrMode::XIndexedZeroPage),
-        0x38 => (Operation::Sec, AddrMode::Implied),
-        0x39 => (Operation::And, AddrMode::YIndexedAbsolute),
-        0x3a => (Operation::UndocNop, AddrMode::Implied),
-        0x3b => (Operation::UndocRla, AddrMode::YIndexedAbsolute),
-        0x3c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
-        0x3d => (Operation::And, AddrMode::XIndexedAbsolute),
-        0x3e => (Operation::Rol, AddrMode::XIndexedAbsolute),
-        0x3f => (Operation::UndocRla, AddrMode::XIndexedAbsolute),
-        0x40 => (Operation::Rti, AddrMode::Implied),
-        0x41 => (Operation::Eor, AddrMode::XIndexedZeroPageIndirect),
-        0x42 => (Operation::UndocJam, AddrMode::Implied),
-        0x43 => (Operation::UndocSre, AddrMode::XIndexedZeroPageIndirect),
-        0x44 => (Operation::UndocNop, AddrMode::ZeroPage),
-        0x45 => (Operation::Eor, AddrMode::ZeroPage),
-        0x46 => (Operation::Lsr, AddrMode::ZeroPage),
-        0x47 => (Operation::UndocSre, AddrMode::ZeroPage),
-        0x48 => (Operation::Pha, AddrMode::Implied),
-        0x49 => (Operation::Eor, AddrMode::Immediate),
-        0x4a => (Operation::Lsr, AddrMode::Accumulator),
-        0x4b => (Operation::UndocAsr, AddrMode::Immediate),
-        0x4c => (Operation::Jmp, AddrMode::Absolute),
-        0x4d => (Operation::Eor, AddrMode::Absolute),
-        0x4e => (Operation::Lsr, AddrMode::Absolute),
-        0x4f => (Operation::UndocSre, AddrMode::Absolute),
-        0x50 => (Operation::Bvc, AddrMode::Relative),
-        0x51 => (Operation::Eor, AddrMode::ZeroPageIndirectYIndexed),
-        0x52 => (Operation::UndocJam, AddrMode::Implied),
-        0x53 => (Operation::UndocSre, AddrMode::ZeroPageIndirectYIndexed),
-        0x54 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
-        0x55 => (Operation::Eor, AddrMode::XIndexedZeroPage),
-        0x56 => (Operation::Lsr, AddrMode::XIndexedZeroPage),
-        0x57 => (Operation::UndocSre, AddrMode::XIndexedZeroPage),
-        0x58 => (Operation::Cli, AddrMode::Implied),
-        0x59 => (Operation::Eor, AddrMode::YIndexedAbsolute),
-        0x5a => (Operation::UndocNop, AddrMode::Implied),
-        0x5b => (Operation::UndocSre, AddrMode::YIndexedAbsolute),
-        0x5c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
-        0x5d => (Operation::Eor, AddrMode::XIndexedAbsolute),
-        0x5e => (Operation::Lsr, AddrMode::XIndexedAbsolute),
-        0x5f => (Operation::UndocSre, AddrMode::XIndexedAbsolute),
-        0x60 => (Operation::Rts, AddrMode::Implied),
-        0x61 => (Operation::Adc, AddrMode::XIndexedZeroPageIndirect),
-        0x62 => (Operation::UndocJam, AddrMode::Implied),
-        0x63 => (Operation::UndocRra, AddrMode::XIndexedZeroPageIndirect),
-        0x64 => (Operation::UndocNop, AddrMode::ZeroPage),
-        0x65 => (Operation::Adc, AddrMode::ZeroPage),
-        0x66 => (Operation::Ror, AddrMode::ZeroPage),
-        0x67 => (Operation::UndocRra, AddrMode::ZeroPage),
-        0x68 => (Operation::Pla, AddrMode::Implied),
-        0x69 => (Operation::Adc, AddrMode::Immediate),
-        0x6a => (Operation::Ror, AddrMode::Accumulator),
-        0x6b => (Operation::UndocArr, AddrMode::Immediate),
-        0x6c => (Operation::Jmp, AddrMode::AbsoluteIndirect),
-        0x6d => (Operation::Adc, AddrMode::Absolute),
-        0x6e => (Operation::Ror, AddrMode::Absolute),
-        0x6f => (Operation::UndocRra, AddrMode::Absolute),
-        0x70 => (Operation::Bvs, AddrMode::Relative),
-        0x71 => (Operation::Adc, AddrMode::ZeroPageIndirectYIndexed),
-        0x72 => (Operation::UndocJam, AddrMode::Implied),
-        0x73 => (Operation::UndocRra, AddrMode::ZeroPageIndirectYIndexed),
-        0x74 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
-        0x75 => (Operation::Adc, AddrMode::XIndexedZeroPage),
-        0x76 => (Operation::Ror, AddrMode::XIndexedZeroPage),
-        0x77 => (Operation::UndocRra, AddrMode::XIndexedZeroPage),
-        0x78 => (Operation::Sei, AddrMode::Implied),
-        0x79 => (Operation::Adc, AddrMode::YIndexedAbsolute),
-        0x7a => (Operation::UndocNop, AddrMode::Implied),
-        0x7b => (Operation::UndocRra, AddrMode::YIndexedAbsolute),
-        0x7c => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
-        0x7d => (Operation::Adc, AddrMode::XIndexedAbsolute),
-        0x7e => (Operation::Ror, AddrMode::XIndexedAbsolute),
-        0x7f => (Operation::UndocRra, AddrMode::XIndexedAbsolute),
-        0x80 => (Operation::UndocNop, AddrMode::Immediate),
-        0x81 => (Operation::Sta, AddrMode::XIndexedZeroPageIndirect),
-        0x82 => (Operation::UndocNop, AddrMode::Immediate),
-        0x83 => (Operation::UndocSax, AddrMode::XIndexedZeroPageIndirect),
-        0x84 => (Operation::Sty, AddrMode::ZeroPage),
-        0x85 => (Operation::Sta, AddrMode::ZeroPage),
-        0x86 => (Operation::Stx, AddrMode::ZeroPage),
-        0x87 => (Operation::UndocSax, AddrMode::ZeroPage),
-        0x88 => (Operation::Dey, AddrMode::Implied),
-        0x89 => (Operation::UndocNop, AddrMode::Immediate),
-        0x8a => (Operation::Txa, AddrMode::Implied),
-        0x8b => (Operation::UndocXaa, AddrMode::Immediate),
-        0x8c => (Operation::Sty, AddrMode::Absolute),
-        0x8d => (Operation::Sta, AddrMode::Absolute),
-        0x8e => (Operation::Stx, AddrMode::Absolute),
-        0x8f => (Operation::UndocSax, AddrMode::Absolute),
-        0x90 => (Operation::Bcc, AddrMode::Relative),
-        0x91 => (Operation::Sta, AddrMode::ZeroPageIndirectYIndexed),
-        0x92 => (Operation::UndocJam, AddrMode::Implied),
-        0x93 => (Operation::UndocSha, AddrMode::ZeroPageIndirectYIndexed),
-        0x94 => (Operation::Sty, AddrMode::XIndexedZeroPage),
-        0x95 => (Operation::Sta, AddrMode::XIndexedZeroPage),
-        0x96 => (Operation::Stx, AddrMode::YIndexedZeroPage),
-        0x97 => (Operation::UndocSax, AddrMode::YIndexedZeroPage),
-        0x98 => (Operation::Tya, AddrMode::Implied),
-        0x99 => (Operation::Sta, AddrMode::YIndexedAbsolute),
-        0x9a => (Operation::Txs, AddrMode::Implied),
-        0x9b => (Operation::UndocShs, AddrMode::YIndexedAbsolute),
-        0x9c => (Operation::UndocShy, AddrMode::XIndexedAbsolute),
-        0x9d => (Operation::Sta, AddrMode::XIndexedAbsolute),
-        0x9e => (Operation::UndocShx, AddrMode::YIndexedAbsolute),
-        0x9f => (Operation::UndocSha, AddrMode::YIndexedAbsolute),
-        0xa0 => (Operation::Ldy, AddrMode::Immediate),
-        0xa1 => (Operation::Lda, AddrMode::XIndexedZeroPageIndirect),
-        0xa2 => (Operation::Ldx, AddrMode::Immediate),
-        0xa3 => (Operation::UndocLax, AddrMode::XIndexedZeroPageIndirect),
-        0xa4 => (Operation::Ldy, AddrMode::ZeroPage),
-        0xa5 => (Operation::Lda, AddrMode::ZeroPage),
-        0xa6 => (Operation::Ldx, AddrMode::ZeroPage),
-        0xa7 => (Operation::UndocLax, AddrMode::ZeroPage),
-        0xa8 => (Operation::Tay, AddrMode::Implied),
-        0xa9 => (Operation::Lda, AddrMode::Immediate),
-        0xaa => (Operation::Tax, AddrMode::Implied),
-        0xab => (Operation::UndocLax, AddrMode::Immediate),
-        0xac => (Operation::Ldy, AddrMode::Absolute),
-        0xad => (Operation::Lda, AddrMode::Absolute),
-        0xae => (Operation::Ldx, AddrMode::Absolute),
-        0xaf => (Operation::UndocLax, AddrMode::Absolute),
-        0xb0 => (Operation::Bcs, AddrMode::Relative),
-        0xb1 => (Operation::Lda, AddrMode::ZeroPageIndirectYIndexed),
-        0xb2 => (Operation::UndocJam, AddrMode::Implied),
-        0xb3 => (Operation::UndocLax, AddrMode::ZeroPageIndirectYIndexed),
-        0xb4 => (Operation::Ldy, AddrMode::XIndexedZeroPage),
-        0xb5 => (Operation::Lda, AddrMode::XIndexedZeroPage),
-        0xb6 => (Operation::Ldx, AddrMode::YIndexedZeroPage),
-        0xb7 => (Operation::UndocLax, AddrMode::YIndexedZeroPage),
-        0xb8 => (Operation::Clv, AddrMode::Implied),
-        0xb9 => (Operation::Lda, AddrMode::YIndexedAbsolute),
-        0xba => (Operation::Tsx, AddrMode::Implied),
-        0xbb => (Operation::UndocLas, AddrMode::YIndexedAbsolute),
-        0xbc => (Operation::Ldy, AddrMode::XIndexedAbsolute),
-        0xbd => (Operation::Lda, AddrMode::XIndexedAbsolute),
-        0xbe => (Operation::Ldx, AddrMode::YIndexedAbsolute),
-        0xbf => (Operation::UndocLax, AddrMode::YIndexedAbsolute),
-        0xc0 => (Operation::Cpy, AddrMode::Immediate),
-        0xc1 => (Operation::Cmp, AddrMode::XIndexedZeroPageIndirect),
-        0xc2 => (Operation::UndocNop, AddrMode::Immediate),
-        0xc3 => (Operation::UndocDcp, AddrMode::XIndexedZeroPageIndirect),
-        0xc4 => (Operation::Cpy, AddrMode::ZeroPage),
-        0xc5 => (Operation::Cmp, AddrMode::ZeroPage),
-        0xc6 => (Operation::Dec, AddrMode::ZeroPage),
-        0xc7 => (Operation::UndocDcp, AddrMode::ZeroPage),
-        0xc8 => (Operation::Iny, AddrMode::Implied),
-        0xc9 => (Operation::Cmp, AddrMode::Immediate),
-        0xca => (Operation::Dex, AddrMode::Implied),
-        0xcb => (Operation::UndocSbx, AddrMode::Immediate),
-        0xcc => (Operation::Cpy, AddrMode::Absolute),
-        0xcd => (Operation::Cmp, AddrMode::Absolute),
-        0xce => (Operation::Dec, AddrMode::Absolute),
-        0xcf => (Operation::UndocDcp, AddrMode::Absolute),
-        0xd0 => (Operation::Bne, AddrMode::Relative),
-        0xd1 => (Operation::Cmp, AddrMode::ZeroPageIndirectYIndexed),
-        0xd2 => (Operation::UndocJam, AddrMode::Implied),
-        0xd3 => (Operation::UndocDcp, AddrMode::ZeroPageIndirectYIndexed),
-        0xd4 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
-        0xd5 => (Operation::Cmp, AddrMode::XIndexedZeroPage),
-        0xd6 => (Operation::Dec, AddrMode::XIndexedZeroPage),
-        0xd7 => (Operation::UndocDcp, AddrMode::XIndexedZeroPage),
-        0xd8 => (Operation::Cld, AddrMode::Implied),
-        0xd9 => (Operation::Cmp, AddrMode::YIndexedAbsolute),
-        0xda => (Operation::UndocNop, AddrMode::Implied),
-        0xdb => (Operation::UndocDcp, AddrMode::YIndexedAbsolute),
-        0xdc => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
-        0xdd => (Operation::Cmp, AddrMode::XIndexedAbsolute),
-        0xde => (Operation::Dec, AddrMode::XIndexedAbsolute),
-        0xdf => (Operation::UndocDcp, AddrMode::XIndexedAbsolute),
-        0xe0 => (Operation::Cpx, AddrMode::Immediate),
-        0xe1 => (Operation::Sbc, AddrMode::XIndexedZeroPageIndirect),
-        0xe2 => (Operation::UndocNop, AddrMode::Immediate),
-        0xe3 => (Operation::UndocIsc, AddrMode::XIndexedZeroPageIndirect),
-        0xe4 => (Operation::Cpx, AddrMode::ZeroPage),
-        0xe5 => (Operation::Sbc, AddrMode::ZeroPage),
-        0xe6 => (Operation::Inc, AddrMode::ZeroPage),
-        0xe7 => (Operation::UndocIsc, AddrMode::ZeroPage),
-        0xe8 => (Operation::Inx, AddrMode::Implied),
-        0xe9 => (Operation::Sbc, AddrMode::Immediate),
-        0xea => (Operation::Nop, AddrMode::Implied),
-        0xeb => (Operation::UndocSbc, AddrMode::Immediate),
-        0xec => (Operation::Cpx, AddrMode::Absolute),
-        0xed => (Operation::Sbc, AddrMode::Absolute),
-        0xee => (Operation::Inc, AddrMode::Absolute),
-        0xef => (Operation::UndocIsc, AddrMode::Absolute),
-        0xf0 => (Operation::Beq, AddrMode::Relative),
-        0xf1 => (Operation::Sbc, AddrMode::ZeroPageIndirectYIndexed),
-        0xf2 => (Operation::UndocJam, AddrMode::Implied),
-        0xf3 => (Operation::UndocIsc, AddrMode::ZeroPageIndirectYIndexed),
-        0xf4 => (Operation::UndocNop, AddrMode::XIndexedZeroPage),
-        0xf5 => (Operation::Sbc, AddrMode::XIndexedZeroPage),
-        0xf6 => (Operation::Inc, AddrMode::XIndexedZeroPage),
-        0xf7 => (Operation::UndocIsc, AddrMode::XIndexedZeroPage),
-        0xf8 => (Operation::Sed, AddrMode::Implied),
-        0xf9 => (Operation::Sbc, AddrMode::YIndexedAbsolute),
-        0xfa => (Operation::UndocNop, AddrMode::Implied),
-        0xfb => (Operation::UndocIsc, AddrMode::YIndexedAbsolute),
-        0xfc => (Operation::UndocNop, AddrMode::XIndexedAbsolute),
-        0xfd => (Operation::Sbc, AddrMode::XIndexedAbsolute),
-        0xfe => (Operation::Inc, AddrMode::XIndexedAbsolute),
-        0xff => (Operation::UndocIsc, AddrMode::XIndexedAbsolute),
+/// A complete instruction, including parameter values, for a 6502 processor.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Instruction {
+    /// The kind of operation to be performed.
+    pub mnemonic: Mnemonic,
+    /// The addressing mode parameter value.
+    pub operand: Operand,
+}
+
+impl Instruction {
+    /// Returns the size of this instruction, in bytes.
+    pub fn size(self) -> u32 {
+        1 + self.operand.size()
+    }
+
+    /// Decodes a single 6502 instruction at the given starting address.
+    pub fn decode(bus: &dyn SimBus, pc: u16) -> Instruction {
+        let opcode = bus.peek_byte(u32::from(pc));
+        let operation = Operation::from_opcode(opcode);
+        let operand = match operation.addr_mode {
+            AddrMode::Implied => Operand::Implied,
+            AddrMode::Accumulator => Operand::Accumulator,
+            AddrMode::Immediate => Operand::Immediate(next_byte(bus, pc)),
+            AddrMode::Relative => Operand::Relative(next_byte(bus, pc) as i8),
+            AddrMode::Absolute => Operand::Absolute(next_word(bus, pc)),
+            AddrMode::AbsoluteIndirect => {
+                Operand::AbsoluteIndirect(next_word(bus, pc))
+            }
+            AddrMode::XIndexedAbsolute => {
+                Operand::XIndexedAbsolute(next_word(bus, pc))
+            }
+            AddrMode::YIndexedAbsolute => {
+                Operand::YIndexedAbsolute(next_word(bus, pc))
+            }
+            AddrMode::ZeroPage => Operand::ZeroPage(next_byte(bus, pc)),
+            AddrMode::XIndexedZeroPage => {
+                Operand::XIndexedZeroPage(next_byte(bus, pc))
+            }
+            AddrMode::YIndexedZeroPage => {
+                Operand::YIndexedZeroPage(next_byte(bus, pc))
+            }
+            AddrMode::XIndexedZeroPageIndirect => {
+                Operand::XIndexedZeroPageIndirect(next_byte(bus, pc))
+            }
+            AddrMode::ZeroPageIndirectYIndexed => {
+                Operand::ZeroPageIndirectYIndexed(next_byte(bus, pc))
+            }
+        };
+        Instruction { mnemonic: operation.mnemonic, operand }
+    }
+
+    /// Formats the decoded 6502 instruction as a human-readable string.  `pc`
+    /// specifies the address of the start of the instruction.  `bus` is
+    /// required for providing labels for addresses; if no labels are needed, a
+    /// `new_open_bus` can be used.
+    pub fn format(self, bus: &dyn SimBus, pc: u16) -> String {
+        format!("{}{}", self.mnemonic, self.operand.format(bus, pc))
     }
 }
 
-/// Reads and disassembles a single 6502 instruction.
-pub fn disassemble_instruction<R: Read>(
-    reader: &mut R,
-) -> io::Result<(u8, Operation, Operand)> {
-    let opcode = read_byte(reader)?;
-    let (operation, mode) = decode_opcode(opcode);
-    let operand = match mode {
-        AddrMode::Implied => Operand::Implied,
-        AddrMode::Accumulator => Operand::Accumulator,
-        AddrMode::Immediate => Operand::Immediate(read_byte(reader)?),
-        AddrMode::Relative => Operand::Relative(read_byte(reader)? as i8),
-        AddrMode::Absolute => Operand::Absolute(read_word(reader)?),
-        AddrMode::AbsoluteIndirect => {
-            Operand::AbsoluteIndirect(read_word(reader)?)
-        }
-        AddrMode::XIndexedAbsolute => {
-            Operand::XIndexedAbsolute(read_word(reader)?)
-        }
-        AddrMode::YIndexedAbsolute => {
-            Operand::YIndexedAbsolute(read_word(reader)?)
-        }
-        AddrMode::ZeroPage => Operand::ZeroPage(read_byte(reader)?),
-        AddrMode::XIndexedZeroPage => {
-            Operand::XIndexedZeroPage(read_byte(reader)?)
-        }
-        AddrMode::YIndexedZeroPage => {
-            Operand::YIndexedZeroPage(read_byte(reader)?)
-        }
-        AddrMode::XIndexedZeroPageIndirect => {
-            Operand::XIndexedZeroPageIndirect(read_byte(reader)?)
-        }
-        AddrMode::ZeroPageIndirectYIndexed => {
-            Operand::ZeroPageIndirectYIndexed(read_byte(reader)?)
-        }
-    };
-    Ok((opcode, operation, operand))
+fn next_byte(bus: &dyn SimBus, pc: u16) -> u8 {
+    bus.peek_byte(u32::from(pc.wrapping_add(1)))
 }
 
-/// Formats a disassembled 6502 instruction as a human-readable string.  `addr`
-/// specifies the address of the start of the instruction.  `bus` is required
-/// for providing labels for addresses; if no labels are needed, a `null_bus()`
-/// can be used.
-pub fn format_instruction(
-    operation: Operation,
-    operand: Operand,
-    addr: u16,
-    bus: &dyn SimBus,
-) -> String {
-    format!("{}{}", operation.mnemonic(), operand.format(addr, bus))
-}
-
-fn read_byte<R: Read>(reader: &mut R) -> io::Result<u8> {
-    let mut buffer = [0u8; 1];
-    reader.read_exact(&mut buffer)?;
-    Ok(buffer[0])
-}
-
-fn read_word<R: Read>(reader: &mut R) -> io::Result<u16> {
-    let mut buffer = [0u8; 2];
-    reader.read_exact(&mut buffer)?;
-    Ok(((buffer[1] as u16) << 8) | (buffer[0] as u16))
+fn next_word(bus: &dyn SimBus, pc: u16) -> u16 {
+    let lo = bus.peek_byte(u32::from(pc.wrapping_add(1)));
+    let hi = bus.peek_byte(u32::from(pc.wrapping_add(2)));
+    (u16::from(hi) << 8) | u16::from(lo)
 }
 
 //===========================================================================//
 
 #[cfg(test)]
 mod tests {
-    use super::{disassemble_instruction, format_instruction};
-    use crate::bus::{LabeledBus, SimBus, new_open_bus};
+    use super::Instruction;
+    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
+    fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {
+        let mut rom = vec![0u8; 1 << 4];
+        rom[..code.len()].copy_from_slice(code);
+        new_rom_bus(rom.into_boxed_slice())
+    }
+
     fn disassemble(code: &[u8]) -> String {
-        disassemble_with_bus(code, &*new_open_bus(16))
+        disassemble_with_bus(&*make_test_bus(code))
     }
 
     fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
         let labels = HashMap::from([(label.to_string(), addr)]);
-        let bus = LabeledBus::new(new_open_bus(16), labels);
-        disassemble_with_bus(code, &bus)
+        let bus = LabeledBus::new(make_test_bus(code), labels);
+        disassemble_with_bus(&bus)
     }
 
-    fn disassemble_with_bus(mut code: &[u8], bus: &dyn SimBus) -> String {
-        let (_opcode, operation, operand) =
-            disassemble_instruction(&mut code).unwrap();
-        assert!(code.is_empty());
-        format_instruction(operation, operand, 0x0000, bus)
+    fn disassemble_with_bus(bus: &dyn SimBus) -> String {
+        Instruction::decode(bus, 0).format(bus, 0)
     }
 
     #[test]

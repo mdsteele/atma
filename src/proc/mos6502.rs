@@ -1,9 +1,6 @@
 use super::util::watch;
-use crate::bus::{BusPeeker, SimBus, WatchKind};
-use crate::dis::mos6502::{
-    AddrMode, Operation, decode_opcode, disassemble_instruction,
-    format_instruction,
-};
+use crate::bus::{SimBus, WatchKind};
+use crate::dis::mos6502::{AddrMode, Instruction, Mnemonic, Operation};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -171,69 +168,70 @@ impl Mos6502 {
     }
 
     fn exec_decode_opcode(&mut self) -> Result<(), SimBreak> {
-        let (operation, addr_mode) = decode_opcode(self.data);
-        match operation {
-            Operation::Adc => self.decode_op_adc(addr_mode),
-            Operation::And => self.decode_op_and(addr_mode),
-            Operation::Asl => self.decode_op_asl(addr_mode),
-            Operation::Bcc => self.decode_op_bcc(),
-            Operation::Bcs => self.decode_op_bcs(),
-            Operation::Beq => self.decode_op_beq(),
-            Operation::Bit => self.decode_op_bit(addr_mode),
-            Operation::Bmi => self.decode_op_bmi(),
-            Operation::Bne => self.decode_op_bne(),
-            Operation::Bpl => self.decode_op_bpl(),
-            Operation::Brk => self.decode_op_brk(),
-            Operation::Bvc => self.decode_op_bvc(),
-            Operation::Bvs => self.decode_op_bvs(),
-            Operation::Clc => self.decode_op_clc(),
-            Operation::Cld => self.decode_op_cld(),
-            Operation::Cli => self.decode_op_cli(),
-            Operation::Clv => self.decode_op_clv(),
-            Operation::Cmp => self.decode_op_cmp(addr_mode),
-            Operation::Cpx => self.decode_op_cpx(addr_mode),
-            Operation::Cpy => self.decode_op_cpy(addr_mode),
-            Operation::Dec => self.decode_op_dec(addr_mode),
-            Operation::Dex => self.decode_op_dex(),
-            Operation::Dey => self.decode_op_dey(),
-            Operation::Eor => self.decode_op_eor(addr_mode),
-            Operation::Inc => self.decode_op_inc(addr_mode),
-            Operation::Inx => self.decode_op_inx(),
-            Operation::Iny => self.decode_op_iny(),
-            Operation::Jmp => self.decode_op_jmp(addr_mode),
-            Operation::Jsr => self.decode_op_jsr(),
-            Operation::Lda => self.decode_op_lda(addr_mode),
-            Operation::Ldx => self.decode_op_ldx(addr_mode),
-            Operation::Ldy => self.decode_op_ldy(addr_mode),
-            Operation::Lsr => self.decode_op_lsr(addr_mode),
-            Operation::Nop => {}
-            Operation::Ora => self.decode_op_ora(addr_mode),
-            Operation::Pha => self.decode_op_pha(),
-            Operation::Php => self.decode_op_php(),
-            Operation::Pla => self.decode_op_pla(),
-            Operation::Plp => self.decode_op_plp(),
-            Operation::Rol => self.decode_op_rol(addr_mode),
-            Operation::Ror => self.decode_op_ror(addr_mode),
-            Operation::Rti => self.decode_op_rti(),
-            Operation::Rts => self.decode_op_rts(),
-            Operation::Sbc => self.decode_op_sbc(addr_mode),
-            Operation::Sec => self.decode_op_sec(),
-            Operation::Sed => self.decode_op_sed(),
-            Operation::Sei => self.decode_op_sei(),
-            Operation::Sta => self.decode_op_sta(addr_mode),
-            Operation::Stx => self.decode_op_stx(addr_mode),
-            Operation::Sty => self.decode_op_sty(addr_mode),
-            Operation::Tax => self.decode_op_tax(),
-            Operation::Tay => self.decode_op_tay(),
-            Operation::Tsx => self.decode_op_tsx(),
-            Operation::Txa => self.decode_op_txa(),
-            Operation::Txs => self.decode_op_txs(),
-            Operation::Tya => self.decode_op_tya(),
-            Operation::UndocNop => self.decode_op_undoc_nop(addr_mode),
+        let operation = Operation::from_opcode(self.data);
+        let addr_mode = operation.addr_mode;
+        match operation.mnemonic {
+            Mnemonic::Adc => self.decode_op_adc(addr_mode),
+            Mnemonic::And => self.decode_op_and(addr_mode),
+            Mnemonic::Asl => self.decode_op_asl(addr_mode),
+            Mnemonic::Bcc => self.decode_op_bcc(),
+            Mnemonic::Bcs => self.decode_op_bcs(),
+            Mnemonic::Beq => self.decode_op_beq(),
+            Mnemonic::Bit => self.decode_op_bit(addr_mode),
+            Mnemonic::Bmi => self.decode_op_bmi(),
+            Mnemonic::Bne => self.decode_op_bne(),
+            Mnemonic::Bpl => self.decode_op_bpl(),
+            Mnemonic::Brk => self.decode_op_brk(),
+            Mnemonic::Bvc => self.decode_op_bvc(),
+            Mnemonic::Bvs => self.decode_op_bvs(),
+            Mnemonic::Clc => self.decode_op_clc(),
+            Mnemonic::Cld => self.decode_op_cld(),
+            Mnemonic::Cli => self.decode_op_cli(),
+            Mnemonic::Clv => self.decode_op_clv(),
+            Mnemonic::Cmp => self.decode_op_cmp(addr_mode),
+            Mnemonic::Cpx => self.decode_op_cpx(addr_mode),
+            Mnemonic::Cpy => self.decode_op_cpy(addr_mode),
+            Mnemonic::Dec => self.decode_op_dec(addr_mode),
+            Mnemonic::Dex => self.decode_op_dex(),
+            Mnemonic::Dey => self.decode_op_dey(),
+            Mnemonic::Eor => self.decode_op_eor(addr_mode),
+            Mnemonic::Inc => self.decode_op_inc(addr_mode),
+            Mnemonic::Inx => self.decode_op_inx(),
+            Mnemonic::Iny => self.decode_op_iny(),
+            Mnemonic::Jmp => self.decode_op_jmp(addr_mode),
+            Mnemonic::Jsr => self.decode_op_jsr(),
+            Mnemonic::Lda => self.decode_op_lda(addr_mode),
+            Mnemonic::Ldx => self.decode_op_ldx(addr_mode),
+            Mnemonic::Ldy => self.decode_op_ldy(addr_mode),
+            Mnemonic::Lsr => self.decode_op_lsr(addr_mode),
+            Mnemonic::Nop => {}
+            Mnemonic::Ora => self.decode_op_ora(addr_mode),
+            Mnemonic::Pha => self.decode_op_pha(),
+            Mnemonic::Php => self.decode_op_php(),
+            Mnemonic::Pla => self.decode_op_pla(),
+            Mnemonic::Plp => self.decode_op_plp(),
+            Mnemonic::Rol => self.decode_op_rol(addr_mode),
+            Mnemonic::Ror => self.decode_op_ror(addr_mode),
+            Mnemonic::Rti => self.decode_op_rti(),
+            Mnemonic::Rts => self.decode_op_rts(),
+            Mnemonic::Sbc => self.decode_op_sbc(addr_mode),
+            Mnemonic::Sec => self.decode_op_sec(),
+            Mnemonic::Sed => self.decode_op_sed(),
+            Mnemonic::Sei => self.decode_op_sei(),
+            Mnemonic::Sta => self.decode_op_sta(addr_mode),
+            Mnemonic::Stx => self.decode_op_stx(addr_mode),
+            Mnemonic::Sty => self.decode_op_sty(addr_mode),
+            Mnemonic::Tax => self.decode_op_tax(),
+            Mnemonic::Tay => self.decode_op_tay(),
+            Mnemonic::Tsx => self.decode_op_tsx(),
+            Mnemonic::Txa => self.decode_op_txa(),
+            Mnemonic::Txs => self.decode_op_txs(),
+            Mnemonic::Tya => self.decode_op_tya(),
+            Mnemonic::UndocNop => self.decode_op_undoc_nop(addr_mode),
             // TODO: Support more undocumented opcodes.
             _ => {
                 return Err(SimBreak::HaltOpcode(
-                    operation.mnemonic(),
+                    operation.mnemonic.string(),
                     self.data,
                 ));
             }
@@ -974,18 +972,10 @@ impl SimProc for Mos6502 {
         "MOS 6502".to_string()
     }
 
-    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (usize, String) {
-        let mut reader = BusPeeker::new(bus, addr);
-        let (_, operation, operand) =
-            disassemble_instruction(&mut reader).unwrap();
-        let instruction_size = operand.size() + 1;
-        let instruction_string = format_instruction(
-            operation,
-            operand,
-            (addr & 0xffff) as u16,
-            bus,
-        );
-        (instruction_size, instruction_string)
+    fn disassemble(&self, bus: &dyn SimBus, pc: u32) -> (u32, String) {
+        let pc = pc as u16;
+        let instruction = Instruction::decode(bus, pc);
+        (instruction.size(), instruction.format(bus, pc))
     }
 
     fn pc(&self) -> u32 {
