@@ -279,6 +279,8 @@ pub enum Mnemonic<ADDR> {
     Bpl(ADDR),
     /// Branch to the specified address unconditionally.
     Bra(ADDR),
+    /// Initiate software interrupt.
+    Brk,
     /// Branch to the specified address if the overflow flag is clear.
     Bvc(ADDR),
     /// Branch to the specified address if the overflow flag is set.
@@ -297,6 +299,10 @@ pub enum Mnemonic<ADDR> {
     /// Compare the contents of the specified register to the byte at the
     /// specified address.
     CmpRegAddr(Reg, ADDR),
+    /// Decimal adjust for addition.
+    Daa,
+    /// Decimal adjust for subtraction.
+    Das,
     /// Decrement the byte at the specified address.
     DecAddr(ADDR),
     /// Decrement the specified register.
@@ -305,6 +311,8 @@ pub enum Mnemonic<ADDR> {
     Decw(ADDR),
     /// Disable interrupts.
     Di,
+    /// Divide YA by X, storing quotient in A and remainder in Y.
+    Div,
     /// Enable interrupts.
     Ei,
     /// Bitwise-XOR the byte at the specified address into the A register.
@@ -331,6 +339,8 @@ pub enum Mnemonic<ADDR> {
     MovRegAddr(Reg, ADDR),
     /// Copy the contents of the second register into the first register.
     MovRegReg(Reg, Reg),
+    /// Multiply Y by A into YA.
+    Mul,
     /// No-op.
     Nop,
     /// Invert the carry flag.
@@ -341,6 +351,14 @@ pub enum Mnemonic<ADDR> {
     OrAddrAddr(ADDR, ADDR),
     /// Call a subroutine located at the specified high page address.
     Pcall(ADDR),
+    /// Pop a register value from the stack.
+    Pop(Reg),
+    /// Push a register value onto the stack.
+    Push(Reg),
+    /// Return from subroutine.
+    Ret,
+    /// Return from interrupt.
+    Reti,
     /// Rotate the A register left by one bit.
     RolA,
     /// Rotate the byte at the specified address left by one bit.
@@ -367,7 +385,7 @@ pub enum Mnemonic<ADDR> {
     /// at the specified high page address.
     Tcall(u8),
     /// Exchange the upper and lower nibbles of the A register.
-    XcnA,
+    Xcn,
 }
 
 //===========================================================================//
@@ -413,6 +431,18 @@ impl Operation {
             0xe1 => Operation::Tcall(0xc2),
             0xf1 => Operation::Tcall(0xc0),
 
+            0x04 => Operation::OrAAddr(AddrMode::DirectPage),
+            0x14 => Operation::OrAAddr(AddrMode::XIndexedDirectPage),
+            0x24 => Operation::AndAAddr(AddrMode::DirectPage),
+            0x34 => Operation::AndAAddr(AddrMode::XIndexedDirectPage),
+            0x44 => Operation::EorAAddr(AddrMode::DirectPage),
+            0x54 => Operation::EorAAddr(AddrMode::XIndexedDirectPage),
+            0x64 => Operation::CmpRegAddr(Reg::A, AddrMode::DirectPage),
+            0x74 => Operation::CmpRegAddr(Reg::A, AddrMode::XIndexedDirectPage),
+            0x84 => Operation::AdcAAddr(AddrMode::DirectPage),
+            0x94 => Operation::AdcAAddr(AddrMode::XIndexedDirectPage),
+            0xa4 => Operation::SbcAAddr(AddrMode::DirectPage),
+            0xb4 => Operation::SbcAAddr(AddrMode::XIndexedDirectPage),
             0xc4 => Operation::MovAddrReg(AddrMode::DirectPage, Reg::A),
             0xd4 => {
                 Operation::MovAddrReg(AddrMode::XIndexedDirectPage, Reg::A)
@@ -422,16 +452,52 @@ impl Operation {
                 Operation::MovRegAddr(Reg::A, AddrMode::XIndexedDirectPage)
             }
 
+            0x05 => Operation::OrAAddr(AddrMode::Absolute),
+            0x15 => Operation::OrAAddr(AddrMode::XIndexedAbsolute),
+            0x25 => Operation::AndAAddr(AddrMode::Absolute),
+            0x35 => Operation::AndAAddr(AddrMode::XIndexedAbsolute),
+            0x45 => Operation::EorAAddr(AddrMode::Absolute),
+            0x55 => Operation::EorAAddr(AddrMode::XIndexedAbsolute),
+            0x65 => Operation::CmpRegAddr(Reg::A, AddrMode::Absolute),
+            0x75 => Operation::CmpRegAddr(Reg::A, AddrMode::XIndexedAbsolute),
+            0x85 => Operation::AdcAAddr(AddrMode::Absolute),
+            0x95 => Operation::AdcAAddr(AddrMode::XIndexedAbsolute),
+            0xa5 => Operation::SbcAAddr(AddrMode::Absolute),
+            0xb5 => Operation::SbcAAddr(AddrMode::XIndexedAbsolute),
             0xc5 => Operation::MovAddrReg(AddrMode::Absolute, Reg::A),
             0xd5 => Operation::MovAddrReg(AddrMode::XIndexedAbsolute, Reg::A),
             0xe5 => Operation::MovRegAddr(Reg::A, AddrMode::Absolute),
             0xf5 => Operation::MovRegAddr(Reg::A, AddrMode::XIndexedAbsolute),
 
+            0x06 => Operation::OrAAddr(AddrMode::DirectPageX),
+            0x16 => Operation::OrAAddr(AddrMode::YIndexedAbsolute),
+            0x26 => Operation::AndAAddr(AddrMode::DirectPageX),
+            0x36 => Operation::AndAAddr(AddrMode::YIndexedAbsolute),
+            0x46 => Operation::EorAAddr(AddrMode::DirectPageX),
+            0x56 => Operation::EorAAddr(AddrMode::YIndexedAbsolute),
+            0x66 => Operation::CmpRegAddr(Reg::A, AddrMode::DirectPageX),
+            0x76 => Operation::CmpRegAddr(Reg::A, AddrMode::YIndexedAbsolute),
+            0x86 => Operation::AdcAAddr(AddrMode::DirectPageX),
+            0x96 => Operation::AdcAAddr(AddrMode::YIndexedAbsolute),
+            0xa6 => Operation::SbcAAddr(AddrMode::DirectPageX),
+            0xb6 => Operation::SbcAAddr(AddrMode::YIndexedAbsolute),
             0xc6 => Operation::MovAddrReg(AddrMode::DirectPageX, Reg::A),
             0xd6 => Operation::MovAddrReg(AddrMode::YIndexedAbsolute, Reg::A),
             0xe6 => Operation::MovRegAddr(Reg::A, AddrMode::DirectPageX),
             0xf6 => Operation::MovRegAddr(Reg::A, AddrMode::YIndexedAbsolute),
 
+            0x07 => Operation::OrAAddr(AddrMode::XIndexedDirectPageIndirect),
+            0x17 => Operation::OrAAddr(AddrMode::DirectPageIndirectYIndexed),
+            0x27 => Operation::AndAAddr(AddrMode::XIndexedDirectPageIndirect),
+            0x37 => Operation::AndAAddr(AddrMode::DirectPageIndirectYIndexed),
+            0x47 => Operation::EorAAddr(AddrMode::XIndexedDirectPageIndirect),
+            0x57 => Operation::EorAAddr(AddrMode::DirectPageIndirectYIndexed),
+            0x67 => Operation::CmpRegAddr(Reg::A, AddrMode::XIndexedDirectPageIndirect),
+            0x77 => Operation::CmpRegAddr(Reg::A, AddrMode::DirectPageIndirectYIndexed),
+            0x87 => Operation::AdcAAddr(AddrMode::XIndexedDirectPageIndirect),
+            0x97 => Operation::AdcAAddr(AddrMode::DirectPageIndirectYIndexed),
+            0xa7 => Operation::SbcAAddr(AddrMode::XIndexedDirectPageIndirect),
+            0xb7 => Operation::SbcAAddr(AddrMode::DirectPageIndirectYIndexed),
             0xc7 => Operation::MovAddrReg(
                 AddrMode::XIndexedDirectPageIndirect,
                 Reg::A,
@@ -449,6 +515,7 @@ impl Operation {
                 AddrMode::DirectPageIndirectYIndexed,
             ),
 
+            0xc8 => Operation::CmpRegAddr(Reg::X, AddrMode::Immediate),
             0xd8 => Operation::MovAddrReg(AddrMode::DirectPage, Reg::X),
             0xe8 => Operation::MovRegAddr(Reg::A, AddrMode::Immediate),
             0xf8 => Operation::MovRegAddr(Reg::X, AddrMode::DirectPage),
@@ -469,6 +536,14 @@ impl Operation {
                 AddrMode::DirectPage,
             ),
 
+            0x0b => Operation::AslAddr(AddrMode::DirectPage),
+            0x1b => Operation::AslAddr(AddrMode::XIndexedDirectPage),
+            0x2b => Operation::RolAddr(AddrMode::DirectPage),
+            0x3b => Operation::RolAddr(AddrMode::XIndexedDirectPage),
+            0x4b => Operation::LsrAddr(AddrMode::DirectPage),
+            0x5b => Operation::LsrAddr(AddrMode::XIndexedDirectPage),
+            0x6b => Operation::RorAddr(AddrMode::DirectPage),
+            0x7b => Operation::RorAddr(AddrMode::XIndexedDirectPage),
             0x8b => Operation::DecAddr(AddrMode::DirectPage),
             0x9b => Operation::DecAddr(AddrMode::XIndexedDirectPage),
             0xab => Operation::IncAddr(AddrMode::DirectPage),
@@ -482,6 +557,14 @@ impl Operation {
                 Operation::MovRegAddr(Reg::Y, AddrMode::XIndexedDirectPage)
             }
 
+            0x0c => Operation::AslAddr(AddrMode::Absolute),
+            0x1c => Operation::AslA,
+            0x2c => Operation::RolAddr(AddrMode::Absolute),
+            0x3c => Operation::RolA,
+            0x4c => Operation::LsrAddr(AddrMode::Absolute),
+            0x5c => Operation::LsrA,
+            0x6c => Operation::RorAddr(AddrMode::Absolute),
+            0x7c => Operation::RorA,
             0x8c => Operation::DecAddr(AddrMode::Absolute),
             0x9c => Operation::DecReg(Reg::A),
             0xac => Operation::IncAddr(AddrMode::Absolute),
@@ -491,9 +574,13 @@ impl Operation {
             0xec => Operation::MovRegAddr(Reg::Y, AddrMode::Absolute),
             0xfc => Operation::IncReg(Reg::Y),
 
+            0x0d => Operation::Push(Reg::Psw),
             0x1d => Operation::DecReg(Reg::X),
+            0x2d => Operation::Push(Reg::A),
             0x3d => Operation::IncReg(Reg::X),
+            0x4d => Operation::Push(Reg::X),
             0x5d => Operation::MovRegReg(Reg::X, Reg::A),
+            0x6d => Operation::Push(Reg::Y),
             0x7d => Operation::MovRegReg(Reg::A, Reg::X),
             0x8d => Operation::MovRegAddr(Reg::Y, AddrMode::Immediate),
             0x9d => Operation::MovRegReg(Reg::X, Reg::Sp),
@@ -503,22 +590,34 @@ impl Operation {
             0xed => Operation::Notc,
             0xfd => Operation::MovRegReg(Reg::Y, Reg::A),
 
+            0x8e => Operation::Pop(Reg::Psw),
+            0x9e => Operation::Div,
+            0xae => Operation::Pop(Reg::A),
+            0xbe => Operation::Das,
+            0xce => Operation::Pop(Reg::X),
+            0xee => Operation::Pop(Reg::Y),
+
+            0x0f => Operation::Brk,
             0x1f => Operation::Jmp(AddrMode::XIndexedAbsoluteIndirect),
             0x2f => Operation::Bra(AddrMode::Relative),
             0x3f => Operation::Call(AddrMode::Absolute),
             0x4f => Operation::Pcall(AddrMode::HighPage),
             0x5f => Operation::Jmp(AddrMode::Absolute),
+            0x6f => Operation::Ret,
+            0x7f => Operation::Reti,
             0x8f => Operation::MovAddrAddr(
                 AddrMode::DirectPage,
                 AddrMode::Immediate,
             ),
-            0x9f => Operation::XcnA,
+            0x9f => Operation::Xcn,
             0xaf => Operation::MovAddrReg(AddrMode::DirectPageXInc, Reg::A),
             0xbf => Operation::MovRegAddr(Reg::A, AddrMode::DirectPageXInc),
+            0xcf => Operation::Mul,
+            0xdf => Operation::Daa,
             0xef => Operation::Sleep,
             0xff => Operation::Stop,
 
-            _ => todo!(),
+            _ => todo!("opcode=0x{opcode:02x}"),
         }
     }
 }
@@ -534,17 +633,26 @@ impl Instruction {
     pub fn size(self) -> u32 {
         match self {
             Instruction::AslA
+            | Instruction::Brk
             | Instruction::Clrc
             | Instruction::Clrp
             | Instruction::Clrv
+            | Instruction::Daa
+            | Instruction::Das
             | Instruction::DecReg(_)
             | Instruction::Di
+            | Instruction::Div
             | Instruction::Ei
             | Instruction::IncReg(_)
             | Instruction::LsrA
+            | Instruction::MovRegReg(_, _)
+            | Instruction::Mul
             | Instruction::Nop
             | Instruction::Notc
-            | Instruction::MovRegReg(_, _)
+            | Instruction::Pop(_)
+            | Instruction::Push(_)
+            | Instruction::Ret
+            | Instruction::Reti
             | Instruction::RolA
             | Instruction::RorA
             | Instruction::Setc
@@ -552,7 +660,7 @@ impl Instruction {
             | Instruction::Sleep
             | Instruction::Stop
             | Instruction::Tcall(_)
-            | Instruction::XcnA => 1,
+            | Instruction::Xcn => 1,
             Instruction::AdcAAddr(operand)
             | Instruction::AndAAddr(operand)
             | Instruction::AslAddr(operand)
@@ -625,6 +733,7 @@ impl Instruction {
             Operation::Bne(mode) => Instruction::Bne(mode.decode(bus, pc)),
             Operation::Bpl(mode) => Instruction::Bpl(mode.decode(bus, pc)),
             Operation::Bra(mode) => Instruction::Bra(mode.decode(bus, pc)),
+            Operation::Brk => Instruction::Brk,
             Operation::Bvc(mode) => Instruction::Bvc(mode.decode(bus, pc)),
             Operation::Bvs(mode) => Instruction::Bvs(mode.decode(bus, pc)),
             Operation::Call(mode) => Instruction::Call(mode.decode(bus, pc)),
@@ -640,12 +749,15 @@ impl Instruction {
             Operation::CmpRegAddr(reg, mode) => {
                 Instruction::CmpRegAddr(reg, mode.decode(bus, pc))
             }
+            Operation::Daa => Instruction::Daa,
+            Operation::Das => Instruction::Das,
             Operation::DecAddr(mode) => {
                 Instruction::DecAddr(mode.decode(bus, pc))
             }
             Operation::DecReg(reg) => Instruction::DecReg(reg),
             Operation::Decw(mode) => Instruction::Decw(mode.decode(bus, pc)),
             Operation::Di => Instruction::Di,
+            Operation::Div => Instruction::Div,
             Operation::Ei => Instruction::Ei,
             Operation::EorAAddr(mode) => {
                 Instruction::EorAAddr(mode.decode(bus, pc))
@@ -679,6 +791,7 @@ impl Instruction {
                 Instruction::MovRegAddr(reg, mode.decode(bus, pc))
             }
             Operation::MovRegReg(r1, r2) => Instruction::MovRegReg(r1, r2),
+            Operation::Mul => Instruction::Mul,
             Operation::Nop => Instruction::Nop,
             Operation::Notc => Instruction::Notc,
             Operation::OrAAddr(mode) => {
@@ -691,6 +804,10 @@ impl Instruction {
                 Instruction::OrAddrAddr(op1, op2)
             }
             Operation::Pcall(mode) => Instruction::Pcall(mode.decode(bus, pc)),
+            Operation::Pop(reg) => Instruction::Pop(reg),
+            Operation::Push(reg) => Instruction::Push(reg),
+            Operation::Ret => Instruction::Ret,
+            Operation::Reti => Instruction::Reti,
             Operation::RolA => Instruction::RolA,
             Operation::RolAddr(mode) => {
                 Instruction::RolAddr(mode.decode(bus, pc))
@@ -713,7 +830,7 @@ impl Instruction {
             Operation::Sleep => Instruction::Sleep,
             Operation::Stop => Instruction::Stop,
             Operation::Tcall(hp) => Instruction::Tcall(hp),
-            Operation::XcnA => Instruction::XcnA,
+            Operation::Xcn => Instruction::Xcn,
         }
     }
 
@@ -751,6 +868,7 @@ impl Instruction {
             Instruction::Bne(op) => format!("BNE {}", op.format(bus, next)),
             Instruction::Bpl(op) => format!("BPL {}", op.format(bus, next)),
             Instruction::Bra(op) => format!("BRA {}", op.format(bus, next)),
+            Instruction::Brk => "BRK".to_string(),
             Instruction::Bvc(op) => format!("BVC {}", op.format(bus, next)),
             Instruction::Bvs(op) => format!("BVS {}", op.format(bus, next)),
             Instruction::Call(op) => format!("CALL {}", op.format(bus, next)),
@@ -765,12 +883,15 @@ impl Instruction {
                 op1.format(bus, next),
                 op2.format(bus, next)
             ),
+            Instruction::Daa => "DAA A".to_string(),
+            Instruction::Das => "DAS A".to_string(),
             Instruction::DecAddr(op) => {
                 format!("DEC {}", op.format(bus, next))
             }
             Instruction::DecReg(reg) => format!("DEC {reg}"),
             Instruction::Decw(op) => format!("DECW {}", op.format(bus, next)),
             Instruction::Di => "DI".to_string(),
+            Instruction::Div => "DIV YA, X".to_string(),
             Instruction::Ei => "EI".to_string(),
             Instruction::EorAAddr(op) => {
                 format!("EOR A, {}", op.format(bus, next))
@@ -802,6 +923,7 @@ impl Instruction {
                 format!("MOV {reg}, {}", op.format(bus, next))
             }
             Instruction::MovRegReg(r1, r2) => format!("MOV {r1}, {r2}"),
+            Instruction::Mul => "MUL YA".to_string(),
             Instruction::Nop => "NOP".to_string(),
             Instruction::Notc => "NOTC".to_string(),
             Instruction::OrAAddr(op) => {
@@ -815,6 +937,10 @@ impl Instruction {
             Instruction::Pcall(op) => {
                 format!("PCALL {}", op.format(bus, next))
             }
+            Instruction::Pop(reg) => format!("POP {reg}"),
+            Instruction::Push(reg) => format!("PUSH {reg}"),
+            Instruction::Ret => "RET".to_string(),
+            Instruction::Reti => "RETI".to_string(),
             Instruction::RolA => "ROL A".to_string(),
             Instruction::RolAddr(op) => {
                 format!("ROL {}", op.format(bus, next))
@@ -842,7 +968,7 @@ impl Instruction {
                         .format(bus, next)
                 )
             }
-            Instruction::XcnA => "XCN A".to_string(),
+            Instruction::Xcn => "XCN A".to_string(),
         }
     }
 }
@@ -951,6 +1077,21 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_miscellaneous() {
+        assert_eq!(disassemble(&[0x0f]), "BRK");
+        assert_eq!(disassemble(&[0xdf]), "DAA A");
+        assert_eq!(disassemble(&[0xbe]), "DAS A");
+        assert_eq!(disassemble(&[0x9e]), "DIV YA, X");
+        assert_eq!(disassemble(&[0xcf]), "MUL YA");
+        assert_eq!(disassemble(&[0x00]), "NOP");
+        assert_eq!(disassemble(&[0x6f]), "RET");
+        assert_eq!(disassemble(&[0x7f]), "RETI");
+        assert_eq!(disassemble(&[0xef]), "SLEEP");
+        assert_eq!(disassemble(&[0xff]), "STOP");
+        assert_eq!(disassemble(&[0x9f]), "XCN A");
+    }
+
+    #[test]
     fn disassemble_mov() {
         assert_eq!(disassemble(&[0xcd, 0xef]), "MOV X, #$ef");
         assert_eq!(disassemble(&[0xbd]), "MOV SP, X");
@@ -972,6 +1113,46 @@ mod tests {
             disassemble_with_label(&[0x4f, 0x80], 0xff80, "foo"),
             "PCALL foo"
         );
+    }
+
+    #[test]
+    fn disassemble_pop() {
+        assert_eq!(disassemble(&[0xae]), "POP A");
+        assert_eq!(disassemble(&[0xce]), "POP X");
+        assert_eq!(disassemble(&[0xee]), "POP Y");
+        assert_eq!(disassemble(&[0x8e]), "POP PSW");
+    }
+
+    #[test]
+    fn disassemble_push() {
+        assert_eq!(disassemble(&[0x2d]), "PUSH A");
+        assert_eq!(disassemble(&[0x4d]), "PUSH X");
+        assert_eq!(disassemble(&[0x6d]), "PUSH Y");
+        assert_eq!(disassemble(&[0x0d]), "PUSH PSW");
+    }
+
+    #[test]
+    fn disassemble_shift() {
+        assert_eq!(disassemble(&[0x1c]), "ASL A");
+        assert_eq!(disassemble(&[0x0b, 0x12]), "ASL $12");
+        assert_eq!(disassemble(&[0x1b, 0x34]), "ASL $34 + X");
+        assert_eq!(disassemble(&[0x0c, 0x34, 0x12]), "ASL !$1234");
+        assert_eq!(disassemble(&[0x5c]), "LSR A");
+        assert_eq!(disassemble(&[0x4b, 0x12]), "LSR $12");
+        assert_eq!(disassemble(&[0x5b, 0x34]), "LSR $34 + X");
+        assert_eq!(disassemble(&[0x4c, 0x34, 0x12]), "LSR !$1234");
+    }
+
+    #[test]
+    fn disassemble_rotate() {
+        assert_eq!(disassemble(&[0x3c]), "ROL A");
+        assert_eq!(disassemble(&[0x2b, 0x12]), "ROL $12");
+        assert_eq!(disassemble(&[0x3b, 0x34]), "ROL $34 + X");
+        assert_eq!(disassemble(&[0x2c, 0x34, 0x12]), "ROL !$1234");
+        assert_eq!(disassemble(&[0x7c]), "ROR A");
+        assert_eq!(disassemble(&[0x6b, 0x12]), "ROR $12");
+        assert_eq!(disassemble(&[0x7b, 0x34]), "ROR $34 + X");
+        assert_eq!(disassemble(&[0x6c, 0x34, 0x12]), "ROR !$1234");
     }
 
     #[test]

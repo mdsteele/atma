@@ -244,7 +244,7 @@ impl Mos6502 {
             AddrMode::Implied | AddrMode::Accumulator => {}
             AddrMode::Immediate | AddrMode::Relative => {
                 self.addr = self.pc;
-                self.pc += 1;
+                self.pc = self.pc.wrapping_add(1);
             }
             AddrMode::Absolute => {
                 self.microcode.push(Microcode::MakeAddrAbs);
@@ -392,7 +392,7 @@ impl Mos6502 {
         self.microcode.push(Microcode::Push2);
         self.microcode.push(Microcode::Push1);
         self.microcode.push(Microcode::GetPcHi);
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
     }
 
     fn decode_op_bvc(&mut self) {
@@ -840,7 +840,7 @@ impl Mos6502 {
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
         let addr = u32::from(self.pc);
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         self.data = bus.read_byte(addr);
         watch(bus, addr, WatchKind::Read)
     }

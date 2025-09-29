@@ -473,7 +473,7 @@ impl SharpSm83 {
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
         let addr = u32::from(self.pc);
-        self.pc += 1;
+        self.pc = self.pc.wrapping_add(1);
         self.data = bus.read_byte(addr);
         watch(bus, addr, WatchKind::Read)
     }
