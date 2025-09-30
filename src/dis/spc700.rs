@@ -287,6 +287,9 @@ pub enum Mnemonic<ADDR> {
     Bvs(ADDR),
     /// Call a subroutine located at the specified address.
     Call(ADDR),
+    /// Compare the A register to the byte at the first address, and branch to
+    /// the second address if they're not equal.
+    Cbne(ADDR, ADDR),
     /// Clear the carry flag.
     Clrc,
     /// Clear the direct page flag (making page 0 the direct page).
@@ -303,6 +306,12 @@ pub enum Mnemonic<ADDR> {
     Daa,
     /// Decimal adjust for subtraction.
     Das,
+    /// Decrement the byte at the first address, then branch to the second
+    /// address unless that byte is now equal to zero.
+    DbnzAddr(ADDR, ADDR),
+    /// Decrement the Y register, then branch to the specified address unless
+    /// the Y register is now equal to zero.
+    DbnzY(ADDR),
     /// Decrement the byte at the specified address.
     DecAddr(ADDR),
     /// Decrement the specified register.
@@ -438,7 +447,9 @@ impl Operation {
             0x44 => Operation::EorAAddr(AddrMode::DirectPage),
             0x54 => Operation::EorAAddr(AddrMode::XIndexedDirectPage),
             0x64 => Operation::CmpRegAddr(Reg::A, AddrMode::DirectPage),
-            0x74 => Operation::CmpRegAddr(Reg::A, AddrMode::XIndexedDirectPage),
+            0x74 => {
+                Operation::CmpRegAddr(Reg::A, AddrMode::XIndexedDirectPage)
+            }
             0x84 => Operation::AdcAAddr(AddrMode::DirectPage),
             0x94 => Operation::AdcAAddr(AddrMode::XIndexedDirectPage),
             0xa4 => Operation::SbcAAddr(AddrMode::DirectPage),
@@ -492,8 +503,14 @@ impl Operation {
             0x37 => Operation::AndAAddr(AddrMode::DirectPageIndirectYIndexed),
             0x47 => Operation::EorAAddr(AddrMode::XIndexedDirectPageIndirect),
             0x57 => Operation::EorAAddr(AddrMode::DirectPageIndirectYIndexed),
-            0x67 => Operation::CmpRegAddr(Reg::A, AddrMode::XIndexedDirectPageIndirect),
-            0x77 => Operation::CmpRegAddr(Reg::A, AddrMode::DirectPageIndirectYIndexed),
+            0x67 => Operation::CmpRegAddr(
+                Reg::A,
+                AddrMode::XIndexedDirectPageIndirect,
+            ),
+            0x77 => Operation::CmpRegAddr(
+                Reg::A,
+                AddrMode::DirectPageIndirectYIndexed,
+            ),
             0x87 => Operation::AdcAAddr(AddrMode::XIndexedDirectPageIndirect),
             0x97 => Operation::AdcAAddr(AddrMode::DirectPageIndirectYIndexed),
             0xa7 => Operation::SbcAAddr(AddrMode::XIndexedDirectPageIndirect),
@@ -590,12 +607,21 @@ impl Operation {
             0xed => Operation::Notc,
             0xfd => Operation::MovRegReg(Reg::Y, Reg::A),
 
+            0x2e => Operation::Cbne(AddrMode::DirectPage, AddrMode::Relative),
+            0x6e => {
+                Operation::DbnzAddr(AddrMode::DirectPage, AddrMode::Relative)
+            }
             0x8e => Operation::Pop(Reg::Psw),
             0x9e => Operation::Div,
             0xae => Operation::Pop(Reg::A),
             0xbe => Operation::Das,
             0xce => Operation::Pop(Reg::X),
+            0xde => Operation::Cbne(
+                AddrMode::XIndexedDirectPage,
+                AddrMode::Relative,
+            ),
             0xee => Operation::Pop(Reg::Y),
+            0xfe => Operation::DbnzY(AddrMode::Relative),
 
             0x0f => Operation::Brk,
             0x1f => Operation::Jmp(AddrMode::XIndexedAbsoluteIndirect),
@@ -675,6 +701,7 @@ impl Instruction {
             | Instruction::Bvs(operand)
             | Instruction::Call(operand)
             | Instruction::CmpRegAddr(_, operand)
+            | Instruction::DbnzY(operand)
             | Instruction::DecAddr(operand)
             | Instruction::Decw(operand)
             | Instruction::EorAAddr(operand)
@@ -691,7 +718,9 @@ impl Instruction {
             | Instruction::SbcAAddr(operand) => 1 + operand.size(),
             Instruction::AdcAddrAddr(op1, op2)
             | Instruction::AndAddrAddr(op1, op2)
+            | Instruction::Cbne(op1, op2)
             | Instruction::CmpAddrAddr(op1, op2)
+            | Instruction::DbnzAddr(op1, op2)
             | Instruction::EorAddrAddr(op1, op2)
             | Instruction::MovAddrAddr(op1, op2)
             | Instruction::OrAddrAddr(op1, op2)
@@ -737,6 +766,12 @@ impl Instruction {
             Operation::Bvc(mode) => Instruction::Bvc(mode.decode(bus, pc)),
             Operation::Bvs(mode) => Instruction::Bvs(mode.decode(bus, pc)),
             Operation::Call(mode) => Instruction::Call(mode.decode(bus, pc)),
+            Operation::Cbne(mode1, mode2) => {
+                let op1 = mode1.decode(bus, pc);
+                let op2 =
+                    mode2.decode(bus, pc.wrapping_add(op1.size() as u16));
+                Instruction::Cbne(op1, op2)
+            }
             Operation::Clrc => Instruction::Clrc,
             Operation::Clrp => Instruction::Clrp,
             Operation::Clrv => Instruction::Clrv,
@@ -751,9 +786,16 @@ impl Instruction {
             }
             Operation::Daa => Instruction::Daa,
             Operation::Das => Instruction::Das,
+            Operation::DbnzAddr(mode1, mode2) => {
+                let op1 = mode1.decode(bus, pc);
+                let op2 =
+                    mode2.decode(bus, pc.wrapping_add(op1.size() as u16));
+                Instruction::DbnzAddr(op1, op2)
+            }
             Operation::DecAddr(mode) => {
                 Instruction::DecAddr(mode.decode(bus, pc))
             }
+            Operation::DbnzY(mode) => Instruction::DbnzY(mode.decode(bus, pc)),
             Operation::DecReg(reg) => Instruction::DecReg(reg),
             Operation::Decw(mode) => Instruction::Decw(mode.decode(bus, pc)),
             Operation::Di => Instruction::Di,
@@ -872,6 +914,11 @@ impl Instruction {
             Instruction::Bvc(op) => format!("BVC {}", op.format(bus, next)),
             Instruction::Bvs(op) => format!("BVS {}", op.format(bus, next)),
             Instruction::Call(op) => format!("CALL {}", op.format(bus, next)),
+            Instruction::Cbne(op1, op2) => format!(
+                "CBNE {}, {}",
+                op1.format(bus, next),
+                op2.format(bus, next)
+            ),
             Instruction::Clrc => "CLRC".to_string(),
             Instruction::Clrp => "CLRP".to_string(),
             Instruction::Clrv => "CLRV".to_string(),
@@ -885,8 +932,16 @@ impl Instruction {
             ),
             Instruction::Daa => "DAA A".to_string(),
             Instruction::Das => "DAS A".to_string(),
+            Instruction::DbnzAddr(op1, op2) => format!(
+                "DBNZ {}, {}",
+                op1.format(bus, next),
+                op2.format(bus, next)
+            ),
             Instruction::DecAddr(op) => {
                 format!("DEC {}", op.format(bus, next))
+            }
+            Instruction::DbnzY(op) => {
+                format!("DBNZ Y, {}", op.format(bus, next))
             }
             Instruction::DecReg(reg) => format!("DEC {reg}"),
             Instruction::Decw(op) => format!("DECW {}", op.format(bus, next)),
@@ -1029,6 +1084,34 @@ mod tests {
         assert_eq!(
             disassemble_with_label(&[0x3f, 0x34, 0x12], 0x1234, "foo"),
             "CALL !foo"
+        );
+    }
+
+    #[test]
+    fn disassemble_cbne() {
+        assert_eq!(disassemble(&[0x2e, 0x12, 0x34]), "CBNE $12, $0037");
+        assert_eq!(disassemble(&[0xde, 0x56, 0x78]), "CBNE $56 + X, $007b");
+        assert_eq!(
+            disassemble_with_label(&[0x2e, 0x12, 0x34], 0x0012, "foo"),
+            "CBNE foo, $0037"
+        );
+        assert_eq!(
+            disassemble_with_label(&[0xde, 0x56, 0x78], 0x007b, "foo"),
+            "CBNE $56 + X, foo"
+        );
+    }
+
+    #[test]
+    fn disassemble_dbnz() {
+        assert_eq!(disassemble(&[0xfe, 0x12]), "DBNZ Y, $0014");
+        assert_eq!(disassemble(&[0x6e, 0x34, 0x12]), "DBNZ $34, $0015");
+        assert_eq!(
+            disassemble_with_label(&[0xfe, 0x12], 0x0014, "foo"),
+            "DBNZ Y, foo"
+        );
+        assert_eq!(
+            disassemble_with_label(&[0x6e, 0x34, 0x12], 0x0034, "foo"),
+            "DBNZ foo, $0015"
         );
     }
 

@@ -3,7 +3,7 @@ use crate::bus::{
     DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_open_bus, new_ram_bus,
     new_rom_bus,
 };
-use crate::proc::{Mos6502, SharpSm83, SimProc};
+use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -39,18 +39,21 @@ const GB_HEADER_LOGO: &[u8; 0x30] = &[
 /// * iNES
 /// * NES 2.0
 /// * sim65 (6502 mode only)
+/// * SPC
 ///
 /// The following binary formats will be supported in the future:
 /// * NSF
 /// * sim65 (65C02 mode)
 /// * SFC/SMC
-/// * SPC
 pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut processors =
         Vec::<(String, (Box<dyn SimProc>, Box<dyn SimBus>))>::new();
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
-    if &header[..4] == b"NES\x1a" {
+    if &header == b"SNES-SPC" {
+        reader.rewind()?;
+        return load_spc_binary(reader);
+    } else if &header[..4] == b"NES\x1a" {
         reader.rewind()?;
         return load_nes_binary(reader);
     } else if &header[..5] == b"sim65" {
@@ -245,6 +248,48 @@ fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
 
     let bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
+    let processors = vec![("cpu".to_string(), (cpu, bus))];
+    Ok(SimEnv::new(processors))
+}
+
+//===========================================================================//
+
+fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+    // See https://wiki.superfamicom.org/spc-and-rsn-file-format
+    let mut header = [0u8; 0x2e];
+    reader.read_exact(&mut header)?;
+    if &header[0..0x21] != b"SNES-SPC700 Sound File Data v0.30" {
+        invalid_data!("incorrect format name in SPC header");
+    }
+    let minor_version = header[0x24];
+    if minor_version != 30 {
+        invalid_data!("unsupported SPC minor version: {minor_version}");
+    }
+    let id666_indicator = header[0x23];
+    if id666_indicator != 26 {
+        invalid_data!("unsupported ID666 indicator byte: {id666_indicator}");
+    };
+
+    let pc = (u16::from(header[0x26]) << 8) | u16::from(header[0x25]);
+    let reg_a = header[0x27];
+    let reg_x = header[0x28];
+    let reg_y = header[0x29];
+    let reg_psw = header[0x2a];
+    let reg_sp = header[0x2b];
+
+    reader.seek(SeekFrom::Start(0x100))?;
+    let mut ram = vec![0u8; 1 << 16];
+    reader.read_exact(&mut ram)?;
+
+    // TODO: Use a specialized bus to support hardware registers and boot ROM.
+    let bus = new_ram_bus(ram.into_boxed_slice());
+    let mut cpu: Box<dyn SimProc> = Box::new(Spc700::new());
+    cpu.set_pc(u32::from(pc));
+    cpu.set_register("A", u32::from(reg_a));
+    cpu.set_register("X", u32::from(reg_x));
+    cpu.set_register("Y", u32::from(reg_y));
+    cpu.set_register("PSW", u32::from(reg_psw));
+    cpu.set_register("SP", u32::from(reg_sp));
     let processors = vec![("cpu".to_string(), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }

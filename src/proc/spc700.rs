@@ -21,7 +21,10 @@ const PROC_FLAG_C: u8 = 0b0000_0001;
 
 #[derive(Clone, Copy)]
 enum Microcode {
+    Branch,       // if TEMP != 0 then PC += (DATA as i8)
     Call,         // push new microcode to call ADDR
+    Cbne,         // prepare to branch if A != DATA
+    Compare(Reg), // compare reg to DATA and update flags
     DecodeOpcode, // decode DATA as opcode, push new microcode
     FinishWrite,  // [ADDR] = DATA
     GetReg(Reg),  // DATA = reg
@@ -99,7 +102,10 @@ impl Spc700 {
         microcode: Microcode,
     ) -> Result<(), SimBreak> {
         match microcode {
+            Microcode::Branch => self.exec_branch(),
             Microcode::Call => self.exec_call(),
+            Microcode::Cbne => self.exec_cbne(),
+            Microcode::Compare(reg) => self.exec_compare(reg),
             Microcode::DecodeOpcode => self.exec_decode_opcode(),
             Microcode::FinishWrite => self.exec_finish_write(bus),
             Microcode::GetReg(reg) => self.exec_get_reg(reg),
@@ -130,11 +136,22 @@ impl Spc700 {
         let opcode = self.data;
         let operation = Operation::from_opcode(opcode);
         match operation {
+            Operation::Bcc(_) => self.decode_op_bcc(),
+            Operation::Bcs(_) => self.decode_op_bcs(),
+            Operation::Beq(_) => self.decode_op_beq(),
+            Operation::Bmi(_) => self.decode_op_bmi(),
+            Operation::Bne(_) => self.decode_op_bne(),
+            Operation::Bpl(_) => self.decode_op_bpl(),
+            Operation::Bra(_) => self.decode_op_bra(),
             Operation::Brk => self.decode_op_brk(),
+            Operation::Bvc(_) => self.decode_op_bvc(),
+            Operation::Bvs(_) => self.decode_op_bvs(),
             Operation::Call(mode) => self.decode_op_call(mode),
+            Operation::Cbne(mode, _) => self.decode_op_cbne(mode),
             Operation::Clrc => self.decode_op_clrc(),
             Operation::Clrp => self.decode_op_clrp(),
             Operation::Clrv => self.decode_op_clrv(),
+            Operation::CmpRegAddr(r, a) => self.decode_op_cmp_reg_addr(r, a),
             Operation::Di => self.decode_op_di(),
             Operation::Div => self.decode_op_div(),
             Operation::Ei => self.decode_op_ei(),
@@ -149,6 +166,7 @@ impl Spc700 {
             Operation::Pcall(mode) => self.decode_op_pcall(mode),
             Operation::Pop(reg) => self.decode_op_pop(reg),
             Operation::Push(reg) => self.decode_op_push(reg),
+            Operation::Ret => self.decode_op_ret(),
             Operation::Setc => self.decode_op_setc(),
             Operation::Setp => self.decode_op_setp(),
             Operation::Sleep => {
@@ -252,10 +270,31 @@ impl Spc700 {
         }
     }
 
+    fn exec_branch(&mut self) -> Result<(), SimBreak> {
+        if self.temp != 0 {
+            let offset = self.data as i8;
+            self.pc = self.pc.wrapping_add(offset as u16);
+        }
+        Ok(())
+    }
+
     fn exec_call(&mut self) -> Result<(), SimBreak> {
         self.microcode.push(Microcode::JumpTo(self.addr));
         self.microcode.push(Microcode::Push(self.pc as u8));
         self.microcode.push(Microcode::Push((self.pc >> 8) as u8));
+        Ok(())
+    }
+
+    fn exec_cbne(&mut self) -> Result<(), SimBreak> {
+        self.decode_branch(u8::from(self.reg_a != self.data));
+        Ok(())
+    }
+
+    fn exec_compare(&mut self, reg: Reg) -> Result<(), SimBreak> {
+        let lhs = self.get_reg(reg);
+        let rhs = self.data;
+        self.set_flag(PROC_FLAG_C, lhs >= rhs);
+        self.update_nz_flags(lhs.wrapping_sub(rhs));
         Ok(())
     }
 
@@ -338,7 +377,11 @@ impl Spc700 {
         self.exec_read(bus)
     }
 
-    fn exec_push(&mut self, bus: &mut dyn SimBus, value: u8) -> Result<(), SimBreak> {
+    fn exec_push(
+        &mut self,
+        bus: &mut dyn SimBus,
+        value: u8,
+    ) -> Result<(), SimBreak> {
         self.data = value;
         self.addr = 0x0100 | u16::from(self.reg_sp);
         self.reg_sp = self.reg_sp.wrapping_sub(1);
@@ -388,6 +431,40 @@ impl Spc700 {
         watch(bus, u32::from(self.addr), WatchKind::Write)
     }
 
+    fn decode_branch(&mut self, condition: u8) {
+        self.microcode.push(Microcode::Branch);
+        self.microcode.push(Microcode::ReadAtPc);
+        self.temp = condition;
+    }
+
+    fn decode_op_bcc(&mut self) {
+        self.decode_branch(PROC_FLAG_C & !self.reg_psw);
+    }
+
+    fn decode_op_bcs(&mut self) {
+        self.decode_branch(PROC_FLAG_C & self.reg_psw);
+    }
+
+    fn decode_op_beq(&mut self) {
+        self.decode_branch(PROC_FLAG_Z & self.reg_psw);
+    }
+
+    fn decode_op_bmi(&mut self) {
+        self.decode_branch(PROC_FLAG_N & self.reg_psw);
+    }
+
+    fn decode_op_bne(&mut self) {
+        self.decode_branch(PROC_FLAG_Z & !self.reg_psw);
+    }
+
+    fn decode_op_bpl(&mut self) {
+        self.decode_branch(PROC_FLAG_N & !self.reg_psw);
+    }
+
+    fn decode_op_bra(&mut self) {
+        self.decode_branch(1);
+    }
+
     fn decode_op_brk(&mut self) {
         self.microcode.push(Microcode::Jump);
         self.microcode.push(Microcode::MakeAddrAbs);
@@ -401,8 +478,22 @@ impl Spc700 {
         self.microcode.push(Microcode::Push((self.pc >> 8) as u8));
     }
 
+    fn decode_op_bvc(&mut self) {
+        self.decode_branch(PROC_FLAG_V & !self.reg_psw);
+    }
+
+    fn decode_op_bvs(&mut self) {
+        self.decode_branch(PROC_FLAG_V & self.reg_psw);
+    }
+
     fn decode_op_call(&mut self, mode: AddrMode) {
         self.microcode.push(Microcode::Call);
+        self.decode_addr_mode(mode);
+    }
+
+    fn decode_op_cbne(&mut self, mode: AddrMode) {
+        self.microcode.push(Microcode::Cbne);
+        self.microcode.push(Microcode::Read);
         self.decode_addr_mode(mode);
     }
 
@@ -416,6 +507,12 @@ impl Spc700 {
 
     fn decode_op_clrv(&mut self) {
         self.set_flag(PROC_FLAG_V, false);
+    }
+
+    fn decode_op_cmp_reg_addr(&mut self, reg: Reg, mode: AddrMode) {
+        self.microcode.push(Microcode::Compare(reg));
+        self.microcode.push(Microcode::Read);
+        self.decode_addr_mode(mode);
     }
 
     fn decode_op_di(&mut self) {
@@ -511,6 +608,14 @@ impl Spc700 {
 
     fn decode_op_push(&mut self, reg: Reg) {
         self.microcode.push(Microcode::Push(self.get_reg(reg)));
+    }
+
+    fn decode_op_ret(&mut self) {
+        self.microcode.push(Microcode::Jump);
+        self.microcode.push(Microcode::MakeAddrAbs);
+        self.microcode.push(Microcode::Pop);
+        self.microcode.push(Microcode::SetTemp);
+        self.microcode.push(Microcode::Pop);
     }
 
     fn decode_op_setc(&mut self) {
