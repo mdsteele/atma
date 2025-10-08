@@ -7,6 +7,7 @@ mod label;
 mod mbc5;
 mod mmc3;
 mod nes;
+mod nsf;
 mod ram;
 
 pub use dmg::DmgBus;
@@ -14,6 +15,7 @@ pub use label::LabeledBus;
 pub use mbc5::Mbc5Bus;
 pub use mmc3::Mmc3Bus;
 pub use nes::NesBus;
+pub use nsf::new_nsf_bus;
 pub use ram::{new_open_bus, new_ram_bus, new_rom_bus};
 
 //===========================================================================//
