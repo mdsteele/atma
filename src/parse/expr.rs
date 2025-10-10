@@ -1,14 +1,9 @@
 //! Facilities for parsing expressions.
 
+use super::atom::{PError, symbol};
 use crate::parse::{ParseError, SrcSpan, Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 use num_bigint::BigInt;
-
-//===========================================================================//
-
-/// The error type used for `chumsky::Parser`s in this crate.
-pub(crate) type PError<'a> =
-    chumsky::extra::Err<chumsky::error::Rich<'a, Token>>;
 
 //===========================================================================//
 
@@ -250,15 +245,6 @@ fn str_literal<'a>()
             }
         })
         .labelled("string literal")
-}
-
-pub(crate) fn symbol<'a>(
-    value: TokenValue,
-) -> impl Parser<'a, &'a [Token], Token, PError<'a>> + Clone {
-    let name = value.name();
-    chumsky::prelude::any()
-        .filter(move |token: &Token| token.value == value)
-        .labelled(name)
 }
 
 //===========================================================================//

@@ -132,6 +132,8 @@ enum TokenKind {
     Colon,
     #[token(",")]
     Comma,
+    #[regex(r"\.[_A-Za-z][_A-Za-z0-9]*")]
+    Directive,
     #[token("==")]
     EqEq,
     #[token("=")]
@@ -170,6 +172,9 @@ impl TokenKind {
             TokenKind::BracketOpen => TokenValue::BracketOpen,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
+            TokenKind::Directive => {
+                TokenValue::Directive(lexer.slice().to_string())
+            }
             TokenKind::EqEq => TokenValue::EqEq,
             TokenKind::Equals => TokenValue::Equals,
             TokenKind::Identifier => {
@@ -210,6 +215,8 @@ pub enum TokenValue {
     Colon,
     /// A "`,`" symbol.
     Comma,
+    /// An assembler directive.
+    Directive(String),
     /// A "`==`" symbol.
     EqEq,
     /// A "`=`" symbol.
@@ -241,6 +248,7 @@ impl TokenValue {
             TokenValue::BracketOpen => "open bracket",
             TokenValue::Colon => "colon",
             TokenValue::Comma => "comma",
+            TokenValue::Directive(_) => "directive",
             TokenValue::EqEq => "equals-equals",
             TokenValue::Equals => "equals sign",
             TokenValue::Identifier(_) => "identifier",

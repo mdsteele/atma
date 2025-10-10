@@ -414,14 +414,13 @@ impl<'a> AdsCompiler<'a> {
                 decl.var_type.clone()
             }
             None => {
-                let uppercase = id_name.to_ascii_uppercase();
                 for &reg in self.env.register_names() {
-                    if uppercase == reg {
+                    if id_name.eq_ignore_ascii_case(reg) {
                         out.push(AdsInstruction::SetRegister(reg));
                         return AdsType::Integer;
                     }
                 }
-                if uppercase == "PC" {
+                if id_name.eq_ignore_ascii_case("PC") {
                     out.push(AdsInstruction::SetPc);
                     return AdsType::Integer;
                 }

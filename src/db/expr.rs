@@ -150,15 +150,14 @@ impl<'a> AdsExprCompiler<'a> {
             self.types.push((decl.var_type.clone(), decl.kind.is_static()));
             return;
         }
-        let uppercase = id.to_ascii_uppercase();
         for &register in self.env.register_names() {
-            if uppercase == register {
+            if id.eq_ignore_ascii_case(register) {
                 self.ops.push(AdsInstruction::GetRegister(register));
                 self.types.push((AdsType::Integer, false));
                 return;
             }
         }
-        if uppercase == "PC" {
+        if id.eq_ignore_ascii_case("PC") {
             self.ops.push(AdsInstruction::GetPc);
             self.types.push((AdsType::Integer, false));
         } else {

@@ -1,6 +1,7 @@
 //! Facilities for parsing Atma Debugger Script.
 
-use super::expr::{ExprAst, IdentifierAst, PError, symbol};
+use super::atom::{PError, keyword, linebreak, symbol};
+use super::expr::{ExprAst, IdentifierAst};
 use super::lvalue::LValueAst;
 use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
 use chumsky::{self, IterParser, Parser};
@@ -172,25 +173,6 @@ impl BreakpointAst {
 }
 
 //===========================================================================//
-
-fn keyword<'a>(
-    word: &'static str,
-) -> impl Parser<'a, &'a [Token], (), PError<'a>> + Clone {
-    chumsky::prelude::any()
-        .filter(move |token: &Token| {
-            if let TokenValue::Identifier(id) = &token.value {
-                id == word
-            } else {
-                false
-            }
-        })
-        .ignored()
-        .labelled(word)
-}
-
-fn linebreak<'a>() -> impl Parser<'a, &'a [Token], (), PError<'a>> + Clone {
-    symbol(TokenValue::Linebreak).repeated().at_least(1)
-}
 
 fn declare_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {

@@ -1,10 +1,10 @@
 use ariadne::{self, Label, ReportKind, Source};
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::parse::ParseError;
+use atma::parse::{AsmRawLine, ParseError};
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -20,6 +20,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Assembles a source file into an object file.
+    Asm {
+        /// The source file to assemble.
+        source: PathBuf,
+        /// The path of the output file.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Simulates and debugs a compiled binary.
     Db {
         /// The compiled binary file to load and debug.
@@ -60,6 +68,7 @@ fn main() -> ExitCode {
 
 fn run_cli() -> Result<(), ExitCode> {
     let result = match Cli::parse().command {
+        Command::Asm { source, output } => command_asm(source, output),
         Command::Db { binary, script } => command_db(binary, script),
     };
     match result {
@@ -77,6 +86,27 @@ fn run_cli() -> Result<(), ExitCode> {
             Err(ExitCode::FAILURE)
         }
     }
+}
+
+//===========================================================================//
+
+fn command_asm(
+    source_path: PathBuf,
+    opt_output_path: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let source = io::read_to_string(File::open(&source_path)?)?;
+    let ast = match AsmRawLine::parse(&source) {
+        Ok(ast) => ast,
+        Err(parse_errors) => {
+            return Err(CliError::Parse(source, parse_errors));
+        }
+    };
+    if let Some(output_path) = opt_output_path {
+        fs::write(output_path, format!("{ast:?}"))?;
+    } else {
+        println!("{ast:?}");
+    }
+    Ok(())
 }
 
 //===========================================================================//

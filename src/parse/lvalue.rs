@@ -1,4 +1,5 @@
-use super::expr::{ExprAst, IdentifierAst, PError, symbol};
+use super::atom::{PError, symbol};
+use super::expr::{ExprAst, IdentifierAst};
 use super::lex::{Token, TokenValue};
 use super::types::SrcSpan;
 use chumsky::{self, IterParser, Parser};
