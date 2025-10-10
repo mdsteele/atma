@@ -14,7 +14,7 @@ impl Mbc5Bus {
     /// Constructs a simulated MBC5 cartridge memory bus, given the busses for
     /// its RAM and ROM chips.
     pub fn new(ram: Box<dyn SimBus>, rom: Box<dyn SimBus>) -> Mbc5Bus {
-        Mbc5Bus { ram, rom, rom_bank: 0, ram_bank: 0 }
+        Mbc5Bus { ram, rom, rom_bank: 1, ram_bank: 0 }
     }
 
     fn translate_rom_address(&self, addr: u32) -> u32 {

@@ -33,6 +33,7 @@ enum Ime {
 #[derive(Clone, Copy)]
 enum Microcode {
     Adc,                // A += (DATA + carry), set flags
+    And,                // A &= DATA, set flags
     Call(Condition),    // if condition met, push new microcode to call ADDR
     Compare,            // compare A to DATA and set flags
     DecodeOpcode,       // decode DATA as opcode, push new microcode
@@ -50,6 +51,7 @@ enum Microcode {
     MakeAddrAbs,        // ADDR = pack(DATA, TEMP)
     MakeAddrHp,         // ADDR = pack(0xff, DATA)
     OffsetSp(Reg16),    // reg = SP + DATA, set flags
+    Or,                 // A |= DATA, set flags
     Pop,                // ADDR = SP, SP += 1, DATA = [ADDR], watch(ADDR, Read)
     PrefixedBit(u8),    // test specified bit in DATA, set flags
     PrefixedRes(u8),    // reset specified bit in DATA
@@ -124,6 +126,7 @@ impl SharpSm83 {
     ) -> Result<(), SimBreak> {
         match microcode {
             Microcode::Adc => self.exec_adc(),
+            Microcode::And => self.exec_and(),
             Microcode::Call(cond) => self.exec_call(cond),
             Microcode::Compare => self.exec_compare(),
             Microcode::DecodeOpcode => self.exec_decode_opcode(),
@@ -141,6 +144,7 @@ impl SharpSm83 {
             Microcode::MakeAddrAbs => self.exec_make_addr_abs(),
             Microcode::MakeAddrHp => self.exec_make_addr_hp(),
             Microcode::OffsetSp(reg) => self.exec_offset_sp(reg),
+            Microcode::Or => self.exec_or(),
             Microcode::Pop => self.exec_pop(bus),
             Microcode::PrefixedBit(bit) => self.exec_prefixed_bit(bit),
             Microcode::PrefixedRes(bit) => self.exec_prefixed_res(bit),
@@ -169,8 +173,8 @@ impl SharpSm83 {
             Operation::AddAI8 => self.decode_op_add_a_i8(),
             Operation::AddAR8(reg) => self.decode_op_add_a_r8(reg),
             Operation::AddSpI8 => self.decode_op_add_sp_i8(),
-            Operation::AndAI8 => todo!(),
-            Operation::AndAR8(_reg) => todo!(),
+            Operation::AndAI8 => self.decode_op_and_a_i8(),
+            Operation::AndAR8(reg) => self.decode_op_and_a_r8(reg),
             Operation::CallM16(cond) => self.decode_op_call(cond),
             Operation::Ccf => self.decode_op_ccf(),
             Operation::CpAI8 => self.decode_op_cp_a_i8(),
@@ -207,8 +211,8 @@ impl SharpSm83 {
             Operation::LdhM8A => self.decode_op_ldh_m8_a(),
             Operation::LdhMcA => self.decode_op_ldh_mc_a(),
             Operation::Nop => {}
-            Operation::OrAI8 => todo!(),
-            Operation::OrAR8(_reg) => todo!(),
+            Operation::OrAI8 => self.decode_op_or_a_i8(),
+            Operation::OrAR8(reg) => self.decode_op_or_a_r8(reg),
             Operation::Pop(reg) => self.decode_op_pop_r16(reg),
             Operation::Prefix => self.decode_op_prefix(),
             Operation::Push(reg) => self.decode_op_push_r16(reg),
@@ -263,6 +267,15 @@ impl SharpSm83 {
         self.reg_a = result as u8;
         self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
         self.set_flag(PROC_FLAG_N, false);
+        Ok(())
+    }
+
+    fn exec_and(&mut self) -> Result<(), SimBreak> {
+        self.reg_a &= self.data;
+        self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, true);
+        self.set_flag(PROC_FLAG_C, false);
         Ok(())
     }
 
@@ -397,6 +410,16 @@ impl SharpSm83 {
         Ok(())
     }
 
+    fn exec_make_addr_abs(&mut self) -> Result<(), SimBreak> {
+        self.addr = pack(self.data, self.temp);
+        Ok(())
+    }
+
+    fn exec_make_addr_hp(&mut self) -> Result<(), SimBreak> {
+        self.addr = pack(0xff, self.data);
+        Ok(())
+    }
+
     fn exec_offset_sp(&mut self, reg: Reg16) -> Result<(), SimBreak> {
         self.set_flag(
             PROC_FLAG_H,
@@ -414,13 +437,12 @@ impl SharpSm83 {
         Ok(())
     }
 
-    fn exec_make_addr_abs(&mut self) -> Result<(), SimBreak> {
-        self.addr = pack(self.data, self.temp);
-        Ok(())
-    }
-
-    fn exec_make_addr_hp(&mut self) -> Result<(), SimBreak> {
-        self.addr = pack(0xff, self.data);
+    fn exec_or(&mut self) -> Result<(), SimBreak> {
+        self.reg_a |= self.data;
+        self.set_flag(PROC_FLAG_Z, self.reg_a == 0);
+        self.set_flag(PROC_FLAG_N, false);
+        self.set_flag(PROC_FLAG_H, false);
+        self.set_flag(PROC_FLAG_C, false);
         Ok(())
     }
 
@@ -612,6 +634,16 @@ impl SharpSm83 {
     fn decode_op_add_sp_i8(&mut self) {
         self.microcode.push(Microcode::OffsetSp(Reg16::Sp));
         self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_and_a_i8(&mut self) {
+        self.microcode.push(Microcode::And);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_and_a_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::And);
+        self.microcode.push(Microcode::GetReg(reg));
     }
 
     fn decode_op_call(&mut self, cond: Condition) {
@@ -822,6 +854,16 @@ impl SharpSm83 {
         self.microcode.push(Microcode::GetReg(Reg8::A));
         self.microcode.push(Microcode::MakeAddrHp);
         self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_or_a_i8(&mut self) {
+        self.microcode.push(Microcode::Or);
+        self.microcode.push(Microcode::ReadAtPc);
+    }
+
+    fn decode_op_or_a_r8(&mut self, reg: Reg8) {
+        self.microcode.push(Microcode::Or);
+        self.microcode.push(Microcode::GetReg(reg));
     }
 
     fn decode_op_pop_r16(&mut self, reg: Reg16) {
