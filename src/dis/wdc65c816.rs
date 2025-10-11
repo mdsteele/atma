@@ -290,3 +290,95 @@ impl Mnemonic {
 }
 
 //===========================================================================//
+
+/// An addressing mode for a 65C816 processor instruction.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AddrMode {
+    /// No additional arguments to the opcode.
+    Implied,
+    /// Operate on the A register.
+    Accumulator,
+    /// Operate on a constant 8-bit value immediately following the opcode.
+    Immediate,
+    /// Operate on a constant 8-bit or 16-bit value (depending on the
+    /// accumulator size) immediately following the opcode.
+    ImmediateM,
+    /// Operate on a constant 8-bit or 16-bit value (depending on the
+    /// index register size) immediately following the opcode.
+    ImmediateX,
+    /// Operate on the destination and source banks specified in the two
+    /// constant bytes immediately following the opcode.
+    BlockMove,
+    /// Operate on the bank-relative 16-bit address following the opcode.
+    Absolute,
+    /// Treat the 16-bit address following the opcode as a pointer to the
+    /// 16-bit address to operate on.
+    AbsoluteIndirect,
+    /// Treat the 16-bit address following the opcode as a pointer to the
+    /// 24-bit address to operate on.
+    AbsoluteIndirectLong,
+    /// Operate on a the absolute 16-bit address following the opcode, offset
+    /// by index X.
+    AbsoluteXIndexed,
+    /// Operate on 16-bit address that is stored in memory, at the 16-bit
+    /// bank-relative address following the opcode offset by index X.
+    AbsoluteXIndexedIndirect,
+    /// Operate on a the absolute 16-bit address following the opcode, offset
+    /// by index Y.
+    AbsoluteYIndexed,
+    /// Operate on the absolute 24-bit address following the opcode.
+    AbsoluteLong,
+    /// Operate on a the absolute 24-bit address following the opcode, offset
+    /// by index X.
+    AbsoluteLongXIndexed,
+    /// Operate on a the 8-bit direct page address following the opcode.
+    DirectPage,
+    /// Operate on a address equal to the 16-bit address stored at the 8-bit
+    /// direct page address following the opcode.
+    DirectPageIndirect,
+    /// Operate on a address equal to the 24-bit address stored at the 8-bit
+    /// direct page address following the opcode.
+    DirectPageIndirectLong,
+    /// Operate on the 8-bit direct page address following the opcode, offset
+    /// by index X.
+    DirectPageXIndexed,
+    /// Operate on the 8-bit direct page address following the opcode, offset
+    /// by index Y.
+    DirectPageYIndexed,
+    /// Operate on the 16-bit address that is stored in memory, at the 8-bit
+    /// direct page address following the opcode offset by index X.
+    DirectPageXIndexedIndirect,
+    /// Operate on a address equal to the 16-bit address stored at the 8-bit
+    /// direct page address following the opcode, offset by index Y.
+    DirectPageIndirectYIndexed,
+    /// Operate on a address equal to the 24-bit address stored at the 8-bit
+    /// direct page address following the opcode, offset by index Y.
+    DirectPageIndirectYIndexedLong,
+    /// Operate on an address that is offset from the end of this instruction
+    /// by the signed 8-bit value following the opcode.
+    Relative,
+    /// Operate on an address that is offset from the end of this instruction
+    /// by the signed 16-bit value following the opcode.
+    RelativeLong,
+    /// Operate on an address offset from the stack pointer by the unsigned
+    /// 8-bit value following the opcode.
+    StackRelative,
+    /// Operate on a address equal to the 16-bit address stored at a location
+    /// offset from the stack pointer by the unsigned 8-bit value following the
+    /// opcode.
+    StackRelativeIndirectYIndexed,
+}
+
+//===========================================================================//
+
+/// An operation (as defined by the instruction opcode, but without the
+/// parameter values) that can be performed on a 65C816 processor.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct Operation {
+    /// The kind of operation to be performed.
+    pub mnemonic: Mnemonic,
+    /// The addressing mode to use for this operation.
+    pub addr_mode: AddrMode,
+}
+
+//===========================================================================//
