@@ -3,7 +3,7 @@ use crate::bus::{
     DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
     new_ram_bus, new_rom_bus,
 };
-use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700};
+use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -41,30 +41,34 @@ const GB_HEADER_LOGO: &[u8; 0x30] = &[
 /// * NES 2.0
 /// * NSF
 /// * sim65 (6502 mode only)
+/// * SFC/SMC
 /// * SPC
 ///
 /// The following binary formats will be supported in the future:
 /// * NSF2
 /// * NSFe
-/// * SFC/SMC
 pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
-    let mut processors =
-        Vec::<(String, (Box<dyn SimProc>, Box<dyn SimBus>))>::new();
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
     if &header[..4] == b"GBS\x01" {
         reader.rewind()?;
         return load_gbs_binary(reader);
-    } else if &header[..4] == b"NES\x1a" {
+    }
+    if &header[..4] == b"NES\x1a" {
         reader.rewind()?;
         return load_nes_binary(reader);
-    } else if &header[..5] == b"NESM\x1a" {
+    }
+    if &header[..5] == b"NESM\x1a" {
         reader.rewind()?;
         return load_nsf_binary(reader);
-    } else if &header == b"SNES-SPC" {
+    }
+    if &header == b"SNES-SPC" {
         reader.rewind()?;
         return load_spc_binary(reader);
-    } else if &header[..5] == b"sim65" {
+    }
+    if &header[..5] == b"sim65" {
+        let mut processors =
+            Vec::<(String, (Box<dyn SimProc>, Box<dyn SimBus>))>::new();
         // Read rest of sim65 header.
         let version = header[5];
         if version != 2 {
@@ -93,18 +97,19 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         let bus = new_ram_bus(ram);
         let cpu = Box::new(Mos6502::new());
         processors.push(("cpu".to_string(), (cpu, bus)));
-    } else {
-        reader.seek(SeekFrom::Start(0x0104))?;
-        let mut logo = [0u8; 0x30];
-        reader.read_exact(&mut logo)?;
-        if &logo == GB_HEADER_LOGO {
-            reader.rewind()?;
-            return load_gb_binary(reader);
-        } else {
-            invalid_data!("unsupported binary file type");
-        }
+        return Ok(SimEnv::new(processors));
     }
-    Ok(SimEnv::new(processors))
+
+    reader.seek(SeekFrom::Start(0x0104))?;
+    let mut logo = [0u8; 0x30];
+    reader.read_exact(&mut logo)?;
+    if &logo == GB_HEADER_LOGO {
+        reader.rewind()?;
+        return load_gb_binary(reader);
+    }
+
+    reader.rewind()?;
+    load_snes_binary(reader)
 }
 
 //===========================================================================//
@@ -152,7 +157,9 @@ fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let cart_type_byte = metadata[0]; // address 0x0147
     let mapper = match GbMapper::from_cart_type(cart_type_byte) {
         Some(mapper) => mapper,
-        None => invalid_data!("unsupported cart type: 0x{cart_type_byte:02x}"),
+        None => {
+            invalid_data!("unsupported cart type: 0x{:02x}", cart_type_byte)
+        }
     };
 
     let rom_size_byte = metadata[1]; // address 0x0148
@@ -432,6 +439,137 @@ fn load_nsf_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
     let processors = vec![("cpu".to_string(), (cpu, bus))];
+    Ok(SimEnv::new(processors))
+}
+
+//===========================================================================//
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SnesMappingMode {
+    LoRom,
+    HiRom,
+    SuperMmc,
+    Sas,
+    SuperFx,
+    ExHiRom,
+    ExLoRom,
+}
+
+impl SnesMappingMode {
+    fn from_mode_byte(byte: u8) -> Option<SnesMappingMode> {
+        match byte & 0x0f {
+            0x0 => Some(SnesMappingMode::LoRom),
+            0x1 => Some(SnesMappingMode::HiRom),
+            0x2 | 0xa => Some(SnesMappingMode::SuperMmc),
+            0x3 => Some(SnesMappingMode::Sas),
+            0x4 => Some(SnesMappingMode::SuperFx),
+            0x5 => Some(SnesMappingMode::ExHiRom),
+            0x6 => Some(SnesMappingMode::ExLoRom),
+            _ => None,
+        }
+    }
+
+    fn header_rom_address(self) -> usize {
+        // See https://snes.nesdev.org/wiki/ROM_file_formats
+        match self {
+            SnesMappingMode::LoRom => 0x007FC0,
+            SnesMappingMode::HiRom => 0x00FFC0,
+            SnesMappingMode::ExHiRom => 0x40FFC0,
+            _ => todo!("{self:?}"),
+        }
+    }
+
+    fn max_rom_size(self) -> usize {
+        // See https://snes.nesdev.org/wiki/Memory_map and
+        // https://www.youtube.com/watch?v=-U76YvWdnZM
+        match self {
+            SnesMappingMode::LoRom => 0x400000, // 4 MiB
+            SnesMappingMode::HiRom => 0x400000, // 4 MiB
+            SnesMappingMode::Sas => 0x800000,   // 8 MiB
+            SnesMappingMode::SuperFx => 0x800000, // 8 MiB
+            SnesMappingMode::ExHiRom => 0x800000, // 8 MiB
+            SnesMappingMode::ExLoRom => 0x800000, // 8 MiB
+            _ => todo!("{self:?}"),
+        }
+    }
+
+    pub fn detect(rom_data: &[u8]) -> io::Result<SnesMappingMode> {
+        let rom_size = rom_data.len();
+        for mode in [
+            SnesMappingMode::ExHiRom,
+            SnesMappingMode::HiRom,
+            SnesMappingMode::LoRom,
+        ] {
+            let header_addr = mode.header_rom_address();
+            if rom_size > mode.max_rom_size() || rom_size < header_addr + 32 {
+                continue;
+            }
+            let header = &rom_data[header_addr..][..32];
+            let mode_byte = header[21];
+            if SnesMappingMode::from_mode_byte(mode_byte) != Some(mode) {
+                continue;
+            }
+            let checksum =
+                (u16::from(header[31]) << 8) | u16::from(header[30]);
+            let complement =
+                (u16::from(header[29]) << 8) | u16::from(header[28]);
+            if complement != !checksum {
+                continue;
+            }
+            return Ok(mode);
+        }
+        invalid_data!("could not find any SNES ROM header");
+    }
+
+    pub fn make_cpu_bus(self, rom_data: Box<[u8]>) -> Box<dyn SimBus> {
+        // TODO: handle SRAM
+        let rom_bus = new_rom_bus(rom_data);
+        // TODO: handle other hardware
+        match self {
+            SnesMappingMode::HiRom => rom_bus,
+            _ => todo!("{self:?}"),
+        }
+    }
+}
+
+fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+    // From https://snes.nesdev.org/wiki/ROM_file_formats: "The data contained
+    // in the file may be unheadered or headered...the headered version has 512
+    // extra bytes at the start of the file...This extra data is generally
+    // considered useless, except to the specific copier device that it was
+    // originally used with...Because ROM files are generally expected to
+    // include complete 32 or 64 kb banks, a simple way of detecting a header
+    // is by checking if the file size modulo 1024 is equal to 512."
+    let file_length = reader.seek(SeekFrom::End(0))?;
+    let is_headered = match file_length % 1024 {
+        0 => false,
+        512 => true,
+        _ => invalid_data!("unexpected SNES ROM file length: {file_length}"),
+    };
+    let rom_start = if is_headered { 512 } else { 0 };
+    let rom_size = file_length - rom_start;
+    // According to https://forums.nesdev.org/viewtopic.php?t=5367, the largest
+    // commercial ROM was 48 Mbit (6 MiB), and the largest fan-made ROM as of
+    // 2009 was 96 Mbit (12 MiB).  For now, limit the ROM size to 16 MiB.
+    if rom_size > 0x1000000 {
+        invalid_data!("SNES ROM is too large ({rom_size:#x} bytes)");
+    }
+    let rom_size = rom_size as usize;
+
+    reader.seek(SeekFrom::Start(rom_start))?;
+    let mut rom_data = vec![0u8; rom_size.next_power_of_two()];
+    reader.read_exact(&mut rom_data[..rom_size])?;
+
+    let mode = SnesMappingMode::detect(&rom_data)?;
+    let cpu_bus = mode.make_cpu_bus(rom_data.into_boxed_slice());
+    let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
+    // TODO: Use a specialized bus to support hardware registers and boot ROM.
+    let apu_bus = new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice());
+    let apu_proc: Box<dyn SimProc> = Box::new(Spc700::new());
+    let processors = vec![
+        ("cpu".to_string(), (cpu_proc, cpu_bus)),
+        ("apu".to_string(), (apu_proc, apu_bus)),
+    ];
     Ok(SimEnv::new(processors))
 }
 

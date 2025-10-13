@@ -141,15 +141,20 @@ fn command_db(
         sim_env.watch_address(0xfff7, WatchKind::Pc);
         sim_env.watch_address(0xfff9, WatchKind::Pc);
         loop {
-            let pc = sim_env.pc();
-            let instruction = sim_env.disassemble(sim_env.pc()).1;
-            let result = sim_env.step();
-            println!(
-                "${:04x} | {:16} {}",
-                pc,
-                instruction,
-                format_registers(&sim_env)
-            );
+            let result = if sim_env.is_mid_instruction() {
+                sim_env.step()
+            } else {
+                let pc = sim_env.pc();
+                let instruction = sim_env.disassemble(pc).1;
+                let result = sim_env.step();
+                println!(
+                    "${:04x} | {:16} {}",
+                    pc,
+                    instruction,
+                    format_registers(&sim_env)
+                );
+                result
+            };
             match result {
                 Ok(()) => {}
                 Err(SimBreak::Watchpoint(kind, id)) => {

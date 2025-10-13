@@ -19,7 +19,7 @@ impl EnvProc {
     }
 
     fn description(&self) -> String {
-        format!("{} with {}", self.proc.description(), self.bus.description())
+        format!("{} core, {}", self.proc.description(), self.bus.description())
     }
 
     fn disassemble(&self, addr: u32) -> (u32, String) {
@@ -69,11 +69,11 @@ impl SimEnv {
             .iter()
             .map(SimEnv::describe_processor)
             .collect::<Vec<String>>()
-            .join("\n")
+            .join("")
     }
 
     fn describe_processor((name, proc): (&String, &EnvProc)) -> String {
-        format!("{name}: {}, pc={:x}\n", proc.description(), proc.proc.pc())
+        format!("{name}: {}\n", proc.description())
     }
 
     fn current_processor(&self) -> &EnvProc {

@@ -291,6 +291,9 @@ impl Mnemonic {
         }
     }
 
+    /// Returns true if operations with this mnemonic use the program bank
+    /// register for absolute addresses, or false if they use the data bank
+    /// register.
     fn uses_program_bank(self) -> bool {
         match self {
             Mnemonic::Adc => false,
@@ -1091,6 +1094,12 @@ impl Instruction {
         )
     }
 }
+
+// From http://www.6502.org/tutorials/65c816opcodes.html#4: "...instruction
+// execution wraps at bank boundaries.  This is true even if the bank boundary
+// occurs in the middle of the instruction."  Therefore, in the below functions
+// for getting subsequent after the instruction opcode, we perform wrapping
+// addition on the bottom 16 bits of the PC.
 
 fn next_byte(bus: &dyn SimBus, pc: u32) -> u8 {
     bus.peek_byte((pc & 0xff0000) | (pc.wrapping_add(1) & 0xffff))

@@ -5,11 +5,13 @@ mod nop;
 mod sm83;
 mod spc700;
 mod util;
+mod w65c816;
 
 pub use mos6502::Mos6502;
 pub use nop::NopProc;
 pub use sm83::SharpSm83;
 pub use spc700::Spc700;
+pub use w65c816::Wdc65c816;
 
 use crate::bus::{SimBus, WatchId, WatchKind};
 
