@@ -69,6 +69,8 @@ pub enum Mnemonic {
     Inx,
     /// An INY (increment index Y) operation.
     Iny,
+    /// A JML (jump to address long) operation.
+    Jml,
     /// A JMP (jump to address) operation.
     Jmp,
     /// A JSL (jump to subroutine long) operation.
@@ -227,6 +229,7 @@ impl Mnemonic {
             Mnemonic::Inc => "INC",
             Mnemonic::Inx => "INX",
             Mnemonic::Iny => "INY",
+            Mnemonic::Jml => "JML",
             Mnemonic::Jmp => "JMP",
             Mnemonic::Jsl => "JSL",
             Mnemonic::Jsr => "JSR",
@@ -326,6 +329,7 @@ impl Mnemonic {
             Mnemonic::Inc => false,
             Mnemonic::Inx => false,
             Mnemonic::Iny => false,
+            Mnemonic::Jml => true,
             Mnemonic::Jmp => true,
             Mnemonic::Jsl => true,
             Mnemonic::Jsr => true,
@@ -903,7 +907,7 @@ impl Operation {
             0x2c => (Mnemonic::Bit, AddrMode::Absolute),
             0x3c => (Mnemonic::Bit, AddrMode::AbsoluteXIndexed),
             0x4c => (Mnemonic::Jmp, AddrMode::Absolute),
-            0x5c => (Mnemonic::Jmp, AddrMode::AbsoluteLong),
+            0x5c => (Mnemonic::Jml, AddrMode::AbsoluteLong),
             0x6c => (Mnemonic::Jmp, AddrMode::AbsoluteIndirect),
             0x7c => (Mnemonic::Jmp, AddrMode::AbsoluteXIndexedIndirect),
             0x8c => (Mnemonic::Sty, AddrMode::Absolute),
@@ -911,7 +915,7 @@ impl Operation {
             0xac => (Mnemonic::Ldy, AddrMode::Absolute),
             0xbc => (Mnemonic::Ldy, AddrMode::AbsoluteXIndexed),
             0xcc => (Mnemonic::Cpy, AddrMode::Absolute),
-            0xdc => (Mnemonic::Jmp, AddrMode::AbsoluteIndirectLong),
+            0xdc => (Mnemonic::Jml, AddrMode::AbsoluteIndirectLong),
             0xec => (Mnemonic::Cpx, AddrMode::Absolute),
             0xfc => (Mnemonic::Jsr, AddrMode::AbsoluteXIndexedIndirect),
 
@@ -1196,10 +1200,10 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_absolute_indirect_long() {
-        assert_eq!(disassemble(&[0xdc, 0xef, 0xbe]), "JMP [$beef]");
+        assert_eq!(disassemble(&[0xdc, 0xef, 0xbe]), "JML [$beef]");
         assert_eq!(
             disassemble_with_label(&[0xdc, 0xef, 0xbe], 0xbeef, "foo"),
-            "JMP [foo]"
+            "JML [foo]"
         );
     }
 
@@ -1209,7 +1213,7 @@ mod tests {
         assert_eq!(disassemble(&[0x2f, 0x56, 0x34, 0x12]), "AND $123456");
         assert_eq!(disassemble(&[0xcf, 0x56, 0x34, 0x12]), "CMP $123456");
         assert_eq!(disassemble(&[0x4f, 0x56, 0x34, 0x12]), "EOR $123456");
-        assert_eq!(disassemble(&[0x5c, 0x56, 0x34, 0x12]), "JMP $123456");
+        assert_eq!(disassemble(&[0x5c, 0x56, 0x34, 0x12]), "JML $123456");
         assert_eq!(disassemble(&[0x22, 0x56, 0x34, 0x12]), "JSL $123456");
         assert_eq!(disassemble(&[0xaf, 0x56, 0x34, 0x12]), "LDA $123456");
         assert_eq!(disassemble(&[0x0f, 0x56, 0x34, 0x12]), "ORA $123456");
