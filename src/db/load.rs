@@ -1,7 +1,7 @@
 use super::env::SimEnv;
 use crate::bus::{
     DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
-    new_ram_bus, new_rom_bus,
+    new_ram_bus, new_rom_bus, new_snes_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -470,11 +470,13 @@ impl SnesMappingMode {
     }
 
     fn header_rom_address(self) -> usize {
-        // See https://snes.nesdev.org/wiki/ROM_file_formats
+        // See https://snes.nesdev.org/wiki/ROM_file_formats and
+        // https://www.youtube.com/watch?v=-U76YvWdnZM
         match self {
-            SnesMappingMode::LoRom => 0x007FC0,
-            SnesMappingMode::HiRom => 0x00FFC0,
-            SnesMappingMode::ExHiRom => 0x40FFC0,
+            SnesMappingMode::LoRom => 0x007fc0,
+            SnesMappingMode::HiRom => 0x00ffc0,
+            SnesMappingMode::ExHiRom => 0x40ffc0,
+            SnesMappingMode::ExLoRom => 0x407fc0,
             _ => todo!("{self:?}"),
         }
     }
@@ -496,9 +498,10 @@ impl SnesMappingMode {
     pub fn detect(rom_data: &[u8]) -> io::Result<SnesMappingMode> {
         let rom_size = rom_data.len();
         for mode in [
-            SnesMappingMode::ExHiRom,
-            SnesMappingMode::HiRom,
             SnesMappingMode::LoRom,
+            SnesMappingMode::HiRom,
+            SnesMappingMode::ExHiRom,
+            SnesMappingMode::ExLoRom,
         ] {
             let header_addr = mode.header_rom_address();
             if rom_size > mode.max_rom_size() || rom_size < header_addr + 32 {
@@ -522,13 +525,13 @@ impl SnesMappingMode {
     }
 
     pub fn make_cpu_bus(self, rom_data: Box<[u8]>) -> Box<dyn SimBus> {
-        // TODO: handle SRAM
         let rom_bus = new_rom_bus(rom_data);
-        // TODO: handle other hardware
-        match self {
+        // TODO: handle SRAM
+        let cart: Box<dyn SimBus> = match self {
             SnesMappingMode::HiRom => rom_bus,
             _ => todo!("{self:?}"),
-        }
+        };
+        new_snes_bus(cart)
     }
 }
 
