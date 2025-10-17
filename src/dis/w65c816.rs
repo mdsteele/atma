@@ -481,6 +481,38 @@ impl AddrMode {
     fn immediate(flag: bool) -> AddrMode {
         if flag { AddrMode::ImmediateByte } else { AddrMode::ImmediateWord }
     }
+
+    /// Returns the length of an instruction that uses this addressing mode, in
+    /// bytes.
+    pub fn instruction_size(self) -> u8 {
+        match self {
+            AddrMode::Absolute => 3,
+            AddrMode::AbsoluteIndirect => 3,
+            AddrMode::AbsoluteIndirectLong => 3,
+            AddrMode::AbsoluteLong => 4,
+            AddrMode::AbsoluteLongXIndexed => 4,
+            AddrMode::AbsoluteXIndexed => 3,
+            AddrMode::AbsoluteXIndexedIndirect => 3,
+            AddrMode::AbsoluteYIndexed => 3,
+            AddrMode::Accumulator => 1,
+            AddrMode::BlockMove => 3,
+            AddrMode::DirectPage => 2,
+            AddrMode::DirectPageIndirect => 2,
+            AddrMode::DirectPageIndirectLong => 2,
+            AddrMode::DirectPageIndirectLongYIndexed => 2,
+            AddrMode::DirectPageIndirectYIndexed => 2,
+            AddrMode::DirectPageXIndexed => 2,
+            AddrMode::DirectPageXIndexedIndirect => 2,
+            AddrMode::DirectPageYIndexed => 2,
+            AddrMode::ImmediateByte => 2,
+            AddrMode::ImmediateWord => 3,
+            AddrMode::Implied => 1,
+            AddrMode::Relative => 2,
+            AddrMode::RelativeLong => 3,
+            AddrMode::StackRelative => 2,
+            AddrMode::StackRelativeIndirectYIndexed => 2,
+        }
+    }
 }
 
 //===========================================================================//
@@ -594,7 +626,9 @@ impl Operand {
             Operand::Accumulator => " A".to_string(),
             Operand::ImmediateByte(byte) => format!(" #${byte:02x}"),
             Operand::ImmediateWord(word) => format!(" #${word:04x}"),
-            Operand::BlockMove(dst, src) => format!(" ${src:02x}, ${dst:02x}"),
+            Operand::BlockMove(dst, src) => {
+                format!(" #${src:02x}, #${dst:02x}")
+            }
             Operand::Absolute(abs) => {
                 format!(" {}", format_abs(bus, bank, abs))
             }
@@ -1285,8 +1319,8 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_block_move() {
-        assert_eq!(disassemble(&[0x54, 0x34, 0x12]), "MVN $12, $34");
-        assert_eq!(disassemble(&[0x44, 0x34, 0x12]), "MVP $12, $34");
+        assert_eq!(disassemble(&[0x54, 0x34, 0x12]), "MVN #$12, #$34");
+        assert_eq!(disassemble(&[0x44, 0x34, 0x12]), "MVP #$12, #$34");
     }
 
     #[test]
