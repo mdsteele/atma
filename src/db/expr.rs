@@ -94,7 +94,7 @@ impl<'a> AdsExprCompiler<'a> {
             }
             ExprAstNode::StrLiteral(value) => {
                 self.ops.push(AdsInstruction::PushValue(AdsValue::String(
-                    value.clone(),
+                    Rc::from(value.as_str()),
                 )));
                 self.types.push((AdsType::String, true));
             }
@@ -308,12 +308,13 @@ impl<'a> AdsExprCompiler<'a> {
         }
         if is_static {
             let item_values = self.pop_statics(num_items);
-            self.ops
-                .push(AdsInstruction::PushValue(AdsValue::List(item_values)));
+            self.ops.push(AdsInstruction::PushValue(AdsValue::List(
+                Rc::from(item_values),
+            )));
         } else {
             self.ops.push(AdsInstruction::MakeList(num_items));
         }
-        self.types.push((AdsType::List(Rc::new(item_type)), is_static));
+        self.types.push((AdsType::List(Rc::from(item_type)), is_static));
     }
 
     fn typecheck_tuple_literal(&mut self, item_asts: &[ExprAst]) {
@@ -321,12 +322,13 @@ impl<'a> AdsExprCompiler<'a> {
         let (item_types, is_static) = self.pop_types(num_items);
         if is_static {
             let item_values = self.pop_statics(num_items);
-            self.ops
-                .push(AdsInstruction::PushValue(AdsValue::Tuple(item_values)));
+            self.ops.push(AdsInstruction::PushValue(AdsValue::Tuple(
+                Rc::from(item_values),
+            )));
         } else {
             self.ops.push(AdsInstruction::MakeTuple(num_items));
         }
-        self.types.push((AdsType::Tuple(Rc::new(item_types)), is_static));
+        self.types.push((AdsType::Tuple(Rc::from(item_types)), is_static));
     }
 
     fn unwrap_static(&self, op: AdsInstruction) -> AdsValue {

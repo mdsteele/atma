@@ -18,7 +18,7 @@ pub enum AdsType {
     /// The string type.
     String,
     /// A heterogenous tuple type.
-    Tuple(Rc<Vec<AdsType>>),
+    Tuple(Rc<[AdsType]>),
 }
 
 impl fmt::Display for AdsType {
@@ -52,11 +52,11 @@ pub enum AdsValue {
     /// An integer value (with no minimum/maximum range).
     Integer(BigInt),
     /// A list value.  All elements must be of the same type.
-    List(Vec<AdsValue>),
+    List(Rc<[AdsValue]>),
     /// A string value.
-    String(String),
+    String(Rc<str>),
     /// A tuple value.  Its elements may be of different types.
-    Tuple(Vec<AdsValue>),
+    Tuple(Rc<[AdsValue]>),
 }
 
 impl AdsValue {
@@ -80,16 +80,16 @@ impl AdsValue {
 
     /// Returns the contained [`List`](AdsValue::List) value, or panics if this
     /// value is not a list.
-    pub fn unwrap_list(self) -> Vec<AdsValue> {
+    pub fn unwrap_list(self) -> Rc<[AdsValue]> {
         match self {
             AdsValue::List(values) => values,
             value => panic!("AdsValue::unwrap_list on {value:?}"),
         }
     }
 
-    /// Returns the contained [`String`](AdsValue::String) value, or panics
-    /// if this value is not a string.
-    pub fn unwrap_str(self) -> String {
+    /// Returns the contained string value, or panics if this value is not a
+    /// string.
+    pub fn unwrap_str(self) -> Rc<str> {
         match self {
             AdsValue::String(string) => string,
             value => panic!("AdsValue::unwrap_str on {value:?}"),
@@ -98,7 +98,7 @@ impl AdsValue {
 
     /// Returns the contained [`List`](AdsValue::List) value, or panics if this
     /// value is not a list.
-    pub fn unwrap_tuple(self) -> Vec<AdsValue> {
+    pub fn unwrap_tuple(self) -> Rc<[AdsValue]> {
         match self {
             AdsValue::Tuple(values) => values,
             value => panic!("AdsValue::unwrap_tuple on {value:?}"),
@@ -160,7 +160,7 @@ mod tests {
     }
 
     fn str_value(value: &str) -> AdsValue {
-        AdsValue::String(value.to_string())
+        AdsValue::String(Rc::from(value))
     }
 
     #[test]
@@ -172,11 +172,11 @@ mod tests {
 
     #[test]
     fn display_list_type() {
-        let ty = AdsType::List(Rc::new(AdsType::Integer));
+        let ty = AdsType::List(Rc::from(AdsType::Integer));
         assert_eq!(format!("{}", ty), "{int}");
-        let ty = AdsType::List(Rc::new(ty));
+        let ty = AdsType::List(Rc::from(ty));
         assert_eq!(format!("{}", ty), "{{int}}");
-        let ty = AdsType::List(Rc::new(AdsType::Tuple(Rc::new(vec![
+        let ty = AdsType::List(Rc::from(AdsType::Tuple(Rc::from([
             AdsType::String,
             ty,
         ]))));
@@ -185,9 +185,8 @@ mod tests {
 
     #[test]
     fn display_tuple_type() {
-        assert_eq!(format!("{}", AdsType::Tuple(Rc::new(vec![]))), "()");
-        let ty =
-            AdsType::Tuple(Rc::new(vec![AdsType::Boolean, AdsType::String]));
+        assert_eq!(format!("{}", AdsType::Tuple(Rc::from([]))), "()");
+        let ty = AdsType::Tuple(Rc::from([AdsType::Boolean, AdsType::String]));
         assert_eq!(format!("{}", ty), "(bool, str)");
     }
 
@@ -213,21 +212,26 @@ mod tests {
 
     #[test]
     fn display_list_value() {
-        let value = AdsValue::List(vec![]);
+        let value = AdsValue::List(Rc::from([]));
         assert_eq!(format!("{}", value), "{}");
-        let value = AdsValue::List(vec![int_value(17)]);
+        let value = AdsValue::List(Rc::from([int_value(17)]));
         assert_eq!(format!("{}", value), "{17}");
-        let value =
-            AdsValue::List(vec![int_value(4), int_value(-3), int_value(0)]);
+        let value = AdsValue::List(Rc::from([
+            int_value(4),
+            int_value(-3),
+            int_value(0),
+        ]));
         assert_eq!(format!("{}", value), "{4, -3, 0}");
     }
 
     #[test]
     fn display_tuple_value() {
-        let value = AdsValue::Tuple(vec![]);
+        let value = AdsValue::Tuple(Rc::from([]));
         assert_eq!(format!("{}", value), "()");
-        let value =
-            AdsValue::Tuple(vec![int_value(37), AdsValue::Boolean(true)]);
+        let value = AdsValue::Tuple(Rc::from([
+            int_value(37),
+            AdsValue::Boolean(true),
+        ]));
         assert_eq!(format!("{}", value), "(37, %true)");
     }
 }

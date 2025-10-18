@@ -8,6 +8,7 @@ use crate::proc::SimBreak;
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::io::Write;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -93,7 +94,7 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::Exit => return Ok(true),
             AdsInstruction::ExpandTuple => {
                 let values = self.value_stack.pop().unwrap().unwrap_tuple();
-                self.value_stack.extend(values);
+                self.value_stack.extend(values.iter().cloned());
             }
             AdsInstruction::GetPc => {
                 let value = self.sim.pc();
@@ -128,13 +129,13 @@ impl<W: Write> AdsEnvironment<W> {
                 debug_assert!(self.value_stack.len() >= num_items);
                 let start = self.value_stack.len() - num_items;
                 let items = self.value_stack.split_off(start);
-                self.value_stack.push(AdsValue::List(items));
+                self.value_stack.push(AdsValue::List(Rc::from(items)));
             }
             &AdsInstruction::MakeTuple(num_items) => {
                 debug_assert!(self.value_stack.len() >= num_items);
                 let start = self.value_stack.len() - num_items;
                 let items = self.value_stack.split_off(start);
-                self.value_stack.push(AdsValue::Tuple(items));
+                self.value_stack.push(AdsValue::Tuple(Rc::from(items)));
             }
             AdsInstruction::PopHandler => {
                 debug_assert!(!self.handler_stack.is_empty());

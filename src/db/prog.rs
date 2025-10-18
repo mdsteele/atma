@@ -377,7 +377,7 @@ impl<'a> AdsCompiler<'a> {
             types.push(self.typecheck_lvalue(lvalue_ast, out));
         }
         types.reverse();
-        AdsType::Tuple(Rc::new(types))
+        AdsType::Tuple(Rc::from(types))
     }
 
     fn typecheck_variable_lvalue(
