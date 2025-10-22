@@ -12,12 +12,12 @@ pub trait BinaryIo: Sized {
     /// Writes this value into the binary object file.
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
 
-    /// Like [`read_from`], but reads an `Option<Self>` from the binary object
+    /// Like `read_from`, but reads an `Option<Self>` from the binary object
     /// file instead of a `Self`.  This is used to implement the blanket
     /// `BinaryIo` implementation for `Option<T>`.
     ///
     /// The default implementation reads one byte to indicate whether the value
-    /// is present; if so, it then defers to [`read_from`] to read the value.
+    /// is present; if so, it then defers to `read_from` to read the value.
     /// However, a type can override this implementation if there is a more
     /// efficient way to represent a possibly-missing value.
     fn read_option_from<R: io::BufRead>(
@@ -30,14 +30,14 @@ pub trait BinaryIo: Sized {
         })
     }
 
-    /// Like [`write_to`], but writes an `Option<Self>` to the binary object
-    /// file instead of `self`.  This is used to implement the blanket
-    /// `BinaryIo` implementation for `Option<T>`.
+    /// Like `write_to`, but writes an `Option<Self>` to the binary object file
+    /// instead of `self`.  This is used to implement the blanket `BinaryIo`
+    /// implementation for `Option<T>`.
     ///
     /// The default implementation writes one byte to indicate whether the
-    /// value is present; if it is, it then defers to [`write_to`] to encode
-    /// the value afterwards.  However, a type can override this implementation
-    /// if there is a more efficient way to represent a possibly-missing value.
+    /// value is present; if it is, it then defers to `write_to` to encode the
+    /// value afterwards.  However, a type can override this implementation if
+    /// there is a more efficient way to represent a possibly-missing value.
     fn write_option_to<W: io::Write>(
         option: &Option<Self>,
         writer: &mut W,
@@ -51,13 +51,13 @@ pub trait BinaryIo: Sized {
         }
     }
 
-    /// Like [`read_from`], but reads a `Vec<Self>` from the binary object file
+    /// Like `read_from`, but reads a `Vec<Self>` from the binary object file
     /// instead of a `Self`.  This is used to implement the blanket `BinaryIo`
     /// implementation for `Vec<T>`.
     ///
     /// The default implementation first reads the length of the vector by
-    /// decoding a `usize` from the stream, then calls [`read_from`] once for
-    /// for each item in the list.  However, a type can override this
+    /// decoding a `usize` from the stream, then calls `read_from` once for for
+    /// each item in the list.  However, a type can override this
     /// implementation if there is a more efficient way to read the data.  For
     /// example, the implementation for `u8` reads the contents of the vector
     /// with a single [`io::Read::read_exact`] call, rather than one call per
@@ -71,12 +71,12 @@ pub trait BinaryIo: Sized {
         Ok(result)
     }
 
-    /// Like [`write_to`], but writes a `&[Self]` to the binary object file
+    /// Like `write_to`, but writes a `&[Self]` to the binary object file
     /// instead of `self`.  This is used to implement the blanket `BinaryIo`
     /// implementation for `Vec<T>`.
     ///
     /// The default implementation first writes the length of the vector to the
-    /// stream, then calls [`write_to`] once for for each item in the list.
+    /// stream, then calls `write_to` once for for each item in the list.
     /// However, a type can override this implementation if there is a more
     /// efficient way to write the data.  For example, the implementation for
     /// `u8` writes the contents of the vector with a single
