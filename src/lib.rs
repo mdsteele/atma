@@ -5,6 +5,7 @@
 pub mod bus;
 pub mod db;
 pub mod dis;
+pub mod link;
 pub mod obj;
 pub mod parse;
 pub mod proc;
