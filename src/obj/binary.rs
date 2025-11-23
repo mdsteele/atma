@@ -1,6 +1,7 @@
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
 use std::io;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -217,6 +218,27 @@ impl<T: BinaryIo> BinaryIo for Option<T> {
     }
 }
 
+impl<T: BinaryIo> BinaryIo for Rc<[T]> {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        Ok(Rc::from(T::read_vec_from(reader)?))
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        T::write_slice_to(self, writer)
+    }
+}
+
+impl BinaryIo for Rc<str> {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        Ok(Rc::from(String::read_from(reader)?))
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.len().write_to(writer)?;
+        writer.write_all(self.as_bytes())
+    }
+}
+
 impl BinaryIo for String {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let len = usize::read_from(reader)?;
@@ -249,6 +271,7 @@ mod tests {
     use super::BinaryIo;
     use num_bigint::{BigInt, BigUint};
     use std::fmt::Debug;
+    use std::rc::Rc;
 
     fn round_trip<T: BinaryIo + Debug + Eq>(original: T) {
         let mut data: Vec<u8> = Vec::new();
@@ -320,6 +343,18 @@ mod tests {
     fn round_trip_option() {
         round_trip(Option::<u8>::None);
         round_trip(Some(42u8));
+    }
+
+    #[test]
+    fn round_trip_rc_slice() {
+        round_trip(Rc::<[usize]>::from(vec![]));
+        round_trip(Rc::<[usize]>::from(vec![1usize, 2usize, 3usize]));
+    }
+
+    #[test]
+    fn round_trip_rc_str() {
+        round_trip(Rc::<str>::from("".to_string()));
+        round_trip(Rc::<str>::from("foobar".to_string()));
     }
 
     #[test]
