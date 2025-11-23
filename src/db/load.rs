@@ -1,7 +1,7 @@
 use super::env::SimEnv;
 use crate::bus::{
     DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
-    new_ram_bus, new_rom_bus, new_snes_bus,
+    new_ram_bus, new_rom_bus, new_snes_bus, new_ssmp_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -566,8 +566,8 @@ fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mode = SnesMappingMode::detect(&rom_data)?;
     let cpu_bus = mode.make_cpu_bus(rom_data.into_boxed_slice());
     let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
-    // TODO: Use a specialized bus to support hardware registers and boot ROM.
-    let apu_bus = new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice());
+    let apu_bus =
+        new_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice()));
     let apu_proc: Box<dyn SimProc> = Box::new(Spc700::new());
     let processors = vec![
         ("cpu".to_string(), (cpu_proc, cpu_bus)),
@@ -605,8 +605,7 @@ fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut ram = vec![0u8; 1 << 16];
     reader.read_exact(&mut ram)?;
 
-    // TODO: Use a specialized bus to support hardware registers and boot ROM.
-    let bus = new_ram_bus(ram.into_boxed_slice());
+    let bus = new_ssmp_bus(new_ram_bus(ram.into_boxed_slice()));
     let mut cpu: Box<dyn SimProc> = Box::new(Spc700::new());
     cpu.set_pc(u32::from(pc));
     cpu.set_register("A", u32::from(reg_a));

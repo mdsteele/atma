@@ -10,6 +10,7 @@ mod nes;
 mod nsf;
 mod ram;
 mod snes;
+mod ssmp;
 
 pub use dmg::DmgBus;
 pub use label::LabeledBus;
@@ -19,6 +20,7 @@ pub use nes::NesBus;
 pub use nsf::new_nsf_bus;
 pub use ram::{new_open_bus, new_ram_bus, new_rom_bus};
 pub use snes::new_snes_bus;
+pub use ssmp::new_ssmp_bus;
 
 //===========================================================================//
 
