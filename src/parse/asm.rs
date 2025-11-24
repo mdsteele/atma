@@ -1,6 +1,6 @@
 //! Facilities for parsing assembly source code.
 
-use super::atom::{PError, directive, linebreak};
+use super::atom::{PError, directive, linebreak, symbol};
 use super::expr::{ExprAst, IdentifierAst};
 use super::lex::{Token, TokenLexer, TokenValue};
 use super::types::ParseError;
@@ -8,24 +8,23 @@ use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
 
-/// The abstract syntax tree for one line in an assembly file.
-#[derive(Clone, Debug)]
-pub enum AsmRawLine {
-    /// A macro invocation.
-    Macro(AsmMacroLine),
-    /// A non-macro line.
-    Final(AsmFinalLine),
+/// The abstract syntax tree for an assembly file.
+#[derive(Debug)]
+pub struct AsmModuleAst {
+    /// The statements in this file.
+    pub statements: Vec<AsmStmtAst>,
 }
 
-impl AsmRawLine {
-    /// Parses assembly source code into a sequence of lines.
-    pub fn parse(source: &str) -> Result<Vec<AsmRawLine>, Vec<ParseError>> {
+impl AsmModuleAst {
+    /// Parses assembly source code.
+    pub fn parse(source: &str) -> Result<AsmModuleAst, Vec<ParseError>> {
         let lexer = TokenLexer::new(source);
         let tokens: Vec<Token> =
             lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
-        AsmRawLine::parser()
+        AsmStmtAst::parser()
             .repeated()
             .collect::<Vec<_>>()
+            .map(|statements| AsmModuleAst { statements })
             .parse(&tokens)
             .into_result()
             .map_err(|errors| {
@@ -43,14 +42,62 @@ impl AsmRawLine {
                     .collect()
             })
     }
+}
 
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmRawLine, PError<'a>> + Clone {
-        chumsky::prelude::choice((
-            AsmMacroLine::parser().map(AsmRawLine::Macro),
-            AsmFinalLine::parser().map(AsmRawLine::Final),
-        ))
+//===========================================================================//
+
+/// The abstract syntax tree for a single statement or declaration in an
+/// assembly file.
+#[derive(Debug)]
+pub enum AsmStmtAst {
+    Invoke(AsmMacroLine),
+    Label(IdentifierAst),
+    Section(AsmSectionAst),
+    U8(ExprAst),
+}
+
+impl AsmStmtAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], AsmStmtAst, PError<'a>> {
+        chumsky::prelude::recursive(|statement| {
+            let label = IdentifierAst::parser()
+                .then_ignore(symbol(TokenValue::Colon))
+                .then_ignore(symbol(TokenValue::Linebreak).repeated())
+                .map(AsmStmtAst::Label);
+            let stmt_block = symbol(TokenValue::BraceOpen)
+                .ignore_then(linebreak())
+                .ignore_then(statement.repeated().collect::<Vec<_>>())
+                .then_ignore(symbol(TokenValue::BraceClose));
+            let section_dir = directive(".SECTION")
+                .ignore_then(ExprAst::parser())
+                .then(stmt_block)
+                .then_ignore(linebreak())
+                .map(|(name, body)| {
+                    AsmStmtAst::Section(AsmSectionAst { name, body })
+                });
+            let u8_dir = directive(".U8")
+                .ignore_then(ExprAst::parser())
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::U8);
+            chumsky::prelude::choice((
+                label,
+                section_dir,
+                u8_dir,
+                AsmMacroLine::parser().map(AsmStmtAst::Invoke),
+            ))
+        })
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a section declaration in an assembly file.
+#[derive(Debug)]
+pub struct AsmSectionAst {
+    /// A static expression that evaluates to the name of the section that this
+    /// chunk belongs to.
+    pub name: ExprAst,
+    /// The statements inside the section block.
+    pub body: Vec<AsmStmtAst>,
 }
 
 //===========================================================================//
@@ -78,31 +125,6 @@ impl AsmMacroLine {
             )
             .then_ignore(linebreak())
             .map(|(name, args)| AsmMacroLine { name, args })
-    }
-}
-
-//===========================================================================//
-
-/// Represents a line in an assembly file that has no more macros to expand.
-#[derive(Clone, Debug)]
-pub enum AsmFinalLine {
-    /// A `.SECTION` directive (starting a new section chunk).
-    Section(ExprAst),
-    /// A `.U8` directive (declaring unsigned byte data).
-    U8(ExprAst),
-}
-
-impl AsmFinalLine {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmFinalLine, PError<'a>> + Clone {
-        let section_dir = directive(".SECTION")
-            .ignore_then(ExprAst::parser())
-            .map(AsmFinalLine::Section);
-        let u8_dir = directive(".U8")
-            .ignore_then(ExprAst::parser())
-            .map(AsmFinalLine::U8);
-        chumsky::prelude::choice((section_dir, u8_dir))
-            .then_ignore(linebreak())
     }
 }
 

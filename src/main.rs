@@ -1,7 +1,7 @@
 use ariadne::{self, Label, ReportKind, Source};
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::parse::{AsmRawLine, ParseError};
+use atma::parse::{AsmModuleAst, ParseError};
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
 use std::fs::{self, File};
@@ -95,7 +95,7 @@ fn command_asm(
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let source = io::read_to_string(File::open(&source_path)?)?;
-    let ast = match AsmRawLine::parse(&source) {
+    let ast = match AsmModuleAst::parse(&source) {
         Ok(ast) => ast,
         Err(parse_errors) => {
             return Err(CliError::Parse(source, parse_errors));
