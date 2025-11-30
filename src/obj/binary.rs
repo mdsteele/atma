@@ -267,106 +267,110 @@ impl<T: BinaryIo> BinaryIo for Vec<T> {
 //===========================================================================//
 
 #[cfg(test)]
+pub(crate) fn assert_round_trips<T: BinaryIo + std::fmt::Debug + Eq>(
+    original: T,
+) {
+    let mut data: Vec<u8> = Vec::new();
+    original.write_to(&mut data).expect("write_to");
+    let parsed = T::read_from(&mut data.as_slice()).expect("read_from");
+    assert_eq!(parsed, original);
+}
+
+//===========================================================================//
+
+#[cfg(test)]
 mod tests {
-    use super::BinaryIo;
+    use super::{BinaryIo, assert_round_trips};
     use num_bigint::{BigInt, BigUint};
-    use std::fmt::Debug;
     use std::rc::Rc;
 
-    fn round_trip<T: BinaryIo + Debug + Eq>(original: T) {
-        let mut data: Vec<u8> = Vec::new();
-        original.write_to(&mut data).expect("write_to");
-        let parsed = T::read_from(&mut data.as_slice()).expect("read_from");
-        assert_eq!(parsed, original);
-    }
-
     #[test]
-    fn round_trip_biguint() {
-        round_trip(BigUint::from(0u32));
-        round_trip(BigUint::from(1u32));
-        round_trip(BigUint::from(2u32));
-        round_trip(BigUint::from(63u32));
-        round_trip(BigUint::from(64u32));
-        round_trip(BigUint::from(65u32));
-        round_trip(BigUint::from(127u32));
-        round_trip(BigUint::from(128u32));
-        round_trip(BigUint::from(129u32));
-        round_trip(BigUint::from(1_000u32));
-        round_trip(BigUint::from(1_000_000u32));
-        round_trip(BigUint::from(1_000_000_000u32));
+    fn binary_round_trip_biguint() {
+        assert_round_trips(BigUint::from(0u32));
+        assert_round_trips(BigUint::from(1u32));
+        assert_round_trips(BigUint::from(2u32));
+        assert_round_trips(BigUint::from(63u32));
+        assert_round_trips(BigUint::from(64u32));
+        assert_round_trips(BigUint::from(65u32));
+        assert_round_trips(BigUint::from(127u32));
+        assert_round_trips(BigUint::from(128u32));
+        assert_round_trips(BigUint::from(129u32));
+        assert_round_trips(BigUint::from(1_000u32));
+        assert_round_trips(BigUint::from(1_000_000u32));
+        assert_round_trips(BigUint::from(1_000_000_000u32));
     }
 
     #[test]
     fn round_trip_bigint() {
-        round_trip(BigInt::from(0i32));
-        round_trip(BigInt::from(1i32));
-        round_trip(BigInt::from(-1i32));
-        round_trip(BigInt::from(2i32));
-        round_trip(BigInt::from(-2i32));
-        round_trip(BigInt::from(63i32));
-        round_trip(BigInt::from(-63i32));
-        round_trip(BigInt::from(64i32));
-        round_trip(BigInt::from(-64i32));
-        round_trip(BigInt::from(65i32));
-        round_trip(BigInt::from(-65i32));
-        round_trip(BigInt::from(1_000i32));
-        round_trip(BigInt::from(-1_000i32));
-        round_trip(BigInt::from(1_000_000i32));
-        round_trip(BigInt::from(-1_000_000i32));
-        round_trip(BigInt::from(1_000_000_000i32));
-        round_trip(BigInt::from(-1_000_000_000i32));
+        assert_round_trips(BigInt::from(0i32));
+        assert_round_trips(BigInt::from(1i32));
+        assert_round_trips(BigInt::from(-1i32));
+        assert_round_trips(BigInt::from(2i32));
+        assert_round_trips(BigInt::from(-2i32));
+        assert_round_trips(BigInt::from(63i32));
+        assert_round_trips(BigInt::from(-63i32));
+        assert_round_trips(BigInt::from(64i32));
+        assert_round_trips(BigInt::from(-64i32));
+        assert_round_trips(BigInt::from(65i32));
+        assert_round_trips(BigInt::from(-65i32));
+        assert_round_trips(BigInt::from(1_000i32));
+        assert_round_trips(BigInt::from(-1_000i32));
+        assert_round_trips(BigInt::from(1_000_000i32));
+        assert_round_trips(BigInt::from(-1_000_000i32));
+        assert_round_trips(BigInt::from(1_000_000_000i32));
+        assert_round_trips(BigInt::from(-1_000_000_000i32));
     }
 
     #[test]
     fn round_trip_bool() {
-        round_trip(false);
-        round_trip(true);
+        assert_round_trips(false);
+        assert_round_trips(true);
     }
 
     #[test]
     fn round_trip_usize() {
-        round_trip(0usize);
-        round_trip(1usize);
-        round_trip(2usize);
-        round_trip(63usize);
-        round_trip(64usize);
-        round_trip(65usize);
-        round_trip(127usize);
-        round_trip(128usize);
-        round_trip(129usize);
-        round_trip(1_000usize);
-        round_trip(1_000_000usize);
-        round_trip(1_000_000_000usize);
+        assert_round_trips(0usize);
+        assert_round_trips(1usize);
+        assert_round_trips(2usize);
+        assert_round_trips(63usize);
+        assert_round_trips(64usize);
+        assert_round_trips(65usize);
+        assert_round_trips(127usize);
+        assert_round_trips(128usize);
+        assert_round_trips(129usize);
+        assert_round_trips(1_000usize);
+        assert_round_trips(1_000_000usize);
+        assert_round_trips(1_000_000_000usize);
     }
 
     #[test]
     fn round_trip_option() {
-        round_trip(Option::<u8>::None);
-        round_trip(Some(42u8));
+        assert_round_trips(Option::<u8>::None);
+        assert_round_trips(Some(42u8));
     }
 
     #[test]
     fn round_trip_rc_slice() {
-        round_trip(Rc::<[usize]>::from(vec![]));
-        round_trip(Rc::<[usize]>::from(vec![1usize, 2usize, 3usize]));
+        assert_round_trips(Rc::<[usize]>::from(vec![]));
+        assert_round_trips(Rc::<[usize]>::from(vec![1usize, 2usize, 3usize]));
     }
 
     #[test]
     fn round_trip_rc_str() {
-        round_trip(Rc::<str>::from("".to_string()));
-        round_trip(Rc::<str>::from("foobar".to_string()));
+        assert_round_trips(Rc::<str>::from("".to_string()));
+        assert_round_trips(Rc::<str>::from("foobar".to_string()));
     }
 
     #[test]
     fn round_trip_string() {
-        round_trip("".to_string());
-        round_trip("foobar".to_string());
+        assert_round_trips("".to_string());
+        assert_round_trips("foobar".to_string());
     }
 
     #[test]
     fn round_trip_vec() {
-        round_trip(Vec::<u8>::new());
-        round_trip(b"hello".to_vec());
+        assert_round_trips(Vec::<u8>::new());
+        assert_round_trips(b"hello".to_vec());
     }
 
     #[test]

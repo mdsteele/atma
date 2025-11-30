@@ -1,7 +1,8 @@
 use ariadne::{self, Label, ReportKind, Source};
+use atma::asm::ObjectFile;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::parse::{AsmModuleAst, ParseError};
+use atma::parse::ParseError;
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
 use std::fs::{self, File};
@@ -95,16 +96,19 @@ fn command_asm(
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let source = io::read_to_string(File::open(&source_path)?)?;
-    let ast = match AsmModuleAst::parse(&source) {
-        Ok(ast) => ast,
+    let obj = match ObjectFile::assemble_source(&source) {
+        Ok(obj) => obj,
         Err(parse_errors) => {
             return Err(CliError::Parse(source, parse_errors));
         }
     };
     if let Some(output_path) = opt_output_path {
-        fs::write(output_path, format!("{ast:?}"))?;
+        fs::write(output_path, format!("{} chunks", obj.chunks.len()))?;
     } else {
-        println!("{ast:?}");
+        println!("{} chunks", obj.chunks.len());
+        for (index, chunk) in obj.chunks.iter().enumerate() {
+            println!("{index}: {}", chunk.section_name);
+        }
     }
     Ok(())
 }

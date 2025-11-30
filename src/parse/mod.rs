@@ -9,7 +9,7 @@ mod lvalue;
 mod types;
 
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst};
-pub use asm::{AsmMacroLine, AsmModuleAst, AsmSectionAst};
+pub use asm::{AsmMacroLine, AsmModuleAst, AsmSectionAst, AsmStmtAst};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, IdentifierAst, parse_expr};
 pub use lex::{Token, TokenLexer, TokenValue};
 pub use lvalue::{LValueAst, LValueAstNode};

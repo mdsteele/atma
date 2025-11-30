@@ -8,4 +8,7 @@ pub use align::Align32;
 pub use binary::BinaryIo;
 pub use chunk::ObjectChunk;
 
+#[cfg(test)]
+pub(crate) use binary::assert_round_trips;
+
 //===========================================================================//

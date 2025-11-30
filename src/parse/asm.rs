@@ -17,7 +17,9 @@ pub struct AsmModuleAst {
 
 impl AsmModuleAst {
     /// Parses assembly source code.
-    pub fn parse(source: &str) -> Result<AsmModuleAst, Vec<ParseError>> {
+    pub fn parse_source(
+        source: &str,
+    ) -> Result<AsmModuleAst, Vec<ParseError>> {
         let lexer = TokenLexer::new(source);
         let tokens: Vec<Token> =
             lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
@@ -50,9 +52,13 @@ impl AsmModuleAst {
 /// assembly file.
 #[derive(Debug)]
 pub enum AsmStmtAst {
+    /// A macro invocation.
     Invoke(AsmMacroLine),
+    /// A label.
     Label(IdentifierAst),
+    /// A `.SECTION` block.
     Section(AsmSectionAst),
+    /// A `.U8` directive.
     U8(ExprAst),
 }
 

@@ -1,6 +1,17 @@
+use crate::obj::BinaryIo;
 use num_bigint::BigInt;
 use std::fmt;
+use std::io;
 use std::rc::Rc;
+
+//===========================================================================//
+
+const TAG_FALSE: u8 = 0;
+const TAG_TRUE: u8 = 1;
+const TAG_INTEGER: u8 = 2;
+const TAG_LIST: u8 = 3;
+const TAG_STRING: u8 = 4;
+const TAG_TUPLE: u8 = 5;
 
 //===========================================================================//
 
@@ -106,6 +117,50 @@ impl AdsValue {
     }
 }
 
+impl BinaryIo for AdsValue {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        match u8::read_from(reader)? {
+            TAG_FALSE => Ok(AdsValue::Boolean(false)),
+            TAG_TRUE => Ok(AdsValue::Boolean(true)),
+            TAG_INTEGER => Ok(AdsValue::Integer(BigInt::read_from(reader)?)),
+            TAG_LIST => {
+                Ok(AdsValue::List(Rc::<[AdsValue]>::read_from(reader)?))
+            }
+            TAG_STRING => Ok(AdsValue::String(Rc::<str>::read_from(reader)?)),
+            TAG_TUPLE => {
+                Ok(AdsValue::Tuple(Rc::<[AdsValue]>::read_from(reader)?))
+            }
+            byte => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unknown value tag: 0x{:02x}", byte),
+            )),
+        }
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        match self {
+            AdsValue::Boolean(false) => TAG_FALSE.write_to(writer),
+            AdsValue::Boolean(true) => TAG_TRUE.write_to(writer),
+            AdsValue::Integer(integer) => {
+                TAG_INTEGER.write_to(writer)?;
+                integer.write_to(writer)
+            }
+            AdsValue::List(list) => {
+                TAG_LIST.write_to(writer)?;
+                list.write_to(writer)
+            }
+            AdsValue::String(string) => {
+                TAG_STRING.write_to(writer)?;
+                string.write_to(writer)
+            }
+            AdsValue::Tuple(tuple) => {
+                TAG_TUPLE.write_to(writer)?;
+                tuple.write_to(writer)
+            }
+        }
+    }
+}
+
 impl From<bool> for AdsValue {
     fn from(value: bool) -> AdsValue {
         AdsValue::Boolean(value)
@@ -152,6 +207,7 @@ fn comma_separate<T: fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::{AdsType, AdsValue};
+    use crate::obj::assert_round_trips;
     use num_bigint::BigInt;
     use std::rc::Rc;
 
@@ -233,6 +289,17 @@ mod tests {
             AdsValue::Boolean(true),
         ]));
         assert_eq!(format!("{}", value), "(37, %true)");
+    }
+
+    #[test]
+    fn assert_round_trips_value() {
+        assert_round_trips(AdsValue::Boolean(false));
+        assert_round_trips(AdsValue::Boolean(true));
+        assert_round_trips(int_value(0));
+        assert_round_trips(int_value(1));
+        assert_round_trips(int_value(-1));
+        assert_round_trips(str_value(""));
+        assert_round_trips(str_value("foobar"));
     }
 }
 

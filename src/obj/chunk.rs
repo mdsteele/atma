@@ -1,4 +1,6 @@
 use super::align::Align32;
+use super::binary::BinaryIo;
+use std::io;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -21,6 +23,26 @@ pub struct ObjectChunk {
     /// If set, then this entire chunk (data + padding) must not cross any
     /// alignment boundary of this size within its address space.
     pub within: Option<Align32>,
+}
+
+impl BinaryIo for ObjectChunk {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        let section_name = Rc::<str>::read_from(reader)?;
+        let data = Rc::<[u8]>::read_from(reader)?;
+        let size = usize::read_from(reader)? as u32;
+        let align = Align32::read_from(reader)?;
+        let within = Option::<Align32>::read_from(reader)?;
+        Ok(ObjectChunk { section_name, data, size, align, within })
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.section_name.write_to(writer)?;
+        self.data.write_to(writer)?;
+        (self.size as usize).write_to(writer)?;
+        self.align.write_to(writer)?;
+        self.within.write_to(writer)?;
+        Ok(())
+    }
 }
 
 //===========================================================================//
