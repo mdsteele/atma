@@ -30,7 +30,7 @@ pub(crate) fn keyword<'a>(
     chumsky::prelude::any()
         .filter(move |token: &Token| {
             if let TokenValue::Identifier(id) = &token.value {
-                id == word
+                **id == *word
             } else {
                 false
             }

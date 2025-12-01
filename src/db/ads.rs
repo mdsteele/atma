@@ -1,8 +1,8 @@
 use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
-use super::value::AdsValue;
 use crate::bus::WatchId;
 use crate::db::SimEnv;
+use crate::expr::ExprValue;
 use crate::parse::ParseError;
 use crate::proc::SimBreak;
 use num_bigint::BigInt;
@@ -50,7 +50,7 @@ pub struct AdsEnvironment<W> {
     sim: SimEnv,
     program: AdsProgram,
     pc: usize,
-    value_stack: Vec<AdsValue>,
+    value_stack: Vec<ExprValue>,
     call_stack: Vec<CallFrame>,
     handler_stack: Vec<WatchId>,
     handlers: HashMap<WatchId, Vec<HandlerData>>,
@@ -98,11 +98,11 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::GetPc => {
                 let value = self.sim.pc();
-                self.value_stack.push(AdsValue::Integer(BigInt::from(value)));
+                self.value_stack.push(ExprValue::Integer(BigInt::from(value)));
             }
             AdsInstruction::GetRegister(name) => {
                 let value = self.sim.get_register(name).unwrap();
-                self.value_stack.push(AdsValue::Integer(BigInt::from(value)));
+                self.value_stack.push(ExprValue::Integer(BigInt::from(value)));
             }
             &AdsInstruction::GetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
@@ -129,13 +129,13 @@ impl<W: Write> AdsEnvironment<W> {
                 debug_assert!(self.value_stack.len() >= num_items);
                 let start = self.value_stack.len() - num_items;
                 let items = self.value_stack.split_off(start);
-                self.value_stack.push(AdsValue::List(Rc::from(items)));
+                self.value_stack.push(ExprValue::List(Rc::from(items)));
             }
             &AdsInstruction::MakeTuple(num_items) => {
                 debug_assert!(self.value_stack.len() >= num_items);
                 let start = self.value_stack.len() - num_items;
                 let items = self.value_stack.split_off(start);
-                self.value_stack.push(AdsValue::Tuple(Rc::from(items)));
+                self.value_stack.push(ExprValue::Tuple(Rc::from(items)));
             }
             AdsInstruction::PopHandler => {
                 debug_assert!(!self.handler_stack.is_empty());

@@ -3,6 +3,7 @@ use super::expr::{ExprAst, IdentifierAst};
 use super::lex::{Token, TokenValue};
 use super::types::SrcSpan;
 use chumsky::{self, IterParser, Parser};
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -66,7 +67,7 @@ pub enum LValueAstNode {
     /// Assign to a tuple of L-values.
     Tuple(Vec<LValueAst>),
     /// Assign to a variable (or simulated processor register or PC).
-    Variable(String),
+    Variable(Rc<str>),
 }
 
 //===========================================================================//

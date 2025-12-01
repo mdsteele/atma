@@ -1,6 +1,7 @@
 use crate::parse::{ParseError, SrcSpan};
 use logos::{self, Logos};
 use num_bigint::{BigInt, Sign};
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -85,7 +86,7 @@ fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
     }
 }
 
-fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> String {
+fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> Rc<str> {
     debug_assert!(lex.slice().starts_with("\""));
     debug_assert!(lex.slice().ends_with("\""));
     let mut string = String::new();
@@ -104,7 +105,7 @@ fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> String {
             string.push(chr);
         }
     }
-    string
+    Rc::from(string)
 }
 
 #[derive(Debug, Eq, Logos, PartialEq)]
@@ -153,7 +154,7 @@ enum TokenKind {
     #[token("+")]
     Plus,
     #[regex("\"([^\"\\n\\\\]|\\\\.)+\"", string_literal_callback)]
-    StrLiteral(String),
+    StrLiteral(Rc<str>),
 }
 
 impl TokenKind {
@@ -173,12 +174,12 @@ impl TokenKind {
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
             TokenKind::Directive => {
-                TokenValue::Directive(lexer.slice().to_string())
+                TokenValue::Directive(Rc::from(lexer.slice()))
             }
             TokenKind::EqEq => TokenValue::EqEq,
             TokenKind::Equals => TokenValue::Equals,
             TokenKind::Identifier => {
-                TokenValue::Identifier(lexer.slice().to_string())
+                TokenValue::Identifier(Rc::from(lexer.slice()))
             }
             TokenKind::IntLiteral(int) => TokenValue::IntLiteral(int),
             TokenKind::Linebreak => TokenValue::Linebreak,
@@ -216,13 +217,13 @@ pub enum TokenValue {
     /// A "`,`" symbol.
     Comma,
     /// An assembler directive.
-    Directive(String),
+    Directive(Rc<str>),
     /// A "`==`" symbol.
     EqEq,
     /// A "`=`" symbol.
     Equals,
     /// An identifier or keyword.
-    Identifier(String),
+    Identifier(Rc<str>),
     /// An integer literal.
     IntLiteral(BigInt),
     /// A linebreak (that wasn't suppressed, e.g. by a backslash).
@@ -234,7 +235,7 @@ pub enum TokenValue {
     /// A "`+`" symbol.
     Plus,
     /// A string literal.
-    StrLiteral(String),
+    StrLiteral(Rc<str>),
 }
 
 impl TokenValue {
@@ -324,6 +325,7 @@ mod tests {
     use crate::parse::SrcSpan;
     use num_bigint::BigInt;
     use std::ops::Range;
+    use std::rc::Rc;
 
     fn token(range: Range<usize>, value: TokenValue) -> Token {
         Token { span: SrcSpan::from_byte_range(range), value }
@@ -394,7 +396,7 @@ mod tests {
             read_all("\"foo\\n\\t\\\\\\\"\""),
             vec![token(
                 0..13,
-                TokenValue::StrLiteral("foo\n\t\\\"".to_string())
+                TokenValue::StrLiteral(Rc::from("foo\n\t\\\""))
             )]
         );
     }

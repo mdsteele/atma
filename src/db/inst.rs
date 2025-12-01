@@ -1,6 +1,5 @@
-use super::binop::AdsBinOp;
-use super::value::AdsValue;
 use crate::bus::WatchKind;
+use crate::expr::{ExprBinOp, ExprOp, ExprValue};
 
 //===========================================================================//
 
@@ -10,7 +9,7 @@ pub enum AdsInstruction {
     /// binary operation using the second-from-the-top value as the left-hand
     /// side and the topmost value as the right-hand side, then pushes the
     /// result onto the value stack.
-    BinOp(AdsBinOp),
+    BinOp(ExprBinOp),
     /// Pops the top value from the value stack (which must be a boolean).  If
     /// the value is false, adds the given offset to the ADS program counter.
     BranchUnless(isize),
@@ -61,7 +60,7 @@ pub enum AdsInstruction {
     /// when the breakpoint is reached.
     PushHandler(WatchKind, isize),
     /// Pushes a value onto the value stack.
-    PushValue(AdsValue),
+    PushValue(ExprValue),
     /// Returns from the current breakpoint handler.
     Return,
     /// Pops the top two values from the value stack (which must both be
@@ -85,6 +84,32 @@ pub enum AdsInstruction {
     /// the specified item from that tuple, then pushes that item onto the
     /// value stack.
     TupleItem(usize),
+}
+
+impl ExprOp for AdsInstruction {
+    fn binary_operation(binop: ExprBinOp) -> Self {
+        AdsInstruction::BinOp(binop)
+    }
+
+    fn list_index() -> Self {
+        AdsInstruction::ListIndex
+    }
+
+    fn literal(value: ExprValue) -> Self {
+        AdsInstruction::PushValue(value)
+    }
+
+    fn make_list(num_items: usize) -> Self {
+        AdsInstruction::MakeList(num_items)
+    }
+
+    fn make_tuple(num_items: usize) -> Self {
+        AdsInstruction::MakeTuple(num_items)
+    }
+
+    fn tuple_item(index: usize) -> Self {
+        AdsInstruction::TupleItem(index)
+    }
 }
 
 //===========================================================================//

@@ -1,8 +1,8 @@
 use super::env::SimEnv;
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
-use super::value::{AdsType, AdsValue};
 use crate::bus::WatchKind;
+use crate::expr::{ExprType, ExprValue};
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
     IdentifierAst, LValueAst, LValueAstNode, ParseError, SrcSpan,
@@ -75,7 +75,7 @@ impl<'a> AdsCompiler<'a> {
     fn try_get_static(
         &self,
         instructions: &[AdsInstruction],
-    ) -> Option<AdsValue> {
+    ) -> Option<ExprValue> {
         match instructions {
             [AdsInstruction::PushValue(value)] => Some(value.clone()),
             _ => None,
@@ -125,7 +125,7 @@ impl<'a> AdsCompiler<'a> {
                 out.append(&mut ops);
                 (ty, static_value)
             } else {
-                (AdsType::Bottom, None)
+                (ExprType::Bottom, None)
             };
         let kind = match kind {
             DeclareAst::Let => AdsDeclKind::Constant(static_value),
@@ -143,7 +143,7 @@ impl<'a> AdsCompiler<'a> {
     ) {
         let pred_span = pred_ast.span;
         if let Some((mut ops, expr_type)) = self.typecheck_expr(pred_ast) {
-            if let AdsType::Boolean = expr_type {
+            if let ExprType::Boolean = expr_type {
                 out.append(&mut ops);
             } else {
                 let message =
@@ -196,11 +196,11 @@ impl<'a> AdsCompiler<'a> {
                 (AdsFrameRef::Local(0), AdsFrameRef::Local(1))
             };
             let index = self.env.frame_end();
-            out.push(AdsInstruction::PushValue(AdsValue::Boolean(false)));
+            out.push(AdsInstruction::PushValue(ExprValue::Boolean(false)));
             out.append(&mut breakpoint_ops);
             out.push(AdsInstruction::PushHandler(breakpoint_kind, 1));
             out.push(AdsInstruction::Jump(3));
-            out.push(AdsInstruction::PushValue(AdsValue::Boolean(true)));
+            out.push(AdsInstruction::PushValue(ExprValue::Boolean(true)));
             out.push(AdsInstruction::SetValue(inner_ref, index));
             out.push(AdsInstruction::Return);
             out.push(AdsInstruction::Step);
@@ -219,12 +219,13 @@ impl<'a> AdsCompiler<'a> {
     ) {
         let lvalue_span = lvalue_ast.span;
         let expr_span = expr_ast.span;
-        let (mut expr_ops, expr_type) =
-            self.typecheck_expr(expr_ast).unwrap_or((vec![], AdsType::Bottom));
+        let (mut expr_ops, expr_type) = self
+            .typecheck_expr(expr_ast)
+            .unwrap_or((vec![], ExprType::Bottom));
         out.append(&mut expr_ops);
         let lvalue_type = self.typecheck_lvalue(lvalue_ast, out);
-        if expr_type == AdsType::Bottom
-            || lvalue_type == AdsType::Bottom
+        if expr_type == ExprType::Bottom
+            || lvalue_type == ExprType::Bottom
             || expr_type == lvalue_type
         {
             return;
@@ -266,7 +267,7 @@ impl<'a> AdsCompiler<'a> {
     fn typecheck_expr(
         &mut self,
         ast: ExprAst,
-    ) -> Option<(Vec<AdsInstruction>, AdsType)> {
+    ) -> Option<(Vec<AdsInstruction>, ExprType)> {
         match self.env.typecheck_expression(ast) {
             Ok(ops_and_type) => Some(ops_and_type),
             Err(mut errors) => {
@@ -312,9 +313,9 @@ impl<'a> AdsCompiler<'a> {
     fn typecheck_breakpoint_addr(
         &mut self,
         expr_span: SrcSpan,
-        expr_type: AdsType,
+        expr_type: ExprType,
     ) -> bool {
-        if let AdsType::Integer = expr_type {
+        if let ExprType::Integer = expr_type {
             return true;
         }
         let message =
@@ -330,7 +331,7 @@ impl<'a> AdsCompiler<'a> {
         &mut self,
         lvalue_ast: LValueAst,
         out: &mut Vec<AdsInstruction>,
-    ) -> AdsType {
+    ) -> ExprType {
         match lvalue_ast.node {
             LValueAstNode::Memory(expr_ast) => {
                 self.typecheck_memory_lvalue(expr_ast, out)
@@ -348,13 +349,14 @@ impl<'a> AdsCompiler<'a> {
         &mut self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
-    ) -> AdsType {
+    ) -> ExprType {
         let expr_span = expr_ast.span;
-        let (mut expr_ops, expr_type) =
-            self.typecheck_expr(expr_ast).unwrap_or((vec![], AdsType::Bottom));
+        let (mut expr_ops, expr_type) = self
+            .typecheck_expr(expr_ast)
+            .unwrap_or((vec![], ExprType::Bottom));
         out.append(&mut expr_ops);
         out.push(AdsInstruction::SetMemory);
-        if expr_type != AdsType::Integer {
+        if expr_type != ExprType::Integer {
             let message =
                 format!("memory address must be of type int, not {expr_type}");
             let label = format!("this expression has type {expr_type}");
@@ -363,29 +365,29 @@ impl<'a> AdsCompiler<'a> {
                     .with_label(expr_span, label),
             );
         }
-        AdsType::Integer
+        ExprType::Integer
     }
 
     fn typecheck_tuple_lvalue(
         &mut self,
         lvalue_asts: Vec<LValueAst>,
         out: &mut Vec<AdsInstruction>,
-    ) -> AdsType {
+    ) -> ExprType {
         out.push(AdsInstruction::ExpandTuple);
-        let mut types = Vec::<AdsType>::new();
+        let mut types = Vec::<ExprType>::new();
         for lvalue_ast in lvalue_asts.into_iter().rev() {
             types.push(self.typecheck_lvalue(lvalue_ast, out));
         }
         types.reverse();
-        AdsType::Tuple(Rc::from(types))
+        ExprType::Tuple(Rc::from(types))
     }
 
     fn typecheck_variable_lvalue(
         &mut self,
         id_span: SrcSpan,
-        id_name: String,
+        id_name: Rc<str>,
         out: &mut Vec<AdsInstruction>,
-    ) -> AdsType {
+    ) -> ExprType {
         match self.env.get_declaration(&id_name) {
             Some((
                 frame_ref,
@@ -417,12 +419,12 @@ impl<'a> AdsCompiler<'a> {
                 for &reg in self.env.register_names() {
                     if id_name.eq_ignore_ascii_case(reg) {
                         out.push(AdsInstruction::SetRegister(reg));
-                        return AdsType::Integer;
+                        return ExprType::Integer;
                     }
                 }
                 if id_name.eq_ignore_ascii_case("PC") {
                     out.push(AdsInstruction::SetPc);
-                    return AdsType::Integer;
+                    return ExprType::Integer;
                 }
                 let message = format!("no such variable: `{id_name}`");
                 let label = "this was never declared".to_string();
@@ -430,7 +432,7 @@ impl<'a> AdsCompiler<'a> {
                     ParseError::new(id_span, message)
                         .with_label(id_span, label),
                 );
-                AdsType::Bottom
+                ExprType::Bottom
             }
         }
     }
@@ -440,7 +442,7 @@ impl<'a> AdsCompiler<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsFrameRef, AdsInstruction, AdsProgram, AdsValue, SimEnv};
+    use super::{AdsFrameRef, AdsInstruction, AdsProgram, ExprValue, SimEnv};
     use crate::bus::{WatchKind, new_open_bus};
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
@@ -452,8 +454,8 @@ mod tests {
         AdsProgram::compile_source(source, &sim).unwrap().instructions
     }
 
-    fn int_value(value: i32) -> AdsValue {
-        AdsValue::Integer(BigInt::from(value))
+    fn int_value(value: i32) -> ExprValue {
+        ExprValue::Integer(BigInt::from(value))
     }
 
     #[test]
@@ -471,7 +473,7 @@ mod tests {
         assert_eq!(
             compile("if %false {\nstep\n}\n"),
             vec![
-                AdsInstruction::PushValue(AdsValue::Boolean(false)),
+                AdsInstruction::PushValue(ExprValue::Boolean(false)),
                 AdsInstruction::BranchUnless(1),
                 AdsInstruction::Step,
                 AdsInstruction::Exit,
@@ -484,7 +486,7 @@ mod tests {
         assert_eq!(
             compile("if %false {\nprint 1\n} else {\nprint 2\n}\n"),
             vec![
-                AdsInstruction::PushValue(AdsValue::Boolean(false)),
+                AdsInstruction::PushValue(ExprValue::Boolean(false)),
                 AdsInstruction::BranchUnless(3),
                 AdsInstruction::PushValue(int_value(1)),
                 AdsInstruction::Print,

@@ -2,7 +2,7 @@
 
 mod expr;
 
-use crate::db::AdsType;
+use crate::expr::ExprType;
 use crate::obj::{Align32, BinaryIo, ObjectChunk};
 use crate::parse::{
     AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, ParseError,
@@ -89,7 +89,7 @@ impl Assembler {
         let name: Option<Rc<str>> = match self
             .typecheck_expression(&section_ast.name)
         {
-            Some((expr, AdsType::String)) => match expr.static_value() {
+            Some((expr, ExprType::String)) => match expr.static_value() {
                 Some(value) => Some(value.clone().unwrap_str()),
                 None => {
                     let message = "section name must be static".to_string();
@@ -134,7 +134,7 @@ impl Assembler {
     fn typecheck_expression(
         &mut self,
         expr_ast: &ExprAst,
-    ) -> Option<(AsmExpr, AdsType)> {
+    ) -> Option<(AsmExpr, ExprType)> {
         let env = AsmTypeEnv {};
         match env.typecheck_expression(expr_ast) {
             Ok(expr_and_type) => Some(expr_and_type),

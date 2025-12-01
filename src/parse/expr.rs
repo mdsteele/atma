@@ -4,6 +4,7 @@ use super::atom::{PError, symbol};
 use crate::parse::{ParseError, SrcSpan, Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 use num_bigint::BigInt;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -49,7 +50,7 @@ pub struct IdentifierAst {
     /// appears.
     pub span: SrcSpan,
     /// The name of the identifier.
-    pub name: String,
+    pub name: Rc<str>,
 }
 
 impl IdentifierAst {
@@ -184,7 +185,7 @@ pub enum ExprAstNode {
     /// An boolean literal.
     BoolLiteral(bool),
     /// An identifier.
-    Identifier(String),
+    Identifier(Rc<str>),
     /// An indexing operation (e.g. into a list).
     Index(SrcSpan, Box<ExprAst>, Box<ExprAst>),
     /// An integer literal.
@@ -192,7 +193,7 @@ pub enum ExprAstNode {
     /// A list literal.
     ListLiteral(Vec<ExprAst>),
     /// A string literal.
-    StrLiteral(String),
+    StrLiteral(Rc<str>),
     /// A tuple literal.
     TupleLiteral(Vec<ExprAst>),
 }
@@ -276,6 +277,7 @@ mod tests {
     use crate::parse::{ParseError, SrcSpan, Token, TokenLexer};
     use num_bigint::BigInt;
     use std::ops::Range;
+    use std::rc::Rc;
 
     fn parse(input: &str) -> Result<ExprAst, Vec<ParseError>> {
         parse_expr(
@@ -302,7 +304,7 @@ mod tests {
             parse("foo"),
             Ok(ExprAst {
                 span: SrcSpan::from_byte_range(0..3),
-                node: ExprAstNode::Identifier("foo".to_string()),
+                node: ExprAstNode::Identifier(Rc::from("foo")),
             })
         );
     }

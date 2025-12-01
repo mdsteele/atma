@@ -235,6 +235,7 @@ mod tests {
         ExprAst, ExprAstNode, ParseError, SrcSpan, Token, TokenLexer,
     };
     use num_bigint::BigInt;
+    use std::rc::Rc;
 
     fn read_statements(input: &str) -> Vec<AdsStmtAst> {
         AdsModuleAst::parse(
@@ -281,7 +282,7 @@ mod tests {
                 DeclareAst::Let,
                 IdentifierAst {
                     span: SrcSpan::from_byte_range(4..7),
-                    name: "foo".to_string(),
+                    name: Rc::from("foo"),
                 },
                 ExprAst {
                     span: SrcSpan::from_byte_range(10..12),
