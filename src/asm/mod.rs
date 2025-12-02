@@ -81,7 +81,7 @@ impl Assembler {
             AsmStmtAst::Invoke(_macro) => {} // TODO
             AsmStmtAst::Label(_id) => {}     // TODO
             AsmStmtAst::Section(section) => self.visit_section(section),
-            AsmStmtAst::U8(_expr) => {} // TODO
+            AsmStmtAst::U8(expr) => self.visit_u8(expr),
         }
     }
 
@@ -129,6 +129,56 @@ impl Assembler {
                 within,
             });
         }
+    }
+
+    fn visit_u8(&mut self, expr_ast: &ExprAst) {
+        if self.section_stack.is_empty() {
+            let message =
+                ".U8 directive must be within a .SECTION".to_string();
+            self.errors.push(ParseError::new(expr_ast.span, message));
+            return;
+        }
+        let byte = match self.typecheck_expression(expr_ast) {
+            None => 0u8,
+            Some((expr, ExprType::Integer)) => {
+                match expr.static_value() {
+                    Some(value) => {
+                        let bigint = value.clone().unwrap_int();
+                        match u8::try_from(&bigint) {
+                            Ok(byte) => byte,
+                            Err(_) => {
+                                let message =
+                                    ".U8 value is statically out of range \
+                                     (0-255)"
+                                        .to_string();
+                                let label = format!(
+                                    "the value of this expression is {bigint}"
+                                );
+                                self.errors.push(
+                                    ParseError::new(expr_ast.span, message)
+                                        .with_label(expr_ast.span, label),
+                                );
+                                0u8
+                            }
+                        }
+                    }
+                    None => {
+                        // TODO: add rewrite patch to chunk
+                        0u8
+                    }
+                }
+            }
+            Some((_, ty)) => {
+                let message = ".U8 value must be an integer".to_string();
+                let label = format!("this expression has type {ty}");
+                self.errors.push(
+                    ParseError::new(expr_ast.span, message)
+                        .with_label(expr_ast.span, label),
+                );
+                0u8
+            }
+        };
+        self.section_stack.last_mut().unwrap().data.push(byte);
     }
 
     fn typecheck_expression(

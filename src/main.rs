@@ -2,11 +2,12 @@ use ariadne::{self, Label, ReportKind, Source};
 use atma::asm::ObjectFile;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
+use atma::obj::{Align32, BinaryIo};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
-use std::fs::{self, File};
-use std::io;
+use std::fs;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -35,6 +36,11 @@ enum Command {
         binary: PathBuf,
         /// The debugger script to run, or none for interactive mode.
         script: Option<PathBuf>,
+    },
+    /// Displays information from an object file.
+    Obj {
+        /// The object file to inspect.
+        objfile: PathBuf,
     },
 }
 
@@ -71,6 +77,7 @@ fn run_cli() -> Result<(), ExitCode> {
     let result = match Cli::parse().command {
         Command::Asm { source, output } => command_asm(source, output),
         Command::Db { binary, script } => command_db(binary, script),
+        Command::Obj { objfile } => command_obj(objfile),
     };
     match result {
         Ok(()) => Ok(()),
@@ -95,7 +102,7 @@ fn command_asm(
     source_path: PathBuf,
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
-    let source = io::read_to_string(File::open(&source_path)?)?;
+    let source = io::read_to_string(fs::File::open(&source_path)?)?;
     let obj = match ObjectFile::assemble_source(&source) {
         Ok(obj) => obj,
         Err(parse_errors) => {
@@ -103,12 +110,13 @@ fn command_asm(
         }
     };
     if let Some(output_path) = opt_output_path {
-        fs::write(output_path, format!("{} chunks", obj.chunks.len()))?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        let mut writer = io::BufWriter::new(options.open(&output_path)?);
+        obj.write_to(&mut writer)?;
+        writer.flush()?;
     } else {
-        println!("{} chunks", obj.chunks.len());
-        for (index, chunk) in obj.chunks.iter().enumerate() {
-            println!("{index}: {}", chunk.section_name);
-        }
+        dump_object_file(&obj);
     }
     Ok(())
 }
@@ -120,13 +128,13 @@ fn command_db(
     opt_ads_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let mut sim_env = {
-        let file = File::open(&binary_path)?;
+        let file = fs::File::open(&binary_path)?;
         atma::db::load_binary(io::BufReader::new(file))?
     };
     print!("{}", sim_env.description());
     if let Some(ads_path) = opt_ads_path {
         let mut ads_env = {
-            let file = File::open(&ads_path)?;
+            let file = fs::File::open(&ads_path)?;
             let source = io::read_to_string(file)?;
             match AdsEnvironment::create(&source, sim_env, io::stdout()) {
                 Ok(ads_env) => ads_env,
@@ -171,6 +179,39 @@ fn command_db(
                 }
             }
         }
+    }
+}
+
+//===========================================================================//
+
+fn command_obj(objfile_path: PathBuf) -> Result<(), CliError> {
+    let mut reader = io::BufReader::new(fs::File::open(&objfile_path)?);
+    let objfile = ObjectFile::read_from(&mut reader)?;
+    dump_object_file(&objfile);
+    Ok(())
+}
+
+fn dump_object_file(obj: &ObjectFile) {
+    for (index, chunk) in obj.chunks.iter().enumerate() {
+        print!(
+            "Chunk {index}: {:?}, size=${:x}",
+            chunk.section_name, chunk.size
+        );
+        if chunk.align != Align32::default() {
+            print!(", align=${:x}", chunk.align);
+        }
+        if let Some(within) = chunk.within {
+            print!(", within=${within:x}");
+        }
+        for (index, &byte) in chunk.data.iter().enumerate() {
+            match index % 16 {
+                0 => print!("\n  "),
+                8 => print!(" "),
+                _ => {}
+            }
+            print!(" {byte:02x}");
+        }
+        println!();
     }
 }
 
