@@ -3,50 +3,26 @@
 mod expr;
 
 use crate::expr::ExprType;
-use crate::obj::{Align32, BinaryIo, ObjectChunk};
+use crate::obj::{Align32, ObjectChunk, ObjectFile, ObjectSymbol};
 use crate::parse::{
-    AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, ParseError,
+    AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, IdentifierAst,
+    ParseError,
 };
 pub use expr::AsmExpr;
 use expr::AsmTypeEnv;
-use std::io;
 use std::rc::Rc;
 
 //===========================================================================//
 
-/// Represents an object file assembled from a source file.
-pub struct ObjectFile {
-    /// The section chunks to be linked.
-    pub chunks: Vec<ObjectChunk>,
+/// Assembles an object file from source code.
+pub fn assemble_source(source: &str) -> Result<ObjectFile, Vec<ParseError>> {
+    assemble_ast(AsmModuleAst::parse_source(source)?)
 }
 
-impl ObjectFile {
-    /// Assembles an object file from source code.
-    pub fn assemble_source(
-        source: &str,
-    ) -> Result<ObjectFile, Vec<ParseError>> {
-        ObjectFile::assemble_ast(AsmModuleAst::parse_source(source)?)
-    }
-
-    fn assemble_ast(
-        module: AsmModuleAst,
-    ) -> Result<ObjectFile, Vec<ParseError>> {
-        let mut assembler = Assembler::new();
-        assembler.visit_module(&module);
-        assembler.finish()
-    }
-}
-
-impl BinaryIo for ObjectFile {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let chunks = Vec::<ObjectChunk>::read_from(reader)?;
-        Ok(ObjectFile { chunks })
-    }
-
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        self.chunks.write_to(writer)?;
-        Ok(())
-    }
+fn assemble_ast(module: AsmModuleAst) -> Result<ObjectFile, Vec<ParseError>> {
+    let mut assembler = Assembler::new();
+    assembler.visit_module(&module);
+    assembler.finish()
 }
 
 //===========================================================================//
@@ -79,9 +55,22 @@ impl Assembler {
     fn visit_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
             AsmStmtAst::Invoke(_macro) => {} // TODO
-            AsmStmtAst::Label(_id) => {}     // TODO
+            AsmStmtAst::Label(id) => self.visit_label(id),
             AsmStmtAst::Section(section) => self.visit_section(section),
             AsmStmtAst::U8(expr) => self.visit_u8(expr),
+        }
+    }
+
+    fn visit_label(&mut self, id_ast: &IdentifierAst) {
+        if let Some(section_env) = self.section_stack.last_mut() {
+            section_env.symbols.push(ObjectSymbol {
+                name: id_ast.name.clone(),
+                exported: false,
+                offset: section_env.data.len() as u32,
+            });
+        } else {
+            let message = "labels must be within a .SECTION".to_string();
+            self.errors.push(ParseError::new(id_ast.span, message));
         }
     }
 
@@ -127,6 +116,7 @@ impl Assembler {
                 size,
                 align,
                 within,
+                symbols: Rc::from(section_env.symbols),
             });
         }
     }
@@ -208,11 +198,12 @@ impl Assembler {
 
 struct SectionEnv {
     data: Vec<u8>,
+    symbols: Vec<ObjectSymbol>,
 }
 
 impl SectionEnv {
     fn new() -> SectionEnv {
-        SectionEnv { data: Vec::new() }
+        SectionEnv { data: Vec::new(), symbols: Vec::new() }
     }
 }
 

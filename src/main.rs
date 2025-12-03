@@ -1,11 +1,12 @@
 use ariadne::{self, Label, ReportKind, Source};
-use atma::asm::ObjectFile;
+use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::obj::{Align32, BinaryIo};
+use atma::obj::{Align32, BinaryIo, ObjectFile};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -103,7 +104,7 @@ fn command_asm(
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let source = io::read_to_string(fs::File::open(&source_path)?)?;
-    let obj = match ObjectFile::assemble_source(&source) {
+    let obj = match assemble_source(&source) {
         Ok(obj) => obj,
         Err(parse_errors) => {
             return Err(CliError::Parse(source, parse_errors));
@@ -203,13 +204,26 @@ fn dump_object_file(obj: &ObjectFile) {
         if let Some(within) = chunk.within {
             print!(", within=${within:x}");
         }
-        for (index, &byte) in chunk.data.iter().enumerate() {
-            match index % 16 {
+        for symbol in chunk.symbols.iter() {
+            print!("\n  - {:04x} {}", symbol.offset, symbol.name);
+        }
+        let symbol_offsets = chunk
+            .symbols
+            .iter()
+            .map(|symbol| symbol.offset)
+            .collect::<HashSet<u32>>();
+        for (offset, &byte) in chunk.data.iter().enumerate() {
+            match offset % 16 {
                 0 => print!("\n  "),
-                8 => print!(" "),
+                8 => print!("  "),
                 _ => {}
             }
-            print!(" {byte:02x}");
+            let prefix = if symbol_offsets.contains(&(offset as u32)) {
+                ":"
+            } else {
+                " "
+            };
+            print!(" {}{byte:02x}", prefix);
         }
         println!();
     }

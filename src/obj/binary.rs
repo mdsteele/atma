@@ -138,6 +138,22 @@ impl BinaryIo for u8 {
     }
 }
 
+impl BinaryIo for u32 {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        let value = BigUint::read_from(reader)?;
+        value.to_u32().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("expected u32, found {}", value),
+            )
+        })
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        BigUint::from(*self).write_to(writer)
+    }
+}
+
 impl BinaryIo for usize {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let value = BigUint::read_from(reader)?;
@@ -325,6 +341,22 @@ mod tests {
     fn round_trip_bool() {
         assert_round_trips(false);
         assert_round_trips(true);
+    }
+
+    #[test]
+    fn round_trip_u32() {
+        assert_round_trips(0u32);
+        assert_round_trips(1u32);
+        assert_round_trips(2u32);
+        assert_round_trips(63u32);
+        assert_round_trips(64u32);
+        assert_round_trips(65u32);
+        assert_round_trips(127u32);
+        assert_round_trips(128u32);
+        assert_round_trips(129u32);
+        assert_round_trips(1_000u32);
+        assert_round_trips(1_000_000u32);
+        assert_round_trips(1_000_000_000u32);
     }
 
     #[test]

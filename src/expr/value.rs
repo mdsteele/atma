@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn assert_round_trips_value() {
+    fn round_trips_value() {
         assert_round_trips(ExprValue::Boolean(false));
         assert_round_trips(ExprValue::Boolean(true));
         assert_round_trips(int_value(0));
