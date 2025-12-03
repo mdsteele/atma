@@ -3,13 +3,16 @@
 mod expr;
 
 use crate::expr::ExprType;
-use crate::obj::{Align32, ObjectChunk, ObjectFile, ObjectSymbol};
+use crate::obj::{
+    Align32, ObjExpr, ObjectChunk, ObjectFile, ObjectPatch, ObjectSymbol,
+    PatchKind,
+};
 use crate::parse::{
     AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, IdentifierAst,
     ParseError,
 };
-pub use expr::AsmExpr;
 use expr::AsmTypeEnv;
+use num_traits::ToPrimitive;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -58,6 +61,8 @@ impl Assembler {
             AsmStmtAst::Label(id) => self.visit_label(id),
             AsmStmtAst::Section(section) => self.visit_section(section),
             AsmStmtAst::U8(expr) => self.visit_u8(expr),
+            AsmStmtAst::U16le(expr) => self.visit_u16le(expr),
+            AsmStmtAst::U24le(expr) => self.visit_u24le(expr),
         }
     }
 
@@ -117,64 +122,96 @@ impl Assembler {
                 align,
                 within,
                 symbols: Rc::from(section_env.symbols),
+                patches: Rc::from(section_env.patches),
             });
         }
     }
 
+    fn visit_u16le(&mut self, expr_ast: &ExprAst) {
+        let word = self.visit_int_data_directive(PatchKind::U16le, expr_ast);
+        let section_env = self.section_stack.last_mut().unwrap();
+        section_env.data.push(word as u8);
+        section_env.data.push((word >> 8) as u8);
+    }
+
+    fn visit_u24le(&mut self, expr_ast: &ExprAst) {
+        let long = self.visit_int_data_directive(PatchKind::U24le, expr_ast);
+        let section_env = self.section_stack.last_mut().unwrap();
+        section_env.data.push(long as u8);
+        section_env.data.push((long >> 8) as u8);
+        section_env.data.push((long >> 16) as u8);
+    }
+
     fn visit_u8(&mut self, expr_ast: &ExprAst) {
-        if self.section_stack.is_empty() {
-            let message =
-                ".U8 directive must be within a .SECTION".to_string();
-            self.errors.push(ParseError::new(expr_ast.span, message));
-            return;
+        let byte = self.visit_int_data_directive(PatchKind::U8, expr_ast);
+        if let Some(section_env) = self.section_stack.last_mut() {
+            section_env.data.push(byte as u8);
         }
-        let byte = match self.typecheck_expression(expr_ast) {
-            None => 0u8,
-            Some((expr, ExprType::Integer)) => {
-                match expr.static_value() {
-                    Some(value) => {
-                        let bigint = value.clone().unwrap_int();
-                        match u8::try_from(&bigint) {
-                            Ok(byte) => byte,
-                            Err(_) => {
-                                let message =
-                                    ".U8 value is statically out of range \
-                                     (0-255)"
-                                        .to_string();
-                                let label = format!(
-                                    "the value of this expression is {bigint}"
-                                );
-                                self.errors.push(
-                                    ParseError::new(expr_ast.span, message)
-                                        .with_label(expr_ast.span, label),
-                                );
-                                0u8
-                            }
-                        }
-                    }
-                    None => {
-                        // TODO: add rewrite patch to chunk
-                        0u8
-                    }
+    }
+
+    fn visit_int_data_directive(
+        &mut self,
+        kind: PatchKind,
+        expr_ast: &ExprAst,
+    ) -> i64 {
+        if self.section_stack.is_empty() {
+            let message = format!(
+                "{} directive must be within a .SECTION",
+                kind.directive()
+            );
+            self.errors.push(ParseError::new(expr_ast.span, message));
+        }
+        match self.typecheck_expression(expr_ast) {
+            Some((expr, ExprType::Integer)) => match expr.static_value() {
+                Some(value) => {
+                    let range = kind.range();
+                    let bigint = value.clone().unwrap_int();
+                    let opt_value =
+                        bigint.to_i64().filter(|value| range.contains(value));
+                    opt_value.unwrap_or_else(|| {
+                        let message = format!(
+                            "{} value is statically out of range ({}-{})",
+                            kind.directive(),
+                            range.start(),
+                            range.end()
+                        );
+                        let label = format!(
+                            "the value of this expression is {bigint}"
+                        );
+                        self.errors.push(
+                            ParseError::new(expr_ast.span, message)
+                                .with_label(expr_ast.span, label),
+                        );
+                        0
+                    })
                 }
-            }
+                None => {
+                    if let Some(section_env) = self.section_stack.last_mut() {
+                        let offset = section_env.data.len() as u32;
+                        let patch = ObjectPatch { offset, kind, expr };
+                        section_env.patches.push(patch);
+                    }
+                    0
+                }
+            },
             Some((_, ty)) => {
-                let message = ".U8 value must be an integer".to_string();
+                let message =
+                    format!("{} value must be an integer", kind.directive());
                 let label = format!("this expression has type {ty}");
                 self.errors.push(
                     ParseError::new(expr_ast.span, message)
                         .with_label(expr_ast.span, label),
                 );
-                0u8
+                0
             }
-        };
-        self.section_stack.last_mut().unwrap().data.push(byte);
+            None => 0,
+        }
     }
 
     fn typecheck_expression(
         &mut self,
         expr_ast: &ExprAst,
-    ) -> Option<(AsmExpr, ExprType)> {
+    ) -> Option<(ObjExpr, ExprType)> {
         let env = AsmTypeEnv {};
         match env.typecheck_expression(expr_ast) {
             Ok(expr_and_type) => Some(expr_and_type),
@@ -199,11 +236,16 @@ impl Assembler {
 struct SectionEnv {
     data: Vec<u8>,
     symbols: Vec<ObjectSymbol>,
+    patches: Vec<ObjectPatch>,
 }
 
 impl SectionEnv {
     fn new() -> SectionEnv {
-        SectionEnv { data: Vec::new(), symbols: Vec::new() }
+        SectionEnv {
+            data: Vec::new(),
+            symbols: Vec::new(),
+            patches: Vec::new(),
+        }
     }
 }
 

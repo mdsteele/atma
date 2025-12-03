@@ -1,5 +1,6 @@
 use super::align::Align32;
 use super::binary::BinaryIo;
+use super::patch::ObjectPatch;
 use super::symbol::ObjectSymbol;
 use std::io;
 use std::rc::Rc;
@@ -26,6 +27,8 @@ pub struct ObjectChunk {
     pub within: Option<Align32>,
     /// Relative symbols defined in this chunk.
     pub symbols: Rc<[ObjectSymbol]>,
+    /// Patches to apply to this chunk's data when linking.
+    pub patches: Rc<[ObjectPatch]>,
 }
 
 impl BinaryIo for ObjectChunk {
@@ -36,7 +39,16 @@ impl BinaryIo for ObjectChunk {
         let align = Align32::read_from(reader)?;
         let within = Option::<Align32>::read_from(reader)?;
         let symbols = Rc::<[ObjectSymbol]>::read_from(reader)?;
-        Ok(ObjectChunk { section_name, data, size, align, within, symbols })
+        let patches = Rc::<[ObjectPatch]>::read_from(reader)?;
+        Ok(ObjectChunk {
+            section_name,
+            data,
+            size,
+            align,
+            within,
+            symbols,
+            patches,
+        })
     }
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -46,6 +58,7 @@ impl BinaryIo for ObjectChunk {
         self.align.write_to(writer)?;
         self.within.write_to(writer)?;
         self.symbols.write_to(writer)?;
+        self.patches.write_to(writer)?;
         Ok(())
     }
 }

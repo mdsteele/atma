@@ -60,6 +60,10 @@ pub enum AsmStmtAst {
     Section(AsmSectionAst),
     /// A `.U8` directive.
     U8(ExprAst),
+    /// A `.U16LE` directive.
+    U16le(ExprAst),
+    /// A `.U24LE` directive.
+    U24le(ExprAst),
 }
 
 impl AsmStmtAst {
@@ -84,10 +88,20 @@ impl AsmStmtAst {
                 .ignore_then(ExprAst::parser())
                 .then_ignore(linebreak())
                 .map(AsmStmtAst::U8);
+            let u16le_dir = directive(".U16LE")
+                .ignore_then(ExprAst::parser())
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::U16le);
+            let u24le_dir = directive(".U24LE")
+                .ignore_then(ExprAst::parser())
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::U24le);
             chumsky::prelude::choice((
                 label,
                 section_dir,
                 u8_dir,
+                u16le_dir,
+                u24le_dir,
                 AsmMacroLine::parser().map(AsmStmtAst::Invoke),
             ))
         })
