@@ -7,7 +7,7 @@ use std::ops::RangeInclusive;
 
 /// A patch to apply to an object file during linking.
 #[derive(Clone)]
-pub struct ObjectPatch {
+pub struct ObjPatch {
     /// The offset from the start of the chunk to the start of the patch, in
     /// bytes.
     pub offset: u32,
@@ -17,12 +17,12 @@ pub struct ObjectPatch {
     pub expr: ObjExpr,
 }
 
-impl BinaryIo for ObjectPatch {
+impl BinaryIo for ObjPatch {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let offset = u32::read_from(reader)?;
         let kind = PatchKind::read_from(reader)?;
         let expr = ObjExpr::read_from(reader)?;
-        Ok(ObjectPatch { offset, kind, expr })
+        Ok(ObjPatch { offset, kind, expr })
     }
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {

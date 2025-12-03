@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 /// A symbol defined within an object file.
 #[derive(Debug, Eq, PartialEq)]
-pub struct ObjectSymbol {
+pub struct ObjSymbol {
     /// The fully qualified name of the symbol.
     pub name: Rc<str>,
     /// True if this symbol may be imported by other object files during
@@ -16,12 +16,12 @@ pub struct ObjectSymbol {
     pub offset: u32,
 }
 
-impl BinaryIo for ObjectSymbol {
+impl BinaryIo for ObjSymbol {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let name = Rc::<str>::read_from(reader)?;
         let exported = bool::read_from(reader)?;
         let offset = u32::read_from(reader)?;
-        Ok(ObjectSymbol { name, exported, offset })
+        Ok(ObjSymbol { name, exported, offset })
     }
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -36,18 +36,18 @@ impl BinaryIo for ObjectSymbol {
 
 #[cfg(test)]
 mod tests {
-    use super::ObjectSymbol;
+    use super::ObjSymbol;
     use crate::obj::assert_round_trips;
     use std::rc::Rc;
 
     #[test]
     fn round_trips() {
-        assert_round_trips(ObjectSymbol {
+        assert_round_trips(ObjSymbol {
             name: Rc::from(""),
             exported: false,
             offset: 0,
         });
-        assert_round_trips(ObjectSymbol {
+        assert_round_trips(ObjSymbol {
             name: Rc::from("foobar"),
             exported: true,
             offset: 1000,

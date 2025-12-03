@@ -4,8 +4,7 @@ mod expr;
 
 use crate::expr::ExprType;
 use crate::obj::{
-    Align32, ObjExpr, ObjectChunk, ObjectFile, ObjectPatch, ObjectSymbol,
-    PatchKind,
+    Align32, ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjSymbol, PatchKind,
 };
 use crate::parse::{
     AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, IdentifierAst,
@@ -18,11 +17,11 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// Assembles an object file from source code.
-pub fn assemble_source(source: &str) -> Result<ObjectFile, Vec<ParseError>> {
+pub fn assemble_source(source: &str) -> Result<ObjFile, Vec<ParseError>> {
     assemble_ast(AsmModuleAst::parse_source(source)?)
 }
 
-fn assemble_ast(module: AsmModuleAst) -> Result<ObjectFile, Vec<ParseError>> {
+fn assemble_ast(module: AsmModuleAst) -> Result<ObjFile, Vec<ParseError>> {
     let mut assembler = Assembler::new();
     assembler.visit_module(&module);
     assembler.finish()
@@ -31,7 +30,7 @@ fn assemble_ast(module: AsmModuleAst) -> Result<ObjectFile, Vec<ParseError>> {
 //===========================================================================//
 
 struct Assembler {
-    chunks: Vec<ObjectChunk>,
+    chunks: Vec<ObjChunk>,
     errors: Vec<ParseError>,
     section_stack: Vec<SectionEnv>,
 }
@@ -68,7 +67,7 @@ impl Assembler {
 
     fn visit_label(&mut self, id_ast: &IdentifierAst) {
         if let Some(section_env) = self.section_stack.last_mut() {
-            section_env.symbols.push(ObjectSymbol {
+            section_env.symbols.push(ObjSymbol {
                 name: id_ast.name.clone(),
                 exported: false,
                 offset: section_env.data.len() as u32,
@@ -115,7 +114,7 @@ impl Assembler {
         // TODO: error if size is too large
         let size = section_env.data.len() as u32;
         if let Some(section_name) = name {
-            self.chunks.push(ObjectChunk {
+            self.chunks.push(ObjChunk {
                 section_name,
                 data: Rc::from(section_env.data),
                 size,
@@ -188,7 +187,7 @@ impl Assembler {
                 None => {
                     if let Some(section_env) = self.section_stack.last_mut() {
                         let offset = section_env.data.len() as u32;
-                        let patch = ObjectPatch { offset, kind, expr };
+                        let patch = ObjPatch { offset, kind, expr };
                         section_env.patches.push(patch);
                     }
                     0
@@ -222,9 +221,9 @@ impl Assembler {
         }
     }
 
-    fn finish(self) -> Result<ObjectFile, Vec<ParseError>> {
+    fn finish(self) -> Result<ObjFile, Vec<ParseError>> {
         if self.errors.is_empty() {
-            Ok(ObjectFile { chunks: self.chunks })
+            Ok(ObjFile { chunks: self.chunks })
         } else {
             Err(self.errors)
         }
@@ -235,8 +234,8 @@ impl Assembler {
 
 struct SectionEnv {
     data: Vec<u8>,
-    symbols: Vec<ObjectSymbol>,
-    patches: Vec<ObjectPatch>,
+    symbols: Vec<ObjSymbol>,
+    patches: Vec<ObjPatch>,
 }
 
 impl SectionEnv {

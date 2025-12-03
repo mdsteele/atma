@@ -1,6 +1,6 @@
 //! Facilities for linking objects files together into a binary.
 
-use crate::obj::{Align32, ObjectChunk};
+use crate::obj::{Align32, ObjChunk};
 use rangemap::RangeInclusiveSet;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -23,13 +23,12 @@ impl SectionConfig {
     /// chunks relative to the eventual starting address of the section.
     pub fn arrange_chunks(
         &self,
-        chunks: &[&ObjectChunk],
+        chunks: &[&ObjChunk],
     ) -> Result<ArrangedSection, LinkError> {
         let mut sorted = Vec::from(chunks);
         sorted.sort_by(|a, b| b.align.cmp(&a.align));
         let mut range_set = RangeInclusiveSet::<u32>::new();
-        let mut arranged =
-            Vec::<(ObjectChunk, u32)>::with_capacity(chunks.len());
+        let mut arranged = Vec::<(ObjChunk, u32)>::with_capacity(chunks.len());
         let mut align = self.align;
         for chunk in sorted {
             align = align.max(chunk.align);
@@ -79,7 +78,7 @@ pub struct ArrangedSection {
     pub size: u32,
     /// The chunks in this section, along with their byte offsets relative to
     /// the starting address of the section.
-    pub chunks: Rc<[(ObjectChunk, u32)]>,
+    pub chunks: Rc<[(ObjChunk, u32)]>,
 }
 
 //===========================================================================//

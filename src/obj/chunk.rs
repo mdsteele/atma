@@ -1,7 +1,7 @@
 use super::align::Align32;
 use super::binary::BinaryIo;
-use super::patch::ObjectPatch;
-use super::symbol::ObjectSymbol;
+use super::patch::ObjPatch;
+use super::symbol::ObjSymbol;
 use std::io;
 use std::rc::Rc;
 
@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 /// Represents one data chunk of an object file.
 #[derive(Clone)]
-pub struct ObjectChunk {
+pub struct ObjChunk {
     /// The name of the linker section to which this chunk belongs.
     pub section_name: Rc<str>,
     /// Static data (before rewrite rules are applied) at the start of this
@@ -26,21 +26,21 @@ pub struct ObjectChunk {
     /// alignment boundary of this size within its address space.
     pub within: Option<Align32>,
     /// Relative symbols defined in this chunk.
-    pub symbols: Rc<[ObjectSymbol]>,
+    pub symbols: Rc<[ObjSymbol]>,
     /// Patches to apply to this chunk's data when linking.
-    pub patches: Rc<[ObjectPatch]>,
+    pub patches: Rc<[ObjPatch]>,
 }
 
-impl BinaryIo for ObjectChunk {
+impl BinaryIo for ObjChunk {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let section_name = Rc::<str>::read_from(reader)?;
         let data = Rc::<[u8]>::read_from(reader)?;
         let size = u32::read_from(reader)?;
         let align = Align32::read_from(reader)?;
         let within = Option::<Align32>::read_from(reader)?;
-        let symbols = Rc::<[ObjectSymbol]>::read_from(reader)?;
-        let patches = Rc::<[ObjectPatch]>::read_from(reader)?;
-        Ok(ObjectChunk {
+        let symbols = Rc::<[ObjSymbol]>::read_from(reader)?;
+        let patches = Rc::<[ObjPatch]>::read_from(reader)?;
+        Ok(ObjChunk {
             section_name,
             data,
             size,

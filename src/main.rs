@@ -2,7 +2,7 @@ use ariadne::{self, Label, ReportKind, Source};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::obj::{Align32, BinaryIo, ObjectFile};
+use atma::obj::{Align32, BinaryIo, ObjFile};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
@@ -187,12 +187,12 @@ fn command_db(
 
 fn command_obj(objfile_path: PathBuf) -> Result<(), CliError> {
     let mut reader = io::BufReader::new(fs::File::open(&objfile_path)?);
-    let objfile = ObjectFile::read_from(&mut reader)?;
+    let objfile = ObjFile::read_from(&mut reader)?;
     dump_object_file(&objfile);
     Ok(())
 }
 
-fn dump_object_file(obj: &ObjectFile) {
+fn dump_object_file(obj: &ObjFile) {
     for (index, chunk) in obj.chunks.iter().enumerate() {
         print!(
             "Chunk {index}: {:?}, size=${:x}",

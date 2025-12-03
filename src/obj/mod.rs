@@ -10,12 +10,12 @@ mod symbol;
 
 pub use align::Align32;
 pub use binary::BinaryIo;
-pub use chunk::ObjectChunk;
+pub use chunk::ObjChunk;
 pub use expr::ObjExpr;
 pub(crate) use expr::ObjExprOp;
-pub use file::ObjectFile;
-pub use patch::{ObjectPatch, PatchKind};
-pub use symbol::ObjectSymbol;
+pub use file::ObjFile;
+pub use patch::{ObjPatch, PatchKind};
+pub use symbol::ObjSymbol;
 
 #[cfg(test)]
 pub(crate) use binary::assert_round_trips;
