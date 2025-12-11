@@ -3,7 +3,7 @@
 use super::atom::{PError, keyword, linebreak, symbol};
 use super::expr::{ExprAst, IdentifierAst};
 use super::lvalue::LValueAst;
-use crate::parse::{ParseError, Token, TokenLexer, TokenValue};
+use crate::parse::{ParseError, ParseResult, Token, TokenLexer, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
@@ -17,9 +17,7 @@ pub struct AdsModuleAst {
 impl AdsModuleAst {
     /// Reads the abstract syntax tree for an Atma Debugger Script module from
     /// a file.
-    pub fn parse_source(
-        source: &str,
-    ) -> Result<AdsModuleAst, Vec<ParseError>> {
+    pub fn parse_source(source: &str) -> ParseResult<AdsModuleAst> {
         let lexer = TokenLexer::new(source);
         let tokens: Vec<Token> =
             lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
@@ -27,7 +25,7 @@ impl AdsModuleAst {
     }
 
     /// Parses a sequence of tokens into an Atma Debugger Script module.
-    pub fn parse(tokens: &[Token]) -> Result<AdsModuleAst, Vec<ParseError>> {
+    pub fn parse(tokens: &[Token]) -> ParseResult<AdsModuleAst> {
         AdsModuleAst::parser().parse(tokens).into_result().map_err(|errors| {
             errors
                 .into_iter()

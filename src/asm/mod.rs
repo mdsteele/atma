@@ -8,7 +8,7 @@ use crate::obj::{
 };
 use crate::parse::{
     AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, IdentifierAst,
-    ParseError,
+    ParseError, ParseResult,
 };
 use expr::AsmTypeEnv;
 use num_traits::ToPrimitive;
@@ -17,11 +17,11 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// Assembles an object file from source code.
-pub fn assemble_source(source: &str) -> Result<ObjFile, Vec<ParseError>> {
+pub fn assemble_source(source: &str) -> ParseResult<ObjFile> {
     assemble_ast(AsmModuleAst::parse_source(source)?)
 }
 
-fn assemble_ast(module: AsmModuleAst) -> Result<ObjFile, Vec<ParseError>> {
+fn assemble_ast(module: AsmModuleAst) -> ParseResult<ObjFile> {
     let mut assembler = Assembler::new();
     assembler.visit_module(&module);
     assembler.finish()
@@ -221,7 +221,7 @@ impl Assembler {
         }
     }
 
-    fn finish(self) -> Result<ObjFile, Vec<ParseError>> {
+    fn finish(self) -> ParseResult<ObjFile> {
         if self.errors.is_empty() {
             Ok(ObjFile { chunks: self.chunks })
         } else {

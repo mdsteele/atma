@@ -1,7 +1,7 @@
 //! Facilities for parsing expressions.
 
 use super::atom::{PError, symbol};
-use crate::parse::{ParseError, SrcSpan, Token, TokenValue};
+use crate::parse::{ParseError, ParseResult, SrcSpan, Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -251,7 +251,7 @@ fn str_literal<'a>()
 //===========================================================================//
 
 /// Parses a sequence of tokens into an abstract syntax tree for an expression.
-pub fn parse_expr(tokens: &[Token]) -> Result<ExprAst, Vec<ParseError>> {
+pub fn parse_expr(tokens: &[Token]) -> ParseResult<ExprAst> {
     assert!(!tokens.is_empty());
     ExprAst::parser().parse(tokens).into_result().map_err(|errors| {
         errors
@@ -274,12 +274,12 @@ pub fn parse_expr(tokens: &[Token]) -> Result<ExprAst, Vec<ParseError>> {
 #[cfg(test)]
 mod tests {
     use super::{BinOpAst, ExprAst, ExprAstNode, parse_expr};
-    use crate::parse::{ParseError, SrcSpan, Token, TokenLexer};
+    use crate::parse::{ParseError, ParseResult, SrcSpan, Token, TokenLexer};
     use num_bigint::BigInt;
     use std::ops::Range;
     use std::rc::Rc;
 
-    fn parse(input: &str) -> Result<ExprAst, Vec<ParseError>> {
+    fn parse(input: &str) -> ParseResult<ExprAst> {
         parse_expr(
             &TokenLexer::new(input)
                 .collect::<Result<Vec<Token>, ParseError>>()

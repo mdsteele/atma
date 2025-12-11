@@ -1,4 +1,5 @@
-use super::lex::{Token, TokenValue};
+use super::lex::{Token, TokenLexer, TokenValue};
+use super::types::{ParseError, ParseResult};
 use chumsky::{self, Parser};
 
 //===========================================================================//
@@ -6,6 +7,36 @@ use chumsky::{self, Parser};
 /// The error type used for `chumsky::Parser`s in this crate.
 pub(crate) type PError<'a> =
     chumsky::extra::Err<chumsky::error::Rich<'a, Token>>;
+
+//===========================================================================//
+
+pub(crate) fn tokenize(source: &str) -> ParseResult<Vec<Token>> {
+    let lexer = TokenLexer::new(source);
+    lexer.collect::<Result<_, _>>().map_err(|error| vec![error])
+}
+
+pub(crate) fn parse_tokens<'a, T, P>(
+    parser: P,
+    tokens: &'a [Token],
+) -> ParseResult<T>
+where
+    P: Parser<'a, &'a [Token], T, PError<'a>>,
+{
+    parser.parse(tokens).into_result().map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| {
+                let index = error.span().start;
+                let span = if index < tokens.len() {
+                    tokens[index].span
+                } else {
+                    tokens[tokens.len() - 1].span.end_span()
+                };
+                ParseError::new(span, format!("{error:?}"))
+            })
+            .collect()
+    })
+}
 
 //===========================================================================//
 

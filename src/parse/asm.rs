@@ -1,9 +1,11 @@
 //! Facilities for parsing assembly source code.
 
-use super::atom::{PError, directive, linebreak, symbol};
+use super::atom::{
+    PError, directive, linebreak, parse_tokens, symbol, tokenize,
+};
 use super::expr::{ExprAst, IdentifierAst};
-use super::lex::{Token, TokenLexer, TokenValue};
-use super::types::ParseError;
+use super::lex::{Token, TokenValue};
+use super::types::ParseResult;
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
@@ -17,32 +19,13 @@ pub struct AsmModuleAst {
 
 impl AsmModuleAst {
     /// Parses assembly source code.
-    pub fn parse_source(
-        source: &str,
-    ) -> Result<AsmModuleAst, Vec<ParseError>> {
-        let lexer = TokenLexer::new(source);
-        let tokens: Vec<Token> =
-            lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
-        AsmStmtAst::parser()
+    pub fn parse_source(source: &str) -> ParseResult<AsmModuleAst> {
+        let tokens = tokenize(source)?;
+        let parser = AsmStmtAst::parser()
             .repeated()
             .collect::<Vec<_>>()
-            .map(|statements| AsmModuleAst { statements })
-            .parse(&tokens)
-            .into_result()
-            .map_err(|errors| {
-                errors
-                    .into_iter()
-                    .map(|error| {
-                        let index = error.span().start;
-                        let span = if index < tokens.len() {
-                            tokens[index].span
-                        } else {
-                            tokens[tokens.len() - 1].span.end_span()
-                        };
-                        ParseError::new(span, format!("{error:?}"))
-                    })
-                    .collect()
-            })
+            .map(|statements| AsmModuleAst { statements });
+        parse_tokens(parser, &tokens)
     }
 }
 

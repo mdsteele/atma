@@ -2,6 +2,7 @@ use ariadne::{self, Label, ReportKind, Source};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
+use atma::link::LinkConfig;
 use atma::obj::{Align32, BinaryIo, ObjFile};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
@@ -37,6 +38,16 @@ enum Command {
         binary: PathBuf,
         /// The debugger script to run, or none for interactive mode.
         script: Option<PathBuf>,
+    },
+    /// Links object files together.
+    Ld {
+        /// The linker configuration file.
+        config: PathBuf,
+        /// The object files to link together.
+        objects: Vec<PathBuf>,
+        /// The path of the output file.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
     /// Displays information from an object file.
     Obj {
@@ -78,6 +89,9 @@ fn run_cli() -> Result<(), ExitCode> {
     let result = match Cli::parse().command {
         Command::Asm { source, output } => command_asm(source, output),
         Command::Db { binary, script } => command_db(binary, script),
+        Command::Ld { config, objects, output } => {
+            command_ld(config, objects, output)
+        }
         Command::Obj { objfile } => command_obj(objfile),
     };
     match result {
@@ -181,6 +195,22 @@ fn command_db(
             }
         }
     }
+}
+
+//===========================================================================//
+
+fn command_ld(
+    config_path: PathBuf,
+    _objfile_paths: Vec<PathBuf>,
+    _opt_output_path: Option<PathBuf>,
+) -> Result<(), CliError> {
+    let config = {
+        let source = io::read_to_string(fs::File::open(&config_path)?)?;
+        LinkConfig::from_source(&source)
+            .map_err(|parse_errors| CliError::Parse(source, parse_errors))?
+    };
+    println!("{config:?}");
+    Ok(())
 }
 
 //===========================================================================//

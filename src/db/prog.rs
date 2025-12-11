@@ -5,7 +5,7 @@ use crate::bus::WatchKind;
 use crate::expr::{ExprType, ExprValue};
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
-    IdentifierAst, LValueAst, LValueAstNode, ParseError, SrcSpan,
+    IdentifierAst, LValueAst, LValueAstNode, ParseError, ParseResult, SrcSpan,
 };
 use std::rc::Rc;
 
@@ -21,7 +21,7 @@ impl AdsProgram {
     pub fn compile_source(
         source: &str,
         sim_env: &SimEnv,
-    ) -> Result<AdsProgram, Vec<ParseError>> {
+    ) -> ParseResult<AdsProgram> {
         AdsProgram::compile_ast(AdsModuleAst::parse_source(source)?, sim_env)
     }
 
@@ -30,7 +30,7 @@ impl AdsProgram {
     fn compile_ast(
         module: AdsModuleAst,
         sim_env: &SimEnv,
-    ) -> Result<AdsProgram, Vec<ParseError>> {
+    ) -> ParseResult<AdsProgram> {
         let mut compiler = AdsCompiler::new(sim_env);
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions);

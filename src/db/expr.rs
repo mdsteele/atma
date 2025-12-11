@@ -1,7 +1,7 @@
 use super::env::SimEnv;
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::expr::{ExprCompiler, ExprEnv, ExprType, ExprValue};
-use crate::parse::{ExprAst, IdentifierAst, ParseError, SrcSpan};
+use crate::parse::{ExprAst, IdentifierAst, ParseError, ParseResult, SrcSpan};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -192,8 +192,10 @@ impl<'a> AdsTypeEnv<'a> {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> Result<(Vec<AdsInstruction>, ExprType), Vec<ParseError>> {
-        ExprCompiler::new(self).typecheck(&expr)
+    ) -> ParseResult<(Vec<AdsInstruction>, ExprType)> {
+        let (ops, expr_type, _static_value) =
+            ExprCompiler::new(self).typecheck(&expr)?;
+        Ok((ops, expr_type))
     }
 }
 
@@ -204,7 +206,7 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         &self,
         span: SrcSpan,
         id: &str,
-    ) -> Result<(Self::Op, ExprType, Option<ExprValue>), Vec<ParseError>> {
+    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)> {
         if let Some((frame_ref, decl)) = self.get_declaration(id) {
             let op = AdsInstruction::GetValue(frame_ref, decl.stack_index);
             let expr_type = decl.var_type.clone();

@@ -3,7 +3,7 @@ use super::prog::AdsProgram;
 use crate::bus::WatchId;
 use crate::db::SimEnv;
 use crate::expr::ExprValue;
-use crate::parse::ParseError;
+use crate::parse::ParseResult;
 use crate::proc::SimBreak;
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -63,7 +63,7 @@ impl<W: Write> AdsEnvironment<W> {
         source: &str,
         sim: SimEnv,
         output: W,
-    ) -> Result<AdsEnvironment<W>, Vec<ParseError>> {
+    ) -> ParseResult<AdsEnvironment<W>> {
         let program = AdsProgram::compile_source(source, &sim)?;
         Ok(AdsEnvironment {
             sim,

@@ -1,6 +1,8 @@
 use super::binop::ExprBinOp;
 use super::value::{ExprType, ExprValue};
-use crate::parse::{BinOpAst, ExprAst, ExprAstNode, ParseError, SrcSpan};
+use crate::parse::{
+    BinOpAst, ExprAst, ExprAstNode, ParseError, ParseResult, SrcSpan,
+};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -13,7 +15,7 @@ pub(crate) trait ExprEnv {
         &self,
         span: SrcSpan,
         id: &str,
-    ) -> Result<(Self::Op, ExprType, Option<ExprValue>), Vec<ParseError>>;
+    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)>;
 }
 
 /// A type that represents a single operation for an expression stack machine.
@@ -62,7 +64,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     pub(crate) fn typecheck(
         mut self,
         expr: &ExprAst,
-    ) -> Result<(Vec<E::Op>, ExprType), Vec<ParseError>> {
+    ) -> ParseResult<(Vec<E::Op>, ExprType, Option<ExprValue>)> {
         let mut stack = vec![expr];
         let mut subexprs = Vec::<&ExprAst>::new();
         while let Some(subexpr) = stack.pop() {
@@ -89,7 +91,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
         debug_assert_eq!(self.types.len(), 1);
         if self.errors.is_empty() {
-            Ok((self.ops, self.types.pop().unwrap().0))
+            let (expr_type, static_value) = self.types.pop().unwrap();
+            Ok((self.ops, expr_type, static_value))
         } else {
             Err(self.errors)
         }
@@ -178,10 +181,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     fn typecheck_identifier(&mut self, span: SrcSpan, id: &str) {
         match self.env.typecheck_identifier(span, id) {
             Ok((op, id_type, id_static)) => {
-                if id_static.is_some() {
-                    debug_assert!(!self.ops.is_empty());
-                    self.ops.pop();
-                }
                 self.ops.push(op);
                 self.types.push((id_type, id_static));
             }

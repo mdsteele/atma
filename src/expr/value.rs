@@ -8,10 +8,11 @@ use std::rc::Rc;
 
 const TAG_FALSE: u8 = 0;
 const TAG_TRUE: u8 = 1;
-const TAG_INTEGER: u8 = 2;
-const TAG_LIST: u8 = 3;
-const TAG_STRING: u8 = 4;
-const TAG_TUPLE: u8 = 5;
+const TAG_ENTITY: u8 = 2;
+const TAG_INTEGER: u8 = 3;
+const TAG_LIST: u8 = 4;
+const TAG_STRING: u8 = 5;
+const TAG_TUPLE: u8 = 6;
 
 //===========================================================================//
 
@@ -22,6 +23,9 @@ pub enum ExprType {
     Boolean,
     /// The bottom type, used for expressions that don't typecheck.
     Bottom,
+    /// An opaque object, of a kind described by the given human-readable
+    /// string.
+    Entity(Rc<str>),
     /// The integer type.
     Integer,
     /// A homogenous list type.
@@ -37,6 +41,7 @@ impl fmt::Display for ExprType {
         match self {
             ExprType::Boolean => f.write_str("bool"),
             ExprType::Bottom => f.write_str("bottom"),
+            ExprType::Entity(kind) => f.write_str(kind),
             ExprType::List(element) => {
                 f.write_str("{")?;
                 element.fmt(f)?;
@@ -61,6 +66,9 @@ impl fmt::Display for ExprType {
 pub enum ExprValue {
     /// A boolean value (false or true).
     Boolean(bool),
+    /// An opaque object with the specified human-readable string
+    /// representation.
+    Entity(Rc<str>),
     /// An integer value (with no minimum/maximum range).
     Integer(BigInt),
     /// A list value.  All elements must be of the same type.
@@ -81,6 +89,15 @@ impl ExprValue {
         }
     }
 
+    /// Returns the representation string of the contained entity value, or
+    /// panics if this value is not an entity.
+    pub fn unwrap_entity(self) -> Rc<str> {
+        match self {
+            ExprValue::Entity(repr) => repr,
+            value => panic!("ExprValue::unwrap_entity on {value:?}"),
+        }
+    }
+
     /// Returns the contained [`Integer`](ExprValue::Integer) value, or panics
     /// if this value is not an integer.
     pub fn unwrap_int(self) -> BigInt {
@@ -90,8 +107,8 @@ impl ExprValue {
         }
     }
 
-    /// Returns the contained [`List`](ExprValue::List) value, or panics if this
-    /// value is not a list.
+    /// Returns the contained [`List`](ExprValue::List) value, or panics if
+    /// this value is not a list.
     pub fn unwrap_list(self) -> Rc<[ExprValue]> {
         match self {
             ExprValue::List(values) => values,
@@ -108,8 +125,8 @@ impl ExprValue {
         }
     }
 
-    /// Returns the contained [`List`](ExprValue::List) value, or panics if this
-    /// value is not a list.
+    /// Returns the contained [`List`](ExprValue::List) value, or panics if
+    /// this value is not a list.
     pub fn unwrap_tuple(self) -> Rc<[ExprValue]> {
         match self {
             ExprValue::Tuple(values) => values,
@@ -123,6 +140,7 @@ impl BinaryIo for ExprValue {
         match u8::read_from(reader)? {
             TAG_FALSE => Ok(ExprValue::Boolean(false)),
             TAG_TRUE => Ok(ExprValue::Boolean(true)),
+            TAG_ENTITY => Ok(ExprValue::Entity(Rc::<str>::read_from(reader)?)),
             TAG_INTEGER => Ok(ExprValue::Integer(BigInt::read_from(reader)?)),
             TAG_LIST => {
                 Ok(ExprValue::List(Rc::<[ExprValue]>::read_from(reader)?))
@@ -142,6 +160,10 @@ impl BinaryIo for ExprValue {
         match self {
             ExprValue::Boolean(false) => TAG_FALSE.write_to(writer),
             ExprValue::Boolean(true) => TAG_TRUE.write_to(writer),
+            ExprValue::Entity(repr) => {
+                TAG_ENTITY.write_to(writer)?;
+                repr.write_to(writer)
+            }
             ExprValue::Integer(integer) => {
                 TAG_INTEGER.write_to(writer)?;
                 integer.write_to(writer)
@@ -172,6 +194,7 @@ impl fmt::Display for ExprValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExprValue::Boolean(value) => write!(f, "%{value}"),
+            ExprValue::Entity(repr) => f.write_str(repr),
             ExprValue::Integer(value) => value.fmt(f),
             ExprValue::List(values) => {
                 f.write_str("{")?;

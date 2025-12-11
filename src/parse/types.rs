@@ -36,6 +36,11 @@ impl SrcSpan {
 
 //===========================================================================//
 
+/// A specialized `Result` type for parsing operations.
+pub type ParseResult<V> = Result<V, Vec<ParseError>>;
+
+//===========================================================================//
+
 /// An error encountered while parsing a source code file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {

@@ -1,6 +1,7 @@
 use crate::expr::{ExprCompiler, ExprEnv, ExprType, ExprValue};
 use crate::obj::{ObjExpr, ObjExprOp};
-use crate::parse::{ExprAst, ParseError, SrcSpan};
+use crate::parse::{ExprAst, ParseError, ParseResult, SrcSpan};
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -10,11 +11,11 @@ impl AsmTypeEnv {
     pub fn typecheck_expression(
         &self,
         expr: &ExprAst,
-    ) -> Result<(ObjExpr, ExprType), Vec<ParseError>> {
+    ) -> ParseResult<(ObjExpr, ExprType)> {
         match ExprCompiler::new(self).typecheck(expr) {
-            Ok((ops, ty)) => {
+            Ok((ops, expr_type, _static_value)) => {
                 debug_assert!(!ops.is_empty());
-                Ok((ObjExpr { ops }, ty))
+                Ok((ObjExpr { ops: Rc::from(ops) }, expr_type))
             }
             Err(errors) => Err(errors),
         }
@@ -28,7 +29,7 @@ impl ExprEnv for AsmTypeEnv {
         &self,
         span: SrcSpan,
         _id: &str,
-    ) -> Result<(Self::Op, ExprType, Option<ExprValue>), Vec<ParseError>> {
+    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)> {
         let message = "TODO: support identifiers".to_string();
         Err(vec![ParseError::new(span, message)])
     }

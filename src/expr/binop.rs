@@ -1,5 +1,5 @@
 use crate::expr::{ExprType, ExprValue};
-use crate::parse::{BinOpAst, ParseError, SrcSpan};
+use crate::parse::{BinOpAst, ParseError, ParseResult, SrcSpan};
 
 //===========================================================================//
 
@@ -18,7 +18,7 @@ impl ExprBinOp {
         lhs_type: ExprType,
         rhs_span: SrcSpan,
         rhs_type: ExprType,
-    ) -> Result<(ExprBinOp, ExprType), Vec<ParseError>> {
+    ) -> ParseResult<(ExprBinOp, ExprType)> {
         match (op, lhs_type, rhs_type) {
             (BinOpAst::Plus, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntPlus, ExprType::Integer))

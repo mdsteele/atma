@@ -1,4 +1,6 @@
 use super::binary::BinaryIo;
+use num_bigint::{BigInt, BigUint, Sign};
+use num_traits::ToPrimitive;
 use std::fmt;
 use std::io;
 use std::num::NonZero;
@@ -110,17 +112,57 @@ impl From<Align32> for u32 {
 }
 
 impl TryFrom<u32> for Align32 {
-    type Error = ();
+    type Error = AlignTryFromError;
 
-    fn try_from(value: u32) -> Result<Align32, ()> {
+    fn try_from(value: u32) -> Result<Align32, AlignTryFromError> {
         if let Some(nonzero) = NonZero::new(value)
             && nonzero.is_power_of_two()
         {
             Ok(Align32(nonzero))
         } else {
-            Err(())
+            Err(AlignTryFromError::NotAPowerOfTwo)
         }
     }
+}
+
+impl TryFrom<&BigUint> for Align32 {
+    type Error = AlignTryFromError;
+
+    fn try_from(value: &BigUint) -> Result<Align32, AlignTryFromError> {
+        match value.to_u32() {
+            Some(int) => Align32::try_from(int),
+            None => Err(if value.count_ones() == 1 {
+                AlignTryFromError::TooLargePowerOfTwo
+            } else {
+                AlignTryFromError::NotAPowerOfTwo
+            }),
+        }
+    }
+}
+
+impl TryFrom<&BigInt> for Align32 {
+    type Error = AlignTryFromError;
+
+    fn try_from(value: &BigInt) -> Result<Align32, AlignTryFromError> {
+        if let Sign::Minus = value.sign() {
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        } else {
+            Align32::try_from(value.magnitude())
+        }
+    }
+}
+
+//===========================================================================//
+
+/// The error for when a conversion to [Align32] fails.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AlignTryFromError {
+    /// The value to be converted wasn't a power of two, and so can't be used
+    /// as an alignment.
+    NotAPowerOfTwo,
+    /// The value to be converted was too large a power of two to fit in an
+    /// [Align32].
+    TooLargePowerOfTwo,
 }
 
 //===========================================================================//
