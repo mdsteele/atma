@@ -84,7 +84,11 @@ impl<W: Write> AdsEnvironment<W> {
                 debug_assert!(self.value_stack.len() >= 2);
                 let rhs = self.value_stack.pop().unwrap();
                 let lhs = self.value_stack.pop().unwrap();
-                self.value_stack.push(binop.evaluate(lhs, rhs));
+                match binop.evaluate(lhs, rhs) {
+                    Ok(result) => self.value_stack.push(result),
+                    // TODO: include error details
+                    Err(_) => return Err(AdsRuntimeError {}),
+                }
             }
             AdsInstruction::BranchUnless(offset) => {
                 if !self.value_stack.pop().unwrap().unwrap_bool() {
@@ -213,6 +217,11 @@ impl<W: Write> AdsEnvironment<W> {
                 let items = self.value_stack.pop().unwrap().unwrap_tuple();
                 debug_assert!(index < items.len());
                 self.value_stack.push(items[index].clone());
+            }
+            AdsInstruction::UnOp(unop) => {
+                debug_assert!(!self.value_stack.is_empty());
+                let sub = self.value_stack.pop().unwrap();
+                self.value_stack.push(unop.evaluate(sub));
             }
         }
         self.pc += 1;

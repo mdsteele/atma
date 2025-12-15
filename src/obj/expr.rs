@@ -1,5 +1,5 @@
 use super::binary::BinaryIo;
-use crate::expr::{ExprBinOp, ExprOp, ExprValue};
+use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
 use std::io;
 use std::rc::Rc;
 
@@ -161,6 +161,10 @@ impl ExprOp for ObjExprOp {
 
     fn tuple_item(index: usize) -> Self {
         ObjExprOp::TupleItem(index)
+    }
+
+    fn unary_operation(_unop: ExprUnOp) -> Self {
+        todo!()
     }
 }
 

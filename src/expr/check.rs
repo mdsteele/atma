@@ -1,7 +1,8 @@
-use super::binop::ExprBinOp;
+use super::binop::{ExprBinOp, ExprBinOpEvalError};
+use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::parse::{
-    BinOpAst, ExprAst, ExprAstNode, ParseError, ParseResult, SrcSpan,
+    BinOpAst, ExprAst, ExprAstNode, ParseError, ParseResult, SrcSpan, UnOpAst,
 };
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -40,6 +41,10 @@ pub(crate) trait ExprOp {
 
     /// Returns an operation to index into a tuple.
     fn tuple_item(index: usize) -> Self;
+
+    /// Returns an operation to modify the top stack value with the specified
+    /// unary operation.
+    fn unary_operation(unop: ExprUnOp) -> Self;
 }
 
 //===========================================================================//
@@ -84,6 +89,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 ExprAstNode::ListLiteral(items) => stack.extend(items),
                 ExprAstNode::StrLiteral(_) => {}
                 ExprAstNode::TupleLiteral(items) => stack.extend(items),
+                ExprAstNode::UnOp(_, sub) => stack.push(sub),
             }
         }
         for subexpr in subexprs.into_iter().rev() {
@@ -133,6 +139,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             ExprAstNode::TupleLiteral(item_asts) => {
                 self.typecheck_tuple_literal(item_asts);
             }
+            ExprAstNode::UnOp(unop_ast, sub_ast) => {
+                self.typecheck_unop_node(*unop_ast, sub_ast);
+            }
         }
     }
 
@@ -149,12 +158,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             self.types.push((ExprType::Bottom, None));
             return;
         }
+        let lhs_span = lhs_ast.span;
+        let rhs_span = rhs_ast.span;
         match ExprBinOp::typecheck(
-            binop_ast,
-            lhs_ast.span,
-            lhs_type,
-            rhs_ast.span,
-            rhs_type,
+            binop_ast, lhs_span, lhs_type, rhs_span, rhs_type,
         ) {
             Ok((binop, result_type)) => {
                 if let Some(lhs_value) = lhs_static
@@ -163,9 +170,17 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     debug_assert!(self.ops.len() >= 2);
                     self.ops.pop();
                     self.ops.pop();
-                    let result_value = binop.evaluate(lhs_value, rhs_value);
-                    self.ops.push(E::Op::literal(result_value.clone()));
-                    self.types.push((result_type, Some(result_value)));
+                    match binop.evaluate(lhs_value, rhs_value) {
+                        Ok(result_value) => {
+                            self.ops
+                                .push(E::Op::literal(result_value.clone()));
+                            self.types.push((result_type, Some(result_value)));
+                        }
+                        Err(error) => {
+                            self.binop_eval_error(error, lhs_span, rhs_span);
+                            self.types.push((result_type, None));
+                        }
+                    }
                 } else {
                     self.ops.push(E::Op::binary_operation(binop));
                     self.types.push((result_type, None));
@@ -374,6 +389,37 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         self.types.push((ExprType::Tuple(Rc::from(item_types)), static_value));
     }
 
+    fn typecheck_unop_node(
+        &mut self,
+        unop_ast: (SrcSpan, UnOpAst),
+        sub_ast: &ExprAst,
+    ) {
+        debug_assert!(!self.types.is_empty());
+        let (sub_type, sub_static) = self.types.pop().unwrap();
+        if sub_type == ExprType::Bottom {
+            self.types.push((ExprType::Bottom, None));
+            return;
+        }
+        match ExprUnOp::typecheck(unop_ast, sub_ast.span, sub_type) {
+            Ok((unop, result_type)) => {
+                if let Some(sub_value) = sub_static {
+                    debug_assert!(!self.ops.is_empty());
+                    self.ops.pop();
+                    let result_value = unop.evaluate(sub_value);
+                    self.ops.push(E::Op::literal(result_value.clone()));
+                    self.types.push((result_type, Some(result_value)));
+                } else {
+                    self.ops.push(E::Op::unary_operation(unop));
+                    self.types.push((result_type, None));
+                }
+            }
+            Err(mut errors) => {
+                self.errors.append(&mut errors);
+                self.types.push((ExprType::Bottom, None));
+            }
+        }
+    }
+
     fn pop_types(
         &mut self,
         num_items: usize,
@@ -382,6 +428,58 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (item_types, static_values): (Vec<_>, Vec<Option<_>>) =
             self.types.drain((self.types.len() - num_items)..).unzip();
         (item_types, static_values.into_iter().collect())
+    }
+
+    fn binop_eval_error(
+        &mut self,
+        error: ExprBinOpEvalError,
+        _lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
+    ) {
+        match error {
+            ExprBinOpEvalError::DivideByZero => {
+                let message = "cannot divide by zero".to_string();
+                let label = "the value of this expression is 0".to_string();
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
+            ExprBinOpEvalError::ModByZero => {
+                let message = "cannot modulo by zero".to_string();
+                let label = "the value of this expression is 0".to_string();
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
+            ExprBinOpEvalError::PowNegativeExponent(exponent) => {
+                let message = "exponent must be non-negative".to_string();
+                let label =
+                    format!("the value of this expression is {exponent}");
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
+            ExprBinOpEvalError::BitShiftByNegative(shift) => {
+                let message =
+                    "cannot shift by a negative number of bits".to_string();
+                let label = format!("the value of this expression is {shift}");
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
+            ExprBinOpEvalError::BitShiftOutOfRange(shift) => {
+                let message = "shift by too many bits".to_string();
+                let label = format!("the value of this expression is {shift}");
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
+        }
     }
 }
 

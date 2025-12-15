@@ -1,5 +1,5 @@
 use crate::bus::WatchKind;
-use crate::expr::{ExprBinOp, ExprOp, ExprValue};
+use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
 
 //===========================================================================//
 
@@ -84,6 +84,10 @@ pub enum AdsInstruction {
     /// the specified item from that tuple, then pushes that item onto the
     /// value stack.
     TupleItem(usize),
+    /// Pops the top value from the value stack, evaluates the specified unary
+    /// operation using that value, then pushes the result onto the value
+    /// stack.
+    UnOp(ExprUnOp),
 }
 
 impl ExprOp for AdsInstruction {
@@ -109,6 +113,10 @@ impl ExprOp for AdsInstruction {
 
     fn tuple_item(index: usize) -> Self {
         AdsInstruction::TupleItem(index)
+    }
+
+    fn unary_operation(unop: ExprUnOp) -> Self {
+        AdsInstruction::UnOp(unop)
     }
 }
 

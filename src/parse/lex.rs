@@ -113,10 +113,18 @@ fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> Rc<str> {
 #[logos(extras = LexerState)]
 #[logos(skip r"[ \t]+")] // whitespace
 #[logos(skip r";[^\n]*")] // comments
-#[logos(source = str)]
+#[logos(utf8 = true)]
 enum TokenKind {
+    #[token("&")]
+    And,
+    #[token("&&")]
+    AndAnd,
     #[token("\\", backslash_callback)]
     Backslash,
+    #[token("!")]
+    Bang,
+    #[token("!=")]
+    BangEquals,
     #[token("%false")]
     BoolLiteralFalse,
     #[token("%true")]
@@ -129,6 +137,8 @@ enum TokenKind {
     BracketClose,
     #[token("[")]
     BracketOpen,
+    #[token("^")]
+    Caret,
     #[token(":")]
     Colon,
     #[token(",")]
@@ -136,25 +146,55 @@ enum TokenKind {
     #[regex(r"\.[_A-Za-z][_A-Za-z0-9]*")]
     Directive,
     #[token("==")]
-    EqEq,
+    EqualsEquals,
     #[token("=")]
     Equals,
+    #[token(">=")]
+    GreaterEquals,
+    #[token(">>")]
+    GreaterGreater,
+    #[token(">")]
+    GreaterThan,
     #[regex(r"[_A-Za-z][_A-Za-z0-9]*")]
     Identifier,
     #[regex(r"%[01]+", binary_literal_callback)]
     #[regex(r"[0-9]+", decimal_literal_callback)]
     #[regex(r"\$[0-9A-Fa-f]+", hex_literal_callback)]
     IntLiteral(BigInt),
+    #[token("<=")]
+    LessEquals,
+    #[token("<<")]
+    LessLess,
+    #[token("<")]
+    LessThan,
     #[regex(r"\n", newline_callback)]
     Linebreak,
+    #[token("-")]
+    Minus,
+    #[token("|")]
+    Or,
+    #[token("||")]
+    OrOr,
     #[token(")")]
     ParenClose,
     #[token("(")]
     ParenOpen,
+    #[token("%")]
+    Percent,
     #[token("+")]
     Plus,
+    #[token("?")]
+    Question,
+    #[token("/")]
+    Slash,
+    #[token("*")]
+    Star,
+    #[token("**")]
+    StarStar,
     #[regex("\"([^\"\\n\\\\]|\\\\.)+\"", string_literal_callback)]
     StrLiteral(Rc<str>),
+    #[token("~")]
+    Tilde,
 }
 
 impl TokenKind {
@@ -164,29 +204,49 @@ impl TokenKind {
     ) -> Result<Token, ParseError> {
         let span = SrcSpan::from_byte_range(lexer.span());
         let value = match self {
+            TokenKind::And => TokenValue::And,
+            TokenKind::AndAnd => TokenValue::AndAnd,
             TokenKind::Backslash => unreachable!(),
+            TokenKind::Bang => TokenValue::Bang,
+            TokenKind::BangEquals => TokenValue::BangEquals,
             TokenKind::BoolLiteralFalse => TokenValue::BoolLiteral(false),
             TokenKind::BoolLiteralTrue => TokenValue::BoolLiteral(true),
             TokenKind::BraceClose => TokenValue::BraceClose,
             TokenKind::BraceOpen => TokenValue::BraceOpen,
             TokenKind::BracketClose => TokenValue::BracketClose,
             TokenKind::BracketOpen => TokenValue::BracketOpen,
+            TokenKind::Caret => TokenValue::Caret,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
             TokenKind::Directive => {
                 TokenValue::Directive(Rc::from(lexer.slice()))
             }
-            TokenKind::EqEq => TokenValue::EqEq,
+            TokenKind::GreaterEquals => TokenValue::GreaterEquals,
+            TokenKind::GreaterGreater => TokenValue::GreaterGreater,
+            TokenKind::GreaterThan => TokenValue::GreaterThan,
+            TokenKind::EqualsEquals => TokenValue::EqualsEquals,
             TokenKind::Equals => TokenValue::Equals,
             TokenKind::Identifier => {
                 TokenValue::Identifier(Rc::from(lexer.slice()))
             }
             TokenKind::IntLiteral(int) => TokenValue::IntLiteral(int),
+            TokenKind::LessEquals => TokenValue::LessEquals,
+            TokenKind::LessLess => TokenValue::LessLess,
+            TokenKind::LessThan => TokenValue::LessThan,
             TokenKind::Linebreak => TokenValue::Linebreak,
+            TokenKind::Minus => TokenValue::Minus,
+            TokenKind::Or => TokenValue::Or,
+            TokenKind::OrOr => TokenValue::OrOr,
             TokenKind::ParenClose => TokenValue::ParenClose,
             TokenKind::ParenOpen => TokenValue::ParenOpen,
+            TokenKind::Percent => TokenValue::Percent,
             TokenKind::Plus => TokenValue::Plus,
+            TokenKind::Question => TokenValue::Question,
+            TokenKind::Slash => TokenValue::Slash,
+            TokenKind::Star => TokenValue::Star,
+            TokenKind::StarStar => TokenValue::StarStar,
             TokenKind::StrLiteral(string) => TokenValue::StrLiteral(string),
+            TokenKind::Tilde => TokenValue::Tilde,
         };
         if let Some(span) = lexer.extras.backslash {
             let message =
@@ -202,6 +262,14 @@ impl TokenKind {
 /// The contents of a single lexical token.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenValue {
+    /// A "`&`" symbol.
+    And,
+    /// A "`&&`" symbol.
+    AndAnd,
+    /// A "`!`" symbol.
+    Bang,
+    /// A "`!=`" symbol.
+    BangEquals,
     /// An boolean literal.
     BoolLiteral(bool),
     /// A "`}`" symbol.
@@ -212,6 +280,8 @@ pub enum TokenValue {
     BracketClose,
     /// A "`[`" symbol.
     BracketOpen,
+    /// A "`^`" symbol.
+    Caret,
     /// A "`:`" symbol.
     Colon,
     /// A "`,`" symbol.
@@ -219,46 +289,96 @@ pub enum TokenValue {
     /// An assembler directive.
     Directive(Rc<str>),
     /// A "`==`" symbol.
-    EqEq,
+    EqualsEquals,
     /// A "`=`" symbol.
     Equals,
+    /// A "`>=`" symbol.
+    GreaterEquals,
+    /// A "`>>`" symbol.
+    GreaterGreater,
+    /// A "`>`" symbol.
+    GreaterThan,
     /// An identifier or keyword.
     Identifier(Rc<str>),
     /// An integer literal.
     IntLiteral(BigInt),
+    /// A "`<=`" symbol.
+    LessEquals,
+    /// A "`<<`" symbol.
+    LessLess,
+    /// A "`<`" symbol.
+    LessThan,
     /// A linebreak (that wasn't suppressed, e.g. by a backslash).
     Linebreak,
+    /// A "`-`" symbol.
+    Minus,
+    /// A "`|`" symbol.
+    Or,
+    /// A "`||`" symbol.
+    OrOr,
     /// A "`)`" symbol.
     ParenClose,
     /// A "`(`" symbol.
     ParenOpen,
+    /// A "`%`" symbol.
+    Percent,
     /// A "`+`" symbol.
     Plus,
+    /// A "`?`" symbol.
+    Question,
+    /// A "`/`" symbol.
+    Slash,
+    /// A "`*`" symbol.
+    Star,
+    /// A "`**`" symbol.
+    StarStar,
     /// A string literal.
     StrLiteral(Rc<str>),
+    /// A "`~`" symbol.
+    Tilde,
 }
 
 impl TokenValue {
     /// Returns the human-readable name for this kind of token.
     pub fn name(&self) -> &'static str {
         match &self {
+            TokenValue::And => "`&`",
+            TokenValue::AndAnd => "`&&`",
+            TokenValue::Bang => "`!`",
+            TokenValue::BangEquals => "`!=`",
             TokenValue::BoolLiteral(_) => "boolean literal",
             TokenValue::BraceClose => "close brace",
             TokenValue::BraceOpen => "open brace",
             TokenValue::BracketClose => "close bracket",
             TokenValue::BracketOpen => "open bracket",
+            TokenValue::Caret => "`^`",
             TokenValue::Colon => "colon",
             TokenValue::Comma => "comma",
             TokenValue::Directive(_) => "directive",
-            TokenValue::EqEq => "equals-equals",
-            TokenValue::Equals => "equals sign",
+            TokenValue::EqualsEquals => "`==`",
+            TokenValue::Equals => "`=`",
+            TokenValue::GreaterEquals => "`>=`",
+            TokenValue::GreaterGreater => "`>>`",
+            TokenValue::GreaterThan => "`>`",
             TokenValue::Identifier(_) => "identifier",
             TokenValue::IntLiteral(_) => "integer literal",
+            TokenValue::LessEquals => "`<=`",
+            TokenValue::LessLess => "`<<`",
+            TokenValue::LessThan => "`<`",
             TokenValue::Linebreak => "linebreak",
+            TokenValue::Minus => "`-`",
+            TokenValue::Or => "`|`",
+            TokenValue::OrOr => "`||`",
             TokenValue::ParenClose => "close parenthesis",
             TokenValue::ParenOpen => "open parenthesis",
-            TokenValue::Plus => "plus sign",
+            TokenValue::Percent => "`%`",
+            TokenValue::Plus => "`+`",
+            TokenValue::Question => "`?`",
+            TokenValue::Slash => "`/`",
+            TokenValue::Star => "`*`",
+            TokenValue::StarStar => "`**`",
             TokenValue::StrLiteral(_) => "string literal",
+            TokenValue::Tilde => "`~`",
         }
     }
 }

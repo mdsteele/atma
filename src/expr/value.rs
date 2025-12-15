@@ -1,5 +1,6 @@
 use crate::obj::BinaryIo;
 use num_bigint::BigInt;
+use std::cmp::Ordering;
 use std::fmt;
 use std::io;
 use std::rc::Rc;
@@ -34,6 +35,26 @@ pub enum ExprType {
     String,
     /// A heterogenous tuple type.
     Tuple(Rc<[ExprType]>),
+}
+
+impl ExprType {
+    /// Returns true if this type supports ordering comparisons
+    /// (e.g. less-than).  If this returns true for an `ExprType`, then calling
+    /// `partial_cmp` on two `ExprValue`s of that type will return a non-`None`
+    /// value.
+    pub(crate) fn is_ord(&self) -> bool {
+        match self {
+            ExprType::Boolean => true,
+            ExprType::Bottom => false,
+            ExprType::Entity(_) => false,
+            ExprType::Integer => true,
+            ExprType::List(item_type) => item_type.is_ord(),
+            ExprType::String => true,
+            ExprType::Tuple(item_types) => {
+                item_types.iter().all(ExprType::is_ord)
+            }
+        }
+    }
 }
 
 impl fmt::Display for ExprType {
@@ -207,6 +228,26 @@ impl fmt::Display for ExprValue {
                 comma_separate(f, values)?;
                 f.write_str(")")
             }
+        }
+    }
+}
+
+impl PartialOrd for ExprValue {
+    fn partial_cmp(&self, other: &ExprValue) -> Option<Ordering> {
+        match (self, other) {
+            (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
+                Some(lhs.cmp(rhs))
+            }
+            (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                Some(lhs.cmp(rhs))
+            }
+            (ExprValue::String(lhs), ExprValue::String(rhs)) => {
+                Some(lhs.cmp(rhs))
+            }
+            // TODO: lists
+            // TODO: tuples
+            _ if self == other => Some(Ordering::Equal),
+            _ => None,
         }
     }
 }
