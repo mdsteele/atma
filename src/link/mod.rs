@@ -4,7 +4,10 @@ mod arrange;
 mod config;
 mod expr;
 
-pub use arrange::{ArrangedSection, LinkError};
+pub use arrange::{
+    ArrangedChunk, ArrangedSection, LinkError, PositionedMemory,
+    PositionedSection,
+};
 pub use config::{AddrspaceConfig, LinkConfig, MemoryConfig, SectionConfig};
 
 //===========================================================================//
