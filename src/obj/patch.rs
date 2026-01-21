@@ -1,5 +1,7 @@
 use super::binary::BinaryIo;
 use super::expr::ObjExpr;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use std::io;
 use std::ops::RangeInclusive;
 
@@ -55,7 +57,32 @@ impl PatchKind {
         }
     }
 
-    pub(crate) fn range(self) -> RangeInclusive<i64> {
+    pub(crate) fn num_bytes(self) -> usize {
+        match self {
+            PatchKind::U8 => 1,
+            PatchKind::U16le => 2,
+            PatchKind::U24le => 3,
+        }
+    }
+
+    pub(crate) fn value_in_range(
+        self,
+        bigint: &BigInt,
+    ) -> Result<i64, RangeInclusive<i64>> {
+        let range = self.range();
+        match bigint.to_i64() {
+            None => Err(range),
+            Some(value) => {
+                if range.contains(&value) {
+                    Ok(value)
+                } else {
+                    Err(range)
+                }
+            }
+        }
+    }
+
+    fn range(self) -> RangeInclusive<i64> {
         match self {
             PatchKind::U8 => 0..=0xff,
             PatchKind::U16le => 0..=0xffff,

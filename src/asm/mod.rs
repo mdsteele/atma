@@ -11,7 +11,6 @@ use crate::parse::{
     ParseError, ParseResult,
 };
 use expr::AsmTypeEnv;
-use num_traits::ToPrimitive;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -163,11 +162,8 @@ impl Assembler {
         match self.typecheck_expression(expr_ast) {
             Some((expr, ExprType::Integer)) => match expr.static_value() {
                 Some(value) => {
-                    let range = kind.range();
-                    let bigint = value.clone().unwrap_int();
-                    let opt_value =
-                        bigint.to_i64().filter(|value| range.contains(value));
-                    opt_value.unwrap_or_else(|| {
+                    let bigint = value.unwrap_int_ref();
+                    kind.value_in_range(bigint).unwrap_or_else(|range| {
                         let message = format!(
                             "{} value is statically out of range ({}-{})",
                             kind.directive(),

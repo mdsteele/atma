@@ -1,13 +1,10 @@
 use super::config::{MemoryConfig, SectionConfig};
+use super::error::LinkError;
 use crate::obj::{Align32, ObjChunk, ObjPatch, ObjSymbol};
 use rangemap::RangeInclusiveSet;
+use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
-
-//===========================================================================//
-
-/// An error encountered during linking.
-pub struct LinkError; // TODO: add fields
 
 //===========================================================================//
 
@@ -67,12 +64,12 @@ impl ArrangedSection {
                 section_align = section_align.max(within);
             }
             if (chunk.size as usize) < chunk.data.len() {
-                return Err(LinkError); // TODO: add error details
+                return Err(LinkError::Misc); // TODO: add error details
             }
             if let Some(within) = chunk.within
                 && chunk.size > u32::from(within)
             {
-                return Err(LinkError); // TODO: add error details
+                return Err(LinkError::Misc); // TODO: add error details
             }
             if chunk.size == 0 {
                 arranged.push(ArrangedChunk::with_start(chunk, 0));
@@ -86,7 +83,7 @@ impl ArrangedSection {
                 chunk.align,
                 chunk.within,
             )
-            .ok_or(LinkError)?; // TODO: add error details
+            .ok_or(LinkError::Misc)?; // TODO: add error details
             arranged.push(ArrangedChunk::with_start(chunk, start));
             range_set.insert(start..=(start + size_offset));
         }
@@ -101,13 +98,51 @@ impl ArrangedSection {
 
 //===========================================================================//
 
+/// Represents a data chunk that has been arranged within its positioned within
+/// its memory region.
+pub struct PositionedChunk {
+    /// The absolute starting address of this chunk within its address space.
+    pub start: u32,
+    /// Static data (before patches are applied) at the start of this chunk.
+    pub data: Rc<[u8]>,
+    /// Symbols defined in this chunk, mapped to their absolute addresses.
+    pub symbols: HashMap<Rc<str>, u32>,
+    /// Patches to apply to this chunk's data when linking.
+    pub patches: Rc<[ObjPatch]>,
+}
+
+impl PositionedChunk {
+    pub(crate) fn with_section_start(
+        chunk: &ArrangedChunk,
+        section_start: u32,
+    ) -> PositionedChunk {
+        let chunk_start = section_start + chunk.start;
+        PositionedChunk {
+            start: chunk_start,
+            data: chunk.data.clone(),
+            symbols: chunk
+                .symbols
+                .iter()
+                .map(|symbol| {
+                    (symbol.name.clone(), chunk_start + symbol.offset)
+                })
+                .collect(),
+            patches: chunk.patches.clone(),
+        }
+    }
+}
+
+//===========================================================================//
+
 /// Represents a data section that has been positioned within its memory
 /// region.
 pub struct PositionedSection {
-    /// The starting address of this section within its address space.
+    /// The absolute starting address of this section within its address space.
     pub start: u32,
+    /// The total size of this section's data, in bytes.
+    pub size: u32,
     /// The chunks in this section.
-    pub chunks: Rc<[ArrangedChunk]>,
+    pub chunks: Rc<[PositionedChunk]>,
 }
 
 impl PositionedSection {
@@ -115,7 +150,15 @@ impl PositionedSection {
         section: &ArrangedSection,
         start: u32,
     ) -> PositionedSection {
-        PositionedSection { start, chunks: section.chunks.clone() }
+        PositionedSection {
+            start,
+            size: section.size,
+            chunks: section
+                .chunks
+                .iter()
+                .map(|chunk| PositionedChunk::with_section_start(chunk, start))
+                .collect(),
+        }
     }
 }
 
@@ -124,6 +167,10 @@ impl PositionedSection {
 /// Represents a memory region after its sections have been positioned within
 /// its address space.
 pub struct PositionedMemory {
+    /// The address of the start of this memory region.
+    pub start: u32,
+    /// The size of this memory region, in bytes.
+    pub size: u32,
     /// The sections in this memory region.
     pub sections: Rc<[PositionedSection]>,
 }
@@ -158,17 +205,21 @@ impl PositionedMemory {
                     section.align,
                     None,
                 )
-                .ok_or(LinkError)?; // TODO: add error details
+                .ok_or(LinkError::Misc)?; // TODO: add error details
                 positioned.push(PositionedSection::with_start(section, start));
                 range_set.insert(start..=(start + size_offset));
             } else {
                 // TODO: Error: Cannot place a non-zero-size section in
                 // zero-size memory region.
-                return Err(LinkError);
+                return Err(LinkError::Misc);
             }
         }
         debug_assert_eq!(positioned.len(), sections.len());
-        Ok(PositionedMemory { sections: Rc::from(positioned) })
+        Ok(PositionedMemory {
+            start: memory.start,
+            size: memory.size,
+            sections: Rc::from(positioned),
+        })
     }
 }
 

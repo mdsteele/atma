@@ -128,6 +128,15 @@ impl ExprValue {
         }
     }
 
+    /// Returns a reference to the contained [`Integer`](ExprValue::Integer)
+    /// value, or panics if this value is not an integer.
+    pub fn unwrap_int_ref(&self) -> &BigInt {
+        match self {
+            ExprValue::Integer(integer) => integer,
+            value => panic!("ExprValue::unwrap_int_ref on {value:?}"),
+        }
+    }
+
     /// Returns the contained [`List`](ExprValue::List) value, or panics if
     /// this value is not a list.
     pub fn unwrap_list(self) -> Rc<[ExprValue]> {
