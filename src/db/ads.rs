@@ -1,6 +1,6 @@
 use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
-use crate::bus::WatchId;
+use crate::bus::{Addr, WatchId};
 use crate::db::SimEnv;
 use crate::expr::ExprValue;
 use crate::parse::ParseResult;
@@ -180,7 +180,7 @@ impl<W: Write> AdsEnvironment<W> {
                 self.value_stack.push(value.clone());
             }
             &AdsInstruction::SetRegister(name) => {
-                let value = self.pop_address_value();
+                let value = self.pop_u32_value();
                 self.sim.set_register(name, value);
             }
             AdsInstruction::SetMemory => {
@@ -266,7 +266,11 @@ impl<W: Write> AdsEnvironment<W> {
         }
     }
 
-    fn pop_address_value(&mut self) -> u32 {
+    fn pop_address_value(&mut self) -> Addr {
+        Addr::wrap_bigint(self.value_stack.pop().unwrap().unwrap_int_ref())
+    }
+
+    fn pop_u32_value(&mut self) -> u32 {
         let int_value = self.value_stack.pop().unwrap().unwrap_int();
         u32::try_from(int_value & BigInt::from(0xffffffffu32)).unwrap()
     }

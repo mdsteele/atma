@@ -1,4 +1,4 @@
-use atma::bus::{SimBus, new_ram_bus};
+use atma::bus::{Addr, SimBus, new_ram_bus};
 use atma::proc::{Mos6502, SimProc};
 
 //===========================================================================//
@@ -17,7 +17,7 @@ fn test_opcode_with_bus(
     pc_after: u16,
 ) {
     let mut proc = Mos6502::new();
-    proc.set_pc(0x0000);
+    proc.set_pc(Addr::from(0x0000u16));
     let (_, disassembly) = proc.disassemble(bus, proc.pc());
     assert_eq!(disassembly, assembly);
     proc.set_register("A", u32::from(registers_before[0]));
@@ -26,7 +26,7 @@ fn test_opcode_with_bus(
     proc.set_register("S", u32::from(registers_before[3]));
     proc.set_register("P", u32::from(registers_before[4]));
     assert_eq!(proc.step(bus), Ok(()));
-    assert_eq!(proc.pc(), u32::from(pc_after));
+    assert_eq!(proc.pc(), Addr::from(pc_after));
     assert_eq!(proc.get_register("A"), Some(u32::from(registers_after[0])));
     assert_eq!(proc.get_register("X"), Some(u32::from(registers_after[1])));
     assert_eq!(proc.get_register("Y"), Some(u32::from(registers_after[2])));
@@ -78,7 +78,7 @@ fn op_asl_zero_page() {
         [0x12, 0x34, 0x56, 0x78, 0x01], // A, X, Y, S, P=C
         0x0002,
     );
-    assert_eq!(bus.peek_byte(0x02), 0x12);
+    assert_eq!(bus.peek_byte(Addr::from(0x02u8)), 0x12);
 }
 
 #[test]
@@ -95,8 +95,8 @@ fn op_bit_absolute() {
 #[test]
 fn op_brk() {
     let mut bus = make_test_bus(8, &[0x00, 0xb2]);
-    bus.write_byte(0xfffe, 0x34);
-    bus.write_byte(0xffff, 0x12);
+    bus.write_byte(Addr::from(0xfffeu16), 0x34);
+    bus.write_byte(Addr::from(0xffffu16), 0x12);
     test_opcode_with_bus(
         &mut *bus,
         "BRK #$b2",
@@ -104,9 +104,9 @@ fn op_brk() {
         [0x12, 0x34, 0x56, 0x75, 0x0c], // A, X, Y, S, P=DI
         0x1234,
     );
-    assert_eq!(bus.peek_byte(0x0176), 0x38); // saved P register
-    assert_eq!(bus.peek_byte(0x0177), 0x02); // return address lo
-    assert_eq!(bus.peek_byte(0x0178), 0x00); // return address hi
+    assert_eq!(bus.peek_byte(Addr::from(0x0176u16)), 0x38); // saved P register
+    assert_eq!(bus.peek_byte(Addr::from(0x0177u16)), 0x02); // return addr lo
+    assert_eq!(bus.peek_byte(Addr::from(0x0178u16)), 0x00); // return addr hi
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn op_dec_zero_page() {
         [0x12, 0x34, 0x56, 0x78, 0x02], // A, X, Y, S, P=Z
         0x0002,
     );
-    assert_eq!(bus.peek_byte(0x02), 0x00);
+    assert_eq!(bus.peek_byte(Addr::from(0x02u8)), 0x00);
     test_opcode_with_bus(
         &mut *bus,
         "DEC $02",
@@ -156,7 +156,7 @@ fn op_dec_zero_page() {
         [0x12, 0x34, 0x56, 0x78, 0x80], // A, X, Y, S, P=N
         0x0002,
     );
-    assert_eq!(bus.peek_byte(0x02), 0xff);
+    assert_eq!(bus.peek_byte(Addr::from(0x02u8)), 0xff);
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn op_sta_zero_page() {
         [0xab, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         0x0002,
     );
-    assert_eq!(bus.peek_byte(0x0e), 0xab);
+    assert_eq!(bus.peek_byte(Addr::from(0x0eu8)), 0xab);
 }
 
 #[test]
@@ -284,7 +284,7 @@ fn op_sta_x_indexed_zero_page_indirect() {
         [0xcd, 0x02, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         0x0002,
     );
-    assert_eq!(bus.peek_byte(0x123), 0xcd);
+    assert_eq!(bus.peek_byte(Addr::from(0x0123u16)), 0xcd);
 }
 
 //===========================================================================//

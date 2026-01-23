@@ -1,4 +1,4 @@
-use crate::bus::{SimBus, WatchKind};
+use crate::bus::{Addr, SimBus, WatchKind};
 use crate::proc::SimBreak;
 
 //===========================================================================//
@@ -13,7 +13,7 @@ pub(crate) fn unpack(word: u16) -> (u8, u8) {
 
 pub(crate) fn watch(
     bus: &dyn SimBus,
-    addr: u32,
+    addr: Addr,
     kind: WatchKind,
 ) -> Result<(), SimBreak> {
     if let Some(id) = bus.watchpoint_at(addr, kind) {

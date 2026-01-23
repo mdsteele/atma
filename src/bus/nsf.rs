@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind, new_ram_bus, new_rom_bus};
+use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus, new_rom_bus};
 
 //===========================================================================//
 
@@ -62,24 +62,24 @@ impl SimBus for NsfBus {
         )
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr & 0xffff {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u16() {
             0x0000..0x6000 => self.driver.label_at(addr),
             0x6000..0x8000 => self.ram.label_at(addr),
             0x8000.. => self.rom.label_at(addr),
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        match addr & 0xffff {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        match addr.as_u16() {
             0x0000..0x6000 => self.driver.watchpoint_at(addr, kind),
             0x6000..0x8000 => self.ram.watchpoint_at(addr, kind),
             0x8000.. => self.rom.watchpoint_at(addr, kind),
         }
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        match addr & 0xffff {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        match addr.as_u16() {
             0x0000..0x6000 => self.driver.watch_address(addr, kind),
             0x6000..0x8000 => self.ram.watch_address(addr, kind),
             0x8000.. => self.rom.watch_address(addr, kind),
@@ -103,24 +103,24 @@ impl SimBus for NsfBus {
         self.rom.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
-        match addr & 0xffff {
+    fn peek_byte(&self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x6000 => self.driver.peek_byte(addr),
             0x6000..0x8000 => self.ram.peek_byte(addr),
             0x8000.. => self.rom.peek_byte(addr),
         }
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
-        match addr & 0xffff {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x6000 => self.driver.read_byte(addr),
             0x6000..0x8000 => self.ram.read_byte(addr),
             0x8000.. => self.rom.read_byte(addr),
         }
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr & 0xffff {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x0000..0x6000 => self.driver.write_byte(addr, data),
             0x6000..0x8000 => self.ram.write_byte(addr, data),
             0x8000.. => self.rom.write_byte(addr, data),

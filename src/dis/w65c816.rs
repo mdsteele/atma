@@ -1,6 +1,6 @@
 //! Facilities for disassembling 65C816 machine code.
 
-use crate::bus::SimBus;
+use crate::bus::{Addr, SimBus};
 use std::fmt;
 
 //===========================================================================//
@@ -692,23 +692,24 @@ impl Operand {
 }
 
 fn format_dp(bus: &dyn SimBus, dpr: u16, dp: u8) -> String {
-    let long = u32::from(dpr.wrapping_add(u16::from(dp)));
-    match bus.label_at(long) {
+    let addr = Addr::from(dpr.wrapping_add(u16::from(dp)));
+    match bus.label_at(addr) {
         Some(label) => label.to_string(),
         None => format!("${dp:02x}"),
     }
 }
 
 fn format_abs(bus: &dyn SimBus, bank: u8, abs: u16) -> String {
-    let long = (u32::from(bank) << 16) | u32::from(abs);
-    match bus.label_at(long) {
+    let addr = (Addr::from(bank) << 16) | Addr::from(abs);
+    match bus.label_at(addr) {
         Some(label) => label.to_string(),
         None => format!("${abs:04x}"),
     }
 }
 
 fn format_long(bus: &dyn SimBus, long: u32) -> String {
-    match bus.label_at(long) {
+    let addr = Addr::from(long);
+    match bus.label_at(addr) {
         Some(label) => label.to_string(),
         None => format!("${long:06x}"),
     }
@@ -1034,7 +1035,7 @@ impl Instruction {
         flag_m: bool,
         flag_x: bool,
     ) -> Instruction {
-        let opcode = bus.peek_byte(pc & 0xffffff);
+        let opcode = bus.peek_byte(Addr::from(pc & 0xffffff));
         let operation = Operation::from_opcode(opcode, flag_m, flag_x);
         let operand = match operation.addr_mode {
             AddrMode::Implied => Operand::Implied,
@@ -1140,15 +1141,15 @@ impl Instruction {
 // addition on the bottom 16 bits of the PC.
 
 fn next_byte(bus: &dyn SimBus, pc: u32) -> u8 {
-    bus.peek_byte((pc & 0xff0000) | (pc.wrapping_add(1) & 0xffff))
+    bus.peek_byte(Addr::from((pc & 0xff0000) | (pc.wrapping_add(1) & 0xffff)))
 }
 
 fn third_byte(bus: &dyn SimBus, pc: u32) -> u8 {
-    bus.peek_byte((pc & 0xff0000) | (pc.wrapping_add(2) & 0xffff))
+    bus.peek_byte(Addr::from((pc & 0xff0000) | (pc.wrapping_add(2) & 0xffff)))
 }
 
 fn fourth_byte(bus: &dyn SimBus, pc: u32) -> u8 {
-    bus.peek_byte((pc & 0xff0000) | (pc.wrapping_add(3) & 0xffff))
+    bus.peek_byte(Addr::from((pc & 0xff0000) | (pc.wrapping_add(3) & 0xffff)))
 }
 
 fn next_word(bus: &dyn SimBus, pc: u32) -> u16 {
@@ -1169,7 +1170,7 @@ fn next_long(bus: &dyn SimBus, pc: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
+    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {
@@ -1183,7 +1184,7 @@ mod tests {
     }
 
     fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
-        let labels = HashMap::from([(label.to_string(), addr)]);
+        let labels = HashMap::from([(label.to_string(), Addr::from(addr))]);
         let bus = LabeledBus::new(make_test_bus(code), labels);
         disassemble_with_bus(&bus)
     }

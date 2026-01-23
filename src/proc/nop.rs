@@ -1,5 +1,5 @@
 use super::util::watch;
-use crate::bus::{SimBus, WatchKind};
+use crate::bus::{Addr, SimBus, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -17,7 +17,7 @@ enum Cycle {
 /// a stub for testing.
 #[derive(Default)]
 pub struct NopProc {
-    pc: u32,
+    pc: Addr,
     data: u8,
     cycle: Cycle,
 }
@@ -34,15 +34,15 @@ impl SimProc for NopProc {
         "null processor".to_string()
     }
 
-    fn disassemble(&self, _bus: &dyn SimBus, _addr: u32) -> (u32, String) {
+    fn disassemble(&self, _bus: &dyn SimBus, _addr: Addr) -> (u32, String) {
         (1, "NOP".to_string())
     }
 
-    fn pc(&self) -> u32 {
+    fn pc(&self) -> Addr {
         self.pc
     }
 
-    fn set_pc(&mut self, addr: u32) {
+    fn set_pc(&mut self, addr: Addr) {
         self.pc = addr;
         self.cycle = Cycle::BetweenInstructions;
     }
@@ -83,19 +83,19 @@ impl SimProc for NopProc {
 #[cfg(test)]
 mod tests {
     use super::{NopProc, SimBreak, SimProc};
-    use crate::bus::{WatchKind, new_open_bus};
+    use crate::bus::{Addr, WatchKind, new_open_bus};
 
     #[test]
     fn set_pc_mid_instruction() {
         let mut bus = new_open_bus(16);
         let mut proc = NopProc::new();
-        let id = bus.watch_address(0x0000, WatchKind::Read);
+        let id = bus.watch_address(Addr::from(0x0000u16), WatchKind::Read);
         assert_eq!(
             proc.step(&mut *bus),
             Err(SimBreak::Watchpoint(WatchKind::Read, id)),
         );
         assert!(proc.is_mid_instruction());
-        proc.set_pc(0x0100);
+        proc.set_pc(Addr::from(0x0100u16));
         assert!(!proc.is_mid_instruction());
     }
 }

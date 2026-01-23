@@ -1,6 +1,6 @@
 use super::env::SimEnv;
 use crate::bus::{
-    DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
+    Addr, DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
     new_ram_bus, new_rom_bus, new_snes_bus, new_ssmp_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
@@ -434,7 +434,7 @@ fn load_nsf_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let cart = new_nsf_bus(rom_data, init_addr, play_addr);
     let bus: Box<dyn SimBus> = Box::new(NesBus::with_cartridge(cart));
     let mut cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
-    cpu.set_pc(0x4800);
+    cpu.set_pc(Addr::from(0x4800u16));
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
@@ -607,7 +607,7 @@ fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
 
     let bus = new_ssmp_bus(new_ram_bus(ram.into_boxed_slice()));
     let mut cpu: Box<dyn SimProc> = Box::new(Spc700::new());
-    cpu.set_pc(u32::from(pc));
+    cpu.set_pc(Addr::from(pc));
     cpu.set_register("A", u32::from(reg_a));
     cpu.set_register("X", u32::from(reg_x));
     cpu.set_register("Y", u32::from(reg_y));

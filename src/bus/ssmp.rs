@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind, new_rom_bus};
+use super::{Addr, SimBus, WatchId, WatchKind, new_rom_bus};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -45,8 +45,8 @@ impl SsmpBus {
         }
     }
 
-    fn sub_bus(&self, addr: u32) -> &dyn SimBus {
-        let addr = addr as u16;
+    fn sub_bus(&self, addr: Addr) -> &dyn SimBus {
+        let addr = addr.as_u16();
         match addr {
             0x00f0..0x0100 => &self.hw_regs,
             _ => {
@@ -59,8 +59,8 @@ impl SsmpBus {
         }
     }
 
-    fn sub_bus_mut(&mut self, addr: u32) -> &mut dyn SimBus {
-        let addr = addr as u16;
+    fn sub_bus_mut(&mut self, addr: Addr) -> &mut dyn SimBus {
+        let addr = addr.as_u16();
         match addr {
             0x00f0..0x0100 => &mut self.hw_regs,
             _ => {
@@ -79,15 +79,15 @@ impl SimBus for SsmpBus {
         format!("S-SMP with {}", self.ram.description())
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
         self.sub_bus(addr).label_at(addr)
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
         self.sub_bus(addr).watchpoint_at(addr, kind)
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
         self.sub_bus_mut(addr).watch_address(addr, kind)
     }
 
@@ -108,16 +108,16 @@ impl SimBus for SsmpBus {
         self.boot_rom.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
+    fn peek_byte(&self, addr: Addr) -> u8 {
         self.sub_bus(addr).peek_byte(addr)
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
         self.sub_bus_mut(addr).read_byte(addr)
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr as u16 {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x00f0..0x0100 => {
                 self.hw_regs.write_byte(addr, data);
             }
@@ -163,8 +163,8 @@ impl SimBus for SsmpRegBus {
         "S-SMP registers".to_string()
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        let addr = addr as u16;
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        let addr = addr.as_u16();
         match addr {
             0x00f0 => Some("TEST"),
             0x00f1 => Some("CONTROL"),
@@ -186,13 +186,13 @@ impl SimBus for SsmpRegBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr as u16;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr.as_u16();
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        let addr = addr as u16;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        let addr = addr.as_u16();
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -227,15 +227,15 @@ impl SimBus for SsmpRegBus {
             "T2OUT" => 0x00ff,
             _ => return None,
         };
-        Some(self.watch_address(u32::from(addr), kind))
+        Some(self.watch_address(Addr::from(addr), kind))
     }
 
     fn unwatch(&mut self, id: WatchId) {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
-        match addr as u16 {
+    fn peek_byte(&self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x00f2 => self.reg_dspaddr,
             0x00f8 => self.reg_auxio4,
             0x00f9 => self.reg_auxio5,
@@ -243,12 +243,12 @@ impl SimBus for SsmpRegBus {
         }
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
         self.peek_byte(addr)
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr as u16 {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x00f1 => self.reg_control = data,
             0x00f2 => self.reg_dspaddr = data,
             0x00f8 => self.reg_auxio4 = data,

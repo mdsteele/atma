@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind};
+use super::{Addr, SimBus, WatchId, WatchKind};
 
 //===========================================================================//
 
@@ -31,8 +31,8 @@ impl Mmc3Bus {
         }
     }
 
-    fn translate_rom_address(&self, addr: u32) -> u32 {
-        let bank = match addr & 0x7fff {
+    fn translate_rom_address(&self, addr: Addr) -> Addr {
+        let bank = match addr.as_u16() & 0x7fff {
             0x0000..0x2000 => {
                 if (self.bank_select & SELECT_FLAG_8000_FIXED) != 0 {
                     0xfe
@@ -50,7 +50,7 @@ impl Mmc3Bus {
             }
             0x6000.. => 0xff,
         };
-        (u32::from(bank) << 13) | (addr & 0x1fff)
+        (Addr::from(bank) << 13) | (addr & Addr::from(0x1fffu16))
     }
 }
 
@@ -63,16 +63,16 @@ impl SimBus for Mmc3Bus {
         )
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr & 0xffff {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u16() {
             0x0000..0x6000 => None,
             0x6000..0x8000 => self.ram.label_at(addr),
             0x8000.. => self.rom.label_at(self.translate_rom_address(addr)),
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        match addr & 0xffff {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        match addr.as_u16() {
             0x0000..0x6000 => None,
             0x6000..0x8000 => self.ram.watchpoint_at(addr, kind),
             0x8000.. => {
@@ -81,8 +81,8 @@ impl SimBus for Mmc3Bus {
         }
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        match addr & 0xffff {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        match addr.as_u16() {
             0x0000..0x6000 => WatchId::create(),
             0x6000..0x8000 => self.ram.watch_address(addr, kind),
             0x8000.. => {
@@ -106,16 +106,16 @@ impl SimBus for Mmc3Bus {
         self.rom.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
-        match addr & 0xffff {
+    fn peek_byte(&self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x6000 => 0,
             0x6000..0x8000 => self.ram.peek_byte(addr),
             0x8000.. => self.rom.peek_byte(self.translate_rom_address(addr)),
         }
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
-        match addr & 0xffff {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x6000 => 0,
             0x6000..0x8000 => {
                 if (self.ram_protect & PROTECT_FLAG_ENABLE_RAM) != 0 {
@@ -128,8 +128,8 @@ impl SimBus for Mmc3Bus {
         }
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr & 0xffff {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x0000..0x6000 => {}
             0x6000..0x8000 => {
                 if (self.ram_protect & PROTECT_FLAG_ENABLE_RAM) != 0
@@ -139,7 +139,7 @@ impl SimBus for Mmc3Bus {
                 }
             }
             0x8000..0xA000 => {
-                if (addr & 1) != 0 {
+                if (addr.as_u8() & 1) != 0 {
                     let index = usize::from(self.bank_select & 0b111);
                     self.bank_registers[index] = data;
                 } else {
@@ -147,7 +147,7 @@ impl SimBus for Mmc3Bus {
                 }
             }
             0xA000..0xC000 => {
-                if (addr & 1) != 0 {
+                if (addr.as_u8() & 1) != 0 {
                     self.ram_protect = data;
                 } else {
                     // This should set nametable mirroring, but we don't

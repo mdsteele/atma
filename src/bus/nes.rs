@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind, new_ram_bus};
+use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -30,8 +30,8 @@ impl SimBus for NesBus {
         format!("NES with {}", self.cart.description())
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr & 0xffff {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u16() {
             0x0000..0x2000 => self.ram.label_at(addr),
             0x2000..0x4000 => self.ppu_regs.label_at(addr),
             0x4000..0x4020 => None, // TODO: APU registers
@@ -39,8 +39,8 @@ impl SimBus for NesBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        match addr & 0xffff {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        match addr.as_u16() {
             0x0000..0x2000 => self.ram.watchpoint_at(addr, kind),
             0x2000..0x4000 => self.ppu_regs.watchpoint_at(addr, kind),
             0x4000..0x4020 => None, // TODO: APU registers
@@ -48,8 +48,8 @@ impl SimBus for NesBus {
         }
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        match addr & 0xffff {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        match addr.as_u16() {
             0x0000..0x2000 => self.ram.watch_address(addr, kind),
             0x2000..0x4000 => self.ppu_regs.watch_address(addr, kind),
             0x4000..0x4020 => WatchId::create(), // TODO: APU registers
@@ -75,8 +75,8 @@ impl SimBus for NesBus {
         self.cart.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
-        match addr & 0xffff {
+    fn peek_byte(&self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x2000 => self.ram.peek_byte(addr),
             0x2000..0x4000 => self.ppu_regs.peek_byte(addr),
             0x4000..0x4020 => 0, // TODO: APU registers
@@ -84,8 +84,8 @@ impl SimBus for NesBus {
         }
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
-        match addr & 0xffff {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x2000 => self.ram.read_byte(addr),
             0x2000..0x4000 => self.ppu_regs.read_byte(addr),
             0x4000..0x4020 => 0, // TODO: APU registers
@@ -93,8 +93,8 @@ impl SimBus for NesBus {
         }
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr & 0xffff {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x0000..0x2000 => self.ram.write_byte(addr, data),
             0x2000..0x4000 => self.ppu_regs.write_byte(addr, data),
             0x4000..0x4020 => {} // TODO: APU registers
@@ -106,7 +106,7 @@ impl SimBus for NesBus {
 //===========================================================================//
 
 pub struct PpuRegBus {
-    watchpoints: BiHashMap<(u32, WatchKind), WatchId>,
+    watchpoints: BiHashMap<(Addr, WatchKind), WatchId>,
 }
 
 impl PpuRegBus {
@@ -120,8 +120,8 @@ impl SimBus for PpuRegBus {
         "PPU registers".to_string()
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr & 0x7 {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u8() & 0x7 {
             0 => Some("PPUCTRL"),
             1 => Some("PPUMASK"),
             2 => Some("PPUSTATUS"),
@@ -134,13 +134,13 @@ impl SimBus for PpuRegBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr & 0x7;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr & Addr::from(0x7u8);
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        let addr = addr & 0x7;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        let addr = addr & Addr::from(0x7u8);
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -156,15 +156,15 @@ impl SimBus for PpuRegBus {
         label: &str,
         kind: WatchKind,
     ) -> Option<WatchId> {
-        let addr: u32 = match label {
-            "PPUCTRL" => 0,
-            "PPUMASK" => 1,
-            "PPUSTATUS" => 2,
-            "OAMADDR" => 3,
-            "OAMDATA" => 4,
-            "PPUSCROLL" => 5,
-            "PPUADDR" => 6,
-            "PPUDATA" => 7,
+        let addr = match label {
+            "PPUCTRL" => Addr::from(0u8),
+            "PPUMASK" => Addr::from(1u8),
+            "PPUSTATUS" => Addr::from(2u8),
+            "OAMADDR" => Addr::from(3u8),
+            "OAMDATA" => Addr::from(4u8),
+            "PPUSCROLL" => Addr::from(5u8),
+            "PPUADDR" => Addr::from(6u8),
+            "PPUDATA" => Addr::from(7u8),
             _ => return None,
         };
         Some(self.watch_address(addr, kind))
@@ -174,15 +174,15 @@ impl SimBus for PpuRegBus {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, _addr: u32) -> u8 {
+    fn peek_byte(&self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn read_byte(&mut self, _addr: u32) -> u8 {
+    fn read_byte(&mut self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn write_byte(&mut self, _addr: u32, _data: u8) {
+    fn write_byte(&mut self, _addr: Addr, _data: u8) {
         // TODO
     }
 }

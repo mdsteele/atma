@@ -1,6 +1,6 @@
 use ariadne::{self, Label, ReportKind, Source};
 use atma::asm::assemble_source;
-use atma::bus::WatchKind;
+use atma::bus::{Addr, WatchKind};
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
 use atma::link::LinkConfig;
 use atma::obj::{Align32, BinaryIo, ObjFile};
@@ -165,8 +165,8 @@ fn command_db(
             }
         }
     } else {
-        sim_env.watch_address(0xfff7, WatchKind::Pc);
-        sim_env.watch_address(0xfff9, WatchKind::Pc);
+        sim_env.watch_address(Addr::from(0xfff7u16), WatchKind::Pc);
+        sim_env.watch_address(Addr::from(0xfff9u16), WatchKind::Pc);
         loop {
             let result = if sim_env.is_mid_instruction() {
                 sim_env.step()

@@ -1,5 +1,5 @@
 use super::util::{unpack, watch};
-use crate::bus::{SimBus, WatchKind};
+use crate::bus::{Addr, SimBus, WatchKind};
 use crate::dis::spc700::{AddrMode, Instruction, Operation, Reg};
 use crate::proc::{SimBreak, SimProc};
 
@@ -302,7 +302,7 @@ impl Spc700 {
         &mut self,
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
-        bus.write_byte(u32::from(self.addr), self.data);
+        bus.write_byte(Addr::from(self.addr), self.data);
         Ok(())
     }
 
@@ -389,7 +389,7 @@ impl Spc700 {
     }
 
     fn exec_read(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
-        let addr = u32::from(self.addr);
+        let addr = Addr::from(self.addr);
         self.data = bus.read_byte(addr);
         watch(bus, addr, WatchKind::Read)
     }
@@ -398,7 +398,7 @@ impl Spc700 {
         &mut self,
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
-        let addr = u32::from(self.pc);
+        let addr = Addr::from(self.pc);
         self.pc = self.pc.wrapping_add(1);
         self.data = bus.read_byte(addr);
         watch(bus, addr, WatchKind::Read)
@@ -428,7 +428,7 @@ impl Spc700 {
 
     fn exec_write(&mut self, bus: &mut dyn SimBus) -> Result<(), SimBreak> {
         self.microcode.push(Microcode::FinishWrite);
-        watch(bus, u32::from(self.addr), WatchKind::Write)
+        watch(bus, Addr::from(self.addr), WatchKind::Write)
     }
 
     fn decode_branch(&mut self, condition: u8) {
@@ -690,18 +690,18 @@ impl SimProc for Spc700 {
         "SPC-700".to_string()
     }
 
-    fn disassemble(&self, bus: &dyn SimBus, pc: u32) -> (u32, String) {
-        let pc = pc as u16;
+    fn disassemble(&self, bus: &dyn SimBus, pc: Addr) -> (u32, String) {
+        let pc = pc.as_u16();
         let instruction = Instruction::decode(bus, pc);
         (instruction.size(), instruction.format(bus, pc))
     }
 
-    fn pc(&self) -> u32 {
-        self.pc as u32
+    fn pc(&self) -> Addr {
+        Addr::from(self.pc)
     }
 
-    fn set_pc(&mut self, addr: u32) {
-        self.pc = addr as u16;
+    fn set_pc(&mut self, addr: Addr) {
+        self.pc = addr.as_u16();
         self.microcode.clear();
     }
 
@@ -741,7 +741,7 @@ impl SimProc for Spc700 {
         while let Some(microcode) = self.microcode.pop() {
             self.execute_microcode(bus, microcode)?;
         }
-        watch(bus, u32::from(self.pc), WatchKind::Pc)
+        watch(bus, Addr::from(self.pc), WatchKind::Pc)
     }
 
     fn is_mid_instruction(&self) -> bool {

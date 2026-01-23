@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind};
+use super::{Addr, SimBus, WatchId, WatchKind};
 
 //===========================================================================//
 
@@ -17,16 +17,16 @@ impl Mbc5Bus {
         Mbc5Bus { ram, rom, rom_bank: 1, ram_bank: 0 }
     }
 
-    fn translate_rom_address(&self, addr: u32) -> u32 {
-        let bank = match addr & 0x7fff {
+    fn translate_rom_address(&self, addr: Addr) -> Addr {
+        let bank = match addr.as_u16() & 0x7fff {
             0x0000..0x4000 => 0,
             0x4000.. => self.rom_bank,
         };
-        (u32::from(bank) << 14) | (addr & 0x3fff)
+        (Addr::from(bank) << 14) | (addr & Addr::from(0x3fffu16))
     }
 
-    fn translate_ram_address(&self, addr: u32) -> u32 {
-        (u32::from(self.ram_bank) << 13) | (addr & 0x1fff)
+    fn translate_ram_address(&self, addr: Addr) -> Addr {
+        (Addr::from(self.ram_bank) << 13) | (addr & Addr::from(0x1fffu16))
     }
 }
 
@@ -39,8 +39,8 @@ impl SimBus for Mbc5Bus {
         )
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr as u16 {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u16() {
             0x0000..0x8000 => {
                 self.rom.label_at(self.translate_rom_address(addr))
             }
@@ -48,8 +48,8 @@ impl SimBus for Mbc5Bus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        match addr as u16 {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        match addr.as_u16() {
             0x0000..0x8000 => {
                 self.rom.watchpoint_at(self.translate_rom_address(addr), kind)
             }
@@ -59,8 +59,8 @@ impl SimBus for Mbc5Bus {
         }
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        match addr as u16 {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        match addr.as_u16() {
             0x0000..0x8000 => {
                 self.rom.watch_address(self.translate_rom_address(addr), kind)
             }
@@ -85,8 +85,8 @@ impl SimBus for Mbc5Bus {
         self.rom.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
-        match addr as u16 {
+    fn peek_byte(&self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x8000 => {
                 self.rom.peek_byte(self.translate_rom_address(addr))
             }
@@ -97,8 +97,8 @@ impl SimBus for Mbc5Bus {
         }
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
-        match addr as u16 {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x8000 => {
                 self.rom.read_byte(self.translate_rom_address(addr))
             }
@@ -109,8 +109,8 @@ impl SimBus for Mbc5Bus {
         }
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr as u16 {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x0000..0x2000 => {
                 // TODO: set RAM enable
             }

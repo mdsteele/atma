@@ -2,6 +2,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod addr;
 mod dmg;
 mod label;
 mod mbc5;
@@ -12,6 +13,7 @@ mod ram;
 mod snes;
 mod ssmp;
 
+pub use addr::Addr;
 pub use dmg::DmgBus;
 pub use label::LabeledBus;
 pub use mbc5::Mbc5Bus;
@@ -54,7 +56,7 @@ pub enum WatchKind {
 
 /// A simulated memory bus.
 ///
-/// This trait uses `u32` for addresses, but many implementations may only
+/// This trait uses `Addr` for addresses, but many implementations may only
 /// represent a 16-bit or 24-bit address bus. Generally speaking,
 /// implementations should ignore address bits higher than the width of their
 /// address bus, as though those physical address lines weren't connected,
@@ -65,13 +67,13 @@ pub trait SimBus {
     fn description(&self) -> String;
 
     /// Returns a label for the given address, if there is one.
-    fn label_at(&self, addr: u32) -> Option<&str>;
+    fn label_at(&self, addr: Addr) -> Option<&str>;
 
     /// Returns a watchpoint for the given address, if there is one.
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId>;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId>;
 
     /// Sets a watchpoint on the given address.
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId;
 
     /// Sets a watchpoint at the given label, if it exists.
     fn watch_label(&mut self, label: &str, kind: WatchKind)
@@ -83,19 +85,19 @@ pub trait SimBus {
     /// Returns the value of a single byte in memory, if the processor were to
     /// read it, but without triggering any watchpoints or performing any side
     /// effects that would occur if the processor actually read the byte.
-    fn peek_byte(&self, addr: u32) -> u8;
+    fn peek_byte(&self, addr: Addr) -> u8;
 
     /// Reads a single byte from memory.
     ///
     /// Note that this is a `&mut self` method, since some hardware registers
     /// may have side effects when read.
-    fn read_byte(&mut self, addr: u32) -> u8;
+    fn read_byte(&mut self, addr: Addr) -> u8;
 
     /// Writes a single byte to memory.
     ///
     /// Depending on the implementation, the write may be ignored (e.g. if this
     /// bus represents read-only memory), and/or have other side effects.
-    fn write_byte(&mut self, addr: u32, data: u8);
+    fn write_byte(&mut self, addr: Addr, data: u8);
 }
 
 //===========================================================================//

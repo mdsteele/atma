@@ -1,6 +1,6 @@
 //! Facilities for disassembling SM83 machine code.
 
-use crate::bus::SimBus;
+use crate::bus::{Addr, SimBus};
 use std::fmt;
 
 //===========================================================================//
@@ -675,7 +675,7 @@ impl Instruction {
 
     /// Reads and decodes a single SM83 instruction.
     pub fn decode(bus: &dyn SimBus, pc: u16) -> Instruction {
-        let opcode = bus.peek_byte(u32::from(pc));
+        let opcode = bus.peek_byte(Addr::from(pc));
         let operation = Operation::from_opcode(opcode);
         let operand = match operation {
             Operation::AdcAR8(_)
@@ -720,7 +720,7 @@ impl Instruction {
             | Operation::SubAR8(_)
             | Operation::XorAR8(_) => Operand::None,
             Operation::AddSpI8 | Operation::JrI8(_) | Operation::LdHlSpI8 => {
-                Operand::I8(bus.peek_byte(u32::from(pc.wrapping_add(1))) as i8)
+                Operand::I8(bus.peek_byte(Addr::from(pc.wrapping_add(1))) as i8)
             }
             Operation::AdcAI8
             | Operation::AddAI8
@@ -734,7 +734,7 @@ impl Instruction {
             | Operation::SbcAI8
             | Operation::SubAI8
             | Operation::XorAI8 => {
-                Operand::U8(bus.peek_byte(u32::from(pc.wrapping_add(1))))
+                Operand::U8(bus.peek_byte(Addr::from(pc.wrapping_add(1))))
             }
             Operation::CallM16(_)
             | Operation::JpI16(_)
@@ -742,8 +742,8 @@ impl Instruction {
             | Operation::LdM16A
             | Operation::LdM16Sp
             | Operation::LdR16I16(_) => {
-                let lo = bus.peek_byte(u32::from(pc.wrapping_add(1)));
-                let hi = bus.peek_byte(u32::from(pc.wrapping_add(2)));
+                let lo = bus.peek_byte(Addr::from(pc.wrapping_add(1)));
+                let hi = bus.peek_byte(Addr::from(pc.wrapping_add(2)));
                 Operand::U16((u16::from(hi) << 8) | u16::from(lo))
             }
         };
@@ -862,7 +862,7 @@ impl Instruction {
             Operation::Rlca => "RLCA".to_string(),
             Operation::Rra => "RRA".to_string(),
             Operation::Rrca => "RRCA".to_string(),
-            Operation::Rst(zp) => match bus.label_at(u32::from(zp)) {
+            Operation::Rst(zp) => match bus.label_at(Addr::from(zp)) {
                 None => format!("RST ${zp:02x}"),
                 Some(label) => format!("RST {label}"),
             },
@@ -897,7 +897,7 @@ fn format_relative(
 }
 
 fn format_address(bus: &dyn SimBus, addr: u16) -> String {
-    match bus.label_at(u32::from(addr)) {
+    match bus.label_at(Addr::from(addr)) {
         None => format!("${addr:04x}"),
         Some(label) => label.to_string(),
     }
@@ -908,7 +908,7 @@ fn format_address(bus: &dyn SimBus, addr: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
+    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {
@@ -921,8 +921,8 @@ mod tests {
         disassemble_with_bus(&*make_test_bus(code))
     }
 
-    fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
-        let labels = HashMap::from([(label.to_string(), addr)]);
+    fn disassemble_with_label(code: &[u8], addr: u16, label: &str) -> String {
+        let labels = HashMap::from([(label.to_string(), Addr::from(addr))]);
         let bus = LabeledBus::new(make_test_bus(code), labels);
         disassemble_with_bus(&bus)
     }

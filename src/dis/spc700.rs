@@ -1,6 +1,6 @@
 //! Facilities for disassembling SPC-700 machine code.
 
-use crate::bus::SimBus;
+use crate::bus::{Addr, SimBus};
 use std::fmt;
 
 //===========================================================================//
@@ -115,12 +115,12 @@ impl AddrMode {
 }
 
 fn next_byte(bus: &dyn SimBus, pc: u16) -> u8 {
-    bus.peek_byte(u32::from(pc.wrapping_add(1)))
+    bus.peek_byte(Addr::from(pc.wrapping_add(1)))
 }
 
 fn next_word(bus: &dyn SimBus, pc: u16) -> u16 {
-    let lo = bus.peek_byte(u32::from(pc.wrapping_add(1)));
-    let hi = bus.peek_byte(u32::from(pc.wrapping_add(2)));
+    let lo = bus.peek_byte(Addr::from(pc.wrapping_add(1)));
+    let hi = bus.peek_byte(Addr::from(pc.wrapping_add(2)));
     (u16::from(hi) << 8) | u16::from(lo)
 }
 
@@ -226,22 +226,25 @@ impl Operand {
 }
 
 fn format_address(bus: &dyn SimBus, addr: u16) -> String {
-    match bus.label_at(u32::from(addr)) {
+    match bus.label_at(Addr::from(addr)) {
         None => format!("${addr:04x}"),
         Some(label) => label.to_string(),
     }
 }
 
 fn format_direct_page(bus: &dyn SimBus, dp: u8) -> String {
-    let addr = u32::from(dp);
-    match bus.label_at(addr).or_else(|| bus.label_at(0x100 | addr)) {
+    let addr = Addr::from(dp);
+    match bus
+        .label_at(addr)
+        .or_else(|| bus.label_at(Addr::from(0x0100u16) | addr))
+    {
         None => format!("${dp:02x}"),
         Some(label) => label.to_string(),
     }
 }
 
 fn format_high_page(bus: &dyn SimBus, hp: u8) -> String {
-    match bus.label_at(0xff00 | u32::from(hp)) {
+    match bus.label_at(Addr::from(0xff00u16) | Addr::from(hp)) {
         None => format!("${hp:02x}"),
         Some(label) => label.to_string(),
     }
@@ -732,7 +735,7 @@ impl Instruction {
 
     /// Reads and decodes a single SPC-700 instruction.
     pub fn decode(bus: &dyn SimBus, pc: u16) -> Instruction {
-        match Operation::from_opcode(bus.peek_byte(u32::from(pc))) {
+        match Operation::from_opcode(bus.peek_byte(Addr::from(pc))) {
             Operation::AdcAAddr(mode) => {
                 Instruction::AdcAAddr(mode.decode(bus, pc))
             }
@@ -1033,7 +1036,7 @@ impl Instruction {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
+    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {
@@ -1048,8 +1051,8 @@ mod tests {
         string
     }
 
-    fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
-        let labels = HashMap::from([(label.to_string(), addr)]);
+    fn disassemble_with_label(code: &[u8], addr: u16, label: &str) -> String {
+        let labels = HashMap::from([(label.to_string(), Addr::from(addr))]);
         let bus = LabeledBus::new(make_test_bus(code), labels);
         let (size, string) = disassemble_with_bus(&bus);
         assert_eq!(size, code.len() as u32);

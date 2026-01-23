@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind};
+use super::{Addr, SimBus, WatchId, WatchKind};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -33,7 +33,7 @@ pub fn new_rom_bus(contents: Box<[u8]>) -> Box<dyn SimBus> {
 
 struct RandomAccessBus {
     storage: Box<dyn Storage>,
-    watchpoints: BiHashMap<(u32, WatchKind), WatchId>,
+    watchpoints: BiHashMap<(Addr, WatchKind), WatchId>,
 }
 
 impl RandomAccessBus {
@@ -47,16 +47,16 @@ impl SimBus for RandomAccessBus {
         self.storage.description()
     }
 
-    fn label_at(&self, _addr: u32) -> Option<&str> {
+    fn label_at(&self, _addr: Addr) -> Option<&str> {
         None
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
         let addr = addr & self.storage.addr_mask();
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
         let addr = addr & self.storage.addr_mask();
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
@@ -80,15 +80,15 @@ impl SimBus for RandomAccessBus {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
+    fn peek_byte(&self, addr: Addr) -> u8 {
         self.storage.read_byte(addr)
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
         self.storage.read_byte(addr)
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
         self.storage.write_byte(addr, data);
     }
 }
@@ -97,9 +97,9 @@ impl SimBus for RandomAccessBus {
 
 trait Storage {
     fn description(&self) -> String;
-    fn addr_mask(&self) -> u32;
-    fn read_byte(&self, addr: u32) -> u8;
-    fn write_byte(&mut self, addr: u32, data: u8);
+    fn addr_mask(&self) -> Addr;
+    fn read_byte(&self, addr: Addr) -> u8;
+    fn write_byte(&mut self, addr: Addr, data: u8);
 }
 
 struct OpenBus {
@@ -111,16 +111,16 @@ impl Storage for OpenBus {
         format!("{}-bit open bus", self.addr_bits)
     }
 
-    fn addr_mask(&self) -> u32 {
+    fn addr_mask(&self) -> Addr {
         debug_assert!(self.addr_bits <= 32);
-        ((1u64 << self.addr_bits) - 1) as u32
+        Addr::wrap_usize((1usize << self.addr_bits) - 1)
     }
 
-    fn read_byte(&self, _addr: u32) -> u8 {
+    fn read_byte(&self, _addr: Addr) -> u8 {
         0
     }
 
-    fn write_byte(&mut self, _addr: u32, _data: u8) {}
+    fn write_byte(&mut self, _addr: Addr, _data: u8) {}
 }
 
 struct RamStorage {
@@ -142,20 +142,20 @@ impl Storage for RamStorage {
         format!("{size}{unit} {kind}")
     }
 
-    fn addr_mask(&self) -> u32 {
+    fn addr_mask(&self) -> Addr {
         debug_assert!(self.contents.len().is_power_of_two());
-        (self.contents.len() - 1) as u32
+        Addr::wrap_usize(self.contents.len() - 1)
     }
 
-    fn read_byte(&self, addr: u32) -> u8 {
+    fn read_byte(&self, addr: Addr) -> u8 {
         let addr = addr & self.addr_mask();
-        self.contents[addr as usize]
+        self.contents[addr.as_usize()]
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
         if !self.read_only {
             let addr = addr & self.addr_mask();
-            self.contents[addr as usize] = data;
+            self.contents[addr.as_usize()] = data;
         }
     }
 }
@@ -164,7 +164,7 @@ impl Storage for RamStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::{new_ram_bus, new_rom_bus};
+    use super::{Addr, new_ram_bus, new_rom_bus};
 
     #[test]
     fn description() {
@@ -184,19 +184,19 @@ mod tests {
     #[test]
     fn address_mirroring() {
         let mut bus = new_ram_bus(Box::new([0u8; 0x10000]));
-        assert_eq!(bus.read_byte(0x01234), 0x00);
-        assert_eq!(bus.read_byte(0x11234), 0x00);
-        assert_eq!(bus.read_byte(0x21234), 0x00);
-        bus.write_byte(0x01234, 0xab);
-        assert_eq!(bus.read_byte(0x01235), 0x00);
-        assert_eq!(bus.read_byte(0x01234), 0xab);
-        assert_eq!(bus.read_byte(0x11234), 0xab);
-        assert_eq!(bus.read_byte(0x21234), 0xab);
-        bus.write_byte(0x71234, 0xcd);
-        assert_eq!(bus.read_byte(0x01235), 0x00);
-        assert_eq!(bus.read_byte(0x01234), 0xcd);
-        assert_eq!(bus.read_byte(0x11234), 0xcd);
-        assert_eq!(bus.read_byte(0x21234), 0xcd);
+        assert_eq!(bus.read_byte(Addr::from(0x01234u32)), 0x00);
+        assert_eq!(bus.read_byte(Addr::from(0x11234u32)), 0x00);
+        assert_eq!(bus.read_byte(Addr::from(0x21234u32)), 0x00);
+        bus.write_byte(Addr::from(0x01234u32), 0xab);
+        assert_eq!(bus.read_byte(Addr::from(0x01235u32)), 0x00);
+        assert_eq!(bus.read_byte(Addr::from(0x01234u32)), 0xab);
+        assert_eq!(bus.read_byte(Addr::from(0x11234u32)), 0xab);
+        assert_eq!(bus.read_byte(Addr::from(0x21234u32)), 0xab);
+        bus.write_byte(Addr::from(0x71234u32), 0xcd);
+        assert_eq!(bus.read_byte(Addr::from(0x01235u32)), 0x00);
+        assert_eq!(bus.read_byte(Addr::from(0x01234u32)), 0xcd);
+        assert_eq!(bus.read_byte(Addr::from(0x11234u32)), 0xcd);
+        assert_eq!(bus.read_byte(Addr::from(0x21234u32)), 0xcd);
     }
 }
 

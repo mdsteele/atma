@@ -1,6 +1,6 @@
 //! Facilities for disassembling 6502 machine code.
 
-use crate::bus::SimBus;
+use crate::bus::{Addr, SimBus};
 use std::fmt;
 
 //===========================================================================//
@@ -675,14 +675,14 @@ impl Operand {
 }
 
 fn format_zp(zp: u8, bus: &dyn SimBus) -> String {
-    match bus.label_at(zp as u32) {
+    match bus.label_at(Addr::from(zp)) {
         Some(label) => label.to_string(),
         None => format!("${zp:02x}"),
     }
 }
 
 fn format_abs(abs: u16, bus: &dyn SimBus) -> String {
-    match bus.label_at(abs as u32) {
+    match bus.label_at(Addr::from(abs)) {
         Some(label) => label.to_string(),
         None => format!("${abs:04x}"),
     }
@@ -707,7 +707,7 @@ impl Instruction {
 
     /// Decodes a single 6502 instruction at the given starting address.
     pub fn decode(bus: &dyn SimBus, pc: u16) -> Instruction {
-        let opcode = bus.peek_byte(u32::from(pc));
+        let opcode = bus.peek_byte(Addr::from(pc));
         let operation = Operation::from_opcode(opcode);
         let operand = match operation.addr_mode {
             AddrMode::Implied => Operand::Implied,
@@ -751,12 +751,12 @@ impl Instruction {
 }
 
 fn next_byte(bus: &dyn SimBus, pc: u16) -> u8 {
-    bus.peek_byte(u32::from(pc.wrapping_add(1)))
+    bus.peek_byte(Addr::from(pc.wrapping_add(1)))
 }
 
 fn next_word(bus: &dyn SimBus, pc: u16) -> u16 {
-    let lo = bus.peek_byte(u32::from(pc.wrapping_add(1)));
-    let hi = bus.peek_byte(u32::from(pc.wrapping_add(2)));
+    let lo = bus.peek_byte(Addr::from(pc.wrapping_add(1)));
+    let hi = bus.peek_byte(Addr::from(pc.wrapping_add(2)));
     (u16::from(hi) << 8) | u16::from(lo)
 }
 
@@ -765,7 +765,7 @@ fn next_word(bus: &dyn SimBus, pc: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
+    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {
@@ -778,8 +778,8 @@ mod tests {
         disassemble_with_bus(&*make_test_bus(code))
     }
 
-    fn disassemble_with_label(code: &[u8], addr: u32, label: &str) -> String {
-        let labels = HashMap::from([(label.to_string(), addr)]);
+    fn disassemble_with_label(code: &[u8], addr: u16, label: &str) -> String {
+        let labels = HashMap::from([(label.to_string(), Addr::from(addr))]);
         let bus = LabeledBus::new(make_test_bus(code), labels);
         disassemble_with_bus(&bus)
     }

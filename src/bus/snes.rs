@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind, new_ram_bus};
+use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -32,12 +32,12 @@ impl SnesBus {
         }
     }
 
-    fn sub_bus(&self, addr: u32) -> (&dyn SimBus, u32) {
-        let bank = (addr >> 16) as u8;
-        let abs = addr as u16;
+    fn sub_bus(&self, addr: Addr) -> (&dyn SimBus, Addr) {
+        let bank = (addr >> 16).as_u8();
+        let abs = addr.as_u16();
         match bank {
             0x00..0x40 | 0x80..0xc0 => match abs {
-                0x0000..0x2000 => (&*self.wram, u32::from(abs)),
+                0x0000..0x2000 => (&*self.wram, Addr::from(abs)),
                 0x2100..0x2200 => (&self.ppu_regs, addr),
                 0x4016..0x4018 => (&self.joy_regs, addr),
                 0x4200..0x4220 => (&self.cpu_regs, addr),
@@ -49,12 +49,12 @@ impl SnesBus {
         }
     }
 
-    fn sub_bus_mut(&mut self, addr: u32) -> (&mut dyn SimBus, u32) {
-        let bank = (addr >> 16) as u8;
-        let abs = addr as u16;
+    fn sub_bus_mut(&mut self, addr: Addr) -> (&mut dyn SimBus, Addr) {
+        let bank = (addr >> 16).as_u8();
+        let abs = addr.as_u16();
         match bank {
             0x00..0x40 | 0x80..0xc0 => match abs {
-                0x0000..0x2000 => (&mut *self.wram, u32::from(abs)),
+                0x0000..0x2000 => (&mut *self.wram, Addr::from(abs)),
                 0x2100..0x2200 => (&mut self.ppu_regs, addr),
                 0x4016..0x4018 => (&mut self.joy_regs, addr),
                 0x4200..0x4220 => (&mut self.cpu_regs, addr),
@@ -72,17 +72,17 @@ impl SimBus for SnesBus {
         format!("SNES with {}", self.cart.description())
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
         let (bus, addr) = self.sub_bus(addr);
         bus.label_at(addr)
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
         let (bus, addr) = self.sub_bus(addr);
         bus.watchpoint_at(addr, kind)
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
         let (bus, addr) = self.sub_bus_mut(addr);
         bus.watch_address(addr, kind)
     }
@@ -110,17 +110,17 @@ impl SimBus for SnesBus {
         self.cart.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
+    fn peek_byte(&self, addr: Addr) -> u8 {
         let (bus, addr) = self.sub_bus(addr);
         bus.peek_byte(addr)
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
         let (bus, addr) = self.sub_bus_mut(addr);
         bus.read_byte(addr)
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
         let (bus, addr) = self.sub_bus_mut(addr);
         bus.write_byte(addr, data);
     }
@@ -143,8 +143,8 @@ impl SimBus for CpuRegBus {
         "SNES CPU registers".to_string()
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        let addr = (addr as u8) & 0x1f;
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        let addr = addr.as_u8() & 0x1f;
         match addr {
             0x00 => Some("NMITIMEN"),
             0x01 => Some("WRIO"),
@@ -180,13 +180,13 @@ impl SimBus for CpuRegBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        let addr = (addr as u8) & 0x1f;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr.as_u8() & 0x1f;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        let addr = (addr as u8) & 0x1f;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        let addr = addr.as_u8() & 0x1f;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -235,22 +235,22 @@ impl SimBus for CpuRegBus {
             "JOY4H" => 0x1f,
             _ => return None,
         };
-        Some(self.watch_address(u32::from(addr), kind))
+        Some(self.watch_address(Addr::from(addr), kind))
     }
 
     fn unwatch(&mut self, id: WatchId) {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, _addr: u32) -> u8 {
+    fn peek_byte(&self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn read_byte(&mut self, _addr: u32) -> u8 {
+    fn read_byte(&mut self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn write_byte(&mut self, _addr: u32, _data: u8) {
+    fn write_byte(&mut self, _addr: Addr, _data: u8) {
         // TODO
     }
 }
@@ -272,8 +272,8 @@ impl SimBus for DmaRegBus {
         "SNES DMA registers".to_string()
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr as u8 {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u8() {
             0x00 => Some("DMAP0"),
             0x10 => Some("DMAP1"),
             0x20 => Some("DMAP2"),
@@ -366,13 +366,13 @@ impl SimBus for DmaRegBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr as u8;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr.as_u8();
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        let addr = addr as u8;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        let addr = addr.as_u8();
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -479,22 +479,22 @@ impl SimBus for DmaRegBus {
             "NTLR7" => 0x7a,
             _ => return None,
         };
-        Some(self.watch_address(u32::from(addr), kind))
+        Some(self.watch_address(Addr::from(addr), kind))
     }
 
     fn unwatch(&mut self, id: WatchId) {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, _addr: u32) -> u8 {
+    fn peek_byte(&self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn read_byte(&mut self, _addr: u32) -> u8 {
+    fn read_byte(&mut self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn write_byte(&mut self, _addr: u32, _data: u8) {
+    fn write_byte(&mut self, _addr: Addr, _data: u8) {
         // TODO
     }
 }
@@ -516,8 +516,8 @@ impl SimBus for JoyRegBus {
         "SNES Joypad registers".to_string()
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        let addr = (addr as u8) & 0x1;
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        let addr = addr.as_u8() & 0x1;
         match addr {
             0 => Some("JOYSER0"),
             1 => Some("JOYSER1"),
@@ -525,13 +525,13 @@ impl SimBus for JoyRegBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        let addr = (addr as u8) & 0x1;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr.as_u8() & 0x1;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        let addr = (addr as u8) & 0x1;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        let addr = addr.as_u8() & 0x1;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -547,9 +547,9 @@ impl SimBus for JoyRegBus {
         label: &str,
         kind: WatchKind,
     ) -> Option<WatchId> {
-        let addr: u32 = match label {
-            "JOYSER0" => 0,
-            "JOYSER1" => 1,
+        let addr: Addr = match label {
+            "JOYSER0" => Addr::from(0u8),
+            "JOYSER1" => Addr::from(1u8),
             _ => return None,
         };
         Some(self.watch_address(addr, kind))
@@ -559,15 +559,15 @@ impl SimBus for JoyRegBus {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, _addr: u32) -> u8 {
+    fn peek_byte(&self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn read_byte(&mut self, _addr: u32) -> u8 {
+    fn read_byte(&mut self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn write_byte(&mut self, _addr: u32, _data: u8) {
+    fn write_byte(&mut self, _addr: Addr, _data: u8) {
         // TODO
     }
 }
@@ -589,8 +589,8 @@ impl SimBus for PpuRegBus {
         "SNES PPU registers".to_string()
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr as u8 {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u8() {
             0x00 => Some("INIDISP"),
             0x01 => Some("OBSEL"),
             0x02 => Some("OAMADDL"),
@@ -667,13 +667,13 @@ impl SimBus for PpuRegBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr as u8;
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        let addr = addr.as_u8();
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        let addr = addr as u8;
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        let addr = addr.as_u8();
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -764,22 +764,22 @@ impl SimBus for PpuRegBus {
             "WMADDH" => 0x83,
             _ => return None,
         };
-        Some(self.watch_address(u32::from(addr), kind))
+        Some(self.watch_address(Addr::from(addr), kind))
     }
 
     fn unwatch(&mut self, id: WatchId) {
         self.watchpoints.remove_by_right(&id);
     }
 
-    fn peek_byte(&self, _addr: u32) -> u8 {
+    fn peek_byte(&self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn read_byte(&mut self, _addr: u32) -> u8 {
+    fn read_byte(&mut self, _addr: Addr) -> u8 {
         0 // TODO
     }
 
-    fn write_byte(&mut self, _addr: u32, _data: u8) {
+    fn write_byte(&mut self, _addr: Addr, _data: u8) {
         // TODO
     }
 }

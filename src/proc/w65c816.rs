@@ -1,5 +1,5 @@
 use super::util::watch;
-use crate::bus::{SimBus, WatchKind};
+use crate::bus::{Addr, SimBus, WatchKind};
 use crate::dis::w65c816::{AddrMode, Instruction, Mnemonic, Operation};
 use crate::proc::{SimBreak, SimProc};
 
@@ -354,7 +354,7 @@ impl Wdc65c816 {
         &mut self,
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
-        bus.write_byte(self.addr, self.data);
+        bus.write_byte(Addr::from(self.addr), self.data);
         Ok(())
     }
 
@@ -514,8 +514,9 @@ impl Wdc65c816 {
         &mut self,
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
-        self.data = bus.read_byte(self.addr);
-        watch(bus, self.addr, WatchKind::Read)
+        let addr = Addr::from(self.addr);
+        self.data = bus.read_byte(addr);
+        watch(bus, addr, WatchKind::Read)
     }
 
     fn exec_read_word(
@@ -578,7 +579,7 @@ impl Wdc65c816 {
         bus: &mut dyn SimBus,
     ) -> Result<(), SimBreak> {
         self.microcode.push(Microcode::FinishWrite);
-        watch(bus, self.addr, WatchKind::Write)
+        watch(bus, Addr::from(self.addr), WatchKind::Write)
     }
 
     fn decode_op_bcc(&mut self) {
@@ -988,20 +989,21 @@ impl SimProc for Wdc65c816 {
         "WDC 65C816".to_string()
     }
 
-    fn disassemble(&self, bus: &dyn SimBus, pc: u32) -> (u32, String) {
+    fn disassemble(&self, bus: &dyn SimBus, pc: Addr) -> (u32, String) {
+        let pc = pc.as_u32();
         let flag_m = self.get_flag(PROC_FLAG_M);
         let flag_x = self.get_flag(PROC_FLAG_X);
         let instruction = Instruction::decode(bus, pc, flag_m, flag_x);
         (instruction.size(), instruction.format(bus, pc, self.reg_d, self.dbr))
     }
 
-    fn pc(&self) -> u32 {
-        (u32::from(self.pbr) << 16) | u32::from(self.pc16)
+    fn pc(&self) -> Addr {
+        (Addr::from(self.pbr) << 16) | Addr::from(self.pc16)
     }
 
-    fn set_pc(&mut self, addr: u32) {
-        self.pc16 = addr as u16;
-        self.pbr = (addr >> 16) as u8;
+    fn set_pc(&mut self, addr: Addr) {
+        self.pc16 = addr.as_u16();
+        self.pbr = (addr >> 16).as_u8();
         self.microcode.clear();
     }
 
@@ -1052,7 +1054,7 @@ impl SimProc for Wdc65c816 {
         if self.microcode.is_empty() {
             self.microcode.push(Microcode::DecodeOpcode);
             self.microcode.push(Microcode::ReadByte);
-            self.addr = self.pc();
+            self.addr = self.pc().as_u32();
         }
         while let Some(microcode) = self.microcode.pop() {
             self.execute_microcode(bus, microcode)?;

@@ -13,7 +13,7 @@ pub use sm83::SharpSm83;
 pub use spc700::Spc700;
 pub use w65c816::Wdc65c816;
 
-use crate::bus::{SimBus, WatchId, WatchKind};
+use crate::bus::{Addr, SimBus, WatchId, WatchKind};
 
 //===========================================================================//
 
@@ -38,16 +38,16 @@ pub trait SimProc {
     /// Disassembles the instruction starting at the given address, returning
     /// the length of the instruction in bytes, and a human-readable string
     /// with the assembly code for that instruction.
-    fn disassemble(&self, bus: &dyn SimBus, addr: u32) -> (u32, String);
+    fn disassemble(&self, bus: &dyn SimBus, addr: Addr) -> (u32, String);
 
     /// Returns the current address of the program counter.
-    fn pc(&self) -> u32;
+    fn pc(&self) -> Addr;
 
     /// Sets the current address of the program counter.  If the processor is
     /// currently paused in the middle of an instruction due to the last
     /// `step()` being interrupted by a breakpoint condition, that instruction
     /// will be aborted.
-    fn set_pc(&mut self, addr: u32);
+    fn set_pc(&mut self, addr: Addr);
 
     /// Returns a list of the this processor's register names.
     fn register_names(&self) -> &'static [&'static str];

@@ -1,4 +1,4 @@
-use super::{SimBus, WatchId, WatchKind, new_open_bus, new_ram_bus};
+use super::{Addr, SimBus, WatchId, WatchKind, new_open_bus, new_ram_bus};
 
 //===========================================================================//
 
@@ -36,8 +36,8 @@ impl SimBus for DmgBus {
         format!("DMG with {}", self.cart.description())
     }
 
-    fn label_at(&self, addr: u32) -> Option<&str> {
-        match addr as u16 {
+    fn label_at(&self, addr: Addr) -> Option<&str> {
+        match addr.as_u16() {
             0x0000..0x8000 => self.cart.label_at(addr),
             0x8000..0xa000 => self.vram.label_at(addr),
             0xa000..0xc000 => self.cart.label_at(addr),
@@ -50,8 +50,8 @@ impl SimBus for DmgBus {
         }
     }
 
-    fn watchpoint_at(&self, addr: u32, kind: WatchKind) -> Option<WatchId> {
-        match addr as u16 {
+    fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
+        match addr.as_u16() {
             0x0000..0x8000 => self.cart.watchpoint_at(addr, kind),
             0x8000..0xa000 => self.vram.watchpoint_at(addr, kind),
             0xa000..0xc000 => self.cart.watchpoint_at(addr, kind),
@@ -63,8 +63,8 @@ impl SimBus for DmgBus {
         }
     }
 
-    fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
-        match addr as u16 {
+    fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
+        match addr.as_u16() {
             0x0000..0x8000 => self.cart.watch_address(addr, kind),
             0x8000..0xa000 => self.vram.watch_address(addr, kind),
             0xa000..0xc000 => self.cart.watch_address(addr, kind),
@@ -90,7 +90,7 @@ impl SimBus for DmgBus {
             .or_else(|| self.io_regs.watch_label(label, kind))
             .or_else(|| {
                 if label == "IE" {
-                    Some(self.hiram.watch_address(0xffff, kind))
+                    Some(self.hiram.watch_address(Addr::from(0xffffu16), kind))
                 } else {
                     None
                 }
@@ -107,8 +107,8 @@ impl SimBus for DmgBus {
         self.hiram.unwatch(id);
     }
 
-    fn peek_byte(&self, addr: u32) -> u8 {
-        match addr as u16 {
+    fn peek_byte(&self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x8000 => self.cart.peek_byte(addr),
             0x8000..0xa000 => self.vram.peek_byte(addr),
             0xa000..0xc000 => self.cart.peek_byte(addr),
@@ -120,8 +120,8 @@ impl SimBus for DmgBus {
         }
     }
 
-    fn read_byte(&mut self, addr: u32) -> u8 {
-        match addr as u16 {
+    fn read_byte(&mut self, addr: Addr) -> u8 {
+        match addr.as_u16() {
             0x0000..0x8000 => self.cart.read_byte(addr),
             0x8000..0xa000 => self.vram.read_byte(addr),
             0xa000..0xc000 => self.cart.read_byte(addr),
@@ -133,8 +133,8 @@ impl SimBus for DmgBus {
         }
     }
 
-    fn write_byte(&mut self, addr: u32, data: u8) {
-        match addr as u16 {
+    fn write_byte(&mut self, addr: Addr, data: u8) {
+        match addr.as_u16() {
             0x0000..0x8000 => self.cart.write_byte(addr, data),
             0x8000..0xa000 => self.vram.write_byte(addr, data),
             0xa000..0xc000 => self.cart.write_byte(addr, data),

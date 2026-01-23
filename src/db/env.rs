@@ -1,4 +1,4 @@
-use crate::bus::{SimBus, WatchId, WatchKind};
+use crate::bus::{Addr, SimBus, WatchId, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ impl EnvProc {
         format!("{} core, {}", self.proc.description(), self.bus.description())
     }
 
-    fn disassemble(&self, addr: u32) -> (u32, String) {
+    fn disassemble(&self, addr: Addr) -> (u32, String) {
         self.proc.disassemble(&*self.bus, addr)
     }
 
@@ -86,13 +86,13 @@ impl SimEnv {
 
     /// Returns the current address of the currently selected processor's
     /// program counter.
-    pub fn pc(&self) -> u32 {
+    pub fn pc(&self) -> Addr {
         self.current_processor().proc.pc()
     }
 
     /// Sets the current address of the currently selected processor's program
     /// counter.
-    pub fn set_pc(&mut self, addr: u32) {
+    pub fn set_pc(&mut self, addr: Addr) {
         self.current_processor_mut().proc.set_pc(addr);
     }
 
@@ -116,7 +116,7 @@ impl SimEnv {
 
     /// Writes a single byte to memory using the currently selected processor's
     /// memory bus.
-    pub fn write_byte(&mut self, addr: u32, data: u8) {
+    pub fn write_byte(&mut self, addr: Addr, data: u8) {
         self.current_processor_mut().bus.write_byte(addr, data);
     }
 
@@ -124,7 +124,7 @@ impl SimEnv {
     /// currently selected processor, returning the length of the instruction
     /// in bytes, and a human-readable string with the assembly code for that
     /// instruction.
-    pub fn disassemble(&self, addr: u32) -> (u32, String) {
+    pub fn disassemble(&self, addr: Addr) -> (u32, String) {
         self.current_processor().disassemble(addr)
     }
 
@@ -143,7 +143,7 @@ impl SimEnv {
 
     /// Sets a watchpoint on the given address for the currently selected
     /// processor.
-    pub fn watch_address(&mut self, addr: u32, kind: WatchKind) -> WatchId {
+    pub fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
         self.current_processor_mut().bus.watch_address(addr, kind)
     }
 
