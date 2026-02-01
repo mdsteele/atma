@@ -1,5 +1,5 @@
 use super::util::watch;
-use crate::bus::{Addr, SimBus, WatchKind};
+use crate::bus::{Addr, Offset, SimBus, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -69,7 +69,7 @@ impl SimProc for NopProc {
         }
         debug_assert!(matches!(self.cycle, Cycle::ExecOpcode));
         self.cycle = Cycle::BetweenInstructions;
-        self.pc += 1;
+        self.pc += Offset::from(1);
         watch(bus, self.pc, WatchKind::Pc)
     }
 

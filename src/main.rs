@@ -1,9 +1,9 @@
 use ariadne::{self, Label, ReportKind, Source};
 use atma::asm::assemble_source;
-use atma::bus::{Addr, WatchKind};
+use atma::bus::{Addr, Align, Offset, WatchKind};
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
 use atma::link::LinkConfig;
-use atma::obj::{Align32, BinaryIo, ObjFile};
+use atma::obj::{BinaryIo, ObjFile};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
@@ -228,7 +228,7 @@ fn dump_object_file(obj: &ObjFile) {
             "Chunk {index}: {:?}, size=${:x}",
             chunk.section_name, chunk.size
         );
-        if chunk.align != Align32::default() {
+        if chunk.align != Align::default() {
             print!(", align=${:x}", chunk.align);
         }
         if let Some(within) = chunk.within {
@@ -241,18 +241,16 @@ fn dump_object_file(obj: &ObjFile) {
             .symbols
             .iter()
             .map(|symbol| symbol.offset)
-            .collect::<HashSet<u32>>();
-        for (offset, &byte) in chunk.data.iter().enumerate() {
-            match offset % 16 {
+            .collect::<HashSet<Offset>>();
+        for (index, &byte) in chunk.data.iter().enumerate() {
+            match index % 16 {
                 0 => print!("\n  "),
                 8 => print!("  "),
                 _ => {}
             }
-            let prefix = if symbol_offsets.contains(&(offset as u32)) {
-                ":"
-            } else {
-                " "
-            };
+            let offset = Offset::try_from(index).unwrap();
+            let prefix =
+                if symbol_offsets.contains(&offset) { ":" } else { " " };
             print!(" {}{byte:02x}", prefix);
         }
         println!();

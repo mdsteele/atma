@@ -2,10 +2,9 @@
 
 mod expr;
 
+use crate::bus::{Align, Offset, Size};
 use crate::expr::ExprType;
-use crate::obj::{
-    Align32, ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjSymbol, PatchKind,
-};
+use crate::obj::{ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjSymbol, PatchKind};
 use crate::parse::{
     AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, IdentifierAst,
     ParseError, ParseResult,
@@ -69,7 +68,7 @@ impl Assembler {
             section_env.symbols.push(ObjSymbol {
                 name: id_ast.name.clone(),
                 exported: false,
-                offset: section_env.data.len() as u32,
+                offset: Offset::try_from(section_env.data.len()).unwrap(),
             });
         } else {
             let message = "labels must be within a .SECTION".to_string();
@@ -104,14 +103,14 @@ impl Assembler {
             }
             None => None,
         };
-        let align = Align32::default(); // TODO: support align attribute
-        let within: Option<Align32> = None; // TODO: support within attribute
+        let align = Align::default(); // TODO: support align attribute
+        let within: Option<Align> = None; // TODO: support within attribute
         self.section_stack.push(SectionEnv::new());
         self.visit_statements(&section_ast.body);
         debug_assert!(!self.section_stack.is_empty());
         let section_env = self.section_stack.pop().unwrap();
         // TODO: error if size is too large
-        let size = section_env.data.len() as u32;
+        let size = Size::try_from(section_env.data.len()).unwrap();
         if let Some(section_name) = name {
             self.chunks.push(ObjChunk {
                 section_name,

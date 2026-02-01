@@ -28,11 +28,12 @@ impl LinkPatcher {
         mut self,
         regions: &[PositionedMemory],
     ) -> Result<Vec<u8>, Vec<LinkError>> {
-        let total_size = regions.iter().map(|r| r.size as usize).sum();
+        let total_size =
+            regions.iter().map(|r| usize::try_from(r.size).unwrap()).sum();
         let mut binary = vec![0u8; total_size];
         let mut region_start: usize = 0;
         for region in regions {
-            let region_size = region.size as usize;
+            let region_size = usize::try_from(region.size).unwrap();
             let region_end = region_start + region_size;
             let region_binary = &mut binary[region_start..region_end];
             self.visit_region(region, region_binary);
@@ -48,10 +49,11 @@ impl LinkPatcher {
         region: &PositionedMemory,
         region_binary: &mut [u8],
     ) {
-        debug_assert_eq!(region_binary.len(), region.size as usize);
+        debug_assert_eq!(region_binary.len() as u64, u64::from(region.size));
         for section in region.sections.iter() {
-            let section_start = (section.start - region.start) as usize;
-            let section_size = section.size as usize;
+            let section_start =
+                (u64::from(section.start) - u64::from(region.start)) as usize;
+            let section_size = usize::try_from(section.size).unwrap();
             let section_end = section_start + section_size;
             let section_binary =
                 &mut region_binary[section_start..section_end];
@@ -64,9 +66,10 @@ impl LinkPatcher {
         section: &PositionedSection,
         section_binary: &mut [u8],
     ) {
-        debug_assert_eq!(section_binary.len(), section.size as usize);
+        debug_assert_eq!(section_binary.len() as u64, u64::from(section.size));
         for chunk in section.chunks.iter() {
-            let chunk_start = (chunk.start - section.start) as usize;
+            let chunk_start =
+                (u64::from(chunk.start) - u64::from(section.start)) as usize;
             let chunk_size = chunk.data.len();
             let chunk_end = chunk_start + chunk_size;
             let chunk_binary = &mut section_binary[chunk_start..chunk_end];

@@ -1,7 +1,7 @@
-use super::align::Align32;
 use super::binary::BinaryIo;
 use super::patch::ObjPatch;
 use super::symbol::ObjSymbol;
+use crate::bus::{Align, Size};
 use std::io;
 use std::rc::Rc;
 
@@ -18,12 +18,12 @@ pub struct ObjChunk {
     /// if the chunk requires additional padding after the data.  This should
     /// not be less than `data.len()`, or else the linker will return an error
     /// when trying to place this chunk.
-    pub size: u32,
+    pub size: Size,
     /// The required alignment for this chunk's data, within its address space.
-    pub align: Align32,
+    pub align: Align,
     /// If set, then this entire chunk (data + padding) must not cross any
     /// alignment boundary of this size within its address space.
-    pub within: Option<Align32>,
+    pub within: Option<Align>,
     /// Relative symbols defined in this chunk.
     pub symbols: Rc<[ObjSymbol]>,
     /// Patches to apply to this chunk's data when linking.
@@ -34,9 +34,9 @@ impl BinaryIo for ObjChunk {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let section_name = Rc::<str>::read_from(reader)?;
         let data = Rc::<[u8]>::read_from(reader)?;
-        let size = u32::read_from(reader)?;
-        let align = Align32::read_from(reader)?;
-        let within = Option::<Align32>::read_from(reader)?;
+        let size = Size::read_from(reader)?;
+        let align = Align::read_from(reader)?;
+        let within = Option::<Align>::read_from(reader)?;
         let symbols = Rc::<[ObjSymbol]>::read_from(reader)?;
         let patches = Rc::<[ObjPatch]>::read_from(reader)?;
         Ok(ObjChunk {

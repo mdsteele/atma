@@ -1,3 +1,4 @@
+use crate::bus::{Addr, Align, Offset, Size};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
 use std::io;
@@ -280,6 +281,82 @@ impl<T: BinaryIo> BinaryIo for Vec<T> {
     }
 }
 
+impl BinaryIo for Addr {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        let value = BigUint::read_from(reader)?;
+        Addr::try_from(&value).map_err(|()| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("expected Addr, found {}", value),
+            )
+        })
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        BigUint::from(*self).write_to(writer)
+    }
+}
+
+impl BinaryIo for Align {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        Align::decode_from_u8(u8::read_from(reader)?)
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.encode_as_u8().write_to(writer)
+    }
+
+    fn read_option_from<R: io::BufRead>(
+        reader: &mut R,
+    ) -> io::Result<Option<Self>> {
+        let byte = u8::read_from(reader)?;
+        if byte == 0 {
+            Ok(None)
+        } else {
+            Align::decode_from_u8(byte).map(Some)
+        }
+    }
+
+    fn write_option_to<W: io::Write>(
+        option: &Option<Align>,
+        writer: &mut W,
+    ) -> io::Result<()> {
+        option.map(Align::encode_as_u8).unwrap_or(0u8).write_to(writer)
+    }
+}
+
+impl BinaryIo for Offset {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        let value = BigInt::read_from(reader)?;
+        Offset::try_from(&value).map_err(|()| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("expected Offset, found {}", value),
+            )
+        })
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        BigInt::from(*self).write_to(writer)
+    }
+}
+
+impl BinaryIo for Size {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        let value = BigUint::read_from(reader)?;
+        Size::try_from(&value).map_err(|()| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("expected Size, found {}", value),
+            )
+        })
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        BigUint::from(*self).write_to(writer)
+    }
+}
+
 //===========================================================================//
 
 #[cfg(test)]
@@ -297,11 +374,30 @@ pub(crate) fn assert_round_trips<T: BinaryIo + std::fmt::Debug + Eq>(
 #[cfg(test)]
 mod tests {
     use super::{BinaryIo, assert_round_trips};
+    use crate::bus::{Addr, Align, Offset, Size};
     use num_bigint::{BigInt, BigUint};
     use std::rc::Rc;
 
     #[test]
-    fn binary_round_trip_biguint() {
+    fn round_trip_align() {
+        for i in 0..Addr::BITS {
+            assert_round_trips(Align::try_from(1u64 << i).unwrap());
+            assert_round_trips(Some(Align::try_from(1u64 << i).unwrap()));
+        }
+        assert_round_trips(Option::<Align>::None);
+    }
+
+    #[test]
+    fn round_trip_addr() {
+        assert_round_trips(Addr::MIN);
+        assert_round_trips(Addr::from(0xbeu8));
+        assert_round_trips(Addr::from(0xfaceu16));
+        assert_round_trips(Addr::from(0x12345678u32));
+        assert_round_trips(Addr::MAX);
+    }
+
+    #[test]
+    fn round_trip_biguint() {
         assert_round_trips(BigUint::from(0u32));
         assert_round_trips(BigUint::from(1u32));
         assert_round_trips(BigUint::from(2u32));
@@ -376,6 +472,15 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_offset() {
+        assert_round_trips(Offset::MIN);
+        assert_round_trips(Offset::from(0xbeu8));
+        assert_round_trips(Offset::from(0xfaceu16));
+        assert_round_trips(Offset::from(0x12345678u32));
+        assert_round_trips(Offset::MAX);
+    }
+
+    #[test]
     fn round_trip_option() {
         assert_round_trips(Option::<u8>::None);
         assert_round_trips(Some(42u8));
@@ -391,6 +496,15 @@ mod tests {
     fn round_trip_rc_str() {
         assert_round_trips(Rc::<str>::from("".to_string()));
         assert_round_trips(Rc::<str>::from("foobar".to_string()));
+    }
+
+    #[test]
+    fn round_trip_size() {
+        assert_round_trips(Size::MIN);
+        assert_round_trips(Size::from(0xbeu8));
+        assert_round_trips(Size::from(0xfaceu16));
+        assert_round_trips(Size::from(0x12345678u32));
+        assert_round_trips(Size::MAX);
     }
 
     #[test]

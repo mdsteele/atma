@@ -1,6 +1,7 @@
 use super::expr::LinkTypeEnv;
+use crate::bus::{Addr, Align, AlignTryFromError, Size};
 use crate::expr::{ExprType, ExprValue};
-use crate::obj::{Align32, AlignTryFromError, ObjExpr};
+use crate::obj::ObjExpr;
 use crate::parse::{
     ExprAst, IdentifierAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
     ParseError, ParseResult, SrcSpan,
@@ -129,8 +130,8 @@ impl ConfigBuilder {
     fn visit_memory_entry(&mut self, entry: LinkEntryAst) {
         self.declare_entry(ENTITY_MEMORY, &entry.id);
         let mut space: Option<Rc<str>> = None;
-        let mut start: Option<u32> = None;
-        let mut size: Option<u32> = None;
+        let mut start: Option<Addr> = None;
+        let mut size: Option<Size> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
@@ -153,19 +154,19 @@ impl ConfigBuilder {
         self.memory.push(MemoryConfig {
             name: entry.id.name,
             space: space.unwrap_or_else(|| Rc::from("")),
-            start: start.unwrap_or(0),
-            size: size.unwrap_or(0),
+            start: start.unwrap_or(Addr::MIN),
+            size: size.unwrap_or(Size::ZERO),
         });
     }
 
-    fn memory_size_attr(&mut self, expr_ast: ExprAst) -> u32 {
+    fn memory_size_attr(&mut self, expr_ast: ExprAst) -> Size {
         let expr_span = expr_ast.span;
         if let Some(bigint) =
             self.static_int_attr(ENTITY_MEMORY, "size", expr_ast)
         {
-            match bigint.to_u32() {
-                Some(int) => return int,
-                _ => self.out_of_range_attr_error(
+            match Size::try_from(&bigint) {
+                Ok(size) => return size,
+                Err(()) => self.out_of_range_attr_error(
                     ENTITY_MEMORY,
                     "size",
                     expr_span,
@@ -173,7 +174,7 @@ impl ConfigBuilder {
                 ),
             }
         }
-        0
+        Size::ZERO
     }
 
     fn memory_space_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
@@ -186,14 +187,14 @@ impl ConfigBuilder {
         .unwrap_or_else(|| Rc::from(""))
     }
 
-    fn memory_start_attr(&mut self, expr_ast: ExprAst) -> u32 {
+    fn memory_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
         let expr_span = expr_ast.span;
         if let Some(bigint) =
             self.static_int_attr(ENTITY_MEMORY, "start", expr_ast)
         {
-            match bigint.to_u32() {
-                Some(int) => return int,
-                _ => self.out_of_range_attr_error(
+            match Addr::try_from(&bigint) {
+                Ok(addr) => return addr,
+                Err(()) => self.out_of_range_attr_error(
                     ENTITY_MEMORY,
                     "start",
                     expr_span,
@@ -201,7 +202,7 @@ impl ConfigBuilder {
                 ),
             }
         }
-        0
+        Addr::MIN
     }
 
     fn visit_sections_dir(&mut self, entries: Vec<LinkEntryAst>) {
@@ -213,9 +214,9 @@ impl ConfigBuilder {
     fn visit_section_entry(&mut self, entry: LinkEntryAst) {
         self.declare_entry(ENTITY_SECTION, &entry.id);
         let mut load: Option<Rc<str>> = None;
-        let mut start: Option<u32> = None;
-        let mut align: Option<Align32> = None;
-        let mut within: Option<Align32> = None;
+        let mut start: Option<Addr> = None;
+        let mut align: Option<Align> = None;
+        let mut within: Option<Align> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
@@ -249,14 +250,14 @@ impl ConfigBuilder {
         .unwrap_or_else(|| Rc::from(""))
     }
 
-    fn section_start_attr(&mut self, expr_ast: ExprAst) -> u32 {
+    fn section_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
         let expr_span = expr_ast.span;
         if let Some(bigint) =
             self.static_int_attr(ENTITY_SECTION, "start", expr_ast)
         {
-            match bigint.to_u32() {
-                Some(int) => return int,
-                _ => self.out_of_range_attr_error(
+            match Addr::try_from(&bigint) {
+                Ok(addr) => return addr,
+                Err(()) => self.out_of_range_attr_error(
                     ENTITY_SECTION,
                     "start",
                     expr_span,
@@ -264,14 +265,14 @@ impl ConfigBuilder {
                 ),
             }
         }
-        0
+        Addr::MIN
     }
 
-    fn section_align_attr(&mut self, expr_ast: ExprAst) -> Align32 {
+    fn section_align_attr(&mut self, expr_ast: ExprAst) -> Align {
         self.static_align_attr(ENTITY_SECTION, "align", expr_ast)
     }
 
-    fn section_within_attr(&mut self, expr_ast: ExprAst) -> Align32 {
+    fn section_within_attr(&mut self, expr_ast: ExprAst) -> Align {
         self.static_align_attr(ENTITY_SECTION, "within", expr_ast)
     }
 
@@ -280,12 +281,12 @@ impl ConfigBuilder {
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
-    ) -> Align32 {
+    ) -> Align {
         let expr_span = expr_ast.span;
         if let Some(bigint) =
             self.static_int_attr(entry_kind, attr_name, expr_ast)
         {
-            match Align32::try_from(&bigint) {
+            match Align::try_from(&bigint) {
                 Ok(align) => return align,
                 Err(error) => {
                     let message = match error {
@@ -308,7 +309,7 @@ impl ConfigBuilder {
                 }
             }
         }
-        Align32::default()
+        Align::default()
     }
 
     fn static_entity_attr(
@@ -525,9 +526,9 @@ pub struct MemoryConfig {
     /// The name of the address space that this memory region exists in.
     pub space: Rc<str>,
     /// The address of the start of this memory region.
-    pub start: u32,
+    pub start: Addr,
     /// The size of this memory region, in bytes.
-    pub size: u32,
+    pub size: Size,
 }
 
 //===========================================================================//
@@ -540,12 +541,12 @@ pub struct SectionConfig {
     /// The name of the memory region that this section should be loaded into.
     pub load: Rc<str>,
     /// If set, then the section must start at exactly this address.
-    pub start: Option<u32>,
+    pub start: Option<Addr>,
     /// The required alignment for this section, within its address space.
-    pub align: Align32,
+    pub align: Align,
     /// If set, then this entire section must not cross any alignment boundary
     /// of this size within its address space.
-    pub within: Option<Align32>,
+    pub within: Option<Align>,
 }
 
 //===========================================================================//

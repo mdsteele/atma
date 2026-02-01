@@ -13,7 +13,7 @@ mod ram;
 mod snes;
 mod ssmp;
 
-pub use addr::Addr;
+pub use addr::{Addr, Align, AlignTryFromError, Offset, Range, Size};
 pub use dmg::DmgBus;
 pub use label::LabeledBus;
 pub use mbc5::Mbc5Bus;

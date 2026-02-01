@@ -1,4 +1,5 @@
 use super::binary::BinaryIo;
+use crate::bus::Offset;
 use std::io;
 use std::rc::Rc;
 
@@ -13,14 +14,14 @@ pub struct ObjSymbol {
     /// linking, false if it is local to this object file.
     pub exported: bool,
     /// The offset from the start of the chunk, in bytes.
-    pub offset: u32,
+    pub offset: Offset,
 }
 
 impl BinaryIo for ObjSymbol {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let name = Rc::<str>::read_from(reader)?;
         let exported = bool::read_from(reader)?;
-        let offset = u32::read_from(reader)?;
+        let offset = Offset::read_from(reader)?;
         Ok(ObjSymbol { name, exported, offset })
     }
 
@@ -37,6 +38,7 @@ impl BinaryIo for ObjSymbol {
 #[cfg(test)]
 mod tests {
     use super::ObjSymbol;
+    use crate::bus::Offset;
     use crate::obj::assert_round_trips;
     use std::rc::Rc;
 
@@ -45,12 +47,12 @@ mod tests {
         assert_round_trips(ObjSymbol {
             name: Rc::from(""),
             exported: false,
-            offset: 0,
+            offset: Offset::from(0),
         });
         assert_round_trips(ObjSymbol {
             name: Rc::from("foobar"),
             exported: true,
-            offset: 1000,
+            offset: Offset::from(1000),
         });
     }
 }

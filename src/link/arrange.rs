@@ -1,9 +1,9 @@
 use super::config::{MemoryConfig, SectionConfig};
 use super::error::LinkError;
-use crate::obj::{Align32, ObjChunk, ObjPatch, ObjSymbol};
+use crate::bus::{Addr, Align, Offset, Range, Size};
+use crate::obj::{ObjChunk, ObjPatch, ObjSymbol};
 use rangemap::RangeInclusiveSet;
 use std::collections::HashMap;
-use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -12,7 +12,7 @@ use std::rc::Rc;
 pub struct ArrangedChunk {
     /// The byte offset of this chunk, relative to the starting address of its
     /// section.
-    pub start: u32,
+    pub offset: Offset,
     /// Static data (before patches are applied) at the start of this chunk.
     pub data: Rc<[u8]>,
     /// Relative symbols defined in this chunk.
@@ -22,9 +22,13 @@ pub struct ArrangedChunk {
 }
 
 impl ArrangedChunk {
-    pub(crate) fn with_start(chunk: &ObjChunk, start: u32) -> ArrangedChunk {
+    pub(crate) fn with_offset(
+        chunk: &ObjChunk,
+        offset: Offset,
+    ) -> ArrangedChunk {
+        debug_assert!(offset >= Offset::ZERO);
         ArrangedChunk {
-            start,
+            offset,
             data: chunk.data.clone(),
             symbols: chunk.symbols.clone(),
             patches: chunk.patches.clone(),
@@ -39,9 +43,9 @@ impl ArrangedChunk {
 pub struct ArrangedSection {
     /// The required alignment for this section, within its address space,
     /// after taking chunk placement restrictions into account.
-    pub align: Align32,
+    pub align: Align,
     /// The total size of this section's data, in bytes.
-    pub size: u32,
+    pub size: Size,
     /// The chunks in this section.
     pub chunks: Rc<[ArrangedChunk]>,
 }
@@ -55,7 +59,7 @@ impl ArrangedSection {
     ) -> Result<ArrangedSection, LinkError> {
         let mut sorted = Vec::from(chunks);
         sorted.sort_by(|a, b| b.align.cmp(&a.align));
-        let mut range_set = RangeInclusiveSet::<u32>::new();
+        let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut arranged = Vec::<ArrangedChunk>::with_capacity(chunks.len());
         let mut section_align = section.align;
         for chunk in sorted {
@@ -63,34 +67,40 @@ impl ArrangedSection {
             if let Some(within) = chunk.within {
                 section_align = section_align.max(within);
             }
-            if (chunk.size as usize) < chunk.data.len() {
+            if u64::from(chunk.size) < chunk.data.len() as u64 {
                 return Err(LinkError::Misc); // TODO: add error details
             }
             if let Some(within) = chunk.within
-                && chunk.size > u32::from(within)
+                && chunk.size > Size::from(within)
             {
                 return Err(LinkError::Misc); // TODO: add error details
             }
-            if chunk.size == 0 {
-                arranged.push(ArrangedChunk::with_start(chunk, 0));
+            if chunk.size == Size::ZERO {
+                arranged.push(ArrangedChunk::with_offset(chunk, Offset::ZERO));
                 continue;
             }
-            let size_offset: u32 = chunk.size - 1;
-            let start = try_place(
+            let range = try_place(
                 &range_set,
-                &(0..=u32::MAX),
-                size_offset,
+                Range::FULL,
+                chunk.size,
                 chunk.align,
                 chunk.within,
             )
             .ok_or(LinkError::Misc)?; // TODO: add error details
-            arranged.push(ArrangedChunk::with_start(chunk, start));
-            range_set.insert(start..=(start + size_offset));
+            arranged.push(ArrangedChunk::with_offset(
+                chunk,
+                range.start() - Addr::MIN,
+            ));
+            range_set.insert(range.into());
         }
         debug_assert_eq!(arranged.len(), chunks.len());
+        let size = range_set
+            .last()
+            .map(|r| Size::of_range(&(Addr::MIN..=*r.end())))
+            .unwrap_or(Size::ZERO);
         Ok(ArrangedSection {
             align: section_align,
-            size: range_set.last().map(|r| r.end() + 1).unwrap_or(0),
+            size,
             chunks: Rc::from(arranged),
         })
     }
@@ -102,11 +112,11 @@ impl ArrangedSection {
 /// its memory region.
 pub struct PositionedChunk {
     /// The absolute starting address of this chunk within its address space.
-    pub start: u32,
+    pub start: Addr,
     /// Static data (before patches are applied) at the start of this chunk.
     pub data: Rc<[u8]>,
     /// Symbols defined in this chunk, mapped to their absolute addresses.
-    pub symbols: HashMap<Rc<str>, u32>,
+    pub symbols: HashMap<Rc<str>, Addr>,
     /// Patches to apply to this chunk's data when linking.
     pub patches: Rc<[ObjPatch]>,
 }
@@ -114,9 +124,9 @@ pub struct PositionedChunk {
 impl PositionedChunk {
     pub(crate) fn with_section_start(
         chunk: &ArrangedChunk,
-        section_start: u32,
+        section_start: Addr,
     ) -> PositionedChunk {
-        let chunk_start = section_start + chunk.start;
+        let chunk_start = section_start + chunk.offset;
         PositionedChunk {
             start: chunk_start,
             data: chunk.data.clone(),
@@ -138,9 +148,9 @@ impl PositionedChunk {
 /// region.
 pub struct PositionedSection {
     /// The absolute starting address of this section within its address space.
-    pub start: u32,
+    pub start: Addr,
     /// The total size of this section's data, in bytes.
-    pub size: u32,
+    pub size: Size,
     /// The chunks in this section.
     pub chunks: Rc<[PositionedChunk]>,
 }
@@ -148,7 +158,7 @@ pub struct PositionedSection {
 impl PositionedSection {
     pub(crate) fn with_start(
         section: &ArrangedSection,
-        start: u32,
+        start: Addr,
     ) -> PositionedSection {
         PositionedSection {
             start,
@@ -168,9 +178,9 @@ impl PositionedSection {
 /// its address space.
 pub struct PositionedMemory {
     /// The address of the start of this memory region.
-    pub start: u32,
+    pub start: Addr,
     /// The size of this memory region, in bytes.
-    pub size: u32,
+    pub size: Size,
     /// The sections in this memory region.
     pub sections: Rc<[PositionedSection]>,
 }
@@ -182,32 +192,31 @@ impl PositionedMemory {
         memory: &MemoryConfig,
         sections: &[&ArrangedSection],
     ) -> Result<PositionedMemory, LinkError> {
-        let memory_range: Option<RangeInclusive<u32>> = if memory.size == 0 {
-            None
-        } else {
-            Some(memory.start..=(memory.size - 1))
-        };
-        let mut range_set = RangeInclusiveSet::<u32>::new();
+        let memory_range: Option<Range> =
+            memory.start.range_with_size(memory.size);
+        let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut positioned =
             Vec::<PositionedSection>::with_capacity(sections.len());
         for section in sections {
-            if section.size == 0 {
+            if section.size == Size::ZERO {
                 positioned.push(PositionedSection::with_start(
                     section,
                     memory.start,
                 ));
-            } else if let Some(outer_range) = &memory_range {
-                let size_offset: u32 = section.size - 1;
-                let start = try_place(
+            } else if let Some(outer_range) = memory_range {
+                let range = try_place(
                     &range_set,
                     outer_range,
-                    size_offset,
+                    section.size,
                     section.align,
                     None,
                 )
                 .ok_or(LinkError::Misc)?; // TODO: add error details
-                positioned.push(PositionedSection::with_start(section, start));
-                range_set.insert(start..=(start + size_offset));
+                positioned.push(PositionedSection::with_start(
+                    section,
+                    range.start(),
+                ));
+                range_set.insert(range.into());
             } else {
                 // TODO: Error: Cannot place a non-zero-size section in
                 // zero-size memory region.
@@ -226,40 +235,31 @@ impl PositionedMemory {
 //===========================================================================//
 
 fn try_place(
-    range_set: &RangeInclusiveSet<u32>,
-    outer_range: &RangeInclusive<u32>,
-    size_offset: u32,
-    align: Align32,
-    opt_within: Option<Align32>,
-) -> Option<u32> {
-    for gap in range_set.gaps(outer_range) {
+    range_set: &RangeInclusiveSet<Addr>,
+    outer_range: Range,
+    size: Size,
+    align: Align,
+    opt_within: Option<Align>,
+) -> Option<Range> {
+    debug_assert_ne!(size, Size::ZERO);
+    for gap in range_set.gaps(&outer_range.into()) {
+        let gap = Range::try_from(&gap).unwrap();
         if let Some(within) = opt_within
             && within > align
         {
-            let within = u32::from(within);
-            let mut subgap_start: u32 = *gap.start();
-            loop {
-                let subgap_end = ((u64::from(subgap_start) + 1)
-                    .next_multiple_of(u64::from(within))
-                    - 1)
-                .min(u64::from(*gap.end()))
-                    as u32;
-                let subgap = subgap_start..=subgap_end;
-                let start = subgap_start.next_multiple_of(u32::from(align));
-                if subgap.contains(&start) && subgap_end - start >= size_offset
+            for subgap in gap.split_at(within) {
+                if let Some(start) = subgap.first_aligned_to(align)
+                    && let Some(range) = start.range_with_size(size)
+                    && subgap.contains(range.end())
                 {
-                    return Some(start);
+                    return Some(range);
                 }
-                if subgap_end == *gap.end() {
-                    break;
-                }
-                subgap_start = subgap_end + 1;
             }
-        } else {
-            let start = gap.start().next_multiple_of(u32::from(align));
-            if gap.contains(&start) && gap.end() - start >= size_offset {
-                return Some(start);
-            }
+        } else if let Some(start) = gap.first_aligned_to(align)
+            && let Some(range) = start.range_with_size(size)
+            && gap.contains(range.end())
+        {
+            return Some(range);
         }
     }
     None
@@ -270,58 +270,64 @@ fn try_place(
 #[cfg(test)]
 mod tests {
     use super::try_place;
-    use crate::obj::Align32;
+    use crate::bus::{Addr, Align, Range, Size};
     use rangemap::RangeInclusiveSet;
 
     #[test]
     fn place_in_empty_range_set() {
         let range_set = RangeInclusiveSet::new();
-        let align = Align32::default();
-        let start = try_place(&range_set, &(0..=u32::MAX), 0xff, align, None);
-        assert_eq!(start, Some(0));
+        let size = Size::from(0x100u32);
+        let align = Align::default();
+        let range = try_place(&range_set, Range::FULL, size, align, None);
+        let expected = Addr::MIN.range_with_size(size).unwrap();
+        assert_eq!(range, Some(expected));
     }
 
     #[test]
-    fn place_full_u32_range_in_empty_range_set() {
+    fn place_full_addr_range_in_empty_range_set() {
         let range_set = RangeInclusiveSet::new();
-        let align = Align32::default();
-        let start =
-            try_place(&range_set, &(0..=u32::MAX), u32::MAX, align, None);
-        assert_eq!(start, Some(0));
+        let size = Size::MAX;
+        let align = Align::default();
+        let range = try_place(&range_set, Range::FULL, size, align, None);
+        let expected = Addr::MIN.range_with_size(size).unwrap();
+        assert_eq!(range, Some(expected));
     }
 
     #[test]
-    fn try_place_full_u32_range_in_nonempty_range_set() {
+    fn try_place_full_addr_range_in_nonempty_range_set() {
         let mut range_set = RangeInclusiveSet::new();
-        range_set.insert(0..=0);
-        let align = Align32::default();
-        let start =
-            try_place(&range_set, &(0..=u32::MAX), u32::MAX, align, None);
-        assert_eq!(start, None);
+        range_set.insert(Addr::MIN..=Addr::MIN);
+        let size = Size::MAX;
+        let align = Align::default();
+        let range = try_place(&range_set, Range::FULL, size, align, None);
+        assert_eq!(range, None);
     }
 
     #[test]
     fn place_aligned() {
         let mut range_set = RangeInclusiveSet::new();
-        range_set.insert(0x00..=0x03);
-        range_set.insert(0x16..=0x18);
-        range_set.insert(0x28..=0x2f);
-        let align = Align32::try_from(0x10).unwrap();
-        let start = try_place(&range_set, &(0..=u32::MAX), 0x7, align, None);
-        assert_eq!(start, Some(0x20));
+        range_set.insert(Addr::from(0x00u16)..=Addr::from(0x03u16));
+        range_set.insert(Addr::from(0x16u16)..=Addr::from(0x18u16));
+        range_set.insert(Addr::from(0x28u16)..=Addr::from(0x2fu16));
+        let size = Size::from(0x7u32);
+        let align = Align::try_from(0x10).unwrap();
+        let range = try_place(&range_set, Range::FULL, size, align, None);
+        let expected = Addr::from(0x20u16).range_with_size(size).unwrap();
+        assert_eq!(range, Some(expected));
     }
 
     #[test]
     fn place_within() {
         let mut range_set = RangeInclusiveSet::new();
-        range_set.insert(0x070..=0x18f);
-        range_set.insert(0x270..=0x274);
-        range_set.insert(0x4a0..=0x4ff);
-        let align = Align32::default();
-        let within = Some(Align32::try_from(0x100).unwrap());
-        let start =
-            try_place(&range_set, &(0..=u32::MAX), 0x7f, align, within);
-        assert_eq!(start, Some(0x275));
+        range_set.insert(Addr::from(0x070u16)..=Addr::from(0x18fu16));
+        range_set.insert(Addr::from(0x270u16)..=Addr::from(0x274u16));
+        range_set.insert(Addr::from(0x4a0u16)..=Addr::from(0x4ffu16));
+        let size = Size::from(0x7fu32);
+        let align = Align::default();
+        let within = Some(Align::try_from(0x100).unwrap());
+        let start = try_place(&range_set, Range::FULL, size, align, within);
+        let expected = Addr::from(0x275u16).range_with_size(size).unwrap();
+        assert_eq!(start, Some(expected));
     }
 }
 
