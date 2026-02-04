@@ -1,5 +1,7 @@
+use crate::bus::Size;
 use crate::obj::PatchKind;
 use num_bigint::BigInt;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -8,6 +10,24 @@ use num_bigint::BigInt;
 pub enum LinkError {
     /// A miscellaneous error.
     Misc, // TODO: remove this
+    /// A chunk was unable to be arranged within its section, given the
+    /// constraints.
+    ChunkCannotBePlaced,
+    /// A chunk in an object file has a declared size smaller than its data
+    /// payload.
+    ChunkDataLargerThanSize {
+        /// The length of the chunk's data payload.
+        chunk_data_len: usize,
+        /// The declared size of the chunk.
+        chunk_size: Size,
+    },
+    /// A chunk in an object file belongs to a section that is not declared in
+    /// the linker config.
+    ChunkSectionDoesNotExist {
+        /// The name of the nonexistent linker section to which the chunk
+        /// should belong.
+        section_name: Rc<str>,
+    },
     /// A patch's offset/size was out of range for the size of the chunk data.
     PatchOffsetOutOfRange,
     /// A patch expression evaluated to a value that is out of range for that
@@ -20,6 +40,19 @@ pub enum LinkError {
     },
     /// A patch expression evaluated to a value of the wrong type.
     PatchValueWrongType,
+    /// A section was unable to be positioned within its memory region, given
+    /// the constraints.
+    SectionCannotBePlaced,
+    /// A section contained no data.
+    SectionIsEmpty {
+        /// The name of the empty section.
+        section_name: Rc<str>,
+    },
+    /// Two symbols were exported with the same name.
+    SymbolExportCollision {
+        /// The fully qualified name shared by the symbols.
+        symbol_name: Rc<str>,
+    },
 }
 
 //===========================================================================//

@@ -8,12 +8,11 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// Represents one data chunk of an object file.
-#[derive(Clone)]
 pub struct ObjChunk {
     /// The name of the linker section to which this chunk belongs.
     pub section_name: Rc<str>,
     /// Static data (before patches are applied) at the start of this chunk.
-    pub data: Rc<[u8]>,
+    pub data: Box<[u8]>,
     /// The size of the chunk, in bytes.  This may be greater than `data.len()`
     /// if the chunk requires additional padding after the data.  This should
     /// not be less than `data.len()`, or else the linker will return an error
@@ -27,18 +26,18 @@ pub struct ObjChunk {
     /// Relative symbols defined in this chunk.
     pub symbols: Rc<[ObjSymbol]>,
     /// Patches to apply to this chunk's data when linking.
-    pub patches: Rc<[ObjPatch]>,
+    pub patches: Box<[ObjPatch]>,
 }
 
 impl BinaryIo for ObjChunk {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         let section_name = Rc::<str>::read_from(reader)?;
-        let data = Rc::<[u8]>::read_from(reader)?;
+        let data = Box::<[u8]>::read_from(reader)?;
         let size = Size::read_from(reader)?;
         let align = Align::read_from(reader)?;
         let within = Option::<Align>::read_from(reader)?;
         let symbols = Rc::<[ObjSymbol]>::read_from(reader)?;
-        let patches = Rc::<[ObjPatch]>::read_from(reader)?;
+        let patches = Box::<[ObjPatch]>::read_from(reader)?;
         Ok(ObjChunk {
             section_name,
             data,

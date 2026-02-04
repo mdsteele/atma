@@ -56,6 +56,11 @@ impl Addr {
         self.0 as usize
     }
 
+    /// Returns true if `self` is aligned to `align`.
+    pub fn is_aligned_to(self, align: Align) -> bool {
+        self & !align.mask() == Addr(0)
+    }
+
     /// Calculates the lowest address greater than or equal to `self` that is
     /// aligned to `align`, or `None` if the next such address would be greater
     /// than `Addr::MAX`.
@@ -80,7 +85,7 @@ impl Addr {
     /// Returns the largest possible address range that starts with `self` and
     /// does not cross any alignment boundary of `align`. That is, `addr &
     /// align.mask()` will be the same for every `addr` in the returned range.
-    fn range_within(self, align: Align) -> Range {
+    pub fn range_within(self, align: Align) -> Range {
         let alignment = 1u64 << align.log2();
         let limit = (u64::from(self.0) + 1).next_multiple_of(alignment);
         Range { first: self, last: Addr((limit - 1) as u32) }
@@ -528,6 +533,14 @@ impl TryFrom<&BigInt> for Offset {
     }
 }
 
+impl TryFrom<Offset> for u64 {
+    type Error = ();
+
+    fn try_from(value: Offset) -> Result<u64, ()> {
+        u64::try_from(value.0).map_err(|_| ())
+    }
+}
+
 impl fmt::Display for Offset {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         self.0.fmt(f)
@@ -571,6 +584,15 @@ impl Range {
     /// A range that covers all possible addresses.
     pub const FULL: Range = Range { first: Addr::MIN, last: Addr::MAX };
 
+    /// Returns an address range that contains `first`, `last`, and all
+    /// addresses in between.
+    ///
+    /// Panics if `last < first`.
+    pub fn with_bounds(first: Addr, last: Addr) -> Range {
+        assert!(first <= last);
+        Range { first, last }
+    }
+
     /// Returns the first address in the range.
     pub fn start(self) -> Addr {
         self.first
@@ -590,6 +612,11 @@ impl Range {
     /// Returns true if this range contains `addr`.
     pub fn contains(self, addr: Addr) -> bool {
         (self.first..=self.last).contains(&addr)
+    }
+
+    /// Returns true if `self` contains all addresses in `other`.
+    pub fn is_superset(self, other: Range) -> bool {
+        self.first <= other.first && self.last >= other.last
     }
 
     /// Returns the first address in `self`, if any, that is aligned to
@@ -817,6 +844,20 @@ mod tests {
     use std::mem::size_of;
 
     #[test]
+    fn addr_is_aligned_to() {
+        assert!(Addr::MIN.is_aligned_to(Align::MAX));
+
+        assert!(Addr::MAX.is_aligned_to(Align::MIN));
+        assert!(!Addr::MAX.is_aligned_to(Align::try_from(0x2).unwrap()));
+
+        let addr = Addr::from(0x1230u32);
+        assert!(addr.is_aligned_to(Align::MIN));
+        assert!(addr.is_aligned_to(Align::try_from(0x8).unwrap()));
+        assert!(addr.is_aligned_to(Align::try_from(0x10).unwrap()));
+        assert!(!addr.is_aligned_to(Align::try_from(0x20).unwrap()));
+    }
+
+    #[test]
     fn align_efficient_option() {
         assert_eq!(size_of::<Option<Align>>(), size_of::<Align>());
     }
@@ -846,8 +887,7 @@ mod tests {
         assert!(Range::FULL.contains(Addr::MAX));
 
         let range =
-            Range::try_from(&(Addr::from(0x1234u16)..=Addr::from(0x2345u16)))
-                .unwrap();
+            Range::with_bounds(Addr::from(0x1234u16), Addr::from(0x2345u16));
         assert!(!range.contains(Addr::from(0x1233u16)));
         assert!(range.contains(Addr::from(0x1234u16)));
         assert!(range.contains(Addr::from(0x2000u16)));
@@ -860,8 +900,7 @@ mod tests {
         assert_eq!(Range::FULL.size(), Size::MAX);
 
         let range =
-            Range::try_from(&(Addr::from(0x1000u16)..=Addr::from(0x1fffu16)))
-                .unwrap();
+            Range::with_bounds(Addr::from(0x1000u16), Addr::from(0x1fffu16));
         assert_eq!(range.size(), Size::from(0x1000u16));
 
         let size = Size::from(0x2345u16);

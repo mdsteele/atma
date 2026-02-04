@@ -114,12 +114,12 @@ impl Assembler {
         if let Some(section_name) = name {
             self.chunks.push(ObjChunk {
                 section_name,
-                data: Rc::from(section_env.data),
+                data: Box::from(section_env.data),
                 size,
                 align,
                 within,
                 symbols: Rc::from(section_env.symbols),
-                patches: Rc::from(section_env.patches),
+                patches: Box::from(section_env.patches),
             });
         }
     }

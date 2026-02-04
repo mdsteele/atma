@@ -1,5 +1,5 @@
 use super::expr::LinkTypeEnv;
-use crate::bus::{Addr, Align, AlignTryFromError, Size};
+use crate::bus::{Addr, Align, AlignTryFromError, Range, Size};
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::ObjExpr;
 use crate::parse::{
@@ -95,12 +95,12 @@ impl ConfigBuilder {
 
     fn addrspace_bits_attr(&mut self, expr_ast: ExprAst) -> u32 {
         let expr_span = expr_ast.span;
-        let mut bits = u32::BITS;
+        let mut bits = Addr::BITS;
         if let Some(bigint) =
             self.static_int_attr(ENTITY_ADDRSPACE, "bits", expr_ast)
         {
             match bigint.to_u32() {
-                Some(int) if (1..=32).contains(&int) => {
+                Some(int) if (1..=Addr::BITS).contains(&int) => {
                     bits = int;
                 }
                 _ => self.out_of_range_attr_error(
@@ -151,11 +151,22 @@ impl ConfigBuilder {
         if size.is_none() {
             self.missing_attr_error("size", &entry.id);
         }
+        let range = match (start, size) {
+            (Some(start), Some(size)) => match start.range_with_size(size) {
+                Some(range) => range,
+                None => {
+                    self.memory_range_overflow_error(&entry.id, start, size);
+                    start.range_within(Align::MAX)
+                }
+            },
+            (Some(start), None) => start.range_within(Align::MAX),
+            (None, Some(size)) => Addr::MIN.range_with_size(size).unwrap(),
+            (None, None) => Range::FULL,
+        };
         self.memory.push(MemoryConfig {
             name: entry.id.name,
             space: space.unwrap_or_else(|| Rc::from("")),
-            start: start.unwrap_or(Addr::MIN),
-            size: size.unwrap_or(Size::ZERO),
+            range,
         });
     }
 
@@ -165,8 +176,8 @@ impl ConfigBuilder {
             self.static_int_attr(ENTITY_MEMORY, "size", expr_ast)
         {
             match Size::try_from(&bigint) {
-                Ok(size) => return size,
-                Err(()) => self.out_of_range_attr_error(
+                Ok(size) if size > Size::ZERO => return size,
+                _ => self.out_of_range_attr_error(
                     ENTITY_MEMORY,
                     "size",
                     expr_span,
@@ -445,6 +456,19 @@ impl ConfigBuilder {
         self.errors.push(ParseError::new(attr_id.span, message));
     }
 
+    fn memory_range_overflow_error(
+        &mut self,
+        entry_id: &IdentifierAst,
+        start: Addr,
+        size: Size,
+    ) {
+        let message = format!(
+            "Memory range overflows address size \
+             (start=${start:x}, size=${size:x})"
+        );
+        self.errors.push(ParseError::new(entry_id.span, message));
+    }
+
     fn missing_attr_error(&mut self, attr: &str, entry_id: &IdentifierAst) {
         let message = format!("Missing required `{attr}` attribute");
         self.errors.push(ParseError::new(entry_id.span, message));
@@ -525,10 +549,8 @@ pub struct MemoryConfig {
     pub name: Rc<str>,
     /// The name of the address space that this memory region exists in.
     pub space: Rc<str>,
-    /// The address of the start of this memory region.
-    pub start: Addr,
-    /// The size of this memory region, in bytes.
-    pub size: Size,
+    /// The range of addresses covered by this memory region.
+    pub range: Range,
 }
 
 //===========================================================================//

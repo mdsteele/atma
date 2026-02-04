@@ -225,6 +225,16 @@ impl BinaryIo for BigInt {
     }
 }
 
+impl<T: BinaryIo> BinaryIo for Box<[T]> {
+    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
+        Ok(Box::from(T::read_vec_from(reader)?))
+    }
+
+    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        T::write_slice_to(self, writer)
+    }
+}
+
 impl<T: BinaryIo> BinaryIo for Option<T> {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         T::read_option_from(reader)
