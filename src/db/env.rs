@@ -1,4 +1,5 @@
-use crate::bus::{Addr, SimBus, WatchId, WatchKind};
+use crate::addr::Addr;
+use crate::bus::{SimBus, WatchId, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 use std::collections::HashMap;
 

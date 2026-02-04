@@ -1,6 +1,7 @@
 //! Facilities for disassembling 6502 machine code.
 
-use crate::bus::{Addr, SimBus};
+use crate::addr::Addr;
+use crate::bus::SimBus;
 use std::fmt;
 
 //===========================================================================//
@@ -765,7 +766,8 @@ fn next_word(bus: &dyn SimBus, pc: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
+    use crate::addr::Addr;
+    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {

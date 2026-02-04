@@ -1,6 +1,7 @@
 //! Facilities for disassembling SM83 machine code.
 
-use crate::bus::{Addr, SimBus};
+use crate::addr::Addr;
+use crate::bus::SimBus;
 use std::fmt;
 
 //===========================================================================//
@@ -908,7 +909,8 @@ fn format_address(bus: &dyn SimBus, addr: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
+    use crate::addr::Addr;
+    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {

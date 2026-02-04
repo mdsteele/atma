@@ -1,6 +1,7 @@
 use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
-use crate::bus::{Addr, WatchId};
+use crate::addr::Addr;
+use crate::bus::WatchId;
 use crate::db::SimEnv;
 use crate::expr::ExprValue;
 use crate::parse::ParseResult;

@@ -1,4 +1,5 @@
-use super::{Addr, SimBus, WatchId, WatchKind, new_open_bus, new_ram_bus};
+use super::{SimBus, WatchId, WatchKind, new_open_bus, new_ram_bus};
+use crate::addr::Addr;
 
 //===========================================================================//
 

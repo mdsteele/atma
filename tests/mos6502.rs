@@ -1,4 +1,5 @@
-use atma::bus::{Addr, SimBus, new_ram_bus};
+use atma::addr::Addr;
+use atma::bus::{SimBus, new_ram_bus};
 use atma::proc::{Mos6502, SimProc};
 
 //===========================================================================//

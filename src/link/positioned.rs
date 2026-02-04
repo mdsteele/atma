@@ -2,7 +2,7 @@ use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::error::LinkError;
 use super::loose::ChunkId;
 use super::place::try_place;
-use crate::bus::{Addr, Size};
+use crate::addr::{Addr, Size};
 use rangemap::RangeInclusiveSet;
 use std::cmp::Ordering;
 

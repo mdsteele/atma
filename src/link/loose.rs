@@ -1,6 +1,6 @@
 use super::config::LinkConfig;
 use super::error::LinkError;
-use crate::bus::{Addr, Align, Size};
+use crate::addr::{Addr, Align, Size};
 use crate::obj::ObjFile;
 use std::collections::HashMap;
 use std::rc::Rc;

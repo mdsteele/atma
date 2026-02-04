@@ -1,5 +1,5 @@
 use super::expr::LinkTypeEnv;
-use crate::bus::{Addr, Align, AlignTryFromError, Range, Size};
+use crate::addr::{Addr, Align, AlignTryFromError, Range, Size};
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::ObjExpr;
 use crate::parse::{

@@ -1,5 +1,6 @@
 use super::util::{pack, unpack, watch};
-use crate::bus::{Addr, SimBus, WatchKind};
+use crate::addr::Addr;
+use crate::bus::{SimBus, WatchKind};
 use crate::dis::sm83::{
     Condition, Instruction, Operation, Prefixed, Reg8, Reg16,
 };

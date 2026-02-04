@@ -2,7 +2,7 @@ use super::config::LinkConfig;
 use super::error::LinkError;
 use super::loose::{ChunkId, LooseChunk, LooseSection};
 use super::place::try_place;
-use crate::bus::{Addr, Align, Offset, Range, Size};
+use crate::addr::{Addr, Align, Offset, Range, Size};
 use rangemap::RangeInclusiveSet;
 use std::collections::HashMap;
 use std::rc::Rc;

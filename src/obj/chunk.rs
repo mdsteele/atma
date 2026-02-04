@@ -1,7 +1,7 @@
 use super::binary::BinaryIo;
 use super::patch::ObjPatch;
 use super::symbol::ObjSymbol;
-use crate::bus::{Align, Size};
+use crate::addr::{Align, Size};
 use std::io;
 use std::rc::Rc;
 

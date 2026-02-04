@@ -9,13 +9,14 @@ mod patch;
 mod place;
 mod positioned;
 
-use crate::bus::Addr;
-use crate::obj::ObjFile;
-use arranged::{ArrangedRegion, ArrangedSection};
 pub use config::{AddrspaceConfig, LinkConfig, MemoryConfig, SectionConfig};
 pub use error::LinkError;
-use loose::{ChunkId, LooseSection};
 pub use patch::PatchedChunk;
+
+use crate::addr::Addr;
+use crate::obj::ObjFile;
+use arranged::{ArrangedRegion, ArrangedSection};
+use loose::{ChunkId, LooseSection};
 use positioned::{PositionedChunk, PositionedRegion};
 use std::collections::HashMap;
 use std::rc::Rc;

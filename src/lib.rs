@@ -2,6 +2,7 @@
 
 #![warn(missing_docs)]
 
+pub mod addr;
 pub mod asm;
 pub mod bus;
 pub mod db;

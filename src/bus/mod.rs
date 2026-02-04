@@ -2,7 +2,6 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-mod addr;
 mod dmg;
 mod label;
 mod mbc5;
@@ -13,7 +12,7 @@ mod ram;
 mod snes;
 mod ssmp;
 
-pub use addr::{Addr, Align, AlignTryFromError, Offset, Range, Size};
+use crate::addr::Addr;
 pub use dmg::DmgBus;
 pub use label::LabeledBus;
 pub use mbc5::Mbc5Bus;

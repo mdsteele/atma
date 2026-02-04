@@ -1,5 +1,6 @@
 use super::util::watch;
-use crate::bus::{Addr, Offset, SimBus, WatchKind};
+use crate::addr::{Addr, Offset};
+use crate::bus::{SimBus, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 
 //===========================================================================//
@@ -83,7 +84,8 @@ impl SimProc for NopProc {
 #[cfg(test)]
 mod tests {
     use super::{NopProc, SimBreak, SimProc};
-    use crate::bus::{Addr, WatchKind, new_open_bus};
+    use crate::addr::Addr;
+    use crate::bus::{WatchKind, new_open_bus};
 
     #[test]
     fn set_pc_mid_instruction() {

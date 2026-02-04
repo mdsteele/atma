@@ -1,4 +1,5 @@
-use crate::bus::{Addr, SimBus, WatchKind};
+use crate::addr::Addr;
+use crate::bus::{SimBus, WatchKind};
 use crate::proc::SimBreak;
 
 //===========================================================================//

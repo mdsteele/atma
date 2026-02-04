@@ -1,5 +1,6 @@
 use super::util::watch;
-use crate::bus::{Addr, SimBus, WatchKind};
+use crate::addr::Addr;
+use crate::bus::{SimBus, WatchKind};
 use crate::dis::w65c816::{AddrMode, Instruction, Mnemonic, Operation};
 use crate::proc::{SimBreak, SimProc};
 

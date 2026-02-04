@@ -1,5 +1,6 @@
 use super::util::{unpack, watch};
-use crate::bus::{Addr, SimBus, WatchKind};
+use crate::addr::Addr;
+use crate::bus::{SimBus, WatchKind};
 use crate::dis::spc700::{AddrMode, Instruction, Operation, Reg};
 use crate::proc::{SimBreak, SimProc};
 

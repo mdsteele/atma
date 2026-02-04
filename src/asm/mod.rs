@@ -2,7 +2,7 @@
 
 mod expr;
 
-use crate::bus::{Align, Offset, Size};
+use crate::addr::{Align, Offset, Size};
 use crate::expr::ExprType;
 use crate::obj::{ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjSymbol, PatchKind};
 use crate::parse::{

@@ -1,7 +1,7 @@
 use super::error::LinkError;
 use super::loose::ChunkId;
 use super::positioned::PositionedChunk;
-use crate::bus::Addr;
+use crate::addr::Addr;
 use crate::expr::ExprValue;
 use crate::obj::{ObjChunk, ObjExpr, ObjFile, ObjPatch, PatchKind};
 use std::collections::HashMap;

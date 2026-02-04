@@ -1,4 +1,4 @@
-use crate::bus::Size;
+use crate::addr::Size;
 use crate::obj::PatchKind;
 use num_bigint::BigInt;
 use std::rc::Rc;

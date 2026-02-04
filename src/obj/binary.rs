@@ -1,4 +1,4 @@
-use crate::bus::{Addr, Align, Offset, Size};
+use crate::addr::{Addr, Align, Offset, Size};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
 use std::io;
@@ -384,7 +384,7 @@ pub(crate) fn assert_round_trips<T: BinaryIo + std::fmt::Debug + Eq>(
 #[cfg(test)]
 mod tests {
     use super::{BinaryIo, assert_round_trips};
-    use crate::bus::{Addr, Align, Offset, Size};
+    use crate::addr::{Addr, Align, Offset, Size};
     use num_bigint::{BigInt, BigUint};
     use std::rc::Rc;
 

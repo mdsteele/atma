@@ -1,6 +1,7 @@
 use ariadne::{self, Label, ReportKind, Source};
+use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
-use atma::bus::{Addr, Align, Offset, WatchKind};
+use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
 use atma::link::LinkConfig;
 use atma::obj::{BinaryIo, ObjFile};

@@ -1,5 +1,5 @@
 use super::binary::BinaryIo;
-use crate::bus::Offset;
+use crate::addr::Offset;
 use std::io;
 use std::rc::Rc;
 
@@ -38,7 +38,7 @@ impl BinaryIo for ObjSymbol {
 #[cfg(test)]
 mod tests {
     use super::ObjSymbol;
-    use crate::bus::Offset;
+    use crate::addr::Offset;
     use crate::obj::assert_round_trips;
     use std::rc::Rc;
 

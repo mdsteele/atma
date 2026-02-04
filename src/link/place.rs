@@ -1,4 +1,4 @@
-use crate::bus::{Addr, Align, Range, Size};
+use crate::addr::{Addr, Align, Range, Size};
 use rangemap::RangeInclusiveSet;
 
 //===========================================================================//
@@ -63,7 +63,7 @@ pub fn try_place(
 #[cfg(test)]
 mod tests {
     use super::try_place;
-    use crate::bus::{Addr, Align, Range, Size};
+    use crate::addr::{Addr, Align, Range, Size};
     use rangemap::RangeInclusiveSet;
 
     #[test]

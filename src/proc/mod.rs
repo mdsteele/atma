@@ -13,7 +13,8 @@ pub use sm83::SharpSm83;
 pub use spc700::Spc700;
 pub use w65c816::Wdc65c816;
 
-use crate::bus::{Addr, SimBus, WatchId, WatchKind};
+use crate::addr::Addr;
+use crate::bus::{SimBus, WatchId, WatchKind};
 
 //===========================================================================//
 

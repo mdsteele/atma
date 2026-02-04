@@ -1,6 +1,7 @@
 //! Facilities for disassembling SPC-700 machine code.
 
-use crate::bus::{Addr, SimBus};
+use crate::addr::Addr;
+use crate::bus::SimBus;
 use std::fmt;
 
 //===========================================================================//
@@ -1036,7 +1037,8 @@ impl Instruction {
 #[cfg(test)]
 mod tests {
     use super::Instruction;
-    use crate::bus::{Addr, LabeledBus, SimBus, new_rom_bus};
+    use crate::addr::Addr;
+    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
     use std::collections::HashMap;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {

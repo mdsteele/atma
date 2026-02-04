@@ -1,6 +1,7 @@
 use super::env::SimEnv;
+use crate::addr::Addr;
 use crate::bus::{
-    Addr, DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
+    DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
     new_ram_bus, new_rom_bus, new_snes_bus, new_ssmp_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
