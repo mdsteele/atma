@@ -23,8 +23,11 @@ pub fn try_place(
                 // Error: `start` does not satisfy `align`.
                 return None;
             }
-            if let Some(_within) = opt_within {
-                // TODO: check `range` against `within` restriction
+            if let Some(within) = opt_within
+                && range.crosses_alignment(within)
+            {
+                // Error: `start` and `size` do not satisfy `within`.
+                return None;
             }
             if range_set.overlaps(&range.into()) {
                 // Error: `range` overlaps with another chunk/section.
@@ -106,9 +109,16 @@ mod tests {
         range_set.insert(Addr::from(0x10u16)..=Addr::from(0x18u16));
         let size = Size::from(0x8u32);
         let start = Addr::from(0x08u16);
-        let align = Align::MIN;
-        let range =
-            try_place(&range_set, Range::FULL, size, Some(start), align, None);
+        let align = Align::try_from(0x04).unwrap();
+        let within = Align::try_from(0x100).unwrap();
+        let range = try_place(
+            &range_set,
+            Range::FULL,
+            size,
+            Some(start),
+            align,
+            Some(within),
+        );
         let expected = start.range_with_size(size).unwrap();
         assert_eq!(range, Some(expected));
     }
@@ -133,6 +143,24 @@ mod tests {
         let align = Align::try_from(0x10).unwrap();
         let range =
             try_place(&range_set, Range::FULL, size, Some(start), align, None);
+        assert_eq!(range, None);
+    }
+
+    #[test]
+    fn try_place_at_start_with_incompatible_within() {
+        let range_set = RangeInclusiveSet::new();
+        let size = Size::from(0x10u32);
+        let start = Addr::from(0xf8u16);
+        let align = Align::MIN;
+        let within = Align::try_from(0x100).unwrap();
+        let range = try_place(
+            &range_set,
+            Range::FULL,
+            size,
+            Some(start),
+            align,
+            Some(within),
+        );
         assert_eq!(range, None);
     }
 

@@ -1,6 +1,7 @@
 use super::{Addr, Size};
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
+use static_assertions::const_assert;
 use std::fmt;
 use std::io;
 use std::num::NonZero;
@@ -21,11 +22,14 @@ impl Align {
     pub const MIN: Align = Align(NonZero::new(1).unwrap());
 
     /// The largest possible alignment, `1 << Addr::BITS`.
+    ///
+    /// The only address that is aligned to this alignment is [`Addr::MIN`].
     pub const MAX: Align = Align(NonZero::new(Addr::BITS as u8 + 1).unwrap());
 
     /// Returns the base-2 logarithm of the alignment.
     ///
-    /// This is always exact, as `self` represents a power of two.
+    /// This is always exact, as `self` represents a power of two. It is also
+    /// very cheap to call.
     pub fn log2(self) -> u32 {
         u32::from(self.0.get() - 1)
     }
@@ -62,7 +66,7 @@ impl Default for Align {
 
 impl fmt::Debug for Align {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(f, "Align(1 << {:?})", u8::from(self.0) - 1)
+        write!(f, "Align(1 << {:?})", self.0.get() - 1)
     }
 }
 
@@ -137,6 +141,39 @@ impl TryFrom<&BigInt> for Align {
         } else {
             Align::try_from(value.magnitude())
         }
+    }
+}
+
+impl TryFrom<Align> for u64 {
+    type Error = ();
+
+    // Currently this always succeeds, but that could change in the future if
+    // we ever want to increase `Addr::BITS` to 64.
+    fn try_from(value: Align) -> Result<u64, ()> {
+        const_assert!(Addr::BITS < 64);
+        Ok(1u64 << value.log2())
+    }
+}
+
+impl TryFrom<Align> for usize {
+    type Error = ();
+
+    fn try_from(value: Align) -> Result<usize, ()> {
+        1usize.checked_shl(value.log2()).ok_or(())
+    }
+}
+
+impl From<Align> for BigUint {
+    fn from(value: Align) -> BigUint {
+        const_assert!(Addr::BITS < 64);
+        BigUint::from(1u64 << value.log2())
+    }
+}
+
+impl From<Align> for BigInt {
+    fn from(value: Align) -> BigInt {
+        const_assert!(Addr::BITS < 64);
+        BigInt::from(1u64 << value.log2())
     }
 }
 

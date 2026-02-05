@@ -181,7 +181,9 @@ impl Assembler {
                 }
                 None => {
                     if let Some(section_env) = self.section_stack.last_mut() {
-                        let offset = section_env.data.len() as u32;
+                        // TODO: Error instead of crash if offset is too large.
+                        let offset =
+                            Offset::try_from(section_env.data.len()).unwrap();
                         let patch = ObjPatch { offset, kind, expr };
                         section_env.patches.push(patch);
                     }

@@ -132,6 +132,8 @@ impl ArrangedSection {
 //===========================================================================//
 
 pub struct ArrangedRegion {
+    /// The name of this memory region.
+    pub name: Rc<str>,
     /// The range of addresses covered by this memory region.
     pub range: Range,
     /// The sections in this memory region.
@@ -151,6 +153,7 @@ impl ArrangedRegion {
             region_name_to_index
                 .insert(memory_region.name.clone(), arranged_regions.len());
             arranged_regions.push(ArrangedRegion {
+                name: memory_region.name.clone(),
                 range: memory_region.range,
                 sections: Vec::new(),
             });

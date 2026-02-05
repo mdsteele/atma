@@ -2,6 +2,7 @@ use super::{Align, Offset, Range, Size};
 use num_bigint::{BigInt, BigUint};
 use num_traits::ToPrimitive;
 use rangemap;
+use static_assertions::const_assert;
 use std::fmt;
 use std::ops;
 
@@ -85,8 +86,11 @@ impl Addr {
     /// does not cross any alignment boundary of `align`. That is, `addr &
     /// align.mask()` will be the same for every `addr` in the returned range.
     pub fn range_within(self, align: Align) -> Range {
+        const_assert!(Addr::BITS < 64);
         let alignment = 1u64 << align.log2();
         let limit = (u64::from(self.0) + 1).next_multiple_of(alignment);
+        debug_assert!(limit > 0);
+        debug_assert!(limit - 1 <= u64::from(u32::MAX));
         Range { first: self, last: Addr((limit - 1) as u32) }
     }
 }
@@ -106,6 +110,28 @@ impl From<u16> for Addr {
 impl From<u32> for Addr {
     fn from(value: u32) -> Addr {
         Addr(value)
+    }
+}
+
+impl TryFrom<u64> for Addr {
+    type Error = ();
+
+    fn try_from(value: u64) -> Result<Addr, ()> {
+        match u32::try_from(value) {
+            Ok(int) => Ok(Addr(int)),
+            Err(_) => Err(()),
+        }
+    }
+}
+
+impl TryFrom<usize> for Addr {
+    type Error = ();
+
+    fn try_from(value: usize) -> Result<Addr, ()> {
+        match u32::try_from(value) {
+            Ok(int) => Ok(Addr(int)),
+            Err(_) => Err(()),
+        }
     }
 }
 
@@ -183,7 +209,7 @@ impl ops::Add<Offset> for Addr {
     type Output = Addr;
 
     fn add(self, rhs: Offset) -> Addr {
-        Addr((i64::from(self.0) + rhs.0) as u32)
+        Addr(self.0.strict_add(rhs.0))
     }
 }
 
@@ -247,7 +273,7 @@ impl ops::Shl<u32> for Addr {
     type Output = Addr;
 
     fn shl(self, rhs: u32) -> Addr {
-        Addr(self.0 << rhs)
+        Addr(self.0.strict_shl(rhs))
     }
 }
 
@@ -261,7 +287,7 @@ impl ops::Shr<u32> for Addr {
     type Output = Addr;
 
     fn shr(self, rhs: u32) -> Addr {
-        Addr(self.0 >> rhs)
+        Addr(self.0.strict_shr(rhs))
     }
 }
 
@@ -275,17 +301,17 @@ impl ops::Sub<Addr> for Addr {
     type Output = Offset;
 
     fn sub(self, rhs: Addr) -> Offset {
-        Offset(i64::from(self.0) - i64::from(rhs.0))
+        Offset(self.0.strict_sub(rhs.0))
     }
 }
 
 impl rangemap::StepLite for Addr {
     fn add_one(&self) -> Addr {
-        Addr(self.0 + 1)
+        Addr(self.0.strict_add(1))
     }
 
     fn sub_one(&self) -> Addr {
-        Addr(self.0 - 1)
+        Addr(self.0.strict_sub(1))
     }
 }
 
@@ -293,7 +319,18 @@ impl rangemap::StepLite for Addr {
 
 #[cfg(test)]
 mod tests {
-    use super::{Addr, Align};
+    use super::{Addr, Align, Offset};
+
+    #[test]
+    fn addr_add() {
+        assert_eq!(Addr::MIN + Offset::ZERO, Addr::MIN);
+        assert_eq!(Addr::MAX + Offset::ZERO, Addr::MAX);
+        assert_eq!(Addr::MIN + Offset::MAX, Addr::MAX);
+        assert_eq!(
+            Addr::from(100u32) + Offset::from(23u32),
+            Addr::from(123u32)
+        );
+    }
 
     #[test]
     fn addr_is_aligned_to() {
@@ -307,6 +344,17 @@ mod tests {
         assert!(addr.is_aligned_to(Align::try_from(0x8).unwrap()));
         assert!(addr.is_aligned_to(Align::try_from(0x10).unwrap()));
         assert!(!addr.is_aligned_to(Align::try_from(0x20).unwrap()));
+    }
+
+    #[test]
+    fn addr_sub() {
+        assert_eq!(Addr::MIN - Addr::MIN, Offset::ZERO);
+        assert_eq!(Addr::MAX - Addr::MAX, Offset::ZERO);
+        assert_eq!(Addr::MAX - Addr::MIN, Offset::MAX);
+        assert_eq!(
+            Addr::from(123u32) - Addr::from(23u32),
+            Offset::from(100u32)
+        );
     }
 }
 

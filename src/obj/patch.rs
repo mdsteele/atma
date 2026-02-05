@@ -1,5 +1,6 @@
 use super::binary::BinaryIo;
 use super::expr::ObjExpr;
+use crate::addr::Offset;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::io;
@@ -12,7 +13,7 @@ use std::ops::RangeInclusive;
 pub struct ObjPatch {
     /// The offset from the start of the chunk to the start of the patch, in
     /// bytes.
-    pub offset: u32,
+    pub offset: Offset,
     /// The size and format of the patch to apply.
     pub kind: PatchKind,
     /// An expression that will evaluate at link time to the value to patch in.
@@ -21,7 +22,7 @@ pub struct ObjPatch {
 
 impl BinaryIo for ObjPatch {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let offset = u32::read_from(reader)?;
+        let offset = Offset::read_from(reader)?;
         let kind = PatchKind::read_from(reader)?;
         let expr = ObjExpr::read_from(reader)?;
         Ok(ObjPatch { offset, kind, expr })

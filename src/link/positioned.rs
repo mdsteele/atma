@@ -28,7 +28,7 @@ impl PositionedChunk {
     ) -> PositionedChunk {
         let chunk_start = section_start + chunk.offset;
         let chunk_binary_offset = section_binary_offset
-            .map(|offset| offset + u64::try_from(chunk.offset).unwrap());
+            .map(|offset| offset + u64::from(chunk.offset));
         PositionedChunk {
             id: chunk.id,
             start: chunk_start,
@@ -124,10 +124,8 @@ impl PositionedRegion {
             ) {
                 let section_offset =
                     section_range.start() - region.range.start();
-                let section_binary_offset =
-                    region_binary_offset.map(|offset| {
-                        offset + u64::try_from(section_offset).unwrap()
-                    });
+                let section_binary_offset = region_binary_offset
+                    .map(|offset| offset + u64::from(section_offset));
                 positioned_sections.push(PositionedSection::with_start(
                     section,
                     section_range.start(),
@@ -138,11 +136,21 @@ impl PositionedRegion {
                 errors.push(LinkError::SectionCannotBePlaced);
             }
         }
+        // If this memory region is to be included in the final binary, then
+        // update `cumulative_offset` appropriately.
         if region_binary_offset.is_some() {
             // TODO: If this region is not set to fill, then reduce
-            // `region_size` to the size actually occupied.
-            let region_binary_size = u64::from(region.range.size());
-            *cumulative_offset += region_binary_size;
+            // `region_range` to the range actually occupied.
+            let region_range = region.range;
+            if let Ok(size) = u64::try_from(region_range.size())
+                && let Some(sum) = cumulative_offset.checked_add(size)
+            {
+                *cumulative_offset = sum;
+            } else {
+                errors.push(LinkError::BinaryTooLarge {
+                    region_name: region.name.clone(),
+                });
+            }
         }
         PositionedRegion { sections: positioned_sections }
     }

@@ -10,6 +10,12 @@ use std::rc::Rc;
 pub enum LinkError {
     /// A miscellaneous error.
     Misc, // TODO: remove this
+    /// The final binary size would be too large to create.
+    BinaryTooLarge {
+        /// The name of the memory region that would not fit in the final
+        /// binary.
+        region_name: Rc<str>,
+    },
     /// A chunk was unable to be arranged within its section, given the
     /// constraints.
     ChunkCannotBePlaced,

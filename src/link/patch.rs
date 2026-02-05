@@ -74,28 +74,33 @@ impl<'a> FilePatcher<'a> {
     }
 
     fn apply_patch(&mut self, patch: &ObjPatch, data: &mut [u8]) {
-        if (patch.offset as usize) + patch.kind.num_bytes() >= data.len() {
-            self.errors.push(LinkError::PatchOffsetOutOfRange);
-            return;
-        }
-        match self.eval_expr(&patch.expr) {
-            None => {} // evaluation failed with errors
-            Some(ExprValue::Integer(bigint)) => {
-                match patch.kind.value_in_range(&bigint) {
-                    Ok(int) => {
-                        write_patch_value(patch.kind, patch.offset, int, data)
-                    }
-                    Err(_range) => {
-                        self.errors.push(LinkError::PatchValueOutOfRange {
-                            kind: patch.kind,
-                            value: bigint,
-                        });
+        if let Ok(start) = usize::try_from(patch.offset)
+            && let Some(end) = start.checked_add(patch.kind.num_bytes())
+            && end <= data.len()
+        {
+            match self.eval_expr(&patch.expr) {
+                None => {} // evaluation failed with errors
+                Some(ExprValue::Integer(bigint)) => {
+                    match patch.kind.value_in_range(&bigint) {
+                        Ok(int) => {
+                            write_patch_value(patch.kind, start, int, data)
+                        }
+                        Err(_range) => {
+                            self.errors.push(
+                                LinkError::PatchValueOutOfRange {
+                                    kind: patch.kind,
+                                    value: bigint,
+                                },
+                            );
+                        }
                     }
                 }
+                Some(_value) => {
+                    self.errors.push(LinkError::PatchValueWrongType);
+                }
             }
-            Some(_value) => {
-                self.errors.push(LinkError::PatchValueWrongType);
-            }
+        } else {
+            self.errors.push(LinkError::PatchOffsetOutOfRange);
         }
     }
 
@@ -108,11 +113,10 @@ impl<'a> FilePatcher<'a> {
 
 fn write_patch_value(
     kind: PatchKind,
-    offset: u32,
+    offset: usize,
     value: i64,
     data: &mut [u8],
 ) {
-    let offset = offset as usize;
     debug_assert!(offset + kind.num_bytes() < data.len());
     match kind {
         PatchKind::U8 => {

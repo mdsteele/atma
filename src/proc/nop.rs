@@ -70,7 +70,7 @@ impl SimProc for NopProc {
         }
         debug_assert!(matches!(self.cycle, Cycle::ExecOpcode));
         self.cycle = Cycle::BetweenInstructions;
-        self.pc += Offset::from(1);
+        self.pc += Offset::from(1u32);
         watch(bus, self.pc, WatchKind::Pc)
     }
 

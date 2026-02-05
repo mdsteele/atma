@@ -47,12 +47,12 @@ mod tests {
         assert_round_trips(ObjSymbol {
             name: Rc::from(""),
             exported: false,
-            offset: Offset::from(0),
+            offset: Offset::ZERO,
         });
         assert_round_trips(ObjSymbol {
             name: Rc::from("foobar"),
             exported: true,
-            offset: Offset::from(1000),
+            offset: Offset::from(1000u32),
         });
     }
 }

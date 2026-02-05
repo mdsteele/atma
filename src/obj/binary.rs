@@ -337,7 +337,7 @@ impl BinaryIo for Align {
 
 impl BinaryIo for Offset {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let value = BigInt::read_from(reader)?;
+        let value = BigUint::read_from(reader)?;
         Offset::try_from(&value).map_err(|()| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -347,7 +347,7 @@ impl BinaryIo for Offset {
     }
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        BigInt::from(*self).write_to(writer)
+        BigUint::from(*self).write_to(writer)
     }
 }
 

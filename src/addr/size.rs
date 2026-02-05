@@ -96,12 +96,6 @@ impl TryFrom<&BigInt> for Size {
     }
 }
 
-impl From<Size> for u64 {
-    fn from(value: Size) -> u64 {
-        value.0
-    }
-}
-
 impl From<Size> for BigUint {
     fn from(value: Size) -> BigUint {
         BigUint::from(value.0)
@@ -111,6 +105,16 @@ impl From<Size> for BigUint {
 impl From<Size> for BigInt {
     fn from(value: Size) -> BigInt {
         BigInt::from(value.0)
+    }
+}
+
+impl TryFrom<Size> for u64 {
+    type Error = ();
+
+    // Currently this always succeeds, but that could change in the future if
+    // we ever want to increase `Addr::BITS` to 64.
+    fn try_from(value: Size) -> Result<u64, ()> {
+        Ok(value.0)
     }
 }
 

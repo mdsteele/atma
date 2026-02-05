@@ -49,11 +49,26 @@ impl Range {
         self.first <= other.first && self.last >= other.last
     }
 
+    /// Returns true if this range crosses any alignment boundary of the
+    /// specified alignment.
+    pub fn crosses_alignment(self, align: Align) -> bool {
+        if self.first == self.last {
+            return false;
+        }
+        let second = self.first + Offset::from(1u32);
+        if let Some(addr) = second.next_aligned_to(align)
+            && addr <= self.last
+        {
+            return true;
+        }
+        false
+    }
+
     /// Returns the first address in `self`, if any, that is aligned to
     /// `align`.
     pub fn first_aligned_to(self, align: Align) -> Option<Addr> {
         if let Some(addr) = self.first.next_aligned_to(align)
-            && self.contains(addr)
+            && addr <= self.last
         {
             Some(addr)
         } else {
@@ -105,7 +120,7 @@ impl Iterator for Subranges {
             let end =
                 start.range_within(self.split_at).last.min(self.range.last);
             self.next_start = if end < self.range.last {
-                Some(end + Offset::from(1))
+                Some(end + Offset::from(1u32))
             } else {
                 None
             };
@@ -122,7 +137,7 @@ impl std::iter::FusedIterator for Subranges {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Addr, Range, Size};
+    use super::{Addr, Align, Range, Size};
 
     #[test]
     fn range_contains() {
@@ -136,6 +151,23 @@ mod tests {
         assert!(range.contains(Addr::from(0x2000u16)));
         assert!(range.contains(Addr::from(0x2345u16)));
         assert!(!range.contains(Addr::from(0x2346u16)));
+    }
+
+    #[test]
+    fn range_crosses_alignment() {
+        assert!(!Range::FULL.crosses_alignment(Align::MAX));
+        assert!(
+            !Range::with_bounds(Addr::from(0x1234u16), Addr::from(0x1234u16))
+                .crosses_alignment(Align::MIN)
+        );
+        assert!(
+            !Range::with_bounds(Addr::from(0x1230u16), Addr::from(0x123fu16))
+                .crosses_alignment(Align::try_from(0x10).unwrap())
+        );
+        assert!(
+            Range::with_bounds(Addr::from(0x1230u16), Addr::from(0x1240u16))
+                .crosses_alignment(Align::try_from(0x10).unwrap())
+        );
     }
 
     #[test]
