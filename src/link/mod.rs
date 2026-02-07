@@ -19,6 +19,7 @@ use arranged::{ArrangedRegion, ArrangedSection};
 use loose::{ChunkId, LooseSection};
 use positioned::{PositionedChunk, PositionedRegion};
 use std::collections::HashMap;
+use std::io;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -92,6 +93,33 @@ pub fn link_objects(
     let exported_symbols =
         export_all_symbols(&object_files, &chunk_positions)?;
     PatchedChunk::patch_all(object_files, &chunk_positions, &exported_symbols)
+}
+
+//===========================================================================//
+
+/// Writes a complete set of patched chunks into a final binary.
+pub fn write_binary(
+    chunks: &[PatchedChunk],
+    writer: &mut impl io::Write,
+) -> io::Result<()> {
+    let mut total_size: u64 = 0;
+    let fill_buffer = [0u8; 1024];
+    for chunk in chunks {
+        if chunk.binary_offset < total_size {
+            return Err(io::Error::other("invalid chunk.binary_offset"));
+        }
+        let mut fill_len = chunk.binary_offset - total_size;
+        total_size += fill_len;
+        while fill_len > 0 {
+            let len = fill_len.min(fill_buffer.len() as u64);
+            writer.write_all(&fill_buffer[..len as usize])?;
+            fill_len -= len;
+        }
+        total_size += chunk.data.len() as u64;
+        writer.write_all(&chunk.data)?;
+    }
+    // TODO: pad end of binary as necessary
+    Ok(())
 }
 
 //===========================================================================//

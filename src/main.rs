@@ -3,7 +3,7 @@ use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::link::LinkConfig;
+use atma::link::{LinkConfig, LinkError, link_objects, write_binary};
 use atma::obj::{BinaryIo, ObjFile};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
@@ -62,12 +62,19 @@ enum Command {
 enum CliError {
     Io(io::Error),
     Parse(String, Vec<ParseError>),
+    Link(Vec<LinkError>),
     AdsRuntimeError(AdsRuntimeError),
 }
 
 impl From<io::Error> for CliError {
     fn from(error: io::Error) -> CliError {
         CliError::Io(error)
+    }
+}
+
+impl From<Vec<LinkError>> for CliError {
+    fn from(errors: Vec<LinkError>) -> CliError {
+        CliError::Link(errors)
     }
 }
 
@@ -103,6 +110,10 @@ fn run_cli() -> Result<(), ExitCode> {
         }
         Err(CliError::Parse(source, parse_errors)) => {
             report_parse_errors(&source, parse_errors);
+            Err(ExitCode::FAILURE)
+        }
+        Err(CliError::Link(link_errors)) => {
+            report_link_errors(link_errors);
             Err(ExitCode::FAILURE)
         }
         Err(CliError::AdsRuntimeError(_)) => {
@@ -202,15 +213,30 @@ fn command_db(
 
 fn command_ld(
     config_path: PathBuf,
-    _objfile_paths: Vec<PathBuf>,
-    _opt_output_path: Option<PathBuf>,
+    objfile_paths: Vec<PathBuf>,
+    opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let config = {
         let source = io::read_to_string(fs::File::open(&config_path)?)?;
         LinkConfig::from_source(&source)
             .map_err(|parse_errors| CliError::Parse(source, parse_errors))?
     };
-    println!("{config:?}");
+    let object_files = {
+        let mut objfiles = Vec::<ObjFile>::with_capacity(objfile_paths.len());
+        for objfile_path in &objfile_paths {
+            let mut reader = io::BufReader::new(fs::File::open(objfile_path)?);
+            objfiles.push(ObjFile::read_from(&mut reader)?);
+        }
+        objfiles
+    };
+    let chunks = link_objects(&config, object_files)?;
+    if let Some(output_path) = opt_output_path {
+        let mut output = io::BufWriter::new(fs::File::create(output_path)?);
+        write_binary(&chunks, &mut output)?;
+        output.flush()?;
+    } else {
+        eprintln!("Link successful.");
+    }
     Ok(())
 }
 
@@ -273,6 +299,16 @@ fn format_registers(sim_env: &SimEnv) -> String {
 }
 
 //===========================================================================//
+
+fn report_link_errors(errors: Vec<LinkError>) {
+    for error in errors {
+        report_link_error(error);
+    }
+}
+
+fn report_link_error(error: LinkError) {
+    eprintln!("Link error: {error:?}");
+}
 
 fn report_parse_errors(source: &str, errors: Vec<ParseError>) {
     for error in errors {
