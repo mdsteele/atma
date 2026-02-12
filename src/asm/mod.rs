@@ -105,6 +105,7 @@ impl Assembler {
         };
         let align = Align::default(); // TODO: support align attribute
         let within: Option<Align> = None; // TODO: support within attribute
+        let fill: Option<u8> = None; // TODO: support fill attribute
         self.section_stack.push(SectionEnv::new());
         self.visit_statements(&section_ast.body);
         debug_assert!(!self.section_stack.is_empty());
@@ -118,6 +119,7 @@ impl Assembler {
                 size,
                 align,
                 within,
+                fill,
                 symbols: Rc::from(section_env.symbols),
                 patches: Box::from(section_env.patches),
             });

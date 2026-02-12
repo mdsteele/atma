@@ -3,7 +3,7 @@ use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::link::{LinkConfig, LinkError, link_objects, write_binary};
+use atma::link::{LinkConfig, LinkError, LinkFragment};
 use atma::obj::{BinaryIo, ObjFile};
 use atma::parse::ParseError;
 use atma::proc::SimBreak;
@@ -229,10 +229,10 @@ fn command_ld(
         }
         objfiles
     };
-    let chunks = link_objects(&config, object_files)?;
+    let fragments = config.link_objects(object_files)?;
     if let Some(output_path) = opt_output_path {
         let mut output = io::BufWriter::new(fs::File::create(output_path)?);
-        write_binary(&chunks, &mut output)?;
+        LinkFragment::write_all(&fragments, &mut output)?;
         output.flush()?;
     } else {
         eprintln!("Link successful.");

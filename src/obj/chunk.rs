@@ -23,6 +23,10 @@ pub struct ObjChunk {
     /// If set, then this entire chunk (data + padding) must not cross any
     /// alignment boundary of this size within its address space.
     pub within: Option<Align>,
+    /// If set, then any padded portions of the chunk will be filled with this
+    /// byte value. Otherwise, they will be filled with this chunk's section's
+    /// fill byte.
+    pub fill: Option<u8>,
     /// Relative symbols defined in this chunk.
     pub symbols: Rc<[ObjSymbol]>,
     /// Patches to apply to this chunk's data when linking.
@@ -36,6 +40,7 @@ impl BinaryIo for ObjChunk {
         let size = Size::read_from(reader)?;
         let align = Align::read_from(reader)?;
         let within = Option::<Align>::read_from(reader)?;
+        let fill = Option::<u8>::read_from(reader)?;
         let symbols = Rc::<[ObjSymbol]>::read_from(reader)?;
         let patches = Box::<[ObjPatch]>::read_from(reader)?;
         Ok(ObjChunk {
@@ -44,6 +49,7 @@ impl BinaryIo for ObjChunk {
             size,
             align,
             within,
+            fill,
             symbols,
             patches,
         })
@@ -55,6 +61,7 @@ impl BinaryIo for ObjChunk {
         self.size.write_to(writer)?;
         self.align.write_to(writer)?;
         self.within.write_to(writer)?;
+        self.fill.write_to(writer)?;
         self.symbols.write_to(writer)?;
         self.patches.write_to(writer)?;
         Ok(())

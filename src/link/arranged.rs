@@ -1,8 +1,9 @@
-use super::config::LinkConfig;
+use super::config::{AddrspaceConfig, LinkConfig};
 use super::error::LinkError;
 use super::loose::{ChunkId, LooseChunk, LooseSection};
 use super::place::try_place;
 use crate::addr::{Addr, Align, Offset, Range, Size};
+use crate::obj::ObjFile;
 use rangemap::RangeInclusiveSet;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -16,12 +17,23 @@ pub struct ArrangedChunk {
     /// The byte offset of this chunk, relative to the starting address of its
     /// section.
     pub offset: Offset,
+    /// The size of the chunk, in bytes.
+    pub size: Size,
+    /// If set, then any padded portions of the chunk will be filled with this
+    /// byte value. Otherwise, they will be filled with this chunk's section's
+    /// fill byte.
+    pub fill: Option<u8>,
 }
 
 impl ArrangedChunk {
     pub fn with_offset(chunk: LooseChunk, offset: Offset) -> ArrangedChunk {
         debug_assert!(offset >= Offset::ZERO);
-        ArrangedChunk { id: chunk.id, offset }
+        ArrangedChunk {
+            id: chunk.id,
+            offset,
+            size: chunk.size,
+            fill: chunk.fill,
+        }
     }
 }
 
@@ -42,6 +54,10 @@ pub struct ArrangedSection {
     /// If set, then this entire section must not cross any alignment boundary
     /// of this size within its address space.
     pub within: Option<Align>,
+    /// If set, then any padded portions of the section will be filled with
+    /// this byte value. Otherwise, they will be filled with this sections's
+    /// memory region's fill byte.
+    pub fill: Option<u8>,
     /// The total size of this section's data, in bytes.
     pub size: Size,
     /// The chunks in this section.
@@ -51,10 +67,12 @@ pub struct ArrangedSection {
 impl ArrangedSection {
     /// Arranges the chunks in each section relative to the eventual starting
     /// address of that section.
-    pub fn arrange(
-        sections: Vec<LooseSection>,
+    fn arrange(
+        config: &LinkConfig,
+        object_files: &[ObjFile],
         errors: &mut Vec<LinkError>,
     ) -> Vec<ArrangedSection> {
+        let sections = LooseSection::collect(config, object_files, errors);
         sections
             .into_iter()
             .map(|section| ArrangedSection::arrange_one(section, errors))
@@ -123,6 +141,7 @@ impl ArrangedSection {
             start: section.start,
             align: section.align,
             within: section.within,
+            fill: section.fill,
             size: section_size,
             chunks: arranged,
         }
@@ -138,27 +157,38 @@ pub struct ArrangedRegion {
     pub range: Range,
     /// The sections in this memory region.
     pub sections: Vec<ArrangedSection>,
+    /// Any padded portions of this memory region will be filled with this byte
+    /// value.
+    pub fill: u8,
 }
 
 impl ArrangedRegion {
     pub fn collect(
         config: &LinkConfig,
-        all_sections: Vec<ArrangedSection>,
-        _errors: &mut Vec<LinkError>,
+        object_files: &[ObjFile],
+        errors: &mut Vec<LinkError>,
     ) -> Vec<ArrangedRegion> {
+        let mut addrspaces = HashMap::<Rc<str>, &AddrspaceConfig>::new();
+        for addrspace in &config.addrspaces {
+            addrspaces.insert(addrspace.name.clone(), addrspace);
+        }
+
         let mut arranged_regions =
             Vec::<ArrangedRegion>::with_capacity(config.memory.len());
         let mut region_name_to_index = HashMap::<Rc<str>, usize>::new();
         for memory_region in &config.memory {
             region_name_to_index
                 .insert(memory_region.name.clone(), arranged_regions.len());
+            let addrspace = addrspaces[&memory_region.space];
             arranged_regions.push(ArrangedRegion {
                 name: memory_region.name.clone(),
                 range: memory_region.range,
                 sections: Vec::new(),
+                fill: memory_region.fill.unwrap_or(addrspace.fill),
             });
         }
-        for section in all_sections {
+
+        for section in ArrangedSection::arrange(config, object_files, errors) {
             let region_index = region_name_to_index[&section.load];
             arranged_regions[region_index].sections.push(section);
         }

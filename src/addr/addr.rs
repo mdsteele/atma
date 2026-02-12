@@ -16,6 +16,9 @@ pub struct Addr(pub(super) u32);
 
 impl Addr {
     /// The size of this integer type in bits.
+    ///
+    /// Right now, this is 32, but that number may be increased to 64 in future
+    /// versions of this crate.
     pub const BITS: u32 = 32;
 
     /// The smallest address value (0).
@@ -51,7 +54,7 @@ impl Addr {
         self.0
     }
 
-    /// Converts the address into a `usize`.
+    /// Returns the lowest `usize::BITS` bits of the address.
     pub fn as_usize(self) -> usize {
         self.0 as usize
     }

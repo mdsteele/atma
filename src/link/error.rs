@@ -48,7 +48,10 @@ pub enum LinkError {
     PatchValueWrongType,
     /// A section was unable to be positioned within its memory region, given
     /// the constraints.
-    SectionCannotBePlaced,
+    SectionCannotBePlaced {
+        /// The name of the section that couldn't be placed.
+        section_name: Rc<str>,
+    },
     /// A section contained no data.
     SectionIsEmpty {
         /// The name of the empty section.

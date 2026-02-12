@@ -1,6 +1,4 @@
 use super::error::LinkError;
-use super::loose::ChunkId;
-use super::positioned::PositionedChunk;
 use crate::addr::Addr;
 use crate::expr::ExprValue;
 use crate::obj::{ObjChunk, ObjExpr, ObjFile, ObjPatch, PatchKind};
@@ -9,40 +7,50 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-/// Represents one data chunk of an object file, after it has had its patches
-/// applied.
+pub struct PatchedFile {
+    /// The patched chunks from this object file.
+    pub chunks: Vec<PatchedChunk>,
+}
+
+impl PatchedFile {
+    pub(crate) fn patch_all(
+        object_files: Vec<ObjFile>,
+        exported_symbols: &HashMap<Rc<str>, Addr>,
+    ) -> Result<Vec<PatchedFile>, Vec<LinkError>> {
+        let mut errors = Vec::<LinkError>::new();
+        let patched_files = object_files
+            .into_iter()
+            .map(|file| {
+                PatchedFile::patch(file, exported_symbols, &mut errors)
+            })
+            .collect::<Vec<PatchedFile>>();
+        if errors.is_empty() { Ok(patched_files) } else { Err(errors) }
+    }
+
+    fn patch(
+        object_file: ObjFile,
+        exported_symbols: &HashMap<Rc<str>, Addr>,
+        errors: &mut Vec<LinkError>,
+    ) -> PatchedFile {
+        let mut patched_chunks = Vec::<PatchedChunk>::new();
+        let mut patcher = FilePatcher::new(exported_symbols, errors);
+        for chunk in object_file.chunks {
+            patched_chunks.push(patcher.patch_chunk(chunk));
+        }
+        PatchedFile { chunks: patched_chunks }
+    }
+}
+
+//===========================================================================//
+
 pub struct PatchedChunk {
-    /// The offset into the final binary where this chunk's data should be
-    /// written.
-    pub binary_offset: u64,
     /// The patched chunk data.
     pub data: Box<[u8]>,
 }
 
 impl PatchedChunk {
-    pub(crate) fn patch_all(
-        object_files: Vec<ObjFile>,
-        chunk_positions: &HashMap<ChunkId, PositionedChunk>,
-        exported_symbols: &HashMap<Rc<str>, Addr>,
-    ) -> Result<Vec<PatchedChunk>, Vec<LinkError>> {
-        let mut errors = Vec::<LinkError>::new();
-        let mut patched_chunks = Vec::<PatchedChunk>::new();
-        for (object_index, file) in object_files.into_iter().enumerate() {
-            let mut patcher = FilePatcher::new(exported_symbols, &mut errors);
-            for (chunk_index, chunk) in file.chunks.into_iter().enumerate() {
-                let chunk_id = ChunkId { object_index, chunk_index };
-                let offset = chunk_positions[&chunk_id].binary_offset;
-                if let Some(patched) = patcher.patch_chunk(chunk, offset) {
-                    patched_chunks.push(patched);
-                }
-            }
-        }
-        if errors.is_empty() {
-            patched_chunks.sort_by_key(|chunk| chunk.binary_offset);
-            Ok(patched_chunks)
-        } else {
-            Err(errors)
-        }
+    pub fn take_data(&mut self) -> Box<[u8]> {
+        std::mem::take(&mut self.data)
     }
 }
 
@@ -61,16 +69,12 @@ impl<'a> FilePatcher<'a> {
         FilePatcher { _exported_symbols: exported_symbols, errors }
     }
 
-    pub fn patch_chunk(
-        &mut self,
-        chunk: ObjChunk,
-        binary_offset: Option<u64>,
-    ) -> Option<PatchedChunk> {
+    pub fn patch_chunk(&mut self, chunk: ObjChunk) -> PatchedChunk {
         let mut data = chunk.data;
         for patch in chunk.patches.iter() {
             self.apply_patch(patch, &mut data);
         }
-        binary_offset.map(|off| PatchedChunk { data, binary_offset: off })
+        PatchedChunk { data }
     }
 
     fn apply_patch(&mut self, patch: &ObjPatch, data: &mut [u8]) {

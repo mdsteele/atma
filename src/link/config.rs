@@ -1,7 +1,11 @@
+use super::error::LinkError;
 use super::expr::LinkTypeEnv;
+use super::fragment::LinkFragment;
+use super::patch::PatchedFile;
+use super::positioned::PositionedBinary;
 use crate::addr::{Addr, Align, AlignTryFromError, Range, Size};
 use crate::expr::{ExprType, ExprValue};
-use crate::obj::ObjExpr;
+use crate::obj::{ObjExpr, ObjFile};
 use crate::parse::{
     ExprAst, IdentifierAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
     ParseError, ParseResult, SrcSpan,
@@ -76,11 +80,13 @@ impl ConfigBuilder {
     fn visit_addrspaces_entry(&mut self, entry: LinkEntryAst) {
         self.declare_entry(ENTITY_ADDRSPACE, &entry.id);
         let mut bits: Option<u32> = None;
+        let mut fill: Option<u8> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
             match &*id_ast.name {
                 "bits" => bits = Some(self.addrspace_bits_attr(expr_ast)),
+                "fill" => fill = Some(self.addrspace_fill_attr(expr_ast)),
                 _ => self.invalid_attr_error(ENTITY_ADDRSPACE, id_ast),
             }
         }
@@ -90,6 +96,7 @@ impl ConfigBuilder {
         self.addrspaces.push(AddrspaceConfig {
             name: entry.id.name,
             bits: bits.unwrap_or(u32::BITS),
+            fill: fill.unwrap_or_default(),
         });
     }
 
@@ -114,6 +121,10 @@ impl ConfigBuilder {
         bits
     }
 
+    fn addrspace_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+        self.static_fill_attr(ENTITY_ADDRSPACE, expr_ast)
+    }
+
     fn visit_let_dir(&mut self, id_ast: IdentifierAst, expr_ast: ExprAst) {
         let (_expr, var_type, static_value) =
             self.typecheck_expression(expr_ast);
@@ -132,10 +143,12 @@ impl ConfigBuilder {
         let mut space: Option<Rc<str>> = None;
         let mut start: Option<Addr> = None;
         let mut size: Option<Size> = None;
+        let mut fill: Option<u8> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
             match &*id_ast.name {
+                "fill" => fill = Some(self.memory_fill_attr(expr_ast)),
                 "size" => size = Some(self.memory_size_attr(expr_ast)),
                 "space" => space = Some(self.memory_space_attr(expr_ast)),
                 "start" => start = Some(self.memory_start_attr(expr_ast)),
@@ -165,9 +178,14 @@ impl ConfigBuilder {
         };
         self.memory.push(MemoryConfig {
             name: entry.id.name,
-            space: space.unwrap_or_else(|| Rc::from("")),
+            space: space.unwrap_or_default(),
             range,
+            fill,
         });
+    }
+
+    fn memory_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+        self.static_fill_attr(ENTITY_MEMORY, expr_ast)
     }
 
     fn memory_size_attr(&mut self, expr_ast: ExprAst) -> Size {
@@ -185,7 +203,7 @@ impl ConfigBuilder {
                 ),
             }
         }
-        Size::ZERO
+        Size::from(1u8)
     }
 
     fn memory_space_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
@@ -195,7 +213,7 @@ impl ConfigBuilder {
             expr_ast,
             ENTITY_ADDRSPACE,
         )
-        .unwrap_or_else(|| Rc::from(""))
+        .unwrap_or_default()
     }
 
     fn memory_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
@@ -228,11 +246,13 @@ impl ConfigBuilder {
         let mut start: Option<Addr> = None;
         let mut align: Option<Align> = None;
         let mut within: Option<Align> = None;
+        let mut fill: Option<u8> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
             match &*id_ast.name {
                 "align" => align = Some(self.section_align_attr(expr_ast)),
+                "fill" => fill = Some(self.section_fill_attr(expr_ast)),
                 "load" => load = Some(self.section_load_attr(expr_ast)),
                 "start" => start = Some(self.section_start_attr(expr_ast)),
                 "within" => within = Some(self.section_within_attr(expr_ast)),
@@ -244,11 +264,20 @@ impl ConfigBuilder {
         }
         self.sections.push(SectionConfig {
             name: entry.id.name,
-            load: load.unwrap_or_else(|| Rc::from("")),
+            load: load.unwrap_or_default(),
             start,
             align: align.unwrap_or_default(),
             within,
+            fill,
         });
+    }
+
+    fn section_align_attr(&mut self, expr_ast: ExprAst) -> Align {
+        self.static_align_attr(ENTITY_SECTION, "align", expr_ast)
+    }
+
+    fn section_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+        self.static_fill_attr(ENTITY_SECTION, expr_ast)
     }
 
     fn section_load_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
@@ -258,7 +287,7 @@ impl ConfigBuilder {
             expr_ast,
             ENTITY_MEMORY,
         )
-        .unwrap_or_else(|| Rc::from(""))
+        .unwrap_or_default()
     }
 
     fn section_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
@@ -276,11 +305,7 @@ impl ConfigBuilder {
                 ),
             }
         }
-        Addr::MIN
-    }
-
-    fn section_align_attr(&mut self, expr_ast: ExprAst) -> Align {
-        self.static_align_attr(ENTITY_SECTION, "align", expr_ast)
+        Addr::default()
     }
 
     fn section_within_attr(&mut self, expr_ast: ExprAst) -> Align {
@@ -358,6 +383,21 @@ impl ConfigBuilder {
                 None
             }
         }
+    }
+
+    fn static_fill_attr(&mut self, entry_kind: &str, expr_ast: ExprAst) -> u8 {
+        let expr_span = expr_ast.span;
+        if let Some(bigint) =
+            self.static_int_attr(entry_kind, "fill", expr_ast)
+        {
+            match u8::try_from(&bigint) {
+                Ok(byte) => return byte,
+                Err(_) => self.out_of_range_attr_error(
+                    entry_kind, "fill", expr_span, &bigint,
+                ),
+            }
+        }
+        u8::default()
     }
 
     fn static_int_attr(
@@ -527,6 +567,21 @@ impl LinkConfig {
         }
         builder.finish()
     }
+
+    /// Given a set of object files, patches all chunks and returns them in the
+    /// order in which they appear in the final binary.
+    pub fn link_objects(
+        &self,
+        object_files: Vec<ObjFile>,
+    ) -> Result<Vec<LinkFragment>, Vec<LinkError>> {
+        let positioned_binary =
+            PositionedBinary::position(self, &object_files)?;
+        let patched_files = PatchedFile::patch_all(
+            object_files,
+            &positioned_binary.exported_symbols,
+        )?;
+        Ok(LinkFragment::from_patched_files(patched_files, &positioned_binary))
+    }
 }
 
 //===========================================================================//
@@ -538,6 +593,9 @@ pub struct AddrspaceConfig {
     pub name: Rc<str>,
     /// The number of address bits for this address space.
     pub bits: u32,
+    /// Any padded portions of memory regions in this address space will be
+    /// filled with this byte value by default.
+    pub fill: u8,
 }
 
 //===========================================================================//
@@ -551,6 +609,10 @@ pub struct MemoryConfig {
     pub space: Rc<str>,
     /// The range of addresses covered by this memory region.
     pub range: Range,
+    /// If set, then any padded portions of the memory region will be filled
+    /// with this byte value. Otherwise, they will be filled with this region's
+    /// address space's fill byte.
+    pub fill: Option<u8>,
 }
 
 //===========================================================================//
@@ -569,6 +631,10 @@ pub struct SectionConfig {
     /// If set, then this entire section must not cross any alignment boundary
     /// of this size within its address space.
     pub within: Option<Align>,
+    /// If set, then any padded portions of the section will be filled with
+    /// this byte value. Otherwise, they will be filled with this sections's
+    /// memory region's fill byte.
+    pub fill: Option<u8>,
 }
 
 //===========================================================================//

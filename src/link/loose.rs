@@ -28,6 +28,10 @@ pub struct LooseChunk {
     /// If set, then this entire chunk must not cross any alignment boundary of
     /// this size within its address space.
     pub within: Option<Align>,
+    /// If set, then any padded portions of the chunk will be filled with this
+    /// byte value. Otherwise, they will be filled with this chunk's section's
+    /// fill byte.
+    pub fill: Option<u8>,
 }
 
 //===========================================================================//
@@ -44,6 +48,10 @@ pub struct LooseSection {
     /// If set, then this entire section must not cross any alignment boundary
     /// of this size within its address space.
     pub within: Option<Align>,
+    /// If set, then any padded portions of the section will be filled with
+    /// this byte value. Otherwise, they will be filled with this sections's
+    /// memory region's fill byte.
+    pub fill: Option<u8>,
     /// The chunks in this section.
     pub chunks: Vec<LooseChunk>,
 }
@@ -65,6 +73,7 @@ impl LooseSection {
                     start: section.start,
                     align: section.align,
                     within: section.within,
+                    fill: section.fill,
                     chunks: Vec::new(),
                 })
             }
@@ -90,6 +99,7 @@ impl LooseSection {
                         size: chunk.size,
                         align: chunk.align,
                         within: chunk.within,
+                        fill: chunk.fill,
                     };
                     loose_sections[section_index].chunks.push(loose_chunk);
                 } else {

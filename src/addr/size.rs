@@ -32,6 +32,12 @@ impl Size {
             Size((range.end().0 - range.start().0) as u64 + 1)
         }
     }
+
+    // This is *internal-only*, and will need to be removed if we ever increase
+    // `Addr::BITS` to 64.
+    pub(crate) fn into_u64(self) -> u64 {
+        self.0
+    }
 }
 
 impl From<Align> for Size {
