@@ -9,7 +9,6 @@ use std::ops::RangeInclusive;
 //===========================================================================//
 
 /// A patch to apply to an object file during linking.
-#[derive(Clone)]
 pub struct ObjPatch {
     /// The offset from the start of the chunk to the start of the patch, in
     /// bytes.

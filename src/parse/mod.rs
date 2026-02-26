@@ -10,7 +10,7 @@ mod lvalue;
 mod types;
 
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst};
-pub use asm::{AsmMacroLine, AsmModuleAst, AsmSectionAst, AsmStmtAst};
+pub use asm::{AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst};
 pub use expr::{
     BinOpAst, ExprAst, ExprAstNode, IdentifierAst, UnOpAst, parse_expr,
 };

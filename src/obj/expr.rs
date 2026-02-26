@@ -1,12 +1,12 @@
 use super::binary::BinaryIo;
 use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
 use std::io;
-use std::rc::Rc;
 
 //===========================================================================//
 
 const OP_ADD: u8 = b'+';
 const OP_GET_VALUE: u8 = b'G';
+const OP_LABEL_ADDR: u8 = b'A';
 const OP_LIST_INDEX: u8 = b'[';
 const OP_MAKE_LIST: u8 = b'}';
 const OP_MAKE_TUPLE: u8 = b')';
@@ -16,9 +16,8 @@ const OP_TUPLE_ITEM: u8 = b'.';
 //===========================================================================//
 
 /// An expression in an assembly file.
-#[derive(Clone)]
 pub struct ObjExpr {
-    pub(crate) ops: Rc<[ObjExprOp]>,
+    pub(crate) ops: Vec<ObjExprOp>,
 }
 
 impl ObjExpr {
@@ -34,7 +33,7 @@ impl ObjExpr {
 
 impl BinaryIo for ObjExpr {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let ops = Rc::<[ObjExprOp]>::read_from(reader)?;
+        let ops = Vec::<ObjExprOp>::read_from(reader)?;
         if ops.is_empty() {
             Err(io::Error::new(io::ErrorKind::InvalidData, "empty expression"))
         } else {
@@ -49,7 +48,7 @@ impl BinaryIo for ObjExpr {
 
 impl From<ExprValue> for ObjExpr {
     fn from(value: ExprValue) -> ObjExpr {
-        ObjExpr { ops: Rc::from([ObjExprOp::Push(value)]) }
+        ObjExpr { ops: vec![ObjExprOp::Push(value)] }
     }
 }
 
@@ -67,6 +66,10 @@ pub(crate) enum ObjExprOp {
     /// Copies the value at the specified index in the value stack, and pushes
     /// the copied value onto the stack.
     GetValue(usize),
+    /// Pops the top value from the value stack (which must be a label), and
+    /// pushes the runtime address of that label (as an integer) onto the value
+    /// stack.
+    LabelAddr,
     /// Pops the top two values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then pushes that list
@@ -94,6 +97,7 @@ impl BinaryIo for ObjExprOp {
         match u8::read_from(reader)? {
             OP_ADD => Ok(ObjExprOp::Add),
             OP_GET_VALUE => Ok(ObjExprOp::GetValue(usize::read_from(reader)?)),
+            OP_LABEL_ADDR => Ok(ObjExprOp::LabelAddr),
             OP_LIST_INDEX => Ok(ObjExprOp::ListIndex),
             OP_MAKE_LIST => Ok(ObjExprOp::MakeList(usize::read_from(reader)?)),
             OP_MAKE_TUPLE => {
@@ -117,6 +121,7 @@ impl BinaryIo for ObjExprOp {
                 OP_GET_VALUE.write_to(writer)?;
                 index.write_to(writer)
             }
+            ObjExprOp::LabelAddr => OP_LABEL_ADDR.write_to(writer),
             ObjExprOp::ListIndex => OP_LIST_INDEX.write_to(writer),
             ObjExprOp::MakeList(num_items) => {
                 OP_MAKE_LIST.write_to(writer)?;

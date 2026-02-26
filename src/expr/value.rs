@@ -1,5 +1,5 @@
 use crate::obj::BinaryIo;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use std::cmp::Ordering;
 use std::fmt;
 use std::io;
@@ -11,9 +11,10 @@ const TAG_FALSE: u8 = 0;
 const TAG_TRUE: u8 = 1;
 const TAG_ENTITY: u8 = 2;
 const TAG_INTEGER: u8 = 3;
-const TAG_LIST: u8 = 4;
-const TAG_STRING: u8 = 5;
-const TAG_TUPLE: u8 = 6;
+const TAG_LABEL: u8 = 4;
+const TAG_LIST: u8 = 5;
+const TAG_STRING: u8 = 6;
+const TAG_TUPLE: u8 = 7;
 
 //===========================================================================//
 
@@ -24,11 +25,13 @@ pub enum ExprType {
     Boolean,
     /// The bottom type, used for expressions that don't typecheck.
     Bottom,
-    /// An opaque object, of a kind described by the given human-readable
-    /// string.
+    /// An opaque object type with the given human-readable type name.
     Entity(Rc<str>),
-    /// The integer type.
+    /// The (unlimited-precision) integer type.
     Integer,
+    /// The type comprising memory locations within an assembly file, compiled
+    /// binary, or runtime address space.
+    Label,
     /// A homogenous list type.
     List(Rc<ExprType>),
     /// The string type.
@@ -38,16 +41,16 @@ pub enum ExprType {
 }
 
 impl ExprType {
-    /// Returns true if this type supports ordering comparisons
-    /// (e.g. less-than).  If this returns true for an `ExprType`, then calling
-    /// `partial_cmp` on two `ExprValue`s of that type will return a non-`None`
-    /// value.
+    /// Returns true if this type supports totally ordered comparisons.  If
+    /// this returns true for an `ExprType`, then calling `partial_cmp` on two
+    /// `ExprValue`s of that type will always return a non-`None` value.
     pub(crate) fn is_ord(&self) -> bool {
         match self {
             ExprType::Boolean => true,
             ExprType::Bottom => false,
             ExprType::Entity(_) => false,
             ExprType::Integer => true,
+            ExprType::Label => false,
             ExprType::List(item_type) => item_type.is_ord(),
             ExprType::String => true,
             ExprType::Tuple(item_types) => {
@@ -62,17 +65,18 @@ impl fmt::Display for ExprType {
         match self {
             ExprType::Boolean => f.write_str("bool"),
             ExprType::Bottom => f.write_str("bottom"),
-            ExprType::Entity(kind) => f.write_str(kind),
-            ExprType::List(element) => {
+            ExprType::Entity(type_name) => f.write_str(type_name),
+            ExprType::Label => f.write_str("label"),
+            ExprType::List(item_type) => {
                 f.write_str("{")?;
-                element.fmt(f)?;
+                item_type.fmt(f)?;
                 f.write_str("}")
             }
             ExprType::Integer => f.write_str("int"),
             ExprType::String => f.write_str("str"),
-            ExprType::Tuple(elements) => {
+            ExprType::Tuple(item_types) => {
                 f.write_str("(")?;
-                comma_separate(f, elements)?;
+                comma_separate(f, item_types)?;
                 f.write_str(")")
             }
         }
@@ -92,6 +96,10 @@ pub enum ExprValue {
     Entity(Rc<str>),
     /// An integer value (with no minimum/maximum range).
     Integer(BigInt),
+    /// A memory location within an assembly file, compiled binary, or runtime
+    /// address space, at the specified signed offset relative to the label
+    /// with the specified fully-qualified name.
+    Label(Rc<str>, Rc<BigInt>),
     /// A list value.  All elements must be of the same type.
     List(Rc<[ExprValue]>),
     /// A string value.
@@ -137,6 +145,16 @@ impl ExprValue {
         }
     }
 
+    /// Returns the label name and relative offset of the contained
+    /// [`Label`](ExprValue::Label) value, or panics if this value is not a
+    /// label.
+    pub fn unwrap_label(self) -> (Rc<str>, Rc<BigInt>) {
+        match self {
+            ExprValue::Label(name, offset) => (name, offset),
+            value => panic!("ExprValue::unwrap_label on {value:?}"),
+        }
+    }
+
     /// Returns the contained [`List`](ExprValue::List) value, or panics if
     /// this value is not a list.
     pub fn unwrap_list(self) -> Rc<[ExprValue]> {
@@ -172,6 +190,11 @@ impl BinaryIo for ExprValue {
             TAG_TRUE => Ok(ExprValue::Boolean(true)),
             TAG_ENTITY => Ok(ExprValue::Entity(Rc::<str>::read_from(reader)?)),
             TAG_INTEGER => Ok(ExprValue::Integer(BigInt::read_from(reader)?)),
+            TAG_LABEL => {
+                let name = Rc::<str>::read_from(reader)?;
+                let offset = BigInt::read_from(reader)?;
+                Ok(ExprValue::Label(name, Rc::from(offset)))
+            }
             TAG_LIST => {
                 Ok(ExprValue::List(Rc::<[ExprValue]>::read_from(reader)?))
             }
@@ -197,6 +220,11 @@ impl BinaryIo for ExprValue {
             ExprValue::Integer(integer) => {
                 TAG_INTEGER.write_to(writer)?;
                 integer.write_to(writer)
+            }
+            ExprValue::Label(name, offset) => {
+                TAG_LABEL.write_to(writer)?;
+                name.write_to(writer)?;
+                offset.write_to(writer)
             }
             ExprValue::List(list) => {
                 TAG_LIST.write_to(writer)?;
@@ -226,6 +254,14 @@ impl fmt::Display for ExprValue {
             ExprValue::Boolean(value) => write!(f, "%{value}"),
             ExprValue::Entity(repr) => f.write_str(repr),
             ExprValue::Integer(value) => value.fmt(f),
+            ExprValue::Label(name, offset) => {
+                f.write_str(name)?;
+                match offset.sign() {
+                    Sign::Plus => write!(f, " + ${:x}", offset.magnitude()),
+                    Sign::Minus => write!(f, " - ${:x}", offset.magnitude()),
+                    Sign::NoSign => Ok(()),
+                }
+            }
             ExprValue::List(values) => {
                 f.write_str("{")?;
                 comma_separate(f, values)?;
@@ -249,6 +285,16 @@ impl PartialOrd for ExprValue {
             }
             (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                 Some(lhs.cmp(rhs))
+            }
+            (
+                ExprValue::Label(lhs_name, lhs_offset),
+                ExprValue::Label(rhs_name, rhs_offset),
+            ) => {
+                if lhs_name == rhs_name {
+                    Some(lhs_offset.cmp(rhs_offset))
+                } else {
+                    None
+                }
             }
             (ExprValue::String(lhs), ExprValue::String(rhs)) => {
                 Some(lhs.cmp(rhs))
@@ -285,6 +331,10 @@ mod tests {
     use num_bigint::BigInt;
     use std::rc::Rc;
 
+    fn rc_bigint(value: i32) -> Rc<BigInt> {
+        Rc::from(BigInt::from(value))
+    }
+
     fn int_value(value: i32) -> ExprValue {
         ExprValue::Integer(BigInt::from(value))
     }
@@ -297,6 +347,7 @@ mod tests {
     fn display_basic_type() {
         assert_eq!(format!("{}", ExprType::Boolean), "bool");
         assert_eq!(format!("{}", ExprType::Integer), "int");
+        assert_eq!(format!("{}", ExprType::Label), "label");
         assert_eq!(format!("{}", ExprType::String), "str");
     }
 
@@ -332,6 +383,16 @@ mod tests {
         assert_eq!(format!("{}", int_value(17)), "17");
         assert_eq!(format!("{}", int_value(0)), "0");
         assert_eq!(format!("{}", int_value(-42)), "-42");
+    }
+
+    #[test]
+    fn display_label_value() {
+        let value = ExprValue::Label(Rc::from("Foo"), rc_bigint(0));
+        assert_eq!(format!("{}", value), "Foo");
+        let value = ExprValue::Label(Rc::from("Bar"), rc_bigint(32));
+        assert_eq!(format!("{}", value), "Bar + $20");
+        let value = ExprValue::Label(Rc::from("Baz"), rc_bigint(-1));
+        assert_eq!(format!("{}", value), "Baz - $1");
     }
 
     #[test]

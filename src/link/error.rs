@@ -34,7 +34,13 @@ pub enum LinkError {
         /// should belong.
         section_name: Rc<str>,
     },
-    /// A patch's offset/size was out of range for the size of the chunk data.
+    /// A patch's expression was malformed in some way (e.g. stack
+    /// underflow). This shouldn't happen for valid object files (as the
+    /// assembler should have generated a valid expression).
+    MalformedPatchExpression,
+    /// A patch's offset/size was out of range for the size of the chunk
+    /// data. This shouldn't happen for valid object files (as the assembler
+    /// should have generated a valid patch offset).
     PatchOffsetOutOfRange,
     /// A patch expression evaluated to a value that is out of range for that
     /// patch's kind.
@@ -44,7 +50,9 @@ pub enum LinkError {
         /// The out-of-range expression value.
         value: BigInt,
     },
-    /// A patch expression evaluated to a value of the wrong type.
+    /// A patch expression evaluated to a value of the wrong type. This
+    /// shouldn't happen for valid object files (as the assembler should have
+    /// caught the type error).
     PatchValueWrongType,
     /// A section was unable to be positioned within its memory region, given
     /// the constraints.

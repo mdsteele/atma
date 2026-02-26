@@ -1,7 +1,8 @@
 use super::error::LinkError;
 use crate::addr::Addr;
 use crate::expr::ExprValue;
-use crate::obj::{ObjChunk, ObjExpr, ObjFile, ObjPatch, PatchKind};
+use crate::obj::{ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, PatchKind};
+use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -57,7 +58,7 @@ impl PatchedChunk {
 //===========================================================================//
 
 struct FilePatcher<'a> {
-    _exported_symbols: &'a HashMap<Rc<str>, Addr>,
+    exported_symbols: &'a HashMap<Rc<str>, Addr>,
     errors: &'a mut Vec<LinkError>,
 }
 
@@ -66,23 +67,23 @@ impl<'a> FilePatcher<'a> {
         exported_symbols: &'a HashMap<Rc<str>, Addr>,
         errors: &'a mut Vec<LinkError>,
     ) -> FilePatcher<'a> {
-        FilePatcher { _exported_symbols: exported_symbols, errors }
+        FilePatcher { exported_symbols, errors }
     }
 
     pub fn patch_chunk(&mut self, chunk: ObjChunk) -> PatchedChunk {
         let mut data = chunk.data;
-        for patch in chunk.patches.iter() {
+        for patch in chunk.patches.into_iter() {
             self.apply_patch(patch, &mut data);
         }
         PatchedChunk { data }
     }
 
-    fn apply_patch(&mut self, patch: &ObjPatch, data: &mut [u8]) {
+    fn apply_patch(&mut self, patch: ObjPatch, data: &mut [u8]) {
         if let Ok(start) = usize::try_from(patch.offset)
             && let Some(end) = start.checked_add(patch.kind.num_bytes())
             && end <= data.len()
         {
-            match self.eval_expr(&patch.expr) {
+            match self.eval_patch_expr(patch.expr) {
                 None => {} // evaluation failed with errors
                 Some(ExprValue::Integer(bigint)) => {
                     match patch.kind.value_in_range(&bigint) {
@@ -108,8 +109,36 @@ impl<'a> FilePatcher<'a> {
         }
     }
 
-    fn eval_expr(&mut self, expr: &ObjExpr) -> Option<ExprValue> {
-        expr.static_value().cloned() // TODO
+    fn eval_patch_expr(&mut self, expr: ObjExpr) -> Option<ExprValue> {
+        let mut value_stack = Vec::<ExprValue>::new();
+        for op in expr.ops {
+            match op {
+                ObjExprOp::LabelAddr => {
+                    if let Some(ExprValue::Label(name, offset)) =
+                        value_stack.pop()
+                        && let Some(addr) =
+                            self.exported_symbols.get(&name).copied()
+                    {
+                        value_stack.push(ExprValue::Integer(
+                            &BigInt::from(addr) + &*offset,
+                        ));
+                    } else {
+                        self.errors.push(LinkError::MalformedPatchExpression);
+                        return None;
+                    }
+                }
+                ObjExprOp::Push(value) => value_stack.push(value),
+                other => todo!("{other:?}"),
+            }
+        }
+        if let Some(value) = value_stack.pop()
+            && value_stack.is_empty()
+        {
+            Some(value)
+        } else {
+            self.errors.push(LinkError::MalformedPatchExpression);
+            None
+        }
     }
 }
 
@@ -121,7 +150,7 @@ fn write_patch_value(
     value: i64,
     data: &mut [u8],
 ) {
-    debug_assert!(offset + kind.num_bytes() < data.len());
+    debug_assert!(offset + kind.num_bytes() <= data.len());
     match kind {
         PatchKind::U8 => {
             data[offset] = value as u8;

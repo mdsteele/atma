@@ -4,10 +4,12 @@ mod expr;
 
 use crate::addr::{Align, Offset, Size};
 use crate::expr::ExprType;
-use crate::obj::{ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjSymbol, PatchKind};
+use crate::obj::{
+    ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol, PatchKind,
+};
 use crate::parse::{
-    AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst, IdentifierAst,
-    ParseError, ParseResult,
+    AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst,
+    IdentifierAst, ParseError, ParseResult,
 };
 use expr::AsmTypeEnv;
 use std::rc::Rc;
@@ -21,13 +23,15 @@ pub fn assemble_source(source: &str) -> ParseResult<ObjFile> {
 
 fn assemble_ast(module: AsmModuleAst) -> ParseResult<ObjFile> {
     let mut assembler = Assembler::new();
-    assembler.visit_module(&module);
+    assembler.scope_module(&module);
+    assembler.expand_module(module);
     assembler.finish()
 }
 
 //===========================================================================//
 
 struct Assembler {
+    env: AsmTypeEnv,
     chunks: Vec<ObjChunk>,
     errors: Vec<ParseError>,
     section_stack: Vec<SectionEnv>,
@@ -36,38 +40,83 @@ struct Assembler {
 impl Assembler {
     fn new() -> Assembler {
         Assembler {
+            env: AsmTypeEnv::new(),
             chunks: Vec::new(),
             errors: Vec::new(),
             section_stack: Vec::new(),
         }
     }
 
-    fn visit_module(&mut self, module: &AsmModuleAst) {
-        self.visit_statements(&module.statements);
+    /// Scans over a module AST (without expanding macros) and collects
+    /// existing labels and scopes into the environment.
+    fn scope_module(&mut self, module: &AsmModuleAst) {
+        self.scope_statements(&module.statements);
     }
 
-    fn visit_statements(&mut self, statements: &[AsmStmtAst]) {
+    /// Scans over a list of statement ASTs (without expanding macros) and
+    /// collects existing labels and scopes into the environment.
+    fn scope_statements(&mut self, statements: &[AsmStmtAst]) {
         for statement in statements {
-            self.visit_statement(statement);
+            self.scope_statement(statement);
         }
     }
 
-    fn visit_statement(&mut self, statement: &AsmStmtAst) {
+    /// Scans over a statement AST (without expanding macros) and collects
+    /// existing labels and scopes into the environment.
+    fn scope_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
-            AsmStmtAst::Invoke(_macro) => {} // TODO
-            AsmStmtAst::Label(id) => self.visit_label(id),
-            AsmStmtAst::Section(section) => self.visit_section(section),
-            AsmStmtAst::U8(expr) => self.visit_u8(expr),
-            AsmStmtAst::U16le(expr) => self.visit_u16le(expr),
-            AsmStmtAst::U24le(expr) => self.visit_u24le(expr),
+            AsmStmtAst::Invoke(_macro) => {}
+            AsmStmtAst::Label(id) => self.scope_label(id),
+            AsmStmtAst::Section(section) => self.scope_section(section),
+            AsmStmtAst::U8(_expr) => {}
+            AsmStmtAst::U16le(_expr) => {}
+            AsmStmtAst::U24le(_expr) => {}
         }
     }
 
-    fn visit_label(&mut self, id_ast: &IdentifierAst) {
+    fn scope_label(&mut self, id_ast: &IdentifierAst) {
+        self.env.declare_label(id_ast);
+    }
+
+    fn scope_section(&mut self, section_ast: &AsmSectionAst) {
+        self.scope_statements(&section_ast.body);
+    }
+
+    /// Consumes a module AST, expanding macros and directives into chunk data.
+    fn expand_module(&mut self, module: AsmModuleAst) {
+        self.expand_statements(module.statements);
+    }
+
+    /// Consumes a list of statement ASTs, expanding macros and directives into
+    /// chunk data.
+    fn expand_statements(&mut self, statements: Vec<AsmStmtAst>) {
+        for statement in statements {
+            self.expand_statement(statement);
+        }
+    }
+
+    /// Consumes a statement AST, expanding macros and directives into chunk
+    /// data.
+    fn expand_statement(&mut self, statement: AsmStmtAst) {
+        match statement {
+            AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
+            AsmStmtAst::Label(id) => self.expand_label(id),
+            AsmStmtAst::Section(section) => self.expand_section(section),
+            AsmStmtAst::U8(expr) => self.expand_u8(expr),
+            AsmStmtAst::U16le(expr) => self.expand_u16le(expr),
+            AsmStmtAst::U24le(expr) => self.expand_u24le(expr),
+        }
+    }
+
+    fn expand_macro_invocation(&mut self, _invoke_ast: AsmInvokeAst) {
+        // TODO
+    }
+
+    fn expand_label(&mut self, id_ast: IdentifierAst) {
         if let Some(section_env) = self.section_stack.last_mut() {
             section_env.symbols.push(ObjSymbol {
-                name: id_ast.name.clone(),
-                exported: false,
+                name: id_ast.name,
+                exported: true, // TODO
                 offset: Offset::try_from(section_env.data.len()).unwrap(),
             });
         } else {
@@ -76,7 +125,7 @@ impl Assembler {
         }
     }
 
-    fn visit_section(&mut self, section_ast: &AsmSectionAst) {
+    fn expand_section(&mut self, section_ast: AsmSectionAst) {
         let name: Option<Rc<str>> = match self
             .typecheck_expression(&section_ast.name)
         {
@@ -107,7 +156,7 @@ impl Assembler {
         let within: Option<Align> = None; // TODO: support within attribute
         let fill: Option<u8> = None; // TODO: support fill attribute
         self.section_stack.push(SectionEnv::new());
-        self.visit_statements(&section_ast.body);
+        self.expand_statements(section_ast.body);
         debug_assert!(!self.section_stack.is_empty());
         let section_env = self.section_stack.pop().unwrap();
         // TODO: error if size is too large
@@ -126,32 +175,37 @@ impl Assembler {
         }
     }
 
-    fn visit_u16le(&mut self, expr_ast: &ExprAst) {
-        let word = self.visit_int_data_directive(PatchKind::U16le, expr_ast);
+    fn expand_u16le(&mut self, expr_ast: ExprAst) {
+        let word = self.expand_int_data_directive(PatchKind::U16le, expr_ast);
         let section_env = self.section_stack.last_mut().unwrap();
         section_env.data.push(word as u8);
         section_env.data.push((word >> 8) as u8);
     }
 
-    fn visit_u24le(&mut self, expr_ast: &ExprAst) {
-        let long = self.visit_int_data_directive(PatchKind::U24le, expr_ast);
+    fn expand_u24le(&mut self, expr_ast: ExprAst) {
+        let long = self.expand_int_data_directive(PatchKind::U24le, expr_ast);
         let section_env = self.section_stack.last_mut().unwrap();
         section_env.data.push(long as u8);
         section_env.data.push((long >> 8) as u8);
         section_env.data.push((long >> 16) as u8);
     }
 
-    fn visit_u8(&mut self, expr_ast: &ExprAst) {
-        let byte = self.visit_int_data_directive(PatchKind::U8, expr_ast);
+    fn expand_u8(&mut self, expr_ast: ExprAst) {
+        let byte = self.expand_int_data_directive(PatchKind::U8, expr_ast);
         if let Some(section_env) = self.section_stack.last_mut() {
             section_env.data.push(byte as u8);
         }
     }
 
-    fn visit_int_data_directive(
+    /// Shared implementation for directives that insert an integer (of some
+    /// size and signedness) into the chunk data. Returns the static integer
+    /// value that should be written into the chunk data; if a link-time patch
+    /// is required, this static value will just be zero, and an appropriate
+    /// `ObjPatch` will be added to the current chunk.
+    fn expand_int_data_directive(
         &mut self,
         kind: PatchKind,
-        expr_ast: &ExprAst,
+        expr_ast: ExprAst,
     ) -> i64 {
         if self.section_stack.is_empty() {
             let message = format!(
@@ -160,37 +214,37 @@ impl Assembler {
             );
             self.errors.push(ParseError::new(expr_ast.span, message));
         }
-        match self.typecheck_expression(expr_ast) {
+        match self.typecheck_expression(&expr_ast) {
+            Some((mut expr, ExprType::Label)) => {
+                // TODO: If the label belongs to a chunk with an explicit start
+                // address, then the label's address value is static and no
+                // patch is necessary.
+                expr.ops.push(ObjExprOp::LabelAddr);
+                self.try_add_patch(kind, expr);
+            }
             Some((expr, ExprType::Integer)) => match expr.static_value() {
                 Some(value) => {
                     let bigint = value.unwrap_int_ref();
-                    kind.value_in_range(bigint).unwrap_or_else(|range| {
-                        let message = format!(
-                            "{} value is statically out of range ({}-{})",
-                            kind.directive(),
-                            range.start(),
-                            range.end()
-                        );
-                        let label = format!(
-                            "the value of this expression is {bigint}"
-                        );
-                        self.errors.push(
-                            ParseError::new(expr_ast.span, message)
-                                .with_label(expr_ast.span, label),
-                        );
-                        0
-                    })
-                }
-                None => {
-                    if let Some(section_env) = self.section_stack.last_mut() {
-                        // TODO: Error instead of crash if offset is too large.
-                        let offset =
-                            Offset::try_from(section_env.data.len()).unwrap();
-                        let patch = ObjPatch { offset, kind, expr };
-                        section_env.patches.push(patch);
+                    match kind.value_in_range(bigint) {
+                        Ok(value) => return value,
+                        Err(range) => {
+                            let message = format!(
+                                "{} value is statically out of range ({}-{})",
+                                kind.directive(),
+                                range.start(),
+                                range.end()
+                            );
+                            let label = format!(
+                                "the value of this expression is {bigint}"
+                            );
+                            self.errors.push(
+                                ParseError::new(expr_ast.span, message)
+                                    .with_label(expr_ast.span, label),
+                            );
+                        }
                     }
-                    0
                 }
+                None => self.try_add_patch(kind, expr),
             },
             Some((_, ty)) => {
                 let message =
@@ -200,9 +254,22 @@ impl Assembler {
                     ParseError::new(expr_ast.span, message)
                         .with_label(expr_ast.span, label),
                 );
-                0
             }
-            None => 0,
+            None => {}
+        }
+        0
+    }
+
+    /// Attempts to add an `ObjPatch` to the current chunk starting at the
+    /// current end of its static data. Does nothing if there is no current
+    /// chunk; it is assumed that the caller will have already flagged an error
+    /// in that case.
+    fn try_add_patch(&mut self, kind: PatchKind, expr: ObjExpr) {
+        if let Some(section_env) = self.section_stack.last_mut() {
+            // TODO: Error instead of crash if offset is too large.
+            let offset = Offset::try_from(section_env.data.len()).unwrap();
+            let patch = ObjPatch { offset, kind, expr };
+            section_env.patches.push(patch);
         }
     }
 
@@ -210,8 +277,7 @@ impl Assembler {
         &mut self,
         expr_ast: &ExprAst,
     ) -> Option<(ObjExpr, ExprType)> {
-        let env = AsmTypeEnv {};
-        match env.typecheck_expression(expr_ast) {
+        match self.env.typecheck_expression(expr_ast) {
             Ok(expr_and_type) => Some(expr_and_type),
             Err(errors) => {
                 self.errors.extend(errors);

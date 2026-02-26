@@ -47,7 +47,7 @@ impl LinkTypeEnv {
         match ExprCompiler::new(self).typecheck(expr) {
             Ok((ops, expr_type, static_value)) => {
                 debug_assert!(!ops.is_empty());
-                Ok((ObjExpr { ops: Rc::from(ops) }, expr_type, static_value))
+                Ok((ObjExpr { ops }, expr_type, static_value))
             }
             Err(errors) => Err(errors),
         }

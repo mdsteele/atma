@@ -2,6 +2,7 @@ use crate::expr::{ExprType, ExprValue};
 use crate::parse::{BinOpAst, ParseError, ParseResult, SrcSpan};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Euclid, Pow, Signed, ToPrimitive, Zero};
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -45,6 +46,7 @@ pub(crate) enum ExprBinOp {
     IntShl,
     IntShr,
     IntSub,
+    LabelAddInt,
 }
 
 impl ExprBinOp {
@@ -58,6 +60,9 @@ impl ExprBinOp {
         match (op, lhs_type, rhs_type) {
             (BinOpAst::Add, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntAdd, ExprType::Integer))
+            }
+            (BinOpAst::Add, ExprType::Label, ExprType::Integer) => {
+                Ok((ExprBinOp::LabelAddInt, ExprType::Label))
             }
             (BinOpAst::BitAnd, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntBitAnd, ExprType::Integer))
@@ -192,6 +197,11 @@ impl ExprBinOp {
             }
             ExprBinOp::IntSub => {
                 Ok(ExprValue::Integer(lhs.unwrap_int() - rhs.unwrap_int()))
+            }
+            ExprBinOp::LabelAddInt => {
+                let (name, offset) = lhs.unwrap_label();
+                let new_offset: BigInt = &*offset + rhs.unwrap_int_ref();
+                Ok(ExprValue::Label(name, Rc::from(new_offset)))
             }
         }
     }

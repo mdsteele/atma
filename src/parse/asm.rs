@@ -36,7 +36,7 @@ impl AsmModuleAst {
 #[derive(Debug)]
 pub enum AsmStmtAst {
     /// A macro invocation.
-    Invoke(AsmMacroLine),
+    Invoke(AsmInvokeAst),
     /// A label.
     Label(IdentifierAst),
     /// A `.SECTION` block.
@@ -85,7 +85,7 @@ impl AsmStmtAst {
                 u8_dir,
                 u16le_dir,
                 u24le_dir,
-                AsmMacroLine::parser().map(AsmStmtAst::Invoke),
+                AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
             ))
         })
     }
@@ -107,16 +107,16 @@ pub struct AsmSectionAst {
 
 /// Represents a line in an assembly file that invokes a macro.
 #[derive(Clone, Debug)]
-pub struct AsmMacroLine {
+pub struct AsmInvokeAst {
     /// The name of the macro to invoke.
     pub name: IdentifierAst,
     /// The arguments to the macro, if any.
     pub args: Vec<Token>,
 }
 
-impl AsmMacroLine {
+impl AsmInvokeAst {
     fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmMacroLine, PError<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], AsmInvokeAst, PError<'a>> + Clone {
         IdentifierAst::parser()
             .then(
                 chumsky::prelude::any()
@@ -127,7 +127,7 @@ impl AsmMacroLine {
                     .collect::<Vec<_>>(),
             )
             .then_ignore(linebreak())
-            .map(|(name, args)| AsmMacroLine { name, args })
+            .map(|(name, args)| AsmInvokeAst { name, args })
     }
 }
 
