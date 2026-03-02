@@ -33,6 +33,7 @@ fn assemble_ast(module: AsmModuleAst) -> ParseResult<ObjFile> {
 struct Assembler {
     env: AsmTypeEnv,
     chunks: Vec<ObjChunk>,
+    imports: Vec<Rc<str>>,
     errors: Vec<ParseError>,
     section_stack: Vec<SectionEnv>,
 }
@@ -42,6 +43,7 @@ impl Assembler {
         Assembler {
             env: AsmTypeEnv::new(),
             chunks: Vec::new(),
+            imports: Vec::new(),
             errors: Vec::new(),
             section_stack: Vec::new(),
         }
@@ -65,6 +67,7 @@ impl Assembler {
     /// existing labels and scopes into the environment.
     fn scope_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
+            AsmStmtAst::Import(id) => self.scope_import(id),
             AsmStmtAst::Invoke(_macro) => {}
             AsmStmtAst::Label(id) => self.scope_label(id),
             AsmStmtAst::Section(section) => self.scope_section(section),
@@ -74,8 +77,18 @@ impl Assembler {
         }
     }
 
+    fn scope_import(&mut self, id_ast: &IdentifierAst) {
+        match self.env.declare_import(id_ast) {
+            Ok(()) => {}
+            Err(mut errors) => self.errors.append(&mut errors),
+        }
+    }
+
     fn scope_label(&mut self, id_ast: &IdentifierAst) {
-        self.env.declare_label(id_ast);
+        match self.env.declare_label(id_ast) {
+            Ok(()) => {}
+            Err(mut errors) => self.errors.append(&mut errors),
+        }
     }
 
     fn scope_section(&mut self, section_ast: &AsmSectionAst) {
@@ -99,6 +112,7 @@ impl Assembler {
     /// data.
     fn expand_statement(&mut self, statement: AsmStmtAst) {
         match statement {
+            AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
             AsmStmtAst::Label(id) => self.expand_label(id),
             AsmStmtAst::Section(section) => self.expand_section(section),
@@ -106,6 +120,10 @@ impl Assembler {
             AsmStmtAst::U16le(expr) => self.expand_u16le(expr),
             AsmStmtAst::U24le(expr) => self.expand_u24le(expr),
         }
+    }
+
+    fn expand_import(&mut self, id_ast: IdentifierAst) {
+        self.imports.push(id_ast.name);
     }
 
     fn expand_macro_invocation(&mut self, _invoke_ast: AsmInvokeAst) {
@@ -288,7 +306,7 @@ impl Assembler {
 
     fn finish(self) -> ParseResult<ObjFile> {
         if self.errors.is_empty() {
-            Ok(ObjFile { chunks: self.chunks })
+            Ok(ObjFile { chunks: self.chunks, imports: self.imports })
         } else {
             Err(self.errors)
         }

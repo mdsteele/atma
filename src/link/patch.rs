@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 //===========================================================================//
 
+/// An object file that has had all of its link-time patches applied.
 pub struct PatchedFile {
     /// The patched chunks from this object file.
     pub chunks: Vec<PatchedChunk>,
@@ -33,8 +34,31 @@ impl PatchedFile {
         exported_symbols: &HashMap<Rc<str>, Addr>,
         errors: &mut Vec<LinkError>,
     ) -> PatchedFile {
+        let mut symbol_addrs = HashMap::<Rc<str>, Option<Addr>>::new();
+        for name in object_file.imports {
+            let addr = exported_symbols.get(&name).copied();
+            if addr.is_none() {
+                errors.push(LinkError::SymbolImportUnresolved {
+                    symbol_name: name.clone(),
+                });
+            }
+            symbol_addrs.insert(name, addr);
+        }
+        for chunk in &object_file.chunks {
+            for symbol in chunk.symbols.iter() {
+                // TODO: don't use `exported_symbols` for local symbols
+                let addr = exported_symbols.get(&symbol.name).copied();
+                if addr.is_none() {
+                    errors.push(LinkError::SymbolImportUnresolved {
+                        symbol_name: symbol.name.clone(),
+                    });
+                }
+                symbol_addrs.insert(symbol.name.clone(), addr);
+            }
+        }
+
         let mut patched_chunks = Vec::<PatchedChunk>::new();
-        let mut patcher = FilePatcher::new(exported_symbols, errors);
+        let mut patcher = FilePatcher::new(symbol_addrs, errors);
         for chunk in object_file.chunks {
             patched_chunks.push(patcher.patch_chunk(chunk));
         }
@@ -44,6 +68,8 @@ impl PatchedFile {
 
 //===========================================================================//
 
+/// A data chunk of an object file that has had all of its link-time patches
+/// applied.
 pub struct PatchedChunk {
     /// The patched chunk data.
     pub data: Box<[u8]>,
@@ -58,16 +84,19 @@ impl PatchedChunk {
 //===========================================================================//
 
 struct FilePatcher<'a> {
-    exported_symbols: &'a HashMap<Rc<str>, Addr>,
+    /// For each symbol declared in the object file, local or imported, this
+    /// stores the run address of the symbol, or `None` if the symbol couldn't
+    /// be resolved.
+    symbol_addrs: HashMap<Rc<str>, Option<Addr>>,
     errors: &'a mut Vec<LinkError>,
 }
 
 impl<'a> FilePatcher<'a> {
     pub fn new(
-        exported_symbols: &'a HashMap<Rc<str>, Addr>,
+        symbol_addrs: HashMap<Rc<str>, Option<Addr>>,
         errors: &'a mut Vec<LinkError>,
     ) -> FilePatcher<'a> {
-        FilePatcher { exported_symbols, errors }
+        FilePatcher { symbol_addrs, errors }
     }
 
     pub fn patch_chunk(&mut self, chunk: ObjChunk) -> PatchedChunk {
@@ -109,6 +138,9 @@ impl<'a> FilePatcher<'a> {
         }
     }
 
+    /// Evaluates an expression and returns the result value, or `None` if an
+    /// error occurred (in which case the error has already been reported when
+    /// this returns).
     fn eval_patch_expr(&mut self, expr: ObjExpr) -> Option<ExprValue> {
         let mut value_stack = Vec::<ExprValue>::new();
         for op in expr.ops {
@@ -116,13 +148,24 @@ impl<'a> FilePatcher<'a> {
                 ObjExprOp::LabelAddr => {
                     if let Some(ExprValue::Label(name, offset)) =
                         value_stack.pop()
-                        && let Some(addr) =
-                            self.exported_symbols.get(&name).copied()
+                        && let Some(opt_addr) =
+                            self.symbol_addrs.get(&name).copied()
                     {
-                        value_stack.push(ExprValue::Integer(
-                            &BigInt::from(addr) + &*offset,
-                        ));
+                        if let Some(addr) = opt_addr {
+                            value_stack.push(ExprValue::Integer(
+                                &BigInt::from(addr) + &*offset,
+                            ));
+                        } else {
+                            // This symbol was never resolved.  An error has
+                            // already been reported for this, so no need to
+                            // report another here.
+                            return None;
+                        }
                     } else {
+                        // The expression either has a type error or references
+                        // a symbol that was never declared in this object
+                        // file.  That shouldn't happen if unless the object
+                        // file was corrupted.
                         self.errors.push(LinkError::MalformedPatchExpression);
                         return None;
                     }

@@ -70,6 +70,12 @@ pub enum LinkError {
         /// The fully qualified name shared by the symbols.
         symbol_name: Rc<str>,
     },
+    /// An object file imported a symbol that was never exported by any other
+    /// object file.
+    SymbolImportUnresolved {
+        /// The fully qualified name of the imported symbol.
+        symbol_name: Rc<str>,
+    },
 }
 
 //===========================================================================//

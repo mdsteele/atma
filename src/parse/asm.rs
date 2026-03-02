@@ -35,6 +35,8 @@ impl AsmModuleAst {
 /// assembly file.
 #[derive(Debug)]
 pub enum AsmStmtAst {
+    /// An `.IMPORT` directive.
+    Import(IdentifierAst),
     /// A macro invocation.
     Invoke(AsmInvokeAst),
     /// A label.
@@ -60,6 +62,10 @@ impl AsmStmtAst {
                 .ignore_then(linebreak())
                 .ignore_then(statement.repeated().collect::<Vec<_>>())
                 .then_ignore(symbol(TokenValue::BraceClose));
+            let import_dir = directive(".IMPORT")
+                .ignore_then(IdentifierAst::parser())
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::Import);
             let section_dir = directive(".SECTION")
                 .ignore_then(ExprAst::parser())
                 .then(stmt_block)
@@ -81,6 +87,7 @@ impl AsmStmtAst {
                 .map(AsmStmtAst::U24le);
             chumsky::prelude::choice((
                 label,
+                import_dir,
                 section_dir,
                 u8_dir,
                 u16le_dir,
