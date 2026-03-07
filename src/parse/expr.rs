@@ -134,7 +134,7 @@ pub struct IdentifierAst {
 }
 
 impl IdentifierAst {
-    pub(crate) fn parser<'a>()
+    pub(super) fn parser<'a>()
     -> impl Parser<'a, &'a [Token], IdentifierAst, PError<'a>> + Clone {
         chumsky::prelude::any()
             .try_map(|token: Token, span| {
@@ -160,7 +160,25 @@ pub struct ExprAst {
 }
 
 impl ExprAst {
-    pub(crate) fn parser<'a>()
+    /// Parses a sequence of tokens into an expression abstract syntax tree.
+    pub fn parse(tokens: &[Token]) -> ParseResult<ExprAst> {
+        ExprAst::parser().parse(tokens).into_result().map_err(|errors| {
+            errors
+                .into_iter()
+                .map(|error| {
+                    let index = error.span().start;
+                    let span = if index < tokens.len() {
+                        tokens[index].span
+                    } else {
+                        tokens[tokens.len() - 1].span.end_span()
+                    };
+                    ParseError::new(span, format!("{error:?}"))
+                })
+                .collect()
+        })
+    }
+
+    pub(super) fn parser<'a>()
     -> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
         chumsky::prelude::recursive(|expr| {
             let parenthesized_expr = chumsky::prelude::group((
@@ -454,37 +472,16 @@ fn str_literal<'a>()
 
 //===========================================================================//
 
-/// Parses a sequence of tokens into an abstract syntax tree for an expression.
-pub fn parse_expr(tokens: &[Token]) -> ParseResult<ExprAst> {
-    assert!(!tokens.is_empty());
-    ExprAst::parser().parse(tokens).into_result().map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|error| {
-                let index = error.span().start;
-                let span = if index < tokens.len() {
-                    tokens[index].span
-                } else {
-                    tokens[tokens.len() - 1].span.end_span()
-                };
-                ParseError::new(span, format!("{error:?}"))
-            })
-            .collect()
-    })
-}
-
-//===========================================================================//
-
 #[cfg(test)]
 mod tests {
-    use super::{BinOpAst, ExprAst, ExprAstNode, parse_expr};
+    use super::{BinOpAst, ExprAst, ExprAstNode};
     use crate::parse::{ParseError, ParseResult, SrcSpan, Token, TokenLexer};
     use num_bigint::BigInt;
     use std::ops::Range;
     use std::rc::Rc;
 
     fn parse(input: &str) -> ParseResult<ExprAst> {
-        parse_expr(
+        ExprAst::parse(
             &TokenLexer::new(input)
                 .collect::<Result<Vec<Token>, ParseError>>()
                 .map_err(|error| vec![error])?,

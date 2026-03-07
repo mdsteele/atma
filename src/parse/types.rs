@@ -29,7 +29,7 @@ impl SrcSpan {
         }
     }
 
-    pub(crate) fn end_span(&self) -> SrcSpan {
+    pub(super) fn end_span(&self) -> SrcSpan {
         SrcSpan { start: self.end, end: self.end }
     }
 }

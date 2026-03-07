@@ -1,6 +1,7 @@
 //! Facilities for assembling source files into object files.
 
 mod expr;
+mod macros;
 
 use crate::addr::{Align, Offset, Size};
 use crate::expr::ExprType;
@@ -12,6 +13,7 @@ use crate::parse::{
     IdentifierAst, ParseError, ParseResult,
 };
 use expr::AsmTypeEnv;
+use macros::MacroTable;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -32,6 +34,7 @@ fn assemble_ast(module: AsmModuleAst) -> ParseResult<ObjFile> {
 
 struct Assembler {
     env: AsmTypeEnv,
+    macros: MacroTable,
     chunks: Vec<ObjChunk>,
     imports: Vec<Rc<str>>,
     errors: Vec<ParseError>,
@@ -42,6 +45,7 @@ impl Assembler {
     fn new() -> Assembler {
         Assembler {
             env: AsmTypeEnv::new(),
+            macros: MacroTable::new(),
             chunks: Vec::new(),
             imports: Vec::new(),
             errors: Vec::new(),
@@ -126,8 +130,16 @@ impl Assembler {
         self.imports.push(id_ast.name);
     }
 
-    fn expand_macro_invocation(&mut self, _invoke_ast: AsmInvokeAst) {
-        // TODO
+    fn expand_macro_invocation(&mut self, invoke_ast: AsmInvokeAst) {
+        match self.macros.expand(invoke_ast) {
+            Ok(statements) => {
+                self.scope_statements(&statements);
+                self.expand_statements(statements);
+            }
+            Err(mut errors) => {
+                self.errors.append(&mut errors);
+            }
+        }
     }
 
     fn expand_label(&mut self, id_ast: IdentifierAst) {

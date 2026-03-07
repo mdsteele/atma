@@ -183,6 +183,8 @@ enum TokenKind {
     Percent,
     #[token("+")]
     Plus,
+    #[token("#")]
+    Pound,
     #[token("?")]
     Question,
     #[token("/")]
@@ -241,6 +243,7 @@ impl TokenKind {
             TokenKind::ParenOpen => TokenValue::ParenOpen,
             TokenKind::Percent => TokenValue::Percent,
             TokenKind::Plus => TokenValue::Plus,
+            TokenKind::Pound => TokenValue::Pound,
             TokenKind::Question => TokenValue::Question,
             TokenKind::Slash => TokenValue::Slash,
             TokenKind::Star => TokenValue::Star,
@@ -324,6 +327,8 @@ pub enum TokenValue {
     Percent,
     /// A "`+`" symbol.
     Plus,
+    /// A "`#`" symbol.
+    Pound,
     /// A "`?`" symbol.
     Question,
     /// A "`/`" symbol.
@@ -373,6 +378,7 @@ impl TokenValue {
             TokenValue::ParenOpen => "open parenthesis",
             TokenValue::Percent => "`%`",
             TokenValue::Plus => "`+`",
+            TokenValue::Pound => "`#`",
             TokenValue::Question => "`?`",
             TokenValue::Slash => "`/`",
             TokenValue::Star => "`*`",

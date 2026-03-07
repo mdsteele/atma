@@ -33,7 +33,7 @@ impl AsmModuleAst {
 
 /// The abstract syntax tree for a single statement or declaration in an
 /// assembly file.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum AsmStmtAst {
     /// An `.IMPORT` directive.
     Import(IdentifierAst),
@@ -101,7 +101,7 @@ impl AsmStmtAst {
 //===========================================================================//
 
 /// The abstract syntax tree for a section declaration in an assembly file.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AsmSectionAst {
     /// A static expression that evaluates to the name of the section that this
     /// chunk belongs to.
@@ -116,25 +116,33 @@ pub struct AsmSectionAst {
 #[derive(Clone, Debug)]
 pub struct AsmInvokeAst {
     /// The name of the macro to invoke.
-    pub name: IdentifierAst,
+    pub id: IdentifierAst,
     /// The arguments to the macro, if any.
-    pub args: Vec<Token>,
+    pub args: Vec<Vec<Token>>,
 }
 
 impl AsmInvokeAst {
     fn parser<'a>()
     -> impl Parser<'a, &'a [Token], AsmInvokeAst, PError<'a>> + Clone {
+        // TODO: Require delimiters to be balanced, and allow commas within
+        // delimiters.
+        let macro_arg = chumsky::prelude::any()
+            .filter(|token: &Token| {
+                !matches!(
+                    token.value,
+                    TokenValue::Comma | TokenValue::Linebreak
+                )
+            })
+            .repeated()
+            .at_least(1)
+            .collect::<Vec<_>>();
+        let macro_args = macro_arg
+            .separated_by(symbol(TokenValue::Comma))
+            .collect::<Vec<_>>();
         IdentifierAst::parser()
-            .then(
-                chumsky::prelude::any()
-                    .filter(|token: &Token| {
-                        !matches!(token.value, TokenValue::Linebreak)
-                    })
-                    .repeated()
-                    .collect::<Vec<_>>(),
-            )
+            .then(macro_args)
             .then_ignore(linebreak())
-            .map(|(name, args)| AsmInvokeAst { name, args })
+            .map(|(id, args)| AsmInvokeAst { id, args })
     }
 }
 
