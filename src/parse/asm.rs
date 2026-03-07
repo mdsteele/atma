@@ -21,7 +21,9 @@ impl AsmModuleAst {
     /// Parses assembly source code.
     pub fn parse_source(source: &str) -> ParseResult<AsmModuleAst> {
         let tokens = tokenize(source)?;
-        let parser = AsmStmtAst::parser()
+        let parser = symbol(TokenValue::Linebreak)
+            .repeated()
+            .ignore_then(AsmStmtAst::parser())
             .repeated()
             .collect::<Vec<_>>()
             .map(|statements| AsmModuleAst { statements });
