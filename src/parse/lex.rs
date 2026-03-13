@@ -169,6 +169,8 @@ enum TokenKind {
     LessThan,
     #[regex(r"\n", newline_callback)]
     Linebreak,
+    #[regex(r"%[_A-Za-z][_A-Za-z0-9]*")]
+    MacroPlaceholder,
     #[token("-")]
     Minus,
     #[token("|")]
@@ -236,6 +238,9 @@ impl TokenKind {
             TokenKind::LessLess => TokenValue::LessLess,
             TokenKind::LessThan => TokenValue::LessThan,
             TokenKind::Linebreak => TokenValue::Linebreak,
+            TokenKind::MacroPlaceholder => {
+                TokenValue::Placeholder(Rc::from(lexer.slice()))
+            }
             TokenKind::Minus => TokenValue::Minus,
             TokenKind::Or => TokenValue::Or,
             TokenKind::OrOr => TokenValue::OrOr,
@@ -325,6 +330,8 @@ pub enum TokenValue {
     ParenOpen,
     /// A "`%`" symbol.
     Percent,
+    /// A placeholder in a macro definition.
+    Placeholder(Rc<str>),
     /// A "`+`" symbol.
     Plus,
     /// A "`#`" symbol.
@@ -377,6 +384,7 @@ impl TokenValue {
             TokenValue::ParenClose => "close parenthesis",
             TokenValue::ParenOpen => "open parenthesis",
             TokenValue::Percent => "`%`",
+            TokenValue::Placeholder(_) => "placeholder",
             TokenValue::Plus => "`+`",
             TokenValue::Pound => "`#`",
             TokenValue::Question => "`?`",

@@ -1,8 +1,8 @@
 use crate::parse::{
-    AsmInvokeAst, AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst, ParseError,
-    ParseResult, SrcSpan, Token, TokenValue,
+    AsmDefMacroAst, AsmInvokeAst, AsmMacroArgAst, AsmStmtAst, ExprAst,
+    ExprAstNode, IdentifierAst, ParseError, ParseResult, SrcSpan, Token,
+    TokenValue,
 };
-use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -14,62 +14,8 @@ pub struct MacroTable {
 
 impl MacroTable {
     pub fn new() -> MacroTable {
-        let mut definitions = HashMap::new();
-        definitions.insert(
-            MacroSignature { name: Rc::from("nop"), num_args: 0 },
-            vec![MacroDefinition {
-                params: vec![],
-                body: vec![AsmStmtAst::U8(ExprAst {
-                    span: SrcSpan::from_byte_range(0..0),
-                    node: ExprAstNode::IntLiteral(BigInt::from(0x54u8)),
-                })],
-            }],
-        );
-        definitions.insert(
-            MacroSignature { name: Rc::from("req"), num_args: 1 },
-            vec![MacroDefinition {
-                params: vec![MacroParameter::Identifier {
-                    placeholder: Rc::from("%label"),
-                }],
-                body: vec![AsmStmtAst::Import(IdentifierAst {
-                    span: SrcSpan::from_byte_range(0..0),
-                    name: Rc::from("%label"),
-                })],
-            }],
-        );
-        definitions.insert(
-            MacroSignature { name: Rc::from("asl"), num_args: 1 },
-            vec![MacroDefinition {
-                params: vec![MacroParameter::Exact {
-                    pattern: vec![TokenValue::Identifier(Rc::from("a"))],
-                }],
-                body: vec![AsmStmtAst::U8(ExprAst {
-                    span: SrcSpan::from_byte_range(0..0),
-                    node: ExprAstNode::IntLiteral(BigInt::from(0x0au8)),
-                })],
-            }],
-        );
-        definitions.insert(
-            MacroSignature { name: Rc::from("lda"), num_args: 1 },
-            vec![MacroDefinition {
-                params: vec![MacroParameter::Expression {
-                    prefix: vec![TokenValue::Pound],
-                    placeholder: Rc::from("%expr"),
-                    suffix: vec![],
-                }],
-                body: vec![
-                    AsmStmtAst::U8(ExprAst {
-                        span: SrcSpan::from_byte_range(0..0),
-                        node: ExprAstNode::IntLiteral(BigInt::from(0x45u8)),
-                    }),
-                    AsmStmtAst::U8(ExprAst {
-                        span: SrcSpan::from_byte_range(0..0),
-                        node: ExprAstNode::Identifier(Rc::from("%expr")),
-                    }),
-                ],
-            }],
-        );
-        MacroTable { definitions }
+        // TODO: pre-populate with architecture-specific instruction mnemonics
+        MacroTable { definitions: HashMap::new() }
     }
 
     pub fn expand(
@@ -104,6 +50,192 @@ impl MacroTable {
             Err(vec![ParseError::new(invoke_ast.id.span, message)])
         }
     }
+
+    pub fn define(
+        &mut self,
+        def_macro_ast: AsmDefMacroAst,
+    ) -> ParseResult<()> {
+        let num_args = def_macro_ast.params.len();
+        let mut builder = MacroBuilder::with_params(def_macro_ast.params);
+        builder.scan_statements(&def_macro_ast.body);
+        let definition = MacroDefinition {
+            params: builder.build()?,
+            body: def_macro_ast.body,
+        };
+        let signature =
+            MacroSignature { name: def_macro_ast.id.name, num_args };
+        self.definitions.entry(signature).or_default().push(definition);
+        Ok(())
+    }
+}
+
+//===========================================================================//
+
+/// Helper type for `MacroTable::define`.
+struct MacroBuilder {
+    params: Vec<AsmMacroArgAst>,
+    placeholders: HashMap<Rc<str>, PlaceholderKind>,
+    errors: Vec<ParseError>,
+}
+
+impl MacroBuilder {
+    fn with_params(params: Vec<AsmMacroArgAst>) -> MacroBuilder {
+        let mut placeholders = HashMap::<Rc<str>, PlaceholderKind>::new();
+        let mut errors = Vec::<ParseError>::new();
+        for param in &params {
+            for token in &param.tokens {
+                if let TokenValue::Placeholder(name) = &token.value {
+                    if placeholders.contains_key(name) {
+                        // TODO: add more error details
+                        let message = "repeated placeholder".to_string();
+                        errors.push(ParseError::new(token.span, message));
+                    } else {
+                        placeholders
+                            .insert(name.clone(), PlaceholderKind::default());
+                    }
+                }
+            }
+        }
+        MacroBuilder { params, placeholders, errors }
+    }
+
+    fn scan_statements(&mut self, statements: &[AsmStmtAst]) {
+        for stmt in statements {
+            self.scan_statement(stmt);
+        }
+    }
+
+    fn scan_statement(&mut self, statement: &AsmStmtAst) {
+        match statement {
+            AsmStmtAst::Import(id) | AsmStmtAst::Label(id) => {
+                self.scan_identifier(id)
+            }
+            AsmStmtAst::U8(expr)
+            | AsmStmtAst::U16le(expr)
+            | AsmStmtAst::U24le(expr) => self.scan_expression(expr),
+            other => todo!("scan_statement {other:?}"), // TODO
+        }
+    }
+
+    fn scan_expression(&mut self, expression: &ExprAst) {
+        match &expression.node {
+            ExprAstNode::Placeholder(name) => {
+                self.unify_placeholder(
+                    expression.span,
+                    name,
+                    PlaceholderKind::Expression,
+                );
+            }
+            ExprAstNode::BoolLiteral(_)
+            | ExprAstNode::Identifier(_)
+            | ExprAstNode::IntLiteral(_)
+            | ExprAstNode::StrLiteral(_) => {}
+            ExprAstNode::UnOp(_, subexpr) => {
+                self.scan_expression(subexpr);
+            }
+            ExprAstNode::BinOp(_, lhs, rhs)
+            | ExprAstNode::Index(_, lhs, rhs) => {
+                self.scan_expression(lhs);
+                self.scan_expression(rhs);
+            }
+            ExprAstNode::ListLiteral(items)
+            | ExprAstNode::TupleLiteral(items) => {
+                for item in items {
+                    self.scan_expression(item);
+                }
+            }
+        }
+    }
+
+    fn scan_identifier(&mut self, identifier: &IdentifierAst) {
+        if identifier.is_placeholder {
+            self.unify_placeholder(
+                identifier.span,
+                &identifier.name,
+                PlaceholderKind::Identifier,
+            );
+        }
+    }
+
+    fn unify_placeholder(
+        &mut self,
+        span: SrcSpan,
+        name: &str,
+        requirement: PlaceholderKind,
+    ) {
+        if let Some(kind) = self.placeholders.get_mut(name) {
+            kind.unify_with(requirement);
+        } else {
+            let message = format!("undeclared placeholder: {}", name);
+            self.errors.push(ParseError::new(span, message));
+        }
+    }
+
+    fn build(mut self) -> ParseResult<Vec<MacroParameter>> {
+        let mut params =
+            Vec::<MacroParameter>::with_capacity(self.params.len());
+        for param in self.params {
+            let placeholders = param
+                .tokens
+                .iter()
+                .enumerate()
+                .filter_map(|(i, token)| match &token.value {
+                    TokenValue::Placeholder(name) => Some((i, name)),
+                    _ => None,
+                })
+                .collect::<Vec<(usize, &Rc<str>)>>();
+            params.push(match placeholders[..] {
+                [] => MacroParameter::Exact {
+                    pattern: param
+                        .tokens
+                        .into_iter()
+                        .map(|token| token.value)
+                        .collect(),
+                },
+                [(index, name)] => {
+                    let suffix = param.tokens[(index + 1)..]
+                        .iter()
+                        .map(|token| token.value.clone())
+                        .collect();
+                    let prefix = param.tokens[..index]
+                        .iter()
+                        .map(|token| token.value.clone())
+                        .collect();
+                    MacroParameter::Placeholder {
+                        prefix,
+                        kind: self.placeholders[name],
+                        name: name.clone(),
+                        suffix,
+                    }
+                }
+                _ => {
+                    // TODO better error message
+                    let message = "multiple placeholders".to_string();
+                    self.errors.push(ParseError::new(param.span, message));
+                    continue;
+                }
+            });
+        }
+        if self.errors.is_empty() { Ok(params) } else { Err(self.errors) }
+    }
+}
+
+//===========================================================================//
+
+/// Helper type for `MacroBuilder`.  Describes what can be substituted for a
+/// given placeholder.  More restrictive types compare greater.
+#[derive(Clone, Copy, Default, Eq, Ord, PartialEq, PartialOrd)]
+enum PlaceholderKind {
+    #[default]
+    Expression,
+    // TODO: LValue
+    Identifier,
+}
+
+impl PlaceholderKind {
+    fn unify_with(&mut self, requirement: PlaceholderKind) {
+        *self = requirement.max(*self);
+    }
 }
 
 //===========================================================================//
@@ -133,7 +265,7 @@ struct MacroDefinition {
 impl MacroDefinition {
     pub fn try_expand(
         &self,
-        args: &[Vec<Token>],
+        args: &[AsmMacroArgAst],
     ) -> MacroResult<Vec<AsmStmtAst>> {
         let expansion = MacroExpansion::try_match(&self.params, args)?;
         Ok(expansion.expand_statements(&self.body))
@@ -146,50 +278,37 @@ enum MacroParameter {
     Exact {
         pattern: Vec<TokenValue>,
     },
-    Expression {
+    Placeholder {
         prefix: Vec<TokenValue>,
-        placeholder: Rc<str>,
+        kind: PlaceholderKind,
+        name: Rc<str>,
         suffix: Vec<TokenValue>,
-    },
-    Identifier {
-        // TODO: allow prefix/suffix, and maybe multiple identifiers per arg
-        placeholder: Rc<str>,
     },
 }
 
 impl MacroParameter {
     pub fn try_match<'a>(
         &self,
-        arg: &'a [Token],
+        arg: &'a AsmMacroArgAst,
     ) -> MacroResult<MacroArgument<'a>> {
         match self {
             MacroParameter::Exact { pattern } => {
-                try_match_tokens(arg, pattern)?;
+                try_match_tokens(&arg.tokens, pattern)?;
                 Ok(MacroArgument::Exact)
             }
-            MacroParameter::Expression { prefix, placeholder, suffix } => {
-                if arg.len() <= prefix.len() + suffix.len() {
+            MacroParameter::Placeholder { prefix, kind, name, suffix } => {
+                if arg.tokens.len() <= prefix.len() + suffix.len() {
                     return Err(MacroError::FailedToMatchPattern);
                 }
-                try_match_tokens(&arg[..prefix.len()], prefix)?;
-                let suffix_start = arg.len() - suffix.len();
-                try_match_tokens(&arg[suffix_start..], suffix)?;
-                Ok(MacroArgument::Expression {
-                    placeholder: placeholder.clone(),
-                    tokens: &arg[prefix.len()..suffix_start],
+                try_match_tokens(&arg.tokens[..prefix.len()], prefix)?;
+                let suffix_start = arg.tokens.len() - suffix.len();
+                try_match_tokens(&arg.tokens[suffix_start..], suffix)?;
+                let inner_tokens = &arg.tokens[prefix.len()..suffix_start];
+                Ok(MacroArgument::Placeholder {
+                    kind: *kind,
+                    name: name.clone(),
+                    tokens: inner_tokens,
                 })
-            }
-            MacroParameter::Identifier { placeholder } => {
-                if let [Token { span, value: TokenValue::Identifier(name) }] =
-                    arg
-                {
-                    Ok(MacroArgument::Identifier {
-                        placeholder: placeholder.clone(),
-                        id: IdentifierAst { span: *span, name: name.clone() },
-                    })
-                } else {
-                    Err(MacroError::FailedToMatchPattern)
-                }
             }
         }
     }
@@ -212,10 +331,11 @@ fn try_match_tokens(
 
 //===========================================================================//
 
+/// One argument to a macro invocation, after it has been matched against the
+/// corresponding parameter of the macro definition.
 enum MacroArgument<'a> {
     Exact,
-    Expression { placeholder: Rc<str>, tokens: &'a [Token] },
-    Identifier { placeholder: Rc<str>, id: IdentifierAst },
+    Placeholder { kind: PlaceholderKind, name: Rc<str>, tokens: &'a [Token] },
 }
 
 //===========================================================================//
@@ -253,7 +373,7 @@ struct MacroExpansion {
 impl MacroExpansion {
     fn try_match(
         params: &[MacroParameter],
-        args: &[Vec<Token>],
+        args: &[AsmMacroArgAst],
     ) -> MacroResult<MacroExpansion> {
         if args.len() != params.len() {
             return Err(MacroError::FailedToMatchPattern);
@@ -268,22 +388,31 @@ impl MacroExpansion {
         for macro_arg in matched {
             match macro_arg {
                 MacroArgument::Exact => {}
-                MacroArgument::Expression { placeholder, tokens } => {
-                    match ExprAst::parse(tokens) {
-                        Ok(expr) => {
-                            subs.insert(
-                                placeholder,
-                                MacroSubstitution::Expression(expr),
-                            );
+                MacroArgument::Placeholder { kind, name, tokens } => {
+                    match kind {
+                        PlaceholderKind::Expression => {
+                            match ExprAst::parse(tokens) {
+                                Ok(expr) => {
+                                    subs.insert(
+                                        name,
+                                        MacroSubstitution::Expression(expr),
+                                    );
+                                }
+                                Err(mut errs) => errors.append(&mut errs),
+                            }
                         }
-                        Err(mut errs) => errors.append(&mut errs),
+                        PlaceholderKind::Identifier => {
+                            match IdentifierAst::parse(tokens) {
+                                Ok(id) => {
+                                    subs.insert(
+                                        name,
+                                        MacroSubstitution::Identifier(id),
+                                    );
+                                }
+                                Err(mut errs) => errors.append(&mut errs),
+                            }
+                        }
                     }
-                }
-                MacroArgument::Identifier { placeholder, id } => {
-                    subs.insert(
-                        placeholder,
-                        MacroSubstitution::Identifier(id),
-                    );
                 }
             }
         }
@@ -334,15 +463,9 @@ impl MacroExpansion {
                 ),
             },
             ExprAstNode::BoolLiteral(_)
+            | ExprAstNode::Identifier(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => expression.clone(),
-            ExprAstNode::Identifier(name) => {
-                if let Some(substitution) = self.subs.get(name) {
-                    substitution.unwrap_expression()
-                } else {
-                    expression.clone()
-                }
-            }
             ExprAstNode::Index(index_span, lhs, rhs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::Index(
@@ -355,6 +478,13 @@ impl MacroExpansion {
                 span: expression.span,
                 node: ExprAstNode::ListLiteral(self.expand_expressions(exprs)),
             },
+            ExprAstNode::Placeholder(name) => {
+                if let Some(substitution) = self.subs.get(name) {
+                    substitution.unwrap_expression()
+                } else {
+                    expression.clone()
+                }
+            }
             ExprAstNode::TupleLiteral(exprs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::TupleLiteral(

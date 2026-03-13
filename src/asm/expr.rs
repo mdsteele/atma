@@ -27,6 +27,7 @@ impl AsmTypeEnv {
         &mut self,
         id_ast: &IdentifierAst,
     ) -> ParseResult<()> {
+        debug_assert!(!id_ast.is_placeholder);
         if let Some(&prev_span) = self.labels.get(&id_ast.name) {
             let message =
                 format!("symbol was already declared: {}", id_ast.name);

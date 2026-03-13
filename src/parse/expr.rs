@@ -1,8 +1,8 @@
 //! Facilities for parsing expressions.
 
-use super::atom::{PError, symbol};
-use crate::parse::{ParseError, ParseResult, SrcSpan, Token, TokenValue};
-use chumsky::{self, IterParser, Parser, pratt};
+use super::atom::{Context, Extra, parse_tokens, symbol};
+use crate::parse::{ParseResult, SrcSpan, Token, TokenValue};
+use chumsky::{self, ConfigParser, IterParser, Parser, pratt};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -131,20 +131,47 @@ pub struct IdentifierAst {
     pub span: SrcSpan,
     /// The name of the identifier.
     pub name: Rc<str>,
+    /// True if this identifier is a macro placeholder.
+    pub is_placeholder: bool,
 }
 
 impl IdentifierAst {
+    /// Parses a sequence of tokens into an identifier abstract syntax tree.
+    pub fn parse(tokens: &[Token]) -> ParseResult<IdentifierAst> {
+        parse_tokens(IdentifierAst::parser(), tokens)
+    }
+
     pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], IdentifierAst, PError<'a>> + Clone {
-        chumsky::prelude::any()
+    -> impl Parser<'a, &'a [Token], IdentifierAst, Extra<'a>> + Clone {
+        let identifier_token = chumsky::prelude::any()
             .try_map(|token: Token, span| {
                 if let TokenValue::Identifier(name) = token.value {
-                    Ok(IdentifierAst { name, span: token.span })
+                    Ok(IdentifierAst {
+                        name,
+                        span: token.span,
+                        is_placeholder: false,
+                    })
                 } else {
                     Err(chumsky::error::Rich::custom(span, ""))
                 }
             })
-            .labelled("identifier")
+            .labelled("identifier");
+        let placeholder_token = chumsky::prelude::any()
+            .try_map(|token: Token, span| {
+                if let TokenValue::Placeholder(name) = token.value {
+                    Ok(IdentifierAst {
+                        name,
+                        span: token.span,
+                        is_placeholder: true,
+                    })
+                } else {
+                    Err(chumsky::error::Rich::custom(span, ""))
+                }
+            })
+            .labelled("placeholder");
+        identifier_token.or(placeholder_token
+            .contextual()
+            .configure(|_, ctx: &Context| ctx.allow_placeholder_as_identifier))
     }
 }
 
@@ -162,24 +189,11 @@ pub struct ExprAst {
 impl ExprAst {
     /// Parses a sequence of tokens into an expression abstract syntax tree.
     pub fn parse(tokens: &[Token]) -> ParseResult<ExprAst> {
-        ExprAst::parser().parse(tokens).into_result().map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|error| {
-                    let index = error.span().start;
-                    let span = if index < tokens.len() {
-                        tokens[index].span
-                    } else {
-                        tokens[tokens.len() - 1].span.end_span()
-                    };
-                    ParseError::new(span, format!("{error:?}"))
-                })
-                .collect()
-        })
+        parse_tokens(ExprAst::parser(), tokens)
     }
 
     pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone {
         chumsky::prelude::recursive(|expr| {
             let parenthesized_expr = chumsky::prelude::group((
                 symbol(TokenValue::ParenOpen),
@@ -216,7 +230,11 @@ impl ExprAst {
             );
             let identifier = IdentifierAst::parser().map(|id| ExprAst {
                 span: id.span,
-                node: ExprAstNode::Identifier(id.name),
+                node: if id.is_placeholder {
+                    ExprAstNode::Placeholder(id.name)
+                } else {
+                    ExprAstNode::Identifier(id.name)
+                },
             });
 
             let expr_atom = chumsky::prelude::choice((
@@ -412,6 +430,8 @@ pub enum ExprAstNode {
     IntLiteral(BigInt),
     /// A list literal.
     ListLiteral(Vec<ExprAst>),
+    /// A macro placeholder.
+    Placeholder(Rc<str>),
     /// A string literal.
     StrLiteral(Rc<str>),
     /// A tuple literal.
@@ -423,7 +443,7 @@ pub enum ExprAstNode {
 //===========================================================================//
 
 fn bool_literal<'a>()
--> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone {
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::BoolLiteral(boolean) = token.value {
@@ -438,8 +458,8 @@ fn bool_literal<'a>()
         .labelled("boolean literal")
 }
 
-fn int_literal<'a>()
--> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
+fn int_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
+{
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::IntLiteral(int) = token.value {
@@ -454,8 +474,8 @@ fn int_literal<'a>()
         .labelled("integer literal")
 }
 
-fn str_literal<'a>()
--> impl Parser<'a, &'a [Token], ExprAst, PError<'a>> + Clone {
+fn str_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
+{
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::StrLiteral(string) = token.value {

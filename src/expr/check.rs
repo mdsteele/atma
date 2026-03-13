@@ -87,6 +87,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 }
                 ExprAstNode::IntLiteral(_) => {}
                 ExprAstNode::ListLiteral(items) => stack.extend(items),
+                ExprAstNode::Placeholder(_) => {}
                 ExprAstNode::StrLiteral(_) => {}
                 ExprAstNode::TupleLiteral(items) => stack.extend(items),
                 ExprAstNode::UnOp(_, sub) => stack.push(sub),
@@ -130,6 +131,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             ExprAstNode::ListLiteral(item_asts) => {
                 self.typecheck_list_literal(item_asts);
             }
+            ExprAstNode::Placeholder(_) => unreachable!(),
             ExprAstNode::StrLiteral(string) => {
                 self.typecheck_primitive_literal(
                     ExprType::String,

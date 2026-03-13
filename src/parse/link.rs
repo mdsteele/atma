@@ -1,7 +1,7 @@
 //! Facilities for parsing linker configuration files.
 
 use super::atom::{
-    PError, directive, linebreak, parse_tokens, symbol, tokenize,
+    Extra, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::expr::{ExprAst, IdentifierAst};
 use super::lex::{Token, TokenValue};
@@ -24,8 +24,7 @@ impl LinkConfigAst {
         parse_tokens(LinkConfigAst::parser(), &tokens)
     }
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], LinkConfigAst, PError<'a>>
-    {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], LinkConfigAst, Extra<'a>> {
         symbol(TokenValue::Linebreak)
             .repeated()
             .ignore_then(
@@ -52,8 +51,8 @@ pub enum LinkDirectiveAst {
 }
 
 impl LinkDirectiveAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], LinkDirectiveAst, PError<'a>> {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], LinkDirectiveAst, Extra<'a>>
+    {
         let entries_block = symbol(TokenValue::BraceOpen)
             .ignore_then(linebreak())
             .ignore_then(LinkEntryAst::parser().repeated().collect::<Vec<_>>())
@@ -97,7 +96,7 @@ pub struct LinkEntryAst {
 
 impl LinkEntryAst {
     fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], LinkEntryAst, PError<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], LinkEntryAst, Extra<'a>> + Clone {
         let attribute = IdentifierAst::parser()
             .then_ignore(symbol(TokenValue::Equals))
             .then(ExprAst::parser());

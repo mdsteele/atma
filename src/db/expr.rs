@@ -268,6 +268,7 @@ mod tests {
             IdentifierAst {
                 span: SrcSpan::from_byte_range(1..4),
                 name: Rc::from("foo"),
+                is_placeholder: false,
             },
             ExprType::Boolean,
         );

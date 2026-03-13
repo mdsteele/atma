@@ -1,4 +1,4 @@
-use super::atom::{PError, symbol};
+use super::atom::{Extra, symbol};
 use super::expr::{ExprAst, IdentifierAst};
 use super::lex::{Token, TokenValue};
 use super::types::SrcSpan;
@@ -17,8 +17,8 @@ pub struct LValueAst {
 }
 
 impl LValueAst {
-    pub(crate) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], LValueAst, PError<'a>> + Clone {
+    pub(super) fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], LValueAst, Extra<'a>> + Clone {
         chumsky::prelude::recursive(|lvalue| {
             let memory = chumsky::prelude::group((
                 symbol(TokenValue::BracketOpen),

@@ -9,8 +9,8 @@ use crate::obj::{
     ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol, PatchKind,
 };
 use crate::parse::{
-    AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst, ExprAst,
-    IdentifierAst, ParseError, ParseResult,
+    AsmDefMacroAst, AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst,
+    ExprAst, IdentifierAst, ParseError, ParseResult,
 };
 use expr::AsmTypeEnv;
 use macros::MacroTable;
@@ -71,8 +71,9 @@ impl Assembler {
     /// existing labels and scopes into the environment.
     fn scope_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
+            AsmStmtAst::DefMacro(_) => {}
             AsmStmtAst::Import(id) => self.scope_import(id),
-            AsmStmtAst::Invoke(_macro) => {}
+            AsmStmtAst::Invoke(_) => {}
             AsmStmtAst::Label(id) => self.scope_label(id),
             AsmStmtAst::Section(section) => self.scope_section(section),
             AsmStmtAst::U8(_expr) => {}
@@ -116,6 +117,7 @@ impl Assembler {
     /// data.
     fn expand_statement(&mut self, statement: AsmStmtAst) {
         match statement {
+            AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
             AsmStmtAst::Label(id) => self.expand_label(id),
@@ -128,6 +130,15 @@ impl Assembler {
 
     fn expand_import(&mut self, id_ast: IdentifierAst) {
         self.imports.push(id_ast.name);
+    }
+
+    fn expand_macro_definition(&mut self, def_macro_ast: AsmDefMacroAst) {
+        match self.macros.define(def_macro_ast) {
+            Ok(()) => {}
+            Err(mut errors) => {
+                self.errors.append(&mut errors);
+            }
+        }
     }
 
     fn expand_macro_invocation(&mut self, invoke_ast: AsmInvokeAst) {

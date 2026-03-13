@@ -1,9 +1,9 @@
 //! Facilities for parsing Atma Debugger Script.
 
-use super::atom::{PError, keyword, linebreak, symbol};
+use super::atom::{Extra, keyword, linebreak, parse_tokens, symbol};
 use super::expr::{ExprAst, IdentifierAst};
 use super::lvalue::LValueAst;
-use crate::parse::{ParseError, ParseResult, Token, TokenLexer, TokenValue};
+use crate::parse::{ParseResult, Token, TokenLexer, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
@@ -26,24 +26,11 @@ impl AdsModuleAst {
 
     /// Parses a sequence of tokens into an Atma Debugger Script module.
     pub fn parse(tokens: &[Token]) -> ParseResult<AdsModuleAst> {
-        AdsModuleAst::parser().parse(tokens).into_result().map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|error| {
-                    let index = error.span().start;
-                    let span = if index < tokens.len() {
-                        tokens[index].span
-                    } else {
-                        tokens[tokens.len() - 1].span.end_span()
-                    };
-                    ParseError::new(span, format!("{error:?}"))
-                })
-                .collect()
-        })
+        parse_tokens(AdsModuleAst::parser(), tokens)
     }
 
     fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AdsModuleAst, PError<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], AdsModuleAst, Extra<'a>> + Clone {
         symbol(TokenValue::Linebreak).repeated().ignore_then(
             AdsStmtAst::parser()
                 .repeated()
@@ -82,7 +69,7 @@ pub enum AdsStmtAst {
 
 impl AdsStmtAst {
     fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
         chumsky::prelude::recursive(|statement| {
             let stmt_block = symbol(TokenValue::BraceOpen)
                 .ignore_then(linebreak())
@@ -129,7 +116,7 @@ pub enum DeclareAst {
 
 impl DeclareAst {
     fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], DeclareAst, PError<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], DeclareAst, Extra<'a>> + Clone {
         chumsky::prelude::choice((
             keyword("let").to(DeclareAst::Let),
             keyword("var").to(DeclareAst::Var),
@@ -154,8 +141,8 @@ pub enum BreakpointAst {
 }
 
 impl BreakpointAst {
-    pub(crate) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], BreakpointAst, PError<'a>> + Clone {
+    pub(super) fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], BreakpointAst, Extra<'a>> + Clone {
         chumsky::prelude::choice((
             keyword("at")
                 .ignore_then(ExprAst::parser())
@@ -173,7 +160,7 @@ impl BreakpointAst {
 //===========================================================================//
 
 fn declare_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     DeclareAst::parser()
         .then(IdentifierAst::parser())
         .then_ignore(symbol(TokenValue::Equals))
@@ -183,12 +170,12 @@ fn declare_statement<'a>()
 }
 
 fn exit_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("exit").ignore_then(linebreak()).to(AdsStmtAst::Exit)
 }
 
 fn print_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("print")
         .ignore_then(ExprAst::parser())
         .then_ignore(linebreak())
@@ -196,12 +183,12 @@ fn print_statement<'a>()
 }
 
 fn relax_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("relax").ignore_then(linebreak()).to(AdsStmtAst::Relax)
 }
 
 fn run_until_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("run")
         .ignore_then(keyword("until"))
         .ignore_then(BreakpointAst::parser())
@@ -210,7 +197,7 @@ fn run_until_statement<'a>()
 }
 
 fn set_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("set")
         .ignore_then(LValueAst::parser())
         .then_ignore(symbol(TokenValue::Equals))
@@ -220,7 +207,7 @@ fn set_statement<'a>()
 }
 
 fn step_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, PError<'a>> + Clone {
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("step").ignore_then(linebreak()).to(AdsStmtAst::Step)
 }
 
@@ -281,6 +268,7 @@ mod tests {
                 IdentifierAst {
                     span: SrcSpan::from_byte_range(4..7),
                     name: Rc::from("foo"),
+                    is_placeholder: false,
                 },
                 ExprAst {
                     span: SrcSpan::from_byte_range(10..12),
