@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-pub struct MacroTable {
+pub(super) struct MacroTable {
     definitions: HashMap<MacroSignature, Vec<MacroDefinition>>,
 }
 
@@ -127,6 +127,7 @@ impl MacroBuilder {
                 );
             }
             ExprAstNode::BoolLiteral(_)
+            | ExprAstNode::HereLabel
             | ExprAstNode::Identifier(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => {}
@@ -346,6 +347,22 @@ enum MacroSubstitution {
 }
 
 impl MacroSubstitution {
+    fn parse_tokens(
+        kind: PlaceholderKind,
+        tokens: &[Token],
+    ) -> ParseResult<MacroSubstitution> {
+        match kind {
+            PlaceholderKind::Expression => {
+                let expr = ExprAst::parse(tokens)?;
+                Ok(MacroSubstitution::Expression(expr))
+            }
+            PlaceholderKind::Identifier => {
+                let id = IdentifierAst::parse(tokens)?;
+                Ok(MacroSubstitution::Identifier(id))
+            }
+        }
+    }
+
     fn unwrap_expression(&self) -> ExprAst {
         match self {
             MacroSubstitution::Expression(expr) => expr.clone(),
@@ -389,29 +406,11 @@ impl MacroExpansion {
             match macro_arg {
                 MacroArgument::Exact => {}
                 MacroArgument::Placeholder { kind, name, tokens } => {
-                    match kind {
-                        PlaceholderKind::Expression => {
-                            match ExprAst::parse(tokens) {
-                                Ok(expr) => {
-                                    subs.insert(
-                                        name,
-                                        MacroSubstitution::Expression(expr),
-                                    );
-                                }
-                                Err(mut errs) => errors.append(&mut errs),
-                            }
+                    match MacroSubstitution::parse_tokens(kind, tokens) {
+                        Ok(sub) => {
+                            subs.insert(name, sub);
                         }
-                        PlaceholderKind::Identifier => {
-                            match IdentifierAst::parse(tokens) {
-                                Ok(id) => {
-                                    subs.insert(
-                                        name,
-                                        MacroSubstitution::Identifier(id),
-                                    );
-                                }
-                                Err(mut errs) => errors.append(&mut errs),
-                            }
-                        }
+                        Err(mut errs) => errors.append(&mut errs),
                     }
                 }
             }
@@ -463,6 +462,7 @@ impl MacroExpansion {
                 ),
             },
             ExprAstNode::BoolLiteral(_)
+            | ExprAstNode::HereLabel
             | ExprAstNode::Identifier(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => expression.clone(),

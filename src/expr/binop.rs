@@ -1,4 +1,4 @@
-use crate::expr::{ExprType, ExprValue};
+use crate::expr::{ExprLabel, ExprType, ExprValue};
 use crate::parse::{BinOpAst, ParseError, ParseResult, SrcSpan};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Euclid, Pow, Signed, ToPrimitive, Zero};
@@ -23,6 +23,12 @@ pub(crate) enum ExprBinOpEvalError {
     /// Tried to exponentiate an integer with the given exponent, but the
     /// exponent was negative.
     PowNegativeExponent(BigInt),
+    /// Tried to subtract one label from another, but the labels were in the
+    /// given two different address spaces.
+    SubtractLabelsInDifferentAddrspaces(Rc<str>, Rc<str>),
+    /// Could not compute the result due to an insufficiently-resolved label
+    /// value.
+    UnresolvedLabel,
 }
 
 //===========================================================================//
@@ -47,6 +53,7 @@ pub(crate) enum ExprBinOp {
     IntShr,
     IntSub,
     LabelAddInt,
+    LabelSub,
 }
 
 impl ExprBinOp {
@@ -112,6 +119,9 @@ impl ExprBinOp {
             (BinOpAst::Sub, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntSub, ExprType::Integer))
             }
+            (BinOpAst::Sub, ExprType::Label, ExprType::Label) => {
+                Ok((ExprBinOp::LabelSub, ExprType::Integer))
+            }
             (op, lhs_type, rhs_type) => {
                 let (verb, conj, rev) = op.verb_conj_rev();
                 let message = if rev {
@@ -119,12 +129,12 @@ impl ExprBinOp {
                 } else {
                     format!("Cannot {verb} {lhs_type} {conj} {rhs_type}")
                 };
-                let label1 = format!("this expression has type {lhs_type}");
-                let label2 = format!("this expression has type {rhs_type}");
+                let lhs_label = format!("this expression has type {lhs_type}");
+                let rhs_label = format!("this expression has type {rhs_type}");
                 Err(vec![
                     ParseError::new(op_span, message)
-                        .with_label(lhs_span, label1)
-                        .with_label(rhs_span, label2),
+                        .with_label(lhs_span, lhs_label)
+                        .with_label(rhs_span, rhs_label),
                 ])
             }
         }
@@ -199,9 +209,84 @@ impl ExprBinOp {
                 Ok(ExprValue::Integer(lhs.unwrap_int() - rhs.unwrap_int()))
             }
             ExprBinOp::LabelAddInt => {
-                let (name, offset) = lhs.unwrap_label();
-                let new_offset: BigInt = &*offset + rhs.unwrap_int_ref();
-                Ok(ExprValue::Label(name, Rc::from(new_offset)))
+                let label = match lhs.unwrap_label() {
+                    ExprLabel::AddrAbsolute { space, address } => {
+                        ExprLabel::AddrAbsolute {
+                            space,
+                            address: address + rhs.unwrap_int(),
+                        }
+                    }
+                    ExprLabel::ChunkAbsolute { chunk_index, address } => {
+                        ExprLabel::ChunkAbsolute {
+                            chunk_index,
+                            address: address + rhs.unwrap_int(),
+                        }
+                    }
+                    ExprLabel::ChunkRelative { chunk_index, offset } => {
+                        ExprLabel::ChunkRelative {
+                            chunk_index,
+                            offset: offset + rhs.unwrap_int(),
+                        }
+                    }
+                    ExprLabel::SymbolRelative { name, offset } => {
+                        ExprLabel::SymbolRelative {
+                            name,
+                            offset: offset + rhs.unwrap_int(),
+                        }
+                    }
+                };
+                Ok(ExprValue::Label(label))
+            }
+            ExprBinOp::LabelSub => {
+                let diff = match (lhs.unwrap_label(), rhs.unwrap_label()) {
+                    (
+                        ExprLabel::AddrAbsolute {
+                            space: lhs_space,
+                            address: lhs_addr,
+                        },
+                        ExprLabel::AddrAbsolute {
+                            space: rhs_space,
+                            address: rhs_addr,
+                        },
+                    ) => {
+                        if lhs_space != rhs_space {
+                            return Err(ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(lhs_space, rhs_space));
+                        }
+                        lhs_addr - rhs_addr
+                    }
+                    (
+                        ExprLabel::ChunkAbsolute {
+                            chunk_index: lhs_index,
+                            address: lhs_addr,
+                        },
+                        ExprLabel::ChunkAbsolute {
+                            chunk_index: rhs_index,
+                            address: rhs_addr,
+                        },
+                    ) if lhs_index == rhs_index => lhs_addr - rhs_addr,
+                    (
+                        ExprLabel::ChunkRelative {
+                            chunk_index: lhs_index,
+                            offset: lhs_offset,
+                        },
+                        ExprLabel::ChunkRelative {
+                            chunk_index: rhs_index,
+                            offset: rhs_offset,
+                        },
+                    ) if lhs_index == rhs_index => lhs_offset - rhs_offset,
+                    (
+                        ExprLabel::SymbolRelative {
+                            name: lhs_name,
+                            offset: lhs_offset,
+                        },
+                        ExprLabel::SymbolRelative {
+                            name: rhs_name,
+                            offset: rhs_offset,
+                        },
+                    ) if lhs_name == rhs_name => lhs_offset - rhs_offset,
+                    _ => return Err(ExprBinOpEvalError::UnresolvedLabel),
+                };
+                Ok(ExprValue::Integer(diff))
             }
         }
     }

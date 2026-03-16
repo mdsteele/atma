@@ -1,5 +1,5 @@
-use crate::expr::{ExprCompiler, ExprEnv, ExprType, ExprValue};
-use crate::obj::{ObjExpr, ObjExprOp};
+use crate::expr::{ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprValue};
+use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjSymbol};
 use crate::parse::{ExprAst, IdentifierAst, ParseError, ParseResult, SrcSpan};
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -7,13 +7,14 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-pub(crate) struct AsmTypeEnv {
+pub(super) struct AsmTypeEnv {
     labels: HashMap<Rc<str>, SrcSpan>,
+    chunk_stack: Vec<ChunkEnv>,
 }
 
 impl AsmTypeEnv {
     pub fn new() -> AsmTypeEnv {
-        AsmTypeEnv { labels: HashMap::new() }
+        AsmTypeEnv { labels: HashMap::new(), chunk_stack: Vec::new() }
     }
 
     pub fn declare_import(
@@ -44,6 +45,19 @@ impl AsmTypeEnv {
         }
     }
 
+    pub fn begin_chunk(&mut self, chunk_index: usize) {
+        self.chunk_stack.push(ChunkEnv::with_chunk_index(chunk_index));
+    }
+
+    pub fn current_chunk(&mut self) -> Option<&mut ChunkEnv> {
+        self.chunk_stack.last_mut()
+    }
+
+    pub fn end_chunk(&mut self) -> ChunkEnv {
+        debug_assert!(!self.chunk_stack.is_empty());
+        self.chunk_stack.pop().unwrap()
+    }
+
     pub fn typecheck_expression(
         &self,
         expr: &ExprAst,
@@ -61,18 +75,61 @@ impl AsmTypeEnv {
 impl ExprEnv for AsmTypeEnv {
     type Op = ObjExprOp;
 
+    fn typecheck_here_label(
+        &self,
+        span: SrcSpan,
+    ) -> ParseResult<(Self::Op, Option<ExprValue>)> {
+        if let Some(chunk_env) = self.chunk_stack.last() {
+            let chunk_index = chunk_env.chunk_index;
+            let offset = BigInt::from(chunk_env.data.len());
+            let value = ExprValue::Label(ExprLabel::ChunkRelative {
+                chunk_index,
+                offset,
+            });
+            let op = ObjExprOp::Push(value.clone());
+            Ok((op, Some(value)))
+        } else {
+            let message =
+                "relative labels must be within a .SECTION".to_string();
+            Err(vec![ParseError::new(span, message)])
+        }
+    }
+
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
-        id: &str,
+        name: &str,
     ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)> {
-        if self.labels.contains_key(id) {
-            let value = ExprValue::Label(Rc::from(id), Rc::from(BigInt::ZERO));
+        if self.labels.contains_key(name) {
+            let value = ExprValue::Label(ExprLabel::SymbolRelative {
+                name: Rc::from(name),
+                offset: BigInt::ZERO,
+            });
             let op = ObjExprOp::Push(value.clone());
             Ok((op, ExprType::Label, Some(value)))
         } else {
-            let message = format!("unknown identifier: {id}");
+            let message = format!("unknown identifier: {name}");
             Err(vec![ParseError::new(span, message)])
+        }
+    }
+}
+
+//===========================================================================//
+
+pub(super) struct ChunkEnv {
+    pub chunk_index: usize,
+    pub data: Vec<u8>,
+    pub symbols: Vec<ObjSymbol>,
+    pub patches: Vec<ObjPatch>,
+}
+
+impl ChunkEnv {
+    fn with_chunk_index(chunk_index: usize) -> ChunkEnv {
+        ChunkEnv {
+            chunk_index,
+            data: Vec::new(),
+            symbols: Vec::new(),
+            patches: Vec::new(),
         }
     }
 }

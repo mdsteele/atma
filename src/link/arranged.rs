@@ -1,7 +1,8 @@
 use super::config::{AddrspaceConfig, LinkConfig};
 use super::error::LinkError;
-use super::loose::{ChunkId, LooseChunk, LooseSection};
+use super::loose::{LooseChunk, LooseSection};
 use super::place::try_place;
+use super::types::ChunkId;
 use crate::addr::{Addr, Align, Offset, Range, Size};
 use crate::obj::ObjFile;
 use rangemap::RangeInclusiveSet;
@@ -11,7 +12,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// Represents a data chunk that has been arranged within its section.
-pub struct ArrangedChunk {
+pub(super) struct ArrangedChunk {
     /// The ID for this chunk.
     pub id: ChunkId,
     /// The byte offset of this chunk, relative to the starting address of its
@@ -41,7 +42,7 @@ impl ArrangedChunk {
 
 /// Represents a data section after all chunks have been arranged within the
 /// section.
-pub struct ArrangedSection {
+pub(super) struct ArrangedSection {
     /// The name of this section.
     pub name: Rc<str>,
     /// The name of the memory region that this section should be loaded into.
@@ -131,6 +132,7 @@ impl ArrangedSection {
                 errors.push(LinkError::ChunkCannotBePlaced);
             }
         }
+        arranged.sort_by_key(|chunk| chunk.offset);
         let section_size = range_set
             .last()
             .map(|r| Range::with_bounds(Addr::MIN, *r.end()).size())
@@ -150,9 +152,11 @@ impl ArrangedSection {
 
 //===========================================================================//
 
-pub struct ArrangedRegion {
+pub(super) struct ArrangedRegion {
     /// The name of this memory region.
     pub name: Rc<str>,
+    /// The name of the address space that this memory region exists in.
+    pub space: Rc<str>,
     /// The range of addresses covered by this memory region.
     pub range: Range,
     /// The sections in this memory region.
@@ -163,7 +167,7 @@ pub struct ArrangedRegion {
 }
 
 impl ArrangedRegion {
-    pub fn collect(
+    pub(super) fn collect(
         config: &LinkConfig,
         object_files: &[ObjFile],
         errors: &mut Vec<LinkError>,
@@ -182,6 +186,7 @@ impl ArrangedRegion {
             let addrspace = addrspaces[&memory_region.space];
             arranged_regions.push(ArrangedRegion {
                 name: memory_region.name.clone(),
+                space: memory_region.space.clone(),
                 range: memory_region.range,
                 sections: Vec::new(),
                 fill: memory_region.fill.unwrap_or(addrspace.fill),

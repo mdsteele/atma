@@ -1,8 +1,8 @@
 use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::config::LinkConfig;
 use super::error::LinkError;
-use super::loose::ChunkId;
 use super::place::try_place;
+use super::types::{AbsoluteLabel, ChunkId};
 use crate::addr::{Addr, Size};
 use crate::obj::ObjFile;
 use rangemap::RangeInclusiveSet;
@@ -13,7 +13,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// Represents a data chunk that has been positioned within its memory region.
-pub struct PositionedChunk {
+pub(super) struct PositionedChunk {
     /// The ID for this chunk.
     pub id: ChunkId,
     /// The offset into the final binary where this chunk's data should be
@@ -55,7 +55,7 @@ impl PositionedChunk {
 
 /// Represents a data section that has been positioned within its memory
 /// region.
-pub struct PositionedSection {
+pub(super) struct PositionedSection {
     /// The offset into the final binary where this section's data should be
     /// written.
     pub binary_offset: u64,
@@ -105,7 +105,9 @@ impl PositionedSection {
 
 /// Represents a memory region after its sections have been positioned within
 /// its address space.
-pub struct PositionedRegion {
+pub(super) struct PositionedRegion {
+    /// The name of the address space that this memory region exists in.
+    pub space: Rc<str>,
     /// The size of this memory region in the final binary, in bytes, or zero
     /// if this region should not appear in the final binary.
     pub binary_size: u64,
@@ -161,6 +163,7 @@ impl PositionedRegion {
                 });
             }
         }
+        positioned_sections.sort_by_key(|section| section.binary_offset);
         // If this memory region is to be included in the final binary, then
         // update `cumulative_offset` appropriately.
         let region_binary_size = if region_binary_offset.is_some() {
@@ -182,6 +185,7 @@ impl PositionedRegion {
             0
         };
         PositionedRegion {
+            space: region.space,
             binary_size: region_binary_size,
             sections: positioned_sections,
             fill: region.fill,
@@ -206,15 +210,18 @@ fn section_ordering(lhs: &ArrangedSection, rhs: &ArrangedSection) -> Ordering {
 //===========================================================================//
 
 /// Positioning information for all regions of a complete binary.
-pub struct PositionedBinary {
+pub(super) struct PositionedBinary {
     /// The memory regions for this binary.
     pub regions: Vec<PositionedRegion>,
+    /// For each object file, the address space and starting address for each chunk in that
+    /// object file.
+    pub file_chunk_starts: Vec<Vec<AbsoluteLabel>>,
     /// The address of each exported symbol across the binary.
-    pub exported_symbols: HashMap<Rc<str>, Addr>,
+    pub exported_symbols: HashMap<Rc<str>, AbsoluteLabel>,
 }
 
 impl PositionedBinary {
-    pub fn position(
+    pub(super) fn position(
         config: &LinkConfig,
         object_files: &[ObjFile],
     ) -> Result<PositionedBinary, Vec<LinkError>> {
@@ -233,11 +240,15 @@ impl PositionedBinary {
             })
             .collect::<Vec<PositionedRegion>>();
 
-        let mut chunk_starts = HashMap::<ChunkId, Addr>::new();
+        let mut chunk_starts = HashMap::<ChunkId, AbsoluteLabel>::new();
         for region in &positioned_regions {
             for section in &region.sections {
                 for chunk in &section.chunks {
-                    chunk_starts.insert(chunk.id, chunk.start);
+                    let chunk_start = AbsoluteLabel {
+                        space: region.space.clone(),
+                        address: chunk.start,
+                    };
+                    chunk_starts.insert(chunk.id, chunk_start);
                 }
             }
         }
@@ -246,18 +257,23 @@ impl PositionedBinary {
             return Err(errors);
         }
 
-        let mut exported_symbols = HashMap::<Rc<str>, Addr>::new();
+        let mut exported_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
         for (object_index, object_file) in object_files.iter().enumerate() {
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
                 let chunk_id = ChunkId { object_index, chunk_index };
-                let chunk_start = chunk_starts[&chunk_id];
+                let chunk_start = chunk_starts[&chunk_id].clone();
                 for symbol in chunk.symbols.iter() {
                     if !symbol.exported {
                         continue;
                     }
-                    let symbol_addr = chunk_start + symbol.offset;
-                    let collision = exported_symbols
-                        .insert(symbol.name.clone(), symbol_addr);
+                    let symbol_addr = chunk_start.address + symbol.offset;
+                    let collision = exported_symbols.insert(
+                        symbol.name.clone(),
+                        AbsoluteLabel {
+                            space: chunk_start.space.clone(),
+                            address: symbol_addr,
+                        },
+                    );
                     if collision.is_some() {
                         errors.push(LinkError::SymbolExportCollision {
                             symbol_name: symbol.name.clone(),
@@ -271,7 +287,24 @@ impl PositionedBinary {
             return Err(errors);
         }
 
-        Ok(PositionedBinary { regions: positioned_regions, exported_symbols })
+        let file_chunk_starts = object_files
+            .iter()
+            .enumerate()
+            .map(|(object_index, object_file)| {
+                (0..object_file.chunks.len())
+                    .map(|chunk_index| {
+                        chunk_starts[&ChunkId { object_index, chunk_index }]
+                            .clone()
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        Ok(PositionedBinary {
+            regions: positioned_regions,
+            file_chunk_starts,
+            exported_symbols,
+        })
     }
 }
 

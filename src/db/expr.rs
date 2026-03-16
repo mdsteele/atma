@@ -202,6 +202,15 @@ impl<'a> AdsTypeEnv<'a> {
 impl<'a> ExprEnv for AdsTypeEnv<'a> {
     type Op = AdsInstruction;
 
+    fn typecheck_here_label(
+        &self,
+        span: SrcSpan,
+    ) -> ParseResult<(Self::Op, Option<ExprValue>)> {
+        let message =
+            "Cannot use relative labels in a debugger script".to_string();
+        Err(vec![ParseError::new(span, message)])
+    }
+
     fn typecheck_identifier(
         &self,
         span: SrcSpan,

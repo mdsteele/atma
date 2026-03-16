@@ -4,14 +4,34 @@ use std::io;
 
 //===========================================================================//
 
-const OP_ADD: u8 = b'+';
-const OP_GET_VALUE: u8 = b'G';
-const OP_LABEL_ADDR: u8 = b'A';
-const OP_LIST_INDEX: u8 = b'[';
-const OP_MAKE_LIST: u8 = b'}';
-const OP_MAKE_TUPLE: u8 = b')';
-const OP_PUSH: u8 = b'P';
-const OP_TUPLE_ITEM: u8 = b'.';
+// Binary ops:
+const OP_ANY_CMP_EQ: u8 = 0x00;
+const OP_ANY_CMP_LE: u8 = 0x01;
+const OP_ANY_CMP_LT: u8 = 0x02;
+const OP_ANY_CMP_GE: u8 = 0x03;
+const OP_ANY_CMP_GT: u8 = 0x04;
+const OP_ANY_CMP_NE: u8 = 0x05;
+const OP_INT_ADD: u8 = 0x10;
+const OP_INT_BIT_AND: u8 = 0x11;
+const OP_INT_BIT_OR: u8 = 0x12;
+const OP_INT_BIT_XOR: u8 = 0x13;
+const OP_INT_DIV: u8 = 0x14;
+const OP_INT_MOD: u8 = 0x15;
+const OP_INT_MUL: u8 = 0x16;
+const OP_INT_POW: u8 = 0x17;
+const OP_INT_SHL: u8 = 0x18;
+const OP_INT_SHR: u8 = 0x19;
+const OP_INT_SUB: u8 = 0x1a;
+const OP_LABEL_ADD_INT: u8 = 0x20;
+const OP_LABEL_SUB: u8 = 0x21;
+// Other ops:
+const OP_GET_VALUE: u8 = 0x30;
+const OP_LABEL_ADDR: u8 = 0x31;
+const OP_LIST_INDEX: u8 = 0x32;
+const OP_MAKE_LIST: u8 = 0x33;
+const OP_MAKE_TUPLE: u8 = 0x34;
+const OP_PUSH: u8 = 0x35;
+const OP_TUPLE_ITEM: u8 = 0x36;
 
 //===========================================================================//
 
@@ -62,7 +82,11 @@ impl From<bool> for ObjExpr {
 
 #[derive(Clone, Debug)]
 pub(crate) enum ObjExprOp {
-    Add,
+    /// Pops the top two values from the value stack, evaluates the specified
+    /// binary operation using the second-from-the-top value as the left-hand
+    /// side and the topmost value as the right-hand side, then pushes the
+    /// result onto the value stack.
+    BinOp(ExprBinOp),
     /// Copies the value at the specified index in the value stack, and pushes
     /// the copied value onto the stack.
     GetValue(usize),
@@ -95,7 +119,27 @@ pub(crate) enum ObjExprOp {
 impl BinaryIo for ObjExprOp {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         match u8::read_from(reader)? {
-            OP_ADD => Ok(ObjExprOp::Add),
+            // Binary ops:
+            OP_ANY_CMP_EQ => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpEq)),
+            OP_ANY_CMP_LE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpLe)),
+            OP_ANY_CMP_LT => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpLt)),
+            OP_ANY_CMP_GE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpGe)),
+            OP_ANY_CMP_GT => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpGt)),
+            OP_ANY_CMP_NE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpNe)),
+            OP_INT_ADD => Ok(ObjExprOp::BinOp(ExprBinOp::IntAdd)),
+            OP_INT_BIT_AND => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitAnd)),
+            OP_INT_BIT_OR => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitOr)),
+            OP_INT_BIT_XOR => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitXor)),
+            OP_INT_DIV => Ok(ObjExprOp::BinOp(ExprBinOp::IntDiv)),
+            OP_INT_MOD => Ok(ObjExprOp::BinOp(ExprBinOp::IntMod)),
+            OP_INT_MUL => Ok(ObjExprOp::BinOp(ExprBinOp::IntMul)),
+            OP_INT_POW => Ok(ObjExprOp::BinOp(ExprBinOp::IntPow)),
+            OP_INT_SHL => Ok(ObjExprOp::BinOp(ExprBinOp::IntShl)),
+            OP_INT_SHR => Ok(ObjExprOp::BinOp(ExprBinOp::IntShr)),
+            OP_INT_SUB => Ok(ObjExprOp::BinOp(ExprBinOp::IntSub)),
+            OP_LABEL_ADD_INT => Ok(ObjExprOp::BinOp(ExprBinOp::LabelAddInt)),
+            OP_LABEL_SUB => Ok(ObjExprOp::BinOp(ExprBinOp::LabelSub)),
+            // Other ops:
             OP_GET_VALUE => Ok(ObjExprOp::GetValue(usize::read_from(reader)?)),
             OP_LABEL_ADDR => Ok(ObjExprOp::LabelAddr),
             OP_LIST_INDEX => Ok(ObjExprOp::ListIndex),
@@ -116,7 +160,47 @@ impl BinaryIo for ObjExprOp {
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         match self {
-            ObjExprOp::Add => OP_ADD.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::AnyCmpEq) => {
+                OP_ANY_CMP_EQ.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::AnyCmpLe) => {
+                OP_ANY_CMP_LE.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::AnyCmpLt) => {
+                OP_ANY_CMP_LT.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::AnyCmpGe) => {
+                OP_ANY_CMP_GE.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::AnyCmpGt) => {
+                OP_ANY_CMP_GT.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::AnyCmpNe) => {
+                OP_ANY_CMP_NE.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntBitAnd) => {
+                OP_INT_BIT_AND.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::IntBitOr) => {
+                OP_INT_BIT_OR.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::IntBitXor) => {
+                OP_INT_BIT_XOR.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::IntDiv) => OP_INT_DIV.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntMod) => OP_INT_MOD.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntMul) => OP_INT_MUL.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntPow) => OP_INT_POW.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntShl) => OP_INT_SHL.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntShr) => OP_INT_SHR.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::IntSub) => OP_INT_SUB.write_to(writer),
+            ObjExprOp::BinOp(ExprBinOp::LabelAddInt) => {
+                OP_LABEL_ADD_INT.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::LabelSub) => {
+                OP_LABEL_SUB.write_to(writer)
+            }
             ObjExprOp::GetValue(index) => {
                 OP_GET_VALUE.write_to(writer)?;
                 index.write_to(writer)
@@ -144,8 +228,8 @@ impl BinaryIo for ObjExprOp {
 }
 
 impl ExprOp for ObjExprOp {
-    fn binary_operation(_binop: ExprBinOp) -> Self {
-        todo!()
+    fn binary_operation(binop: ExprBinOp) -> Self {
+        ObjExprOp::BinOp(binop)
     }
 
     fn list_index() -> Self {

@@ -57,6 +57,15 @@ impl LinkTypeEnv {
 impl ExprEnv for LinkTypeEnv {
     type Op = ObjExprOp;
 
+    fn typecheck_here_label(
+        &self,
+        span: SrcSpan,
+    ) -> ParseResult<(Self::Op, Option<ExprValue>)> {
+        let message =
+            "Cannot use relative labels in a linker config".to_string();
+        Err(vec![ParseError::new(span, message)])
+    }
+
     fn typecheck_identifier(
         &self,
         span: SrcSpan,

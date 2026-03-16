@@ -12,6 +12,11 @@ use std::rc::Rc;
 pub(crate) trait ExprEnv {
     type Op: ExprOp;
 
+    fn typecheck_here_label(
+        &self,
+        span: SrcSpan,
+    ) -> ParseResult<(Self::Op, Option<ExprValue>)>;
+
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
@@ -80,6 +85,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     stack.push(rhs);
                 }
                 ExprAstNode::BoolLiteral(_) => {}
+                ExprAstNode::HereLabel => {}
                 ExprAstNode::Identifier(_) => {}
                 ExprAstNode::Index(_, lhs, rhs) => {
                     stack.push(lhs);
@@ -115,6 +121,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     ExprType::Boolean,
                     ExprValue::Boolean(*boolean),
                 );
+            }
+            ExprAstNode::HereLabel => {
+                self.typecheck_here_label(subexpr.span);
             }
             ExprAstNode::Identifier(id) => {
                 self.typecheck_identifier(subexpr.span, id);
@@ -169,17 +178,26 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 if let Some(lhs_value) = lhs_static
                     && let Some(rhs_value) = rhs_static
                 {
-                    debug_assert!(self.ops.len() >= 2);
-                    self.ops.pop();
-                    self.ops.pop();
                     match binop.evaluate(lhs_value, rhs_value) {
                         Ok(result_value) => {
+                            debug_assert!(self.ops.len() >= 2);
+                            self.ops.pop();
+                            self.ops.pop();
                             self.ops
                                 .push(E::Op::literal(result_value.clone()));
                             self.types.push((result_type, Some(result_value)));
                         }
+                        Err(ExprBinOpEvalError::UnresolvedLabel) => {
+                            self.ops.push(E::Op::binary_operation(binop));
+                            self.types.push((result_type, None));
+                        }
                         Err(error) => {
-                            self.binop_eval_error(error, lhs_span, rhs_span);
+                            self.binop_eval_error(
+                                error,
+                                binop_ast.0,
+                                lhs_span,
+                                rhs_span,
+                            );
                             self.types.push((result_type, None));
                         }
                     }
@@ -187,6 +205,19 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.ops.push(E::Op::binary_operation(binop));
                     self.types.push((result_type, None));
                 }
+            }
+            Err(mut errors) => {
+                self.errors.append(&mut errors);
+                self.types.push((ExprType::Bottom, None));
+            }
+        }
+    }
+
+    fn typecheck_here_label(&mut self, span: SrcSpan) {
+        match self.env.typecheck_here_label(span) {
+            Ok((op, static_label)) => {
+                self.ops.push(op);
+                self.types.push((ExprType::Label, static_label));
             }
             Err(mut errors) => {
                 self.errors.append(&mut errors);
@@ -435,10 +466,28 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     fn binop_eval_error(
         &mut self,
         error: ExprBinOpEvalError,
-        _lhs_span: SrcSpan,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
         rhs_span: SrcSpan,
     ) {
         match error {
+            ExprBinOpEvalError::BitShiftByNegative(shift) => {
+                let message =
+                    "cannot shift by a negative number of bits".to_string();
+                let label = format!("the value of this expression is {shift}");
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
+            ExprBinOpEvalError::BitShiftOutOfRange(shift) => {
+                let message = "shift by too many bits".to_string();
+                let label = format!("the value of this expression is {shift}");
+                self.errors.push(
+                    ParseError::new(rhs_span, message)
+                        .with_label(rhs_span, label),
+                );
+            }
             ExprBinOpEvalError::DivideByZero => {
                 let message = "cannot divide by zero".to_string();
                 let label = "the value of this expression is 0".to_string();
@@ -464,23 +513,24 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         .with_label(rhs_span, label),
                 );
             }
-            ExprBinOpEvalError::BitShiftByNegative(shift) => {
+            ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(
+                lhs_space,
+                rhs_space,
+            ) => {
                 let message =
-                    "cannot shift by a negative number of bits".to_string();
-                let label = format!("the value of this expression is {shift}");
+                    "cannot subtract labels in different address spaces"
+                        .to_string();
+                let lhs_label =
+                    format!("this label is in address space {lhs_space}");
+                let rhs_label =
+                    format!("this label is in address space {rhs_space}");
                 self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
+                    ParseError::new(op_span, message)
+                        .with_label(lhs_span, lhs_label)
+                        .with_label(rhs_span, rhs_label),
                 );
             }
-            ExprBinOpEvalError::BitShiftOutOfRange(shift) => {
-                let message = "shift by too many bits".to_string();
-                let label = format!("the value of this expression is {shift}");
-                self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
-                );
-            }
+            ExprBinOpEvalError::UnresolvedLabel => unreachable!(),
         }
     }
 }

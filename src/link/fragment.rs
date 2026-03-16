@@ -23,7 +23,7 @@ pub enum LinkFragment {
 }
 
 impl LinkFragment {
-    pub(crate) fn from_patched_files(
+    pub(super) fn from_patched_files(
         patched_files: Vec<PatchedFile>,
         positioned_binary: &PositionedBinary,
     ) -> Vec<LinkFragment> {

@@ -1,5 +1,6 @@
 use super::config::LinkConfig;
 use super::error::LinkError;
+use super::types::ChunkId;
 use crate::addr::{Addr, Align, Size};
 use crate::obj::ObjFile;
 use std::collections::HashMap;
@@ -7,18 +8,7 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-/// Uniquely identifies one chunk in one of a collection of object files.
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
-pub struct ChunkId {
-    /// The index of the object file that contains the chunk.
-    pub object_index: usize,
-    /// The index of the chunk within its object file.
-    pub chunk_index: usize,
-}
-
-//===========================================================================//
-
-pub struct LooseChunk {
+pub(super) struct LooseChunk {
     /// The ID for this chunk.
     pub id: ChunkId,
     /// The size of the chunk, in bytes.
@@ -36,7 +26,7 @@ pub struct LooseChunk {
 
 //===========================================================================//
 
-pub struct LooseSection {
+pub(super) struct LooseSection {
     /// The name of this section.
     pub name: Rc<str>,
     /// The name of the memory region that this section should be loaded into.
@@ -57,7 +47,7 @@ pub struct LooseSection {
 }
 
 impl LooseSection {
-    pub fn collect(
+    pub(super) fn collect(
         config: &LinkConfig,
         object_files: &[ObjFile],
         errors: &mut Vec<LinkError>,

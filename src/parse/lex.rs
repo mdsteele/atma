@@ -145,6 +145,14 @@ enum TokenKind {
     Comma,
     #[regex(r"\.[_A-Za-z][_A-Za-z0-9]*")]
     Directive,
+    #[token("$v")]
+    DollarDown,
+    #[token("$<")]
+    DollarLeft,
+    #[token("$>")]
+    DollarRight,
+    #[token("$^")]
+    DollarUp,
     #[token("==")]
     EqualsEquals,
     #[token("=")]
@@ -169,8 +177,6 @@ enum TokenKind {
     LessThan,
     #[regex(r"\n", newline_callback)]
     Linebreak,
-    #[regex(r"%[_A-Za-z][_A-Za-z0-9]*")]
-    MacroPlaceholder,
     #[token("-")]
     Minus,
     #[token("|")]
@@ -183,6 +189,8 @@ enum TokenKind {
     ParenOpen,
     #[token("%")]
     Percent,
+    #[regex(r"%[_A-Za-z][_A-Za-z0-9]*")]
+    Placeholder,
     #[token("+")]
     Plus,
     #[token("#")]
@@ -225,6 +233,10 @@ impl TokenKind {
             TokenKind::Directive => {
                 TokenValue::Directive(Rc::from(lexer.slice()))
             }
+            TokenKind::DollarDown => TokenValue::DollarDown,
+            TokenKind::DollarLeft => TokenValue::DollarLeft,
+            TokenKind::DollarRight => TokenValue::DollarRight,
+            TokenKind::DollarUp => TokenValue::DollarUp,
             TokenKind::GreaterEquals => TokenValue::GreaterEquals,
             TokenKind::GreaterGreater => TokenValue::GreaterGreater,
             TokenKind::GreaterThan => TokenValue::GreaterThan,
@@ -238,7 +250,7 @@ impl TokenKind {
             TokenKind::LessLess => TokenValue::LessLess,
             TokenKind::LessThan => TokenValue::LessThan,
             TokenKind::Linebreak => TokenValue::Linebreak,
-            TokenKind::MacroPlaceholder => {
+            TokenKind::Placeholder => {
                 TokenValue::Placeholder(Rc::from(lexer.slice()))
             }
             TokenKind::Minus => TokenValue::Minus,
@@ -296,6 +308,14 @@ pub enum TokenValue {
     Comma,
     /// An assembler directive.
     Directive(Rc<str>),
+    /// A "`$v`" symbol.
+    DollarDown,
+    /// A "`$<`" symbol.
+    DollarLeft,
+    /// A "`$>`" symbol.
+    DollarRight,
+    /// A "`$^`" symbol.
+    DollarUp,
     /// A "`==`" symbol.
     EqualsEquals,
     /// A "`=`" symbol.
@@ -359,14 +379,18 @@ impl TokenValue {
             TokenValue::Bang => "`!`",
             TokenValue::BangEquals => "`!=`",
             TokenValue::BoolLiteral(_) => "boolean literal",
-            TokenValue::BraceClose => "close brace",
-            TokenValue::BraceOpen => "open brace",
-            TokenValue::BracketClose => "close bracket",
-            TokenValue::BracketOpen => "open bracket",
+            TokenValue::BraceClose => "`}`",
+            TokenValue::BraceOpen => "`{`",
+            TokenValue::BracketClose => "`]`",
+            TokenValue::BracketOpen => "`[`",
             TokenValue::Caret => "`^`",
-            TokenValue::Colon => "colon",
-            TokenValue::Comma => "comma",
+            TokenValue::Colon => "`:`",
+            TokenValue::Comma => "`,`",
             TokenValue::Directive(_) => "directive",
+            TokenValue::DollarDown => "`$v`",
+            TokenValue::DollarLeft => "`$<`",
+            TokenValue::DollarRight => "`$>`",
+            TokenValue::DollarUp => "`$^`",
             TokenValue::EqualsEquals => "`==`",
             TokenValue::Equals => "`=`",
             TokenValue::GreaterEquals => "`>=`",
@@ -381,8 +405,8 @@ impl TokenValue {
             TokenValue::Minus => "`-`",
             TokenValue::Or => "`|`",
             TokenValue::OrOr => "`||`",
-            TokenValue::ParenClose => "close parenthesis",
-            TokenValue::ParenOpen => "open parenthesis",
+            TokenValue::ParenClose => "`)`",
+            TokenValue::ParenOpen => "`(`",
             TokenValue::Percent => "`%`",
             TokenValue::Placeholder(_) => "placeholder",
             TokenValue::Plus => "`+`",

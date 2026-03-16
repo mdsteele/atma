@@ -14,6 +14,7 @@ use crate::parse::{
 };
 use expr::AsmTypeEnv;
 use macros::MacroTable;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -35,10 +36,10 @@ fn assemble_ast(module: AsmModuleAst) -> ParseResult<ObjFile> {
 struct Assembler {
     env: AsmTypeEnv,
     macros: MacroTable,
-    chunks: Vec<ObjChunk>,
+    next_chunk_index: usize,
+    chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<Rc<str>>,
     errors: Vec<ParseError>,
-    section_stack: Vec<SectionEnv>,
 }
 
 impl Assembler {
@@ -46,10 +47,10 @@ impl Assembler {
         Assembler {
             env: AsmTypeEnv::new(),
             macros: MacroTable::new(),
-            chunks: Vec::new(),
+            next_chunk_index: 0,
+            chunks: BTreeMap::new(),
             imports: Vec::new(),
             errors: Vec::new(),
-            section_stack: Vec::new(),
         }
     }
 
@@ -154,11 +155,11 @@ impl Assembler {
     }
 
     fn expand_label(&mut self, id_ast: IdentifierAst) {
-        if let Some(section_env) = self.section_stack.last_mut() {
-            section_env.symbols.push(ObjSymbol {
+        if let Some(chunk_env) = self.env.current_chunk() {
+            chunk_env.symbols.push(ObjSymbol {
                 name: id_ast.name,
                 exported: true, // TODO
-                offset: Offset::try_from(section_env.data.len()).unwrap(),
+                offset: Offset::try_from(chunk_env.data.len()).unwrap(),
             });
         } else {
             let message = "labels must be within a .SECTION".to_string();
@@ -196,45 +197,50 @@ impl Assembler {
         let align = Align::default(); // TODO: support align attribute
         let within: Option<Align> = None; // TODO: support within attribute
         let fill: Option<u8> = None; // TODO: support fill attribute
-        self.section_stack.push(SectionEnv::new());
+        let chunk_index = self.next_chunk_index;
+        self.next_chunk_index += 1;
+        self.env.begin_chunk(chunk_index);
         self.expand_statements(section_ast.body);
-        debug_assert!(!self.section_stack.is_empty());
-        let section_env = self.section_stack.pop().unwrap();
+        let chunk_env = self.env.end_chunk();
         // TODO: error if size is too large
-        let size = Size::try_from(section_env.data.len()).unwrap();
+        let size = Size::try_from(chunk_env.data.len()).unwrap();
         if let Some(section_name) = name {
-            self.chunks.push(ObjChunk {
+            let chunk = ObjChunk {
                 section_name,
-                data: Box::from(section_env.data),
+                data: Box::from(chunk_env.data),
                 size,
                 align,
                 within,
                 fill,
-                symbols: Rc::from(section_env.symbols),
-                patches: Box::from(section_env.patches),
-            });
+                symbols: Rc::from(chunk_env.symbols),
+                patches: Box::from(chunk_env.patches),
+            };
+            debug_assert!(!self.chunks.contains_key(&chunk_index));
+            self.chunks.insert(chunk_index, chunk);
         }
     }
 
     fn expand_u16le(&mut self, expr_ast: ExprAst) {
         let word = self.expand_int_data_directive(PatchKind::U16le, expr_ast);
-        let section_env = self.section_stack.last_mut().unwrap();
-        section_env.data.push(word as u8);
-        section_env.data.push((word >> 8) as u8);
+        if let Some(chunk_env) = self.env.current_chunk() {
+            chunk_env.data.push(word as u8);
+            chunk_env.data.push((word >> 8) as u8);
+        }
     }
 
     fn expand_u24le(&mut self, expr_ast: ExprAst) {
         let long = self.expand_int_data_directive(PatchKind::U24le, expr_ast);
-        let section_env = self.section_stack.last_mut().unwrap();
-        section_env.data.push(long as u8);
-        section_env.data.push((long >> 8) as u8);
-        section_env.data.push((long >> 16) as u8);
+        if let Some(chunk_env) = self.env.current_chunk() {
+            chunk_env.data.push(long as u8);
+            chunk_env.data.push((long >> 8) as u8);
+            chunk_env.data.push((long >> 16) as u8);
+        }
     }
 
     fn expand_u8(&mut self, expr_ast: ExprAst) {
         let byte = self.expand_int_data_directive(PatchKind::U8, expr_ast);
-        if let Some(section_env) = self.section_stack.last_mut() {
-            section_env.data.push(byte as u8);
+        if let Some(chunk_env) = self.env.current_chunk() {
+            chunk_env.data.push(byte as u8);
         }
     }
 
@@ -248,7 +254,7 @@ impl Assembler {
         kind: PatchKind,
         expr_ast: ExprAst,
     ) -> i64 {
-        if self.section_stack.is_empty() {
+        if self.env.current_chunk().is_none() {
             let message = format!(
                 "{} directive must be within a .SECTION",
                 kind.directive()
@@ -306,11 +312,11 @@ impl Assembler {
     /// chunk; it is assumed that the caller will have already flagged an error
     /// in that case.
     fn try_add_patch(&mut self, kind: PatchKind, expr: ObjExpr) {
-        if let Some(section_env) = self.section_stack.last_mut() {
+        if let Some(chunk_env) = self.env.current_chunk() {
             // TODO: Error instead of crash if offset is too large.
-            let offset = Offset::try_from(section_env.data.len()).unwrap();
+            let offset = Offset::try_from(chunk_env.data.len()).unwrap();
             let patch = ObjPatch { offset, kind, expr };
-            section_env.patches.push(patch);
+            chunk_env.patches.push(patch);
         }
     }
 
@@ -329,27 +335,12 @@ impl Assembler {
 
     fn finish(self) -> ParseResult<ObjFile> {
         if self.errors.is_empty() {
-            Ok(ObjFile { chunks: self.chunks, imports: self.imports })
+            Ok(ObjFile {
+                chunks: self.chunks.into_values().collect(),
+                imports: self.imports,
+            })
         } else {
             Err(self.errors)
-        }
-    }
-}
-
-//===========================================================================//
-
-struct SectionEnv {
-    data: Vec<u8>,
-    symbols: Vec<ObjSymbol>,
-    patches: Vec<ObjPatch>,
-}
-
-impl SectionEnv {
-    fn new() -> SectionEnv {
-        SectionEnv {
-            data: Vec::new(),
-            symbols: Vec::new(),
-            patches: Vec::new(),
         }
     }
 }

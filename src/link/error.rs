@@ -38,6 +38,8 @@ pub enum LinkError {
     /// underflow). This shouldn't happen for valid object files (as the
     /// assembler should have generated a valid expression).
     MalformedPatchExpression,
+    /// A patch expression could not be evaluated.
+    PatchEvaluationFailed,
     /// A patch's offset/size was out of range for the size of the chunk
     /// data. This shouldn't happen for valid object files (as the assembler
     /// should have generated a valid patch offset).

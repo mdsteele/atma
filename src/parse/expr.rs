@@ -228,6 +228,9 @@ impl ExprAst {
                     node: ExprAstNode::ListLiteral(asts),
                 },
             );
+            let here_label = symbol(TokenValue::DollarLeft).map(|token| {
+                ExprAst { span: token.span, node: ExprAstNode::HereLabel }
+            });
             let identifier = IdentifierAst::parser().map(|id| ExprAst {
                 span: id.span,
                 node: if id.is_placeholder {
@@ -239,6 +242,7 @@ impl ExprAst {
 
             let expr_atom = chumsky::prelude::choice((
                 parenthesized_expr,
+                here_label,
                 identifier,
                 list_literal,
                 bool_literal(),
@@ -422,6 +426,8 @@ pub enum ExprAstNode {
     BinOp((SrcSpan, BinOpAst), Box<ExprAst>, Box<ExprAst>),
     /// An boolean literal.
     BoolLiteral(bool),
+    /// A "here" label.
+    HereLabel,
     /// An identifier.
     Identifier(Rc<str>),
     /// An indexing operation (e.g. into a list).

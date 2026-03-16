@@ -9,6 +9,7 @@ mod loose;
 mod patch;
 mod place;
 mod positioned;
+mod types;
 
 pub use config::{AddrspaceConfig, LinkConfig, MemoryConfig, SectionConfig};
 pub use error::LinkError;

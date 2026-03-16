@@ -1,5 +1,6 @@
+use super::label::ExprLabel;
 use crate::obj::BinaryIo;
-use num_bigint::{BigInt, Sign};
+use num_bigint::BigInt;
 use std::cmp::Ordering;
 use std::fmt;
 use std::io;
@@ -11,10 +12,13 @@ const TAG_FALSE: u8 = 0;
 const TAG_TRUE: u8 = 1;
 const TAG_ENTITY: u8 = 2;
 const TAG_INTEGER: u8 = 3;
-const TAG_LABEL: u8 = 4;
-const TAG_LIST: u8 = 5;
-const TAG_STRING: u8 = 6;
-const TAG_TUPLE: u8 = 7;
+const TAG_LABEL_ADDR_ABS: u8 = 4;
+const TAG_LABEL_CHUNK_ABS: u8 = 5;
+const TAG_LABEL_CHUNK_REL: u8 = 6;
+const TAG_LABEL_SYMBOL_REL: u8 = 7;
+const TAG_LIST: u8 = 8;
+const TAG_STRING: u8 = 9;
+const TAG_TUPLE: u8 = 10;
 
 //===========================================================================//
 
@@ -96,10 +100,8 @@ pub enum ExprValue {
     Entity(Rc<str>),
     /// An integer value (with no minimum/maximum range).
     Integer(BigInt),
-    /// A memory location within an assembly file, compiled binary, or runtime
-    /// address space, at the specified signed offset relative to the label
-    /// with the specified fully-qualified name.
-    Label(Rc<str>, Rc<BigInt>),
+    /// A memory location.
+    Label(ExprLabel),
     /// A list value.  All elements must be of the same type.
     List(Rc<[ExprValue]>),
     /// A string value.
@@ -145,12 +147,11 @@ impl ExprValue {
         }
     }
 
-    /// Returns the label name and relative offset of the contained
-    /// [`Label`](ExprValue::Label) value, or panics if this value is not a
-    /// label.
-    pub fn unwrap_label(self) -> (Rc<str>, Rc<BigInt>) {
+    /// Returns the contained [`Label`](ExprValue::Label) value, or panics if
+    /// this value is not a label.
+    pub fn unwrap_label(self) -> ExprLabel {
         match self {
-            ExprValue::Label(name, offset) => (name, offset),
+            ExprValue::Label(label) => label,
             value => panic!("ExprValue::unwrap_label on {value:?}"),
         }
     }
@@ -190,10 +191,37 @@ impl BinaryIo for ExprValue {
             TAG_TRUE => Ok(ExprValue::Boolean(true)),
             TAG_ENTITY => Ok(ExprValue::Entity(Rc::<str>::read_from(reader)?)),
             TAG_INTEGER => Ok(ExprValue::Integer(BigInt::read_from(reader)?)),
-            TAG_LABEL => {
+            TAG_LABEL_ADDR_ABS => {
+                let space = Rc::<str>::read_from(reader)?;
+                let address = BigInt::read_from(reader)?;
+                Ok(ExprValue::Label(ExprLabel::AddrAbsolute {
+                    space,
+                    address,
+                }))
+            }
+            TAG_LABEL_CHUNK_ABS => {
+                let chunk_index = usize::read_from(reader)?;
+                let address = BigInt::read_from(reader)?;
+                Ok(ExprValue::Label(ExprLabel::ChunkAbsolute {
+                    chunk_index,
+                    address,
+                }))
+            }
+            TAG_LABEL_CHUNK_REL => {
+                let chunk_index = usize::read_from(reader)?;
+                let offset = BigInt::read_from(reader)?;
+                Ok(ExprValue::Label(ExprLabel::ChunkRelative {
+                    chunk_index,
+                    offset,
+                }))
+            }
+            TAG_LABEL_SYMBOL_REL => {
                 let name = Rc::<str>::read_from(reader)?;
                 let offset = BigInt::read_from(reader)?;
-                Ok(ExprValue::Label(name, Rc::from(offset)))
+                Ok(ExprValue::Label(ExprLabel::SymbolRelative {
+                    name,
+                    offset,
+                }))
             }
             TAG_LIST => {
                 Ok(ExprValue::List(Rc::<[ExprValue]>::read_from(reader)?))
@@ -221,8 +249,29 @@ impl BinaryIo for ExprValue {
                 TAG_INTEGER.write_to(writer)?;
                 integer.write_to(writer)
             }
-            ExprValue::Label(name, offset) => {
-                TAG_LABEL.write_to(writer)?;
+            ExprValue::Label(ExprLabel::AddrAbsolute { space, address }) => {
+                TAG_LABEL_ADDR_ABS.write_to(writer)?;
+                space.write_to(writer)?;
+                address.write_to(writer)
+            }
+            ExprValue::Label(ExprLabel::ChunkAbsolute {
+                chunk_index,
+                address,
+            }) => {
+                TAG_LABEL_CHUNK_ABS.write_to(writer)?;
+                chunk_index.write_to(writer)?;
+                address.write_to(writer)
+            }
+            ExprValue::Label(ExprLabel::ChunkRelative {
+                chunk_index,
+                offset,
+            }) => {
+                TAG_LABEL_CHUNK_REL.write_to(writer)?;
+                chunk_index.write_to(writer)?;
+                offset.write_to(writer)
+            }
+            ExprValue::Label(ExprLabel::SymbolRelative { name, offset }) => {
+                TAG_LABEL_SYMBOL_REL.write_to(writer)?;
                 name.write_to(writer)?;
                 offset.write_to(writer)
             }
@@ -254,14 +303,7 @@ impl fmt::Display for ExprValue {
             ExprValue::Boolean(value) => write!(f, "%{value}"),
             ExprValue::Entity(repr) => f.write_str(repr),
             ExprValue::Integer(value) => value.fmt(f),
-            ExprValue::Label(name, offset) => {
-                f.write_str(name)?;
-                match offset.sign() {
-                    Sign::Plus => write!(f, " + ${:x}", offset.magnitude()),
-                    Sign::Minus => write!(f, " - ${:x}", offset.magnitude()),
-                    Sign::NoSign => Ok(()),
-                }
-            }
+            ExprValue::Label(label) => label.fmt(f),
             ExprValue::List(values) => {
                 f.write_str("{")?;
                 comma_separate(f, values)?;
@@ -286,15 +328,8 @@ impl PartialOrd for ExprValue {
             (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                 Some(lhs.cmp(rhs))
             }
-            (
-                ExprValue::Label(lhs_name, lhs_offset),
-                ExprValue::Label(rhs_name, rhs_offset),
-            ) => {
-                if lhs_name == rhs_name {
-                    Some(lhs_offset.cmp(rhs_offset))
-                } else {
-                    None
-                }
+            (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
+                lhs.partial_cmp(rhs)
             }
             (ExprValue::String(lhs), ExprValue::String(rhs)) => {
                 Some(lhs.cmp(rhs))
@@ -326,14 +361,10 @@ fn comma_separate<T: fmt::Display>(
 
 #[cfg(test)]
 mod tests {
-    use super::{ExprType, ExprValue};
+    use super::{ExprLabel, ExprType, ExprValue};
     use crate::obj::assert_round_trips;
     use num_bigint::BigInt;
     use std::rc::Rc;
-
-    fn rc_bigint(value: i32) -> Rc<BigInt> {
-        Rc::from(BigInt::from(value))
-    }
 
     fn int_value(value: i32) -> ExprValue {
         ExprValue::Integer(BigInt::from(value))
@@ -387,12 +418,11 @@ mod tests {
 
     #[test]
     fn display_label_value() {
-        let value = ExprValue::Label(Rc::from("Foo"), rc_bigint(0));
-        assert_eq!(format!("{}", value), "Foo");
-        let value = ExprValue::Label(Rc::from("Bar"), rc_bigint(32));
-        assert_eq!(format!("{}", value), "Bar + $20");
-        let value = ExprValue::Label(Rc::from("Baz"), rc_bigint(-1));
-        assert_eq!(format!("{}", value), "Baz - $1");
+        let value = ExprValue::Label(ExprLabel::SymbolRelative {
+            name: Rc::from("Foo"),
+            offset: BigInt::from(0x20u32),
+        });
+        assert_eq!(format!("{}", value), "Foo + $20");
     }
 
     #[test]
