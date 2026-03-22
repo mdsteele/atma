@@ -1,9 +1,9 @@
 use super::binop::{ExprBinOp, ExprBinOpEvalError};
+use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
-use crate::parse::{
-    BinOpAst, ExprAst, ExprAstNode, ParseError, ParseResult, SrcSpan, UnOpAst,
-};
+use crate::error::SrcSpan;
+use crate::parse::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -15,13 +15,13 @@ pub(crate) trait ExprEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ParseResult<(Self::Op, Option<ExprValue>)>;
+    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)>;
 
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
-        id: &str,
-    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)>;
+        name: &Rc<str>,
+    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)>;
 }
 
 /// A type that represents a single operation for an expression stack machine.
@@ -58,7 +58,7 @@ pub(crate) struct ExprCompiler<'a, E: ExprEnv> {
     env: &'a E,
     types: Vec<(ExprType, Option<ExprValue>)>,
     ops: Vec<E::Op>,
-    errors: Vec<ParseError>,
+    errors: Vec<ExprTypeError>,
 }
 
 impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
@@ -74,7 +74,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     pub(crate) fn typecheck(
         mut self,
         expr: &ExprAst,
-    ) -> ParseResult<(Vec<E::Op>, ExprType, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Vec<E::Op>, ExprType, Option<ExprValue>)> {
         let mut stack = vec![expr];
         let mut subexprs = Vec::<&ExprAst>::new();
         while let Some(subexpr) = stack.pop() {
@@ -226,8 +226,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn typecheck_identifier(&mut self, span: SrcSpan, id: &str) {
-        match self.env.typecheck_identifier(span, id) {
+    fn typecheck_identifier(&mut self, span: SrcSpan, name: &Rc<str>) {
+        match self.env.typecheck_identifier(span, name) {
             Ok((op, id_type, id_static)) => {
                 self.ops.push(op);
                 self.types.push((id_type, id_static));
@@ -241,7 +241,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
 
     fn typecheck_index(
         &mut self,
-        index_span: SrcSpan,
+        bracket_span: SrcSpan,
         lhs_ast: &ExprAst,
         rhs_ast: &ExprAst,
     ) {
@@ -265,18 +265,13 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     if index < BigInt::ZERO
                         || index >= BigInt::from(item_values.len())
                     {
-                        let message = "list index is statically out of range"
-                            .to_string();
-                        let label1 = format!(
-                            "this list has length {}",
-                            item_values.len()
-                        );
-                        let label2 =
-                            format!("the value of this expression is {index}");
                         self.errors.push(
-                            ParseError::new(rhs_ast.span, message)
-                                .with_label(lhs_ast.span, label1)
-                                .with_label(rhs_ast.span, label2),
+                            ExprTypeError::ListIndexStaticallyOutOfRange {
+                                list_span: lhs_ast.span,
+                                list_length: item_values.len(),
+                                index_span: rhs_ast.span,
+                                index_value: index,
+                            },
                         );
                         self.types.push((ExprType::Bottom, None));
                     } else {
@@ -292,12 +287,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 }
             }
             (ExprType::List(_), rhs_type) => {
-                let message = format!("cannot use {rhs_type} as a list index");
-                let label = format!("this expression has type {rhs_type}");
-                self.errors.push(
-                    ParseError::new(rhs_ast.span, message)
-                        .with_label(rhs_ast.span, label),
-                );
+                self.errors.push(ExprTypeError::CannotUseTypeAsIndex {
+                    index_span: rhs_ast.span,
+                    index_type: rhs_type,
+                });
                 self.types.push((ExprType::Bottom, None));
             }
             (ExprType::Tuple(item_types), ExprType::Integer) => {
@@ -308,17 +301,13 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     if index < BigInt::ZERO
                         || index >= BigInt::from(item_types.len())
                     {
-                        let message = "tuple index out of bounds".to_string();
-                        let label1 = format!(
-                            "this expression has type {}",
-                            ExprType::Tuple(item_types)
-                        );
-                        let label2 =
-                            format!("the value of this expression is {index}");
                         self.errors.push(
-                            ParseError::new(rhs_ast.span, message)
-                                .with_label(lhs_ast.span, label1)
-                                .with_label(rhs_ast.span, label2),
+                            ExprTypeError::TupleIndexOutOfRange {
+                                tuple_span: lhs_ast.span,
+                                item_types,
+                                index_span: rhs_ast.span,
+                                index_value: index,
+                            },
                         );
                         self.types.push((ExprType::Bottom, None));
                         return;
@@ -337,33 +326,25 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.types.push((item_type, None));
                     }
                 } else {
-                    let message = "tuple index must be static".to_string();
-                    let label = "this expression isn't static".to_string();
-                    self.errors.push(
-                        ParseError::new(rhs_ast.span, message)
-                            .with_label(rhs_ast.span, label),
-                    );
+                    self.errors.push(ExprTypeError::TupleIndexNotStatic {
+                        index_span: rhs_ast.span,
+                    });
                     self.types.push((ExprType::Bottom, None));
                 }
             }
             (ExprType::Tuple(_), rhs_type) => {
-                let message =
-                    format!("cannot use {rhs_type} as a tuple index");
-                let label = format!("this expression has type {rhs_type}");
-                self.errors.push(
-                    ParseError::new(rhs_ast.span, message)
-                        .with_label(rhs_ast.span, label),
-                );
+                self.errors.push(ExprTypeError::CannotUseTypeAsIndex {
+                    index_span: rhs_ast.span,
+                    index_type: rhs_type,
+                });
                 self.types.push((ExprType::Bottom, None));
             }
             (lhs_type, _) => {
-                let message =
-                    format!("cannot index into value of type {lhs_type}");
-                let label = format!("this expression has type {lhs_type}");
-                self.errors.push(
-                    ParseError::new(index_span, message)
-                        .with_label(lhs_ast.span, label),
-                );
+                self.errors.push(ExprTypeError::CannotIndexIntoType {
+                    bracket_span,
+                    indexed_span: lhs_ast.span,
+                    indexed_type: lhs_type,
+                });
                 self.types.push((ExprType::Bottom, None));
             }
         }
@@ -376,15 +357,12 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             item_types.first().cloned().unwrap_or(ExprType::Bottom);
         for (ty, ast) in item_types.into_iter().zip(item_asts) {
             if ty != item_type {
-                let message =
-                    "all items in a list must have the same type".to_string();
-                let label1 = format!("this item has type {item_type}");
-                let label2 = format!("this item has type {ty}");
-                self.errors.push(
-                    ParseError::new(ast.span, message)
-                        .with_label(item_asts[0].span, label1)
-                        .with_label(ast.span, label2),
-                );
+                self.errors.push(ExprTypeError::ListItemsMustAllBeSameType {
+                    first_item_span: item_asts[0].span,
+                    first_item_type: item_type.clone(),
+                    other_item_span: ast.span,
+                    other_item_type: ty,
+                });
                 break;
             }
         }
@@ -470,68 +448,36 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         lhs_span: SrcSpan,
         rhs_span: SrcSpan,
     ) {
-        match error {
-            ExprBinOpEvalError::BitShiftByNegative(shift) => {
-                let message =
-                    "cannot shift by a negative number of bits".to_string();
-                let label = format!("the value of this expression is {shift}");
-                self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
-                );
+        let expr_eval_error = match error {
+            ExprBinOpEvalError::BitShiftByNegative(rhs_value) => {
+                ExprEvalError::BitShiftByNegative { rhs_span, rhs_value }
             }
-            ExprBinOpEvalError::BitShiftOutOfRange(shift) => {
-                let message = "shift by too many bits".to_string();
-                let label = format!("the value of this expression is {shift}");
-                self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
-                );
+            ExprBinOpEvalError::BitShiftOutOfRange(rhs_value) => {
+                ExprEvalError::BitShiftOutOfRange { rhs_span, rhs_value }
             }
             ExprBinOpEvalError::DivideByZero => {
-                let message = "cannot divide by zero".to_string();
-                let label = "the value of this expression is 0".to_string();
-                self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
-                );
+                ExprEvalError::DivideByZero { rhs_span }
             }
             ExprBinOpEvalError::ModByZero => {
-                let message = "cannot modulo by zero".to_string();
-                let label = "the value of this expression is 0".to_string();
-                self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
-                );
+                ExprEvalError::ModByZero { rhs_span }
             }
-            ExprBinOpEvalError::PowNegativeExponent(exponent) => {
-                let message = "exponent must be non-negative".to_string();
-                let label =
-                    format!("the value of this expression is {exponent}");
-                self.errors.push(
-                    ParseError::new(rhs_span, message)
-                        .with_label(rhs_span, label),
-                );
+            ExprBinOpEvalError::PowNegativeExponent(rhs_value) => {
+                ExprEvalError::PowNegativeExponent { rhs_span, rhs_value }
             }
             ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(
                 lhs_space,
                 rhs_space,
-            ) => {
-                let message =
-                    "cannot subtract labels in different address spaces"
-                        .to_string();
-                let lhs_label =
-                    format!("this label is in address space {lhs_space}");
-                let rhs_label =
-                    format!("this label is in address space {rhs_space}");
-                self.errors.push(
-                    ParseError::new(op_span, message)
-                        .with_label(lhs_span, lhs_label)
-                        .with_label(rhs_span, rhs_label),
-                );
-            }
+            ) => ExprEvalError::SubtractLabelsInDifferentAddrspaces {
+                op_span,
+                lhs_span,
+                lhs_space,
+                rhs_span,
+                rhs_space,
+            },
             ExprBinOpEvalError::UnresolvedLabel => unreachable!(),
-        }
+        };
+        self.errors
+            .push(ExprTypeError::StaticEvalError { error: expr_eval_error });
     }
 }
 

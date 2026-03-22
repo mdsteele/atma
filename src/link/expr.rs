@@ -1,6 +1,9 @@
-use crate::expr::{ExprCompiler, ExprEnv, ExprType, ExprValue};
+use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::expr::{
+    ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
+};
 use crate::obj::{ObjExpr, ObjExprOp};
-use crate::parse::{ExprAst, IdentifierAst, ParseError, ParseResult, SrcSpan};
+use crate::parse::{ExprAst, IdentifierAst};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -43,13 +46,13 @@ impl LinkTypeEnv {
     pub fn typecheck_expression(
         &self,
         expr: &ExprAst,
-    ) -> ParseResult<(ObjExpr, ExprType, Option<ExprValue>)> {
+    ) -> SourceResult<(ObjExpr, ExprType, Option<ExprValue>)> {
         match ExprCompiler::new(self).typecheck(expr) {
             Ok((ops, expr_type, static_value)) => {
                 debug_assert!(!ops.is_empty());
                 Ok((ObjExpr { ops }, expr_type, static_value))
             }
-            Err(errors) => Err(errors),
+            Err(errors) => Err(SourceError::from_errors(errors)),
         }
     }
 }
@@ -60,31 +63,26 @@ impl ExprEnv for LinkTypeEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ParseResult<(Self::Op, Option<ExprValue>)> {
-        let message =
-            "Cannot use relative labels in a linker config".to_string();
-        Err(vec![ParseError::new(span, message)])
+    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
+        Err(vec![ExprTypeError::RelativeLabelInLinkerConfig { span }])
     }
 
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
-        id: &str,
-    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)> {
-        match self.variables.get(id) {
+        name: &Rc<str>,
+    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
+        match self.variables.get(name) {
             Some(decl) => {
                 let var_type = decl.var_type.clone();
                 let static_value = decl.static_value.clone();
                 let op = ObjExprOp::GetValue(decl.stack_index);
                 Ok((op, var_type, static_value))
             }
-            None => {
-                let message = format!("No such identifier: `{id}`");
-                let label = "this was never declared".to_string();
-                Err(vec![
-                    ParseError::new(span, message).with_label(span, label),
-                ])
-            }
+            None => Err(vec![ExprTypeError::UnknownIdentifier {
+                span,
+                name: name.clone(),
+            }]),
         }
     }
 }

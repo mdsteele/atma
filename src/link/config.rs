@@ -4,11 +4,11 @@ use super::fragment::LinkFragment;
 use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
 use crate::addr::{Addr, Align, AlignTryFromError, Range, Size};
+use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::{ObjExpr, ObjFile};
 use crate::parse::{
     ExprAst, IdentifierAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
-    ParseError, ParseResult, SrcSpan,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -30,7 +30,7 @@ struct ConfigBuilder {
     addrspaces: Vec<AddrspaceConfig>,
     memory: Vec<MemoryConfig>,
     sections: Vec<SectionConfig>,
-    errors: Vec<ParseError>,
+    errors: Vec<SourceError>,
 }
 
 impl ConfigBuilder {
@@ -44,7 +44,7 @@ impl ConfigBuilder {
         }
     }
 
-    pub(crate) fn finish(self) -> ParseResult<LinkConfig> {
+    pub(crate) fn finish(self) -> SourceResult<LinkConfig> {
         if self.errors.is_empty() {
             Ok(LinkConfig {
                 addrspaces: self.addrspaces,
@@ -339,7 +339,7 @@ impl ConfigBuilder {
                     let label =
                         format!("the value of this expression is {bigint}");
                     self.errors.push(
-                        ParseError::new(expr_span, message)
+                        SourceError::new(expr_span, message)
                             .with_label(expr_span, label),
                     );
                 }
@@ -377,7 +377,7 @@ impl ConfigBuilder {
                 );
                 let label = format!("this expression has type {expr_type}");
                 self.errors.push(
-                    ParseError::new(expr_span, message)
+                    SourceError::new(expr_span, message)
                         .with_label(expr_span, label),
                 );
                 None
@@ -419,7 +419,7 @@ impl ConfigBuilder {
                     format!("{entry_kind} `{attr_name}` must be an integer");
                 let label = format!("this expression has type {expr_type}");
                 self.errors.push(
-                    ParseError::new(expr_span, message)
+                    SourceError::new(expr_span, message)
                         .with_label(expr_span, label),
                 );
                 None
@@ -466,7 +466,7 @@ impl ConfigBuilder {
             let label1 = "Previously declared here".to_string();
             let label2 = "Duplicated here".to_string();
             self.errors.push(
-                ParseError::new(id_ast.span, message)
+                SourceError::new(id_ast.span, message)
                     .with_label(prev_span, label1)
                     .with_label(id_ast.span, label2),
             );
@@ -480,7 +480,7 @@ impl ConfigBuilder {
         let label1 = "Previously declared here".to_string();
         let label2 = "Declared again here".to_string();
         self.errors.push(
-            ParseError::new(id.span, message)
+            SourceError::new(id.span, message)
                 .with_label(prev_span, label1)
                 .with_label(id.span, label2),
         );
@@ -493,7 +493,7 @@ impl ConfigBuilder {
     ) {
         let message =
             format!("Invalid {entry_kind} attribute: `{}`", attr_id.name);
-        self.errors.push(ParseError::new(attr_id.span, message));
+        self.errors.push(SourceError::new(attr_id.span, message));
     }
 
     fn memory_range_overflow_error(
@@ -506,12 +506,12 @@ impl ConfigBuilder {
             "Memory range overflows address size \
              (start=${start:x}, size=${size:x})"
         );
-        self.errors.push(ParseError::new(entry_id.span, message));
+        self.errors.push(SourceError::new(entry_id.span, message));
     }
 
     fn missing_attr_error(&mut self, attr: &str, entry_id: &IdentifierAst) {
         let message = format!("Missing required `{attr}` attribute");
-        self.errors.push(ParseError::new(entry_id.span, message));
+        self.errors.push(SourceError::new(entry_id.span, message));
     }
 
     fn non_static_attr_error(
@@ -524,7 +524,7 @@ impl ConfigBuilder {
             format!("{entry_kind} `{attr_name}` attribute must be static");
         let label = "this expression isn't static".to_string();
         self.errors.push(
-            ParseError::new(expr_span, message).with_label(expr_span, label),
+            SourceError::new(expr_span, message).with_label(expr_span, label),
         );
     }
 
@@ -538,7 +538,7 @@ impl ConfigBuilder {
         let message = format!("{entry_kind} `{attr_name}` is out of range");
         let label = format!("the value of this expression is {value}");
         self.errors.push(
-            ParseError::new(expr_span, message).with_label(expr_span, label),
+            SourceError::new(expr_span, message).with_label(expr_span, label),
         );
     }
 }
@@ -558,9 +558,10 @@ pub struct LinkConfig {
 }
 
 impl LinkConfig {
-    /// Parses source code into a linker configuration.
-    pub fn from_source(source: &str) -> ParseResult<LinkConfig> {
-        let ast = LinkConfigAst::parse_source(source)?;
+    /// Sources source code into a linker configuration.
+    pub fn from_source(source: &str) -> SourceResult<LinkConfig> {
+        let ast = LinkConfigAst::parse_source(source)
+            .map_err(SourceError::from_errors)?;
         let mut builder = ConfigBuilder::new();
         for dir_ast in ast.directives {
             builder.visit_directive(dir_ast);

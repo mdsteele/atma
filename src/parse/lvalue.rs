@@ -1,7 +1,7 @@
 use super::atom::{Extra, symbol};
 use super::expr::{ExprAst, IdentifierAst};
 use super::lex::{Token, TokenValue};
-use super::types::SrcSpan;
+use crate::error::SrcSpan;
 use chumsky::{self, IterParser, Parser};
 use std::rc::Rc;
 

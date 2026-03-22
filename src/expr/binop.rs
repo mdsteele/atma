@@ -1,5 +1,7 @@
+use super::error::{ExprTypeError, ExprTypeResult};
+use crate::error::SrcSpan;
 use crate::expr::{ExprLabel, ExprType, ExprValue};
-use crate::parse::{BinOpAst, ParseError, ParseResult, SrcSpan};
+use crate::parse::BinOpAst;
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Euclid, Pow, Signed, ToPrimitive, Zero};
 use std::rc::Rc;
@@ -57,13 +59,13 @@ pub(crate) enum ExprBinOp {
 }
 
 impl ExprBinOp {
-    pub(crate) fn typecheck(
+    pub(super) fn typecheck(
         (op_span, op): (SrcSpan, BinOpAst),
         lhs_span: SrcSpan,
         lhs_type: ExprType,
         rhs_span: SrcSpan,
         rhs_type: ExprType,
-    ) -> ParseResult<(ExprBinOp, ExprType)> {
+    ) -> ExprTypeResult<(ExprBinOp, ExprType)> {
         match (op, lhs_type, rhs_type) {
             (BinOpAst::Add, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntAdd, ExprType::Integer))
@@ -123,19 +125,14 @@ impl ExprBinOp {
                 Ok((ExprBinOp::LabelSub, ExprType::Integer))
             }
             (op, lhs_type, rhs_type) => {
-                let (verb, conj, rev) = op.verb_conj_rev();
-                let message = if rev {
-                    format!("Cannot {verb} {rhs_type} {conj} {lhs_type}")
-                } else {
-                    format!("Cannot {verb} {lhs_type} {conj} {rhs_type}")
-                };
-                let lhs_label = format!("this expression has type {lhs_type}");
-                let rhs_label = format!("this expression has type {rhs_type}");
-                Err(vec![
-                    ParseError::new(op_span, message)
-                        .with_label(lhs_span, lhs_label)
-                        .with_label(rhs_span, rhs_label),
-                ])
+                Err(vec![ExprTypeError::CannotApplyBinaryOpToTypes {
+                    op_span,
+                    op,
+                    lhs_span,
+                    lhs_type,
+                    rhs_span,
+                    rhs_type,
+                }])
             }
         }
     }

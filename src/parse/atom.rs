@@ -1,6 +1,7 @@
+use super::error::{ParseError, ParseResult};
 use super::lex::{Token, TokenLexer, TokenValue};
-use super::types::{ParseError, ParseResult};
 use chumsky::{self, Parser};
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -17,7 +18,7 @@ pub(super) struct Context {
 
 pub(super) fn tokenize(source: &str) -> ParseResult<Vec<Token>> {
     let lexer = TokenLexer::new(source);
-    lexer.collect::<Result<_, _>>().map_err(|error| vec![error])
+    lexer.collect::<Result<_, _>>().map_err(|err| vec![ParseError::Lex(err)])
 }
 
 pub(super) fn parse_tokens<'a, T, P>(
@@ -37,7 +38,8 @@ where
                 } else {
                     tokens[tokens.len() - 1].span.end_span()
                 };
-                ParseError::new(span, format!("{error:?}"))
+                // TODO: provide richer details
+                ParseError::ExpectedToken(span, Rc::from(format!("{error:?}")))
             })
             .collect()
     })

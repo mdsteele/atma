@@ -1,7 +1,7 @@
+use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::parse::{
     AsmDefMacroAst, AsmInvokeAst, AsmMacroArgAst, AsmStmtAst, ExprAst,
-    ExprAstNode, IdentifierAst, ParseError, ParseResult, SrcSpan, Token,
-    TokenValue,
+    ExprAstNode, IdentifierAst, Token, TokenValue,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -21,7 +21,7 @@ impl MacroTable {
     pub fn expand(
         &self,
         invoke_ast: AsmInvokeAst,
-    ) -> ParseResult<Vec<AsmStmtAst>> {
+    ) -> SourceResult<Vec<AsmStmtAst>> {
         // TODO: support different macros sets for different architectures
         let signature = MacroSignature {
             name: Rc::from(invoke_ast.id.name.to_ascii_lowercase()),
@@ -40,21 +40,21 @@ impl MacroTable {
             // TODO: Better error messages; maybe report the possible
             // definitions that would work for this macro.
             let message = format!("wrong syntax for `{}`", signature.name);
-            Err(vec![ParseError::new(invoke_ast.id.span, message)])
+            Err(vec![SourceError::new(invoke_ast.id.span, message)])
         } else {
             // TODO: Better error messages; for example, report if a macro
             // name exists, but needs a differenct number of arguments, or
             // if the macro name only exists under a different
             // architecture.
             let message = format!("unknown macro `{}`", signature.name);
-            Err(vec![ParseError::new(invoke_ast.id.span, message)])
+            Err(vec![SourceError::new(invoke_ast.id.span, message)])
         }
     }
 
     pub fn define(
         &mut self,
         def_macro_ast: AsmDefMacroAst,
-    ) -> ParseResult<()> {
+    ) -> SourceResult<()> {
         let num_args = def_macro_ast.params.len();
         let mut builder = MacroBuilder::with_params(def_macro_ast.params);
         builder.scan_statements(&def_macro_ast.body);
@@ -75,20 +75,20 @@ impl MacroTable {
 struct MacroBuilder {
     params: Vec<AsmMacroArgAst>,
     placeholders: HashMap<Rc<str>, PlaceholderKind>,
-    errors: Vec<ParseError>,
+    errors: Vec<SourceError>,
 }
 
 impl MacroBuilder {
     fn with_params(params: Vec<AsmMacroArgAst>) -> MacroBuilder {
         let mut placeholders = HashMap::<Rc<str>, PlaceholderKind>::new();
-        let mut errors = Vec::<ParseError>::new();
+        let mut errors = Vec::<SourceError>::new();
         for param in &params {
             for token in &param.tokens {
                 if let TokenValue::Placeholder(name) = &token.value {
                     if placeholders.contains_key(name) {
                         // TODO: add more error details
                         let message = "repeated placeholder".to_string();
-                        errors.push(ParseError::new(token.span, message));
+                        errors.push(SourceError::new(token.span, message));
                     } else {
                         placeholders
                             .insert(name.clone(), PlaceholderKind::default());
@@ -168,11 +168,11 @@ impl MacroBuilder {
             kind.unify_with(requirement);
         } else {
             let message = format!("undeclared placeholder: {}", name);
-            self.errors.push(ParseError::new(span, message));
+            self.errors.push(SourceError::new(span, message));
         }
     }
 
-    fn build(mut self) -> ParseResult<Vec<MacroParameter>> {
+    fn build(mut self) -> SourceResult<Vec<MacroParameter>> {
         let mut params =
             Vec::<MacroParameter>::with_capacity(self.params.len());
         for param in self.params {
@@ -212,7 +212,7 @@ impl MacroBuilder {
                 _ => {
                     // TODO better error message
                     let message = "multiple placeholders".to_string();
-                    self.errors.push(ParseError::new(param.span, message));
+                    self.errors.push(SourceError::new(param.span, message));
                     continue;
                 }
             });
@@ -251,7 +251,7 @@ struct MacroSignature {
 
 enum MacroError {
     FailedToMatchPattern,
-    FailedToParseArguments(Vec<ParseError>),
+    FailedToParseArguments(Vec<SourceError>),
 }
 
 type MacroResult<T> = Result<T, MacroError>;
@@ -350,14 +350,16 @@ impl MacroSubstitution {
     fn parse_tokens(
         kind: PlaceholderKind,
         tokens: &[Token],
-    ) -> ParseResult<MacroSubstitution> {
+    ) -> SourceResult<MacroSubstitution> {
         match kind {
             PlaceholderKind::Expression => {
-                let expr = ExprAst::parse(tokens)?;
+                let expr = ExprAst::parse(tokens)
+                    .map_err(SourceError::from_errors)?;
                 Ok(MacroSubstitution::Expression(expr))
             }
             PlaceholderKind::Identifier => {
-                let id = IdentifierAst::parse(tokens)?;
+                let id = IdentifierAst::parse(tokens)
+                    .map_err(SourceError::from_errors)?;
                 Ok(MacroSubstitution::Identifier(id))
             }
         }
@@ -401,7 +403,7 @@ impl MacroExpansion {
             .map(|(arg, param)| param.try_match(arg))
             .collect::<MacroResult<Vec<MacroArgument>>>()?;
         let mut subs = HashMap::<Rc<str>, MacroSubstitution>::new();
-        let mut errors = Vec::<ParseError>::new();
+        let mut errors = Vec::<SourceError>::new();
         for macro_arg in matched {
             match macro_arg {
                 MacroArgument::Exact => {}

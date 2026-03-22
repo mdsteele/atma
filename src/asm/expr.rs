@@ -1,6 +1,10 @@
-use crate::expr::{ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprValue};
+use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::expr::{
+    ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
+    ExprValue,
+};
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjSymbol};
-use crate::parse::{ExprAst, IdentifierAst, ParseError, ParseResult, SrcSpan};
+use crate::parse::{ExprAst, IdentifierAst};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -20,14 +24,14 @@ impl AsmTypeEnv {
     pub fn declare_import(
         &mut self,
         id_ast: &IdentifierAst,
-    ) -> ParseResult<()> {
+    ) -> SourceResult<()> {
         self.declare_label(id_ast)
     }
 
     pub fn declare_label(
         &mut self,
         id_ast: &IdentifierAst,
-    ) -> ParseResult<()> {
+    ) -> SourceResult<()> {
         debug_assert!(!id_ast.is_placeholder);
         if let Some(&prev_span) = self.labels.get(&id_ast.name) {
             let message =
@@ -35,7 +39,7 @@ impl AsmTypeEnv {
             let label1 = "previously declared here".to_string();
             let label2 = "redeclared here".to_string();
             Err(vec![
-                ParseError::new(id_ast.span, message)
+                SourceError::new(id_ast.span, message)
                     .with_label(prev_span, label1)
                     .with_label(id_ast.span, label2),
             ])
@@ -61,13 +65,13 @@ impl AsmTypeEnv {
     pub fn typecheck_expression(
         &self,
         expr: &ExprAst,
-    ) -> ParseResult<(ObjExpr, ExprType)> {
+    ) -> SourceResult<(ObjExpr, ExprType)> {
         match ExprCompiler::new(self).typecheck(expr) {
             Ok((ops, expr_type, _static_value)) => {
                 debug_assert!(!ops.is_empty());
                 Ok((ObjExpr { ops }, expr_type))
             }
-            Err(errors) => Err(errors),
+            Err(errors) => Err(SourceError::from_errors(errors)),
         }
     }
 }
@@ -78,7 +82,7 @@ impl ExprEnv for AsmTypeEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ParseResult<(Self::Op, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
         if let Some(chunk_env) = self.chunk_stack.last() {
             let chunk_index = chunk_env.chunk_index;
             let offset = BigInt::from(chunk_env.data.len());
@@ -89,27 +93,27 @@ impl ExprEnv for AsmTypeEnv {
             let op = ObjExprOp::Push(value.clone());
             Ok((op, Some(value)))
         } else {
-            let message =
-                "relative labels must be within a .SECTION".to_string();
-            Err(vec![ParseError::new(span, message)])
+            Err(vec![ExprTypeError::RelativeLabelOutsideOfAnySection { span }])
         }
     }
 
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
-        name: &str,
-    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)> {
+        name: &Rc<str>,
+    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
         if self.labels.contains_key(name) {
             let value = ExprValue::Label(ExprLabel::SymbolRelative {
-                name: Rc::from(name),
+                name: name.clone(),
                 offset: BigInt::ZERO,
             });
             let op = ObjExprOp::Push(value.clone());
             Ok((op, ExprType::Label, Some(value)))
         } else {
-            let message = format!("unknown identifier: {name}");
-            Err(vec![ParseError::new(span, message)])
+            Err(vec![ExprTypeError::UnknownIdentifier {
+                span,
+                name: name.clone(),
+            }])
         }
     }
 }

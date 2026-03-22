@@ -1,5 +1,7 @@
+use super::error::{ExprTypeError, ExprTypeResult};
+use crate::error::SrcSpan;
 use crate::expr::{ExprType, ExprValue};
-use crate::parse::{ParseError, ParseResult, SrcSpan, UnOpAst};
+use crate::parse::UnOpAst;
 
 //===========================================================================//
 
@@ -11,12 +13,12 @@ pub(crate) enum ExprUnOp {
 }
 
 impl ExprUnOp {
-    pub(crate) fn typecheck(
+    pub(super) fn typecheck(
         (op_span, op): (SrcSpan, UnOpAst),
-        sub_span: SrcSpan,
-        sub_type: ExprType,
-    ) -> ParseResult<(ExprUnOp, ExprType)> {
-        match (op, sub_type) {
+        arg_span: SrcSpan,
+        arg_type: ExprType,
+    ) -> ExprTypeResult<(ExprUnOp, ExprType)> {
+        match (op, arg_type) {
             (UnOpAst::Neg, ExprType::Integer) => {
                 Ok((ExprUnOp::IntNeg, ExprType::Integer))
             }
@@ -26,23 +28,22 @@ impl ExprUnOp {
             (UnOpAst::BitNot, ExprType::Integer) => {
                 Ok((ExprUnOp::IntBitNot, ExprType::Integer))
             }
-            (op, sub_type) => {
-                let verb = op.verb();
-                let message = format!("Cannot {verb} {sub_type}");
-                let label = format!("this expression has type {sub_type}");
-                Err(vec![
-                    ParseError::new(op_span, message)
-                        .with_label(sub_span, label),
-                ])
+            (op, arg_type) => {
+                Err(vec![ExprTypeError::CannotApplyUnaryOpToType {
+                    op_span,
+                    op,
+                    arg_span,
+                    arg_type,
+                }])
             }
         }
     }
 
-    pub(crate) fn evaluate(self, sub: ExprValue) -> ExprValue {
+    pub(crate) fn evaluate(self, arg: ExprValue) -> ExprValue {
         match self {
-            ExprUnOp::BoolNot => ExprValue::Boolean(!sub.unwrap_bool()),
-            ExprUnOp::IntBitNot => ExprValue::Integer(!sub.unwrap_int()),
-            ExprUnOp::IntNeg => ExprValue::Integer(-sub.unwrap_int()),
+            ExprUnOp::BoolNot => ExprValue::Boolean(!arg.unwrap_bool()),
+            ExprUnOp::IntBitNot => ExprValue::Integer(!arg.unwrap_int()),
+            ExprUnOp::IntNeg => ExprValue::Integer(-arg.unwrap_int()),
         }
     }
 }

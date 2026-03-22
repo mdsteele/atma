@@ -1,7 +1,10 @@
 use super::env::SimEnv;
 use super::inst::{AdsFrameRef, AdsInstruction};
-use crate::expr::{ExprCompiler, ExprEnv, ExprType, ExprValue};
-use crate::parse::{ExprAst, IdentifierAst, ParseError, ParseResult, SrcSpan};
+use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::expr::{
+    ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
+};
+use crate::parse::{ExprAst, IdentifierAst};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -192,9 +195,10 @@ impl<'a> AdsTypeEnv<'a> {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> ParseResult<(Vec<AdsInstruction>, ExprType)> {
-        let (ops, expr_type, _static_value) =
-            ExprCompiler::new(self).typecheck(&expr)?;
+    ) -> SourceResult<(Vec<AdsInstruction>, ExprType)> {
+        let (ops, expr_type, _static_value) = ExprCompiler::new(self)
+            .typecheck(&expr)
+            .map_err(SourceError::from_errors)?;
         Ok((ops, expr_type))
     }
 }
@@ -205,35 +209,34 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ParseResult<(Self::Op, Option<ExprValue>)> {
-        let message =
-            "Cannot use relative labels in a debugger script".to_string();
-        Err(vec![ParseError::new(span, message)])
+    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
+        Err(vec![ExprTypeError::RelativeLabelInDebuggerScript { span }])
     }
 
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
-        id: &str,
-    ) -> ParseResult<(Self::Op, ExprType, Option<ExprValue>)> {
-        if let Some((frame_ref, decl)) = self.get_declaration(id) {
+        name: &Rc<str>,
+    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
+        if let Some((frame_ref, decl)) = self.get_declaration(name) {
             let op = AdsInstruction::GetValue(frame_ref, decl.stack_index);
             let expr_type = decl.var_type.clone();
             let static_value = decl.kind.static_value();
             return Ok((op, expr_type, static_value));
         }
         for &register in self.register_names() {
-            if id.eq_ignore_ascii_case(register) {
+            if name.eq_ignore_ascii_case(register) {
                 let op = AdsInstruction::GetRegister(register);
                 return Ok((op, ExprType::Integer, None));
             }
         }
-        if id.eq_ignore_ascii_case("PC") {
+        if name.eq_ignore_ascii_case("PC") {
             return Ok((AdsInstruction::GetPc, ExprType::Integer, None));
         }
-        let message = format!("No such identifier: `{id}`");
-        let label = "this was never declared".to_string();
-        Err(vec![ParseError::new(span, message).with_label(span, label)])
+        Err(vec![ExprTypeError::UnknownIdentifier {
+            span,
+            name: name.clone(),
+        }])
     }
 }
 
@@ -245,7 +248,8 @@ mod tests {
         AdsDeclKind, AdsFrameRef, AdsInstruction, AdsTypeEnv, ExprType,
         ExprValue, SimEnv,
     };
-    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, SrcSpan};
+    use crate::error::SrcSpan;
+    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst};
     use num_bigint::BigInt;
     use std::ops::Range;
     use std::rc::Rc;

@@ -4,13 +4,14 @@ mod expr;
 mod macros;
 
 use crate::addr::{Align, Offset, Size};
+use crate::error::{SourceError, SourceResult};
 use crate::expr::ExprType;
 use crate::obj::{
     ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol, PatchKind,
 };
 use crate::parse::{
     AsmDefMacroAst, AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst,
-    ExprAst, IdentifierAst, ParseError, ParseResult,
+    ExprAst, IdentifierAst,
 };
 use expr::AsmTypeEnv;
 use macros::MacroTable;
@@ -20,11 +21,14 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// Assembles an object file from source code.
-pub fn assemble_source(source: &str) -> ParseResult<ObjFile> {
-    assemble_ast(AsmModuleAst::parse_source(source)?)
+pub fn assemble_source(source: &str) -> SourceResult<ObjFile> {
+    assemble_ast(
+        AsmModuleAst::parse_source(source)
+            .map_err(SourceError::from_errors)?,
+    )
 }
 
-fn assemble_ast(module: AsmModuleAst) -> ParseResult<ObjFile> {
+fn assemble_ast(module: AsmModuleAst) -> SourceResult<ObjFile> {
     let mut assembler = Assembler::new();
     assembler.scope_module(&module);
     assembler.expand_module(module);
@@ -39,7 +43,7 @@ struct Assembler {
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<Rc<str>>,
-    errors: Vec<ParseError>,
+    errors: Vec<SourceError>,
 }
 
 impl Assembler {
@@ -163,7 +167,7 @@ impl Assembler {
             });
         } else {
             let message = "labels must be within a .SECTION".to_string();
-            self.errors.push(ParseError::new(id_ast.span, message));
+            self.errors.push(SourceError::new(id_ast.span, message));
         }
     }
 
@@ -177,7 +181,7 @@ impl Assembler {
                     let message = "section name must be static".to_string();
                     let label = "this expression isn't static".to_string();
                     self.errors.push(
-                        ParseError::new(section_ast.name.span, message)
+                        SourceError::new(section_ast.name.span, message)
                             .with_label(section_ast.name.span, label),
                     );
                     None
@@ -187,7 +191,7 @@ impl Assembler {
                 let message = "section name must be a string".to_string();
                 let label = format!("this expression has type {ty}");
                 self.errors.push(
-                    ParseError::new(section_ast.name.span, message)
+                    SourceError::new(section_ast.name.span, message)
                         .with_label(section_ast.name.span, label),
                 );
                 None
@@ -259,7 +263,7 @@ impl Assembler {
                 "{} directive must be within a .SECTION",
                 kind.directive()
             );
-            self.errors.push(ParseError::new(expr_ast.span, message));
+            self.errors.push(SourceError::new(expr_ast.span, message));
         }
         match self.typecheck_expression(&expr_ast) {
             Some((mut expr, ExprType::Label)) => {
@@ -285,7 +289,7 @@ impl Assembler {
                                 "the value of this expression is {bigint}"
                             );
                             self.errors.push(
-                                ParseError::new(expr_ast.span, message)
+                                SourceError::new(expr_ast.span, message)
                                     .with_label(expr_ast.span, label),
                             );
                         }
@@ -298,7 +302,7 @@ impl Assembler {
                     format!("{} value must be an integer", kind.directive());
                 let label = format!("this expression has type {ty}");
                 self.errors.push(
-                    ParseError::new(expr_ast.span, message)
+                    SourceError::new(expr_ast.span, message)
                         .with_label(expr_ast.span, label),
                 );
             }
@@ -333,7 +337,7 @@ impl Assembler {
         }
     }
 
-    fn finish(self) -> ParseResult<ObjFile> {
+    fn finish(self) -> SourceResult<ObjFile> {
         if self.errors.is_empty() {
             Ok(ObjFile {
                 chunks: self.chunks.into_values().collect(),

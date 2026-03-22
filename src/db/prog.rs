@@ -2,10 +2,11 @@ use super::env::SimEnv;
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::bus::WatchKind;
+use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
-    IdentifierAst, LValueAst, LValueAstNode, ParseError, ParseResult, SrcSpan,
+    IdentifierAst, LValueAst, LValueAstNode,
 };
 use std::rc::Rc;
 
@@ -21,8 +22,12 @@ impl AdsProgram {
     pub fn compile_source(
         source: &str,
         sim_env: &SimEnv,
-    ) -> ParseResult<AdsProgram> {
-        AdsProgram::compile_ast(AdsModuleAst::parse_source(source)?, sim_env)
+    ) -> SourceResult<AdsProgram> {
+        AdsProgram::compile_ast(
+            AdsModuleAst::parse_source(source)
+                .map_err(SourceError::from_errors)?,
+            sim_env,
+        )
     }
 
     /// Distills the abstract syntax tree for an Atma Debugger Script module
@@ -30,7 +35,7 @@ impl AdsProgram {
     fn compile_ast(
         module: AdsModuleAst,
         sim_env: &SimEnv,
-    ) -> ParseResult<AdsProgram> {
+    ) -> SourceResult<AdsProgram> {
         let mut compiler = AdsCompiler::new(sim_env);
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions);
@@ -50,7 +55,7 @@ impl AdsProgram {
 
 struct AdsCompiler<'a> {
     env: AdsTypeEnv<'a>,
-    errors: Vec<ParseError>,
+    errors: Vec<SourceError>,
 }
 
 impl<'a> AdsCompiler<'a> {
@@ -58,7 +63,7 @@ impl<'a> AdsCompiler<'a> {
         AdsCompiler { env: AdsTypeEnv::new(sim_env), errors: Vec::new() }
     }
 
-    fn into_errors(self) -> Vec<ParseError> {
+    fn into_errors(self) -> Vec<SourceError> {
         self.errors
     }
 
@@ -150,7 +155,7 @@ impl<'a> AdsCompiler<'a> {
                     format!("predicate must be of type bool, not {expr_type}");
                 let label = format!("this expression has type {expr_type}");
                 self.errors.push(
-                    ParseError::new(pred_span, message)
+                    SourceError::new(pred_span, message)
                         .with_label(pred_span, label),
                 );
             }
@@ -236,7 +241,7 @@ impl<'a> AdsCompiler<'a> {
         let label1 = format!("this expression has type {expr_type}");
         let label2 = format!("this destination has type {lvalue_type}");
         self.errors.push(
-            ParseError::new(expr_span, message)
+            SourceError::new(expr_span, message)
                 .with_label(expr_span, label1)
                 .with_label(lvalue_span, label2),
         );
@@ -322,7 +327,7 @@ impl<'a> AdsCompiler<'a> {
             format!("breakpoint address must be of type int, not {expr_type}");
         let label = format!("this expression has type {expr_type}");
         self.errors.push(
-            ParseError::new(expr_span, message).with_label(expr_span, label),
+            SourceError::new(expr_span, message).with_label(expr_span, label),
         );
         false
     }
@@ -361,7 +366,7 @@ impl<'a> AdsCompiler<'a> {
                 format!("memory address must be of type int, not {expr_type}");
             let label = format!("this expression has type {expr_type}");
             self.errors.push(
-                ParseError::new(expr_span, message)
+                SourceError::new(expr_span, message)
                     .with_label(expr_span, label),
             );
         }
@@ -409,7 +414,7 @@ impl<'a> AdsCompiler<'a> {
                 let label2 =
                     format!("`{id_name}` was declared as a constant here");
                 self.errors.push(
-                    ParseError::new(id_span, message)
+                    SourceError::new(id_span, message)
                         .with_label(id_span, label1)
                         .with_label(decl.id_span, label2),
                 );
@@ -429,7 +434,7 @@ impl<'a> AdsCompiler<'a> {
                 let message = format!("no such variable: `{id_name}`");
                 let label = "this was never declared".to_string();
                 self.errors.push(
-                    ParseError::new(id_span, message)
+                    SourceError::new(id_span, message)
                         .with_label(id_span, label),
                 );
                 ExprType::Bottom

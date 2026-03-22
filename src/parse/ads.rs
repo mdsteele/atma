@@ -1,9 +1,9 @@
 //! Facilities for parsing Atma Debugger Script.
 
-use super::atom::{Extra, keyword, linebreak, parse_tokens, symbol};
+use super::atom::{Extra, keyword, linebreak, parse_tokens, symbol, tokenize};
 use super::expr::{ExprAst, IdentifierAst};
 use super::lvalue::LValueAst;
-use crate::parse::{ParseResult, Token, TokenLexer, TokenValue};
+use crate::parse::{ParseResult, Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
@@ -18,9 +18,7 @@ impl AdsModuleAst {
     /// Reads the abstract syntax tree for an Atma Debugger Script module from
     /// a file.
     pub fn parse_source(source: &str) -> ParseResult<AdsModuleAst> {
-        let lexer = TokenLexer::new(source);
-        let tokens: Vec<Token> =
-            lexer.collect::<Result<_, _>>().map_err(|error| vec![error])?;
+        let tokens = tokenize(source)?;
         AdsModuleAst::parse(&tokens)
     }
 
@@ -216,20 +214,13 @@ fn step_statement<'a>()
 #[cfg(test)]
 mod tests {
     use super::{AdsModuleAst, AdsStmtAst, DeclareAst, IdentifierAst};
-    use crate::parse::{
-        ExprAst, ExprAstNode, ParseError, SrcSpan, Token, TokenLexer,
-    };
+    use crate::error::SrcSpan;
+    use crate::parse::{ExprAst, ExprAstNode};
     use num_bigint::BigInt;
     use std::rc::Rc;
 
     fn read_statements(input: &str) -> Vec<AdsStmtAst> {
-        AdsModuleAst::parse(
-            &TokenLexer::new(input)
-                .collect::<Result<Vec<Token>, ParseError>>()
-                .unwrap(),
-        )
-        .unwrap()
-        .statements
+        AdsModuleAst::parse_source(input).unwrap().statements
     }
 
     #[test]

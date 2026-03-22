@@ -3,9 +3,9 @@ use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
+use atma::error::SourceError;
 use atma::link::{LinkConfig, LinkError, LinkFragment};
 use atma::obj::{BinaryIo, ObjFile};
-use atma::parse::ParseError;
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
 use std::collections::HashSet;
@@ -61,7 +61,7 @@ enum Command {
 
 enum CliError {
     Io(io::Error),
-    Parse(String, Vec<ParseError>),
+    Source(String, Vec<SourceError>),
     Link(Vec<LinkError>),
     AdsRuntimeError(AdsRuntimeError),
 }
@@ -108,8 +108,8 @@ fn run_cli() -> Result<(), ExitCode> {
             report_io_error(io_error);
             Err(ExitCode::FAILURE)
         }
-        Err(CliError::Parse(source, parse_errors)) => {
-            report_parse_errors(&source, parse_errors);
+        Err(CliError::Source(source, source_errors)) => {
+            report_source_errors(&source, source_errors);
             Err(ExitCode::FAILURE)
         }
         Err(CliError::Link(link_errors)) => {
@@ -132,8 +132,8 @@ fn command_asm(
     let source = io::read_to_string(fs::File::open(&source_path)?)?;
     let obj = match assemble_source(&source) {
         Ok(obj) => obj,
-        Err(parse_errors) => {
-            return Err(CliError::Parse(source, parse_errors));
+        Err(source_errors) => {
+            return Err(CliError::Source(source, source_errors));
         }
     };
     if let Some(output_path) = opt_output_path {
@@ -165,8 +165,8 @@ fn command_db(
             let source = io::read_to_string(file)?;
             match AdsEnvironment::create(&source, sim_env, io::stdout()) {
                 Ok(ads_env) => ads_env,
-                Err(parse_errors) => {
-                    return Err(CliError::Parse(source, parse_errors));
+                Err(source_errors) => {
+                    return Err(CliError::Source(source, source_errors));
                 }
             }
         };
@@ -219,7 +219,7 @@ fn command_ld(
     let config = {
         let source = io::read_to_string(fs::File::open(&config_path)?)?;
         LinkConfig::from_source(&source)
-            .map_err(|parse_errors| CliError::Parse(source, parse_errors))?
+            .map_err(|source_errors| CliError::Source(source, source_errors))?
     };
     let object_files = {
         let mut objfiles = Vec::<ObjFile>::with_capacity(objfile_paths.len());
@@ -310,13 +310,13 @@ fn report_link_error(error: LinkError) {
     eprintln!("Link error: {error:?}");
 }
 
-fn report_parse_errors(source: &str, errors: Vec<ParseError>) {
+fn report_source_errors(source: &str, errors: Vec<SourceError>) {
     for error in errors {
-        report_parse_error(source, error);
+        report_source_error(source, error);
     }
 }
 
-fn report_parse_error(source: &str, error: ParseError) {
+fn report_source_error(source: &str, error: SourceError) {
     let id = "input";
     let mut colors = ariadne::ColorGenerator::new();
     let mut builder = ariadne::Report::build(

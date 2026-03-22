@@ -1,7 +1,9 @@
 //! Facilities for parsing expressions.
 
 use super::atom::{Context, Extra, parse_tokens, symbol};
-use crate::parse::{ParseResult, SrcSpan, Token, TokenValue};
+use super::error::ParseResult;
+use super::lex::{Token, TokenValue};
+use crate::error::SrcSpan;
 use chumsky::{self, ConfigParser, IterParser, Parser, pratt};
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -500,18 +502,16 @@ fn str_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
 
 #[cfg(test)]
 mod tests {
+    use super::super::atom::tokenize;
+    use super::super::error::ParseResult;
     use super::{BinOpAst, ExprAst, ExprAstNode};
-    use crate::parse::{ParseError, ParseResult, SrcSpan, Token, TokenLexer};
+    use crate::error::SrcSpan;
     use num_bigint::BigInt;
     use std::ops::Range;
     use std::rc::Rc;
 
     fn parse(input: &str) -> ParseResult<ExprAst> {
-        ExprAst::parse(
-            &TokenLexer::new(input)
-                .collect::<Result<Vec<Token>, ParseError>>()
-                .map_err(|error| vec![error])?,
-        )
+        ExprAst::parse(&tokenize(input)?)
     }
 
     fn int_node(value: i32) -> ExprAstNode {
