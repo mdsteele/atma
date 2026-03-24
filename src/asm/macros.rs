@@ -20,39 +20,40 @@ impl MacroTable {
 
     pub fn expand(
         &self,
+        arches: &[Rc<str>],
         invoke_ast: AsmInvokeAst,
     ) -> SourceResult<Vec<AsmStmtAst>> {
-        // TODO: support different macros sets for different architectures
-        let signature = MacroSignature {
-            name: Rc::from(invoke_ast.id.name.to_ascii_lowercase()),
-            num_args: invoke_ast.args.len(),
-        };
-        if let Some(definitions) = self.definitions.get(&signature) {
-            for definition in definitions {
-                match definition.try_expand(&invoke_ast.args) {
-                    Err(MacroError::FailedToMatchPattern) => continue,
-                    Err(MacroError::FailedToParseArguments(errors)) => {
-                        return Err(errors);
+        let name = Rc::<str>::from(invoke_ast.id.name.to_ascii_lowercase());
+        for arch in arches {
+            let signature = MacroSignature {
+                arch: arch.clone(),
+                name: name.clone(),
+                num_args: invoke_ast.args.len(),
+            };
+            if let Some(definitions) = self.definitions.get(&signature) {
+                for definition in definitions {
+                    match definition.try_expand(&invoke_ast.args) {
+                        Err(MacroError::FailedToMatchPattern) => continue,
+                        Err(MacroError::FailedToParseArguments(errors)) => {
+                            return Err(errors);
+                        }
+                        Ok(stmts) => return Ok(stmts),
                     }
-                    Ok(stmts) => return Ok(stmts),
                 }
             }
-            // TODO: Better error messages; maybe report the possible
-            // definitions that would work for this macro.
-            let message = format!("wrong syntax for `{}`", signature.name);
-            Err(vec![SourceError::new(invoke_ast.id.span, message)])
-        } else {
-            // TODO: Better error messages; for example, report if a macro
-            // name exists, but needs a differenct number of arguments, or
-            // if the macro name only exists under a different
-            // architecture.
-            let message = format!("unknown macro `{}`", signature.name);
-            Err(vec![SourceError::new(invoke_ast.id.span, message)])
         }
+        // TODO: Better error messages; for example, report if a macro name
+        // exists, but needs a differenct pattern, or if the macro name exists
+        // under a different architecture.
+        let arch = arches.first().cloned().unwrap_or_default();
+        let message =
+            format!("no match for `{name}` in architecture `{arch}`");
+        Err(vec![SourceError::new(invoke_ast.id.span, message)])
     }
 
     pub fn define(
         &mut self,
+        arch: &Rc<str>,
         def_macro_ast: AsmDefMacroAst,
     ) -> SourceResult<()> {
         let num_args = def_macro_ast.params.len();
@@ -62,8 +63,11 @@ impl MacroTable {
             params: builder.build()?,
             body: def_macro_ast.body,
         };
-        let signature =
-            MacroSignature { name: def_macro_ast.id.name, num_args };
+        let signature = MacroSignature {
+            arch: arch.clone(),
+            name: def_macro_ast.id.name,
+            num_args,
+        };
         self.definitions.entry(signature).or_default().push(definition);
         Ok(())
     }
@@ -243,6 +247,7 @@ impl PlaceholderKind {
 
 #[derive(Clone, Hash, Eq, PartialEq)]
 struct MacroSignature {
+    pub arch: Rc<str>,
     pub name: Rc<str>,
     pub num_args: usize,
 }

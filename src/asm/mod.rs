@@ -1,10 +1,11 @@
 //! Facilities for assembling source files into object files.
 
+mod arch;
 mod expr;
 mod macros;
 
 use crate::addr::{Align, Offset, Size};
-use crate::error::{SourceError, SourceResult};
+use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::ExprType;
 use crate::obj::{
     ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol, PatchKind,
@@ -13,8 +14,10 @@ use crate::parse::{
     AsmDefMacroAst, AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst,
     ExprAst, IdentifierAst,
 };
+use arch::ArchTree;
 use expr::AsmTypeEnv;
 use macros::MacroTable;
+use num_bigint::BigInt;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -38,6 +41,7 @@ fn assemble_ast(module: AsmModuleAst) -> SourceResult<ObjFile> {
 //===========================================================================//
 
 struct Assembler {
+    arch_tree: ArchTree,
     env: AsmTypeEnv,
     macros: MacroTable,
     next_chunk_index: usize,
@@ -48,7 +52,14 @@ struct Assembler {
 
 impl Assembler {
     fn new() -> Assembler {
+        let mut arch_tree = ArchTree::new();
+        // TODO: define other built-in architectures and macros
+        arch_tree
+            .define_arch(Rc::from("65xx"), ArchTree::ROOT_ARCH_NAME)
+            .unwrap();
+        arch_tree.define_arch(Rc::from("6502"), "65xx").unwrap();
         Assembler {
+            arch_tree,
             env: AsmTypeEnv::new(),
             macros: MacroTable::new(),
             next_chunk_index: 0,
@@ -88,17 +99,13 @@ impl Assembler {
     }
 
     fn scope_import(&mut self, id_ast: &IdentifierAst) {
-        match self.env.declare_import(id_ast) {
-            Ok(()) => {}
-            Err(mut errors) => self.errors.append(&mut errors),
-        }
+        let result = self.env.declare_import(id_ast);
+        self.merge_errors(result);
     }
 
     fn scope_label(&mut self, id_ast: &IdentifierAst) {
-        match self.env.declare_label(id_ast) {
-            Ok(()) => {}
-            Err(mut errors) => self.errors.append(&mut errors),
-        }
+        let result = self.env.declare_label(id_ast);
+        self.merge_errors(result);
     }
 
     fn scope_section(&mut self, section_ast: &AsmSectionAst) {
@@ -138,7 +145,8 @@ impl Assembler {
     }
 
     fn expand_macro_definition(&mut self, def_macro_ast: AsmDefMacroAst) {
-        match self.macros.define(def_macro_ast) {
+        let arch = self.env.current_arch();
+        match self.macros.define(arch, def_macro_ast) {
             Ok(()) => {}
             Err(mut errors) => {
                 self.errors.append(&mut errors);
@@ -147,7 +155,8 @@ impl Assembler {
     }
 
     fn expand_macro_invocation(&mut self, invoke_ast: AsmInvokeAst) {
-        match self.macros.expand(invoke_ast) {
+        let arches = self.arch_tree.get_all_ancestors(self.env.current_arch());
+        match self.macros.expand(&arches, invoke_ast) {
             Ok(statements) => {
                 self.scope_statements(&statements);
                 self.expand_statements(statements);
@@ -198,12 +207,27 @@ impl Assembler {
             }
             None => None,
         };
+
+        let mut arch: Option<Rc<str>> = None;
         let align = Align::default(); // TODO: support align attribute
         let within: Option<Align> = None; // TODO: support within attribute
-        let fill: Option<u8> = None; // TODO: support fill attribute
+        let mut fill: Option<u8> = None;
+        for (id_ast, expr_ast) in section_ast.attrs {
+            // TODO: error if repeated attr name
+            match &*id_ast.name {
+                "arch" => arch = self.chunk_arch_attr(expr_ast),
+                "fill" => fill = Some(self.chunk_fill_attr(expr_ast)),
+                _ => {} // TODO: error for unknown attr name
+            }
+        }
+
         let chunk_index = self.next_chunk_index;
         self.next_chunk_index += 1;
         self.env.begin_chunk(chunk_index);
+        if let Some(arch) = arch {
+            self.set_current_arch(arch);
+        }
+        // TODO: don't attempt to expand statements if the arch was invalid
         self.expand_statements(section_ast.body);
         let chunk_env = self.env.end_chunk();
         // TODO: error if size is too large
@@ -311,6 +335,134 @@ impl Assembler {
         0
     }
 
+    fn set_current_arch(&mut self, arch: Rc<str>) {
+        debug_assert!(self.arch_tree.contains_arch(&arch));
+        self.env.set_current_arch(arch);
+    }
+
+    fn chunk_arch_attr(&mut self, expr_ast: ExprAst) -> Option<Rc<str>> {
+        let expr_span = expr_ast.span;
+        if let Some(arch) = self.chunk_static_str_attr("arch", expr_ast) {
+            if self.arch_tree.contains_arch(&arch) {
+                return Some(arch);
+            }
+            self.unknown_arch_error(expr_span, &arch);
+        }
+        None
+    }
+
+    fn chunk_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+        let expr_span = expr_ast.span;
+        if let Some(bigint) = self.chunk_static_int_attr("fill", expr_ast) {
+            match u8::try_from(&bigint) {
+                Ok(byte) => return byte,
+                Err(_) => self
+                    .chunk_attr_out_of_range_error("fill", expr_span, &bigint),
+            }
+        }
+        u8::default()
+    }
+
+    fn chunk_static_int_attr(
+        &mut self,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> Option<BigInt> {
+        let expr_span = expr_ast.span;
+        match self.typecheck_expression(&expr_ast) {
+            Some((expr, ExprType::Integer)) => match expr.static_value() {
+                Some(value) => Some(value.clone().unwrap_int()),
+                None => {
+                    self.chunk_attr_non_static_error(attr_name, expr_span);
+                    None
+                }
+            },
+            Some((_, expr_type)) => {
+                self.chunk_attr_type_error(
+                    attr_name,
+                    &ExprType::Integer,
+                    expr_span,
+                    &expr_type,
+                );
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn chunk_static_str_attr(
+        &mut self,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> Option<Rc<str>> {
+        let expr_span = expr_ast.span;
+        match self.typecheck_expression(&expr_ast) {
+            Some((expr, ExprType::String)) => match expr.static_value() {
+                Some(value) => Some(value.clone().unwrap_str()),
+                None => {
+                    self.chunk_attr_non_static_error(attr_name, expr_span);
+                    None
+                }
+            },
+            Some((_, expr_type)) => {
+                self.chunk_attr_type_error(
+                    attr_name,
+                    &ExprType::String,
+                    expr_span,
+                    &expr_type,
+                );
+                None
+            }
+            None => None,
+        }
+    }
+
+    fn chunk_attr_non_static_error(
+        &mut self,
+        attr_name: &str,
+        expr_span: SrcSpan,
+    ) {
+        let message =
+            format!(".SECTION `{attr_name}` attribute must be static");
+        let label = "this expression isn't static".to_string();
+        self.errors.push(
+            SourceError::new(expr_span, message).with_label(expr_span, label),
+        );
+    }
+
+    fn chunk_attr_out_of_range_error(
+        &mut self,
+        attr_name: &str,
+        expr_span: SrcSpan,
+        value: &BigInt,
+    ) {
+        let message = format!(".SECTION `{attr_name}` is out of range");
+        let label = format!("the value of this expression is {value}");
+        self.errors.push(
+            SourceError::new(expr_span, message).with_label(expr_span, label),
+        );
+    }
+
+    fn chunk_attr_type_error(
+        &mut self,
+        attr_name: &str,
+        expected_type: &ExprType,
+        expr_span: SrcSpan,
+        actual_type: &ExprType,
+    ) {
+        let message =
+            format!(".SECTION `{attr_name}` must have type {expected_type}");
+        let label = format!("this expression has type {actual_type}");
+        self.errors.push(
+            SourceError::new(expr_span, message).with_label(expr_span, label),
+        );
+    }
+
+    fn unknown_arch_error(&mut self, expr_span: SrcSpan, arch: &str) {
+        let message = format!("the `{arch}` architecture was never defined");
+        self.errors.push(SourceError::new(expr_span, message));
+    }
+
     /// Attempts to add an `ObjPatch` to the current chunk starting at the
     /// current end of its static data. Does nothing if there is no current
     /// chunk; it is assumed that the caller will have already flagged an error
@@ -334,6 +486,13 @@ impl Assembler {
                 self.errors.extend(errors);
                 None
             }
+        }
+    }
+
+    fn merge_errors(&mut self, result: SourceResult<()>) {
+        match result {
+            Ok(()) => {}
+            Err(mut errors) => self.errors.append(&mut errors),
         }
     }
 

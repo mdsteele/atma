@@ -58,6 +58,12 @@ pub enum AsmStmtAst {
 
 impl AsmStmtAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], AsmStmtAst, Extra<'a>> {
+        let attributes = symbol(TokenValue::Comma)
+            .ignore_then(IdentifierAst::parser())
+            .then_ignore(symbol(TokenValue::Equals))
+            .then(ExprAst::parser())
+            .repeated()
+            .collect::<Vec<_>>();
         chumsky::prelude::recursive(|statement| {
             let label = IdentifierAst::parser()
                 .then_ignore(symbol(TokenValue::Colon))
@@ -87,10 +93,11 @@ impl AsmStmtAst {
                 .map(AsmStmtAst::Import);
             let section_dir = directive(".SECTION")
                 .ignore_then(ExprAst::parser())
+                .then(attributes)
                 .then(stmt_block)
                 .then_ignore(linebreak())
-                .map(|(name, body)| {
-                    AsmStmtAst::Section(AsmSectionAst { name, body })
+                .map(|((name, attrs), body)| {
+                    AsmStmtAst::Section(AsmSectionAst { name, attrs, body })
                 });
             let u8_dir = directive(".U8")
                 .ignore_then(ExprAst::parser())
@@ -241,6 +248,8 @@ pub struct AsmSectionAst {
     /// A static expression that evaluates to the name of the section that this
     /// chunk belongs to.
     pub name: ExprAst,
+    /// Key/value attributes associated with this chunk.
+    pub attrs: Vec<(IdentifierAst, ExprAst)>,
     /// The statements inside the section block.
     pub body: Vec<AsmStmtAst>,
 }

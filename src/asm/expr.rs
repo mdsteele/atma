@@ -1,3 +1,4 @@
+use super::arch::ArchTree;
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
@@ -13,12 +14,17 @@ use std::rc::Rc;
 
 pub(super) struct AsmTypeEnv {
     labels: HashMap<Rc<str>, SrcSpan>,
+    arch_stack: Vec<Rc<str>>,
     chunk_stack: Vec<ChunkEnv>,
 }
 
 impl AsmTypeEnv {
     pub fn new() -> AsmTypeEnv {
-        AsmTypeEnv { labels: HashMap::new(), chunk_stack: Vec::new() }
+        AsmTypeEnv {
+            labels: HashMap::new(),
+            arch_stack: vec![Rc::from(ArchTree::ROOT_ARCH_NAME)],
+            chunk_stack: Vec::new(),
+        }
     }
 
     pub fn declare_import(
@@ -51,6 +57,8 @@ impl AsmTypeEnv {
 
     pub fn begin_chunk(&mut self, chunk_index: usize) {
         self.chunk_stack.push(ChunkEnv::with_chunk_index(chunk_index));
+        debug_assert!(!self.arch_stack.is_empty());
+        self.arch_stack.push(self.arch_stack.last().unwrap().clone());
     }
 
     pub fn current_chunk(&mut self) -> Option<&mut ChunkEnv> {
@@ -58,8 +66,20 @@ impl AsmTypeEnv {
     }
 
     pub fn end_chunk(&mut self) -> ChunkEnv {
+        debug_assert!(self.arch_stack.len() >= 2);
+        self.arch_stack.pop();
         debug_assert!(!self.chunk_stack.is_empty());
         self.chunk_stack.pop().unwrap()
+    }
+
+    pub fn current_arch(&self) -> &Rc<str> {
+        debug_assert!(!self.arch_stack.is_empty());
+        self.arch_stack.last().unwrap()
+    }
+
+    pub fn set_current_arch(&mut self, arch: Rc<str>) {
+        debug_assert!(!self.arch_stack.is_empty());
+        *self.arch_stack.last_mut().unwrap() = arch;
     }
 
     pub fn typecheck_expression(
