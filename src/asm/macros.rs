@@ -23,7 +23,7 @@ impl MacroTable {
         arches: &[Rc<str>],
         invoke_ast: AsmInvokeAst,
     ) -> SourceResult<Vec<AsmStmtAst>> {
-        let name = Rc::<str>::from(invoke_ast.id.name.to_ascii_lowercase());
+        let name = normalize_macro_name(&invoke_ast.id.name);
         for arch in arches {
             let signature = MacroSignature {
                 arch: arch.clone(),
@@ -65,7 +65,7 @@ impl MacroTable {
         };
         let signature = MacroSignature {
             arch: arch.clone(),
-            name: def_macro_ast.id.name,
+            name: normalize_macro_name(&def_macro_ast.id.name),
             num_args,
         };
         self.definitions.entry(signature).or_default().push(definition);
@@ -514,6 +514,16 @@ impl MacroExpansion {
         } else {
             identifier.clone()
         }
+    }
+}
+
+//===========================================================================//
+
+fn normalize_macro_name(name: &Rc<str>) -> Rc<str> {
+    if name.chars().all(|ch| ch.is_ascii_uppercase()) {
+        name.clone()
+    } else {
+        Rc::<str>::from(name.to_ascii_uppercase())
     }
 }
 

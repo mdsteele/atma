@@ -121,10 +121,8 @@ impl SimBus for SsmpBus {
             0x00f0..0x0100 => {
                 self.hw_regs.write_byte(addr, data);
             }
-            0xffc0.. => {
-                if self.hw_regs.boot_rom_enabled() {
-                    self.boot_rom.write_byte(addr, data);
-                }
+            0xffc0.. if self.hw_regs.boot_rom_enabled() => {
+                self.boot_rom.write_byte(addr, data);
             }
             _ => {}
         }

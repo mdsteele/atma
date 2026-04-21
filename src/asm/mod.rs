@@ -1,6 +1,7 @@
 //! Facilities for assembling source files into object files.
 
 mod arch;
+mod builtins;
 mod expr;
 mod macros;
 
@@ -42,8 +43,8 @@ fn assemble_ast(module: AsmModuleAst) -> SourceResult<ObjFile> {
 
 struct Assembler {
     arch_tree: ArchTree,
-    env: AsmTypeEnv,
     macros: MacroTable,
+    env: AsmTypeEnv,
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<Rc<str>>,
@@ -52,16 +53,11 @@ struct Assembler {
 
 impl Assembler {
     fn new() -> Assembler {
-        let mut arch_tree = ArchTree::new();
-        // TODO: define other built-in architectures and macros
-        arch_tree
-            .define_arch(Rc::from("65xx"), ArchTree::ROOT_ARCH_NAME)
-            .unwrap();
-        arch_tree.define_arch(Rc::from("6502"), "65xx").unwrap();
+        let (arch_tree, macros) = builtins::make_builtins();
         Assembler {
             arch_tree,
+            macros,
             env: AsmTypeEnv::new(),
-            macros: MacroTable::new(),
             next_chunk_index: 0,
             chunks: BTreeMap::new(),
             imports: Vec::new(),
@@ -168,16 +164,16 @@ impl Assembler {
     }
 
     fn expand_label(&mut self, id_ast: IdentifierAst) {
-        if let Some(chunk_env) = self.env.current_chunk() {
-            chunk_env.symbols.push(ObjSymbol {
-                name: id_ast.name,
-                exported: true, // TODO
-                offset: Offset::try_from(chunk_env.data.len()).unwrap(),
-            });
-        } else {
+        let Some(chunk_env) = self.env.current_chunk() else {
             let message = "labels must be within a .SECTION".to_string();
             self.errors.push(SourceError::new(id_ast.span, message));
-        }
+            return;
+        };
+        chunk_env.symbols.push(ObjSymbol {
+            name: id_ast.name,
+            exported: true, // TODO
+            offset: Offset::try_from(chunk_env.data.len()).unwrap(),
+        });
     }
 
     fn expand_section(&mut self, section_ast: AsmSectionAst) {

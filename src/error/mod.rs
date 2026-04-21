@@ -12,6 +12,10 @@ pub struct SrcSpan {
 }
 
 impl SrcSpan {
+    /// A [SrcSpan] for code that is built in to ATMA and doesn't actually
+    /// exist in any source code file.
+    pub const BUILTIN: SrcSpan = SrcSpan { start: 0, end: 0 };
+
     /// Constructs a span from the given the byte range.
     pub fn from_byte_range(range: Range<usize>) -> SrcSpan {
         assert!(range.start <= range.end);

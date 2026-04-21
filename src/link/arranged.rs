@@ -86,7 +86,7 @@ impl ArrangedSection {
         mut section: LooseSection,
         errors: &mut Vec<LinkError>,
     ) -> ArrangedSection {
-        section.chunks.sort_by(|a, b| b.align.cmp(&a.align));
+        section.chunks.sort_by_key(|chunk| std::cmp::Reverse(chunk.align));
         let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut arranged =
             Vec::<ArrangedChunk>::with_capacity(section.chunks.len());
