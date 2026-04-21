@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -19,7 +19,7 @@ impl ArchTree {
         let mut arches = HashMap::new();
         arches.insert(
             Rc::from(ArchTree::ROOT_ARCH_NAME),
-            ArchDefinition { parent: None },
+            ArchDefinition { parent: None, reserved: HashSet::new() },
         );
         ArchTree { arches }
     }
@@ -27,6 +27,21 @@ impl ArchTree {
     /// Returns true if `name` is a defined architecture in this tree.
     pub fn contains_arch(&self, name: &str) -> bool {
         self.arches.contains_key(name)
+    }
+
+    /// Given an architecture name, returns the set of all identifier names
+    /// that are reserved (e.g. because they are register names).  Any such
+    /// names cannot be used for identifiers or labels while the specified
+    /// architecture is set as the current architecture, and any macros
+    /// parameter tokens that require matching one of these names exactly
+    /// should do so case-insensitively.
+    ///
+    /// Panics if no such architecture is defined.
+    pub fn reserved_names(&self, name: &str) -> &HashSet<Rc<str>> {
+        match self.arches.get(name) {
+            Some(def) => &def.reserved,
+            None => panic!("No such architecture: {name:?}"),
+        }
     }
 
     /// Given an architecture name, returns a list of all architectures that
@@ -54,15 +69,20 @@ impl ArchTree {
         &mut self,
         name: Rc<str>,
         parent: &str,
+        reserved_names: &[Rc<str>],
     ) -> Result<(), DefineArchError> {
         if self.contains_arch(&name) {
             return Err(DefineArchError::ArchAlreadyExists);
         }
-        let parent = match self.arches.get_key_value(parent) {
+        let (parent, mut reserved) = match self.arches.get_key_value(parent) {
             None => return Err(DefineArchError::NoSuchParentArch),
-            Some((parent, _)) => parent.clone(),
+            Some((parent, def)) => (parent.clone(), def.reserved.clone()),
         };
-        self.arches.insert(name, ArchDefinition { parent: Some(parent) });
+        for name in reserved_names {
+            reserved.insert(name.clone());
+        }
+        self.arches
+            .insert(name, ArchDefinition { parent: Some(parent), reserved });
         Ok(())
     }
 }
@@ -80,7 +100,15 @@ pub enum DefineArchError {
 
 /// Helper struct for `ArchTree`.
 struct ArchDefinition {
+    /// The name of the parent architecture, or `None` is this is the root
+    /// architecture.
     parent: Option<Rc<str>>,
+    /// Identifier names that are reserved in this architecture (e.g. names of
+    /// registers).  Any such names cannot be used for identifiers or labels
+    /// while this is set as the current architecture, and any macros parameter
+    /// tokens that require matching one of these names exactly will do so
+    /// case-insensitively.
+    reserved: HashSet<Rc<str>>,
 }
 
 //===========================================================================//

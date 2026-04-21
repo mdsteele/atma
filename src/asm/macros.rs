@@ -3,7 +3,7 @@ use crate::parse::{
     AsmDefMacroAst, AsmInvokeAst, AsmMacroArgAst, AsmStmtAst, ExprAst,
     ExprAstNode, IdentifierAst, Token, TokenValue,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -54,10 +54,12 @@ impl MacroTable {
     pub fn define(
         &mut self,
         arch: &Rc<str>,
+        reserved: &HashSet<Rc<str>>,
         def_macro_ast: AsmDefMacroAst,
     ) -> SourceResult<()> {
         let num_args = def_macro_ast.params.len();
-        let mut builder = MacroBuilder::with_params(def_macro_ast.params);
+        let mut builder =
+            MacroBuilder::with_params(def_macro_ast.params, reserved);
         builder.scan_statements(&def_macro_ast.body);
         let definition = MacroDefinition {
             params: builder.build()?,
@@ -76,14 +78,18 @@ impl MacroTable {
 //===========================================================================//
 
 /// Helper type for `MacroTable::define`.
-struct MacroBuilder {
+struct MacroBuilder<'a> {
     params: Vec<AsmMacroArgAst>,
     placeholders: HashMap<Rc<str>, PlaceholderKind>,
+    reserved: &'a HashSet<Rc<str>>,
     errors: Vec<SourceError>,
 }
 
-impl MacroBuilder {
-    fn with_params(params: Vec<AsmMacroArgAst>) -> MacroBuilder {
+impl<'a> MacroBuilder<'a> {
+    fn with_params(
+        params: Vec<AsmMacroArgAst>,
+        reserved: &'a HashSet<Rc<str>>,
+    ) -> MacroBuilder<'a> {
         let mut placeholders = HashMap::<Rc<str>, PlaceholderKind>::new();
         let mut errors = Vec::<SourceError>::new();
         for param in &params {
@@ -100,7 +106,7 @@ impl MacroBuilder {
                 }
             }
         }
-        MacroBuilder { params, placeholders, errors }
+        MacroBuilder { params, placeholders, reserved, errors }
     }
 
     fn scan_statements(&mut self, statements: &[AsmStmtAst]) {
@@ -194,17 +200,17 @@ impl MacroBuilder {
                     pattern: param
                         .tokens
                         .into_iter()
-                        .map(|token| token.value)
+                        .map(|token| param_token(&token, self.reserved))
                         .collect(),
                 },
                 [(index, name)] => {
                     let suffix = param.tokens[(index + 1)..]
                         .iter()
-                        .map(|token| token.value.clone())
+                        .map(|token| param_token(token, self.reserved))
                         .collect();
                     let prefix = param.tokens[..index]
                         .iter()
-                        .map(|token| token.value.clone())
+                        .map(|token| param_token(token, self.reserved))
                         .collect();
                     MacroParameter::Placeholder {
                         prefix,
@@ -223,6 +229,16 @@ impl MacroBuilder {
         }
         if self.errors.is_empty() { Ok(params) } else { Err(self.errors) }
     }
+}
+
+fn param_token(token: &Token, reserved: &HashSet<Rc<str>>) -> MacroParamToken {
+    if let TokenValue::Identifier(name) = &token.value {
+        let res = Rc::<str>::from(name.to_ascii_uppercase());
+        if reserved.contains(&res) {
+            return MacroParamToken::Reserved(res);
+        }
+    }
+    MacroParamToken::Exact(token.value.clone())
 }
 
 //===========================================================================//
@@ -282,13 +298,13 @@ impl MacroDefinition {
 
 enum MacroParameter {
     Exact {
-        pattern: Vec<TokenValue>,
+        pattern: Vec<MacroParamToken>,
     },
     Placeholder {
-        prefix: Vec<TokenValue>,
+        prefix: Vec<MacroParamToken>,
         kind: PlaceholderKind,
         name: Rc<str>,
-        suffix: Vec<TokenValue>,
+        suffix: Vec<MacroParamToken>,
     },
 }
 
@@ -322,17 +338,43 @@ impl MacroParameter {
 
 fn try_match_tokens(
     tokens: &[Token],
-    pattern: &[TokenValue],
+    pattern: &[MacroParamToken],
 ) -> MacroResult<()> {
     if tokens.len() != pattern.len() {
         return Err(MacroError::FailedToMatchPattern);
     }
-    for (token, value) in tokens.iter().zip(pattern.iter()) {
-        if &token.value != value {
+    for (token, pat) in tokens.iter().zip(pattern.iter()) {
+        if !pat.matches(token) {
             return Err(MacroError::FailedToMatchPattern);
         }
     }
     Ok(())
+}
+
+//===========================================================================//
+
+/// A specification, as part of macro definition parameter, for a matching a
+/// single token in an argument in a macro invocation.
+enum MacroParamToken {
+    /// The token must have exactly the specified value.
+    Exact(TokenValue),
+    /// The token must be an identifier that matches the specified reserved
+    /// name case-insensitively.
+    Reserved(Rc<str>),
+}
+
+impl MacroParamToken {
+    pub fn matches(&self, token: &Token) -> bool {
+        match self {
+            MacroParamToken::Exact(value) => &token.value == value,
+            MacroParamToken::Reserved(res) => match &token.value {
+                TokenValue::Identifier(name) => {
+                    **res == *name.to_ascii_uppercase()
+                }
+                _ => false,
+            },
+        }
+    }
 }
 
 //===========================================================================//

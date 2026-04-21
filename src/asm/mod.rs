@@ -95,11 +95,13 @@ impl Assembler {
     }
 
     fn scope_import(&mut self, id_ast: &IdentifierAst) {
+        // TODO: error if name is reserved in current arch
         let result = self.env.declare_import(id_ast);
         self.merge_errors(result);
     }
 
     fn scope_label(&mut self, id_ast: &IdentifierAst) {
+        // TODO: error if name is reserved in current arch
         let result = self.env.declare_label(id_ast);
         self.merge_errors(result);
     }
@@ -142,7 +144,8 @@ impl Assembler {
 
     fn expand_macro_definition(&mut self, def_macro_ast: AsmDefMacroAst) {
         let arch = self.env.current_arch();
-        match self.macros.define(arch, def_macro_ast) {
+        let reserved = self.arch_tree.reserved_names(arch);
+        match self.macros.define(arch, reserved, def_macro_ast) {
             Ok(()) => {}
             Err(mut errors) => {
                 self.errors.append(&mut errors);
@@ -476,6 +479,7 @@ impl Assembler {
         &mut self,
         expr_ast: &ExprAst,
     ) -> Option<(ObjExpr, ExprType)> {
+        // TODO: error if contains a name that is reserved in current arch
         match self.env.typecheck_expression(expr_ast) {
             Ok(expr_and_type) => Some(expr_and_type),
             Err(errors) => {

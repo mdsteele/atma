@@ -12,46 +12,107 @@ use std::rc::Rc;
 
 pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
     let mut arch_tree = ArchTree::new();
+
     let arch_65xx = Rc::<str>::from("65xx");
     let arch_6502 = Rc::<str>::from("6502");
     let arch_65c816 = Rc::<str>::from("65C816");
     let arch_sm83 = Rc::<str>::from("SM83");
     let arch_spc700 = Rc::<str>::from("SPC700");
+
+    let reg_a = Rc::<str>::from("A");
+    let reg_af = Rc::<str>::from("AF");
+    let reg_b = Rc::<str>::from("B");
+    let reg_bc = Rc::<str>::from("BC");
+    let reg_c = Rc::<str>::from("C");
+    let reg_d = Rc::<str>::from("D");
+    let reg_de = Rc::<str>::from("DE");
+    let reg_e = Rc::<str>::from("E");
+    let reg_h = Rc::<str>::from("H");
+    let reg_hl = Rc::<str>::from("HL");
+    let reg_l = Rc::<str>::from("L");
+    let reg_nc = Rc::<str>::from("NC");
+    let reg_nz = Rc::<str>::from("NZ");
+    let reg_s = Rc::<str>::from("S");
+    let reg_sp = Rc::<str>::from("SP");
+    let reg_x = Rc::<str>::from("X");
+    let reg_y = Rc::<str>::from("Y");
+    let reg_ya = Rc::<str>::from("YA");
+    let reg_z = Rc::<str>::from("Z");
+
+    let res_65xx = vec![reg_a.clone(), reg_x.clone(), reg_y.clone()];
+    let res_65c816 = vec![reg_s.clone()];
+    let res_sm83 = vec![
+        reg_a.clone(),
+        reg_af.clone(),
+        reg_b.clone(),
+        reg_bc.clone(),
+        reg_c.clone(),
+        reg_d.clone(),
+        reg_de.clone(),
+        reg_e.clone(),
+        reg_h.clone(),
+        reg_hl.clone(),
+        reg_l.clone(),
+        reg_nc.clone(),
+        reg_nz.clone(),
+        reg_sp.clone(),
+        reg_z.clone(),
+    ];
+    let res_spc700 = vec![
+        reg_a.clone(),
+        reg_c.clone(),
+        reg_sp.clone(),
+        reg_x.clone(),
+        reg_y.clone(),
+        reg_ya.clone(),
+    ];
+
     arch_tree
-        .define_arch(arch_65xx.clone(), ArchTree::ROOT_ARCH_NAME)
+        .define_arch(arch_65xx.clone(), ArchTree::ROOT_ARCH_NAME, &res_65xx)
         .unwrap();
-    arch_tree.define_arch(arch_6502.clone(), &arch_65xx).unwrap();
-    arch_tree.define_arch(arch_65c816.clone(), &arch_65xx).unwrap();
+    arch_tree.define_arch(arch_6502.clone(), &arch_65xx, &[]).unwrap();
     arch_tree
-        .define_arch(arch_sm83.clone(), ArchTree::ROOT_ARCH_NAME)
+        .define_arch(arch_65c816.clone(), &arch_65xx, &res_65c816)
         .unwrap();
     arch_tree
-        .define_arch(arch_spc700.clone(), ArchTree::ROOT_ARCH_NAME)
+        .define_arch(arch_sm83.clone(), ArchTree::ROOT_ARCH_NAME, &res_sm83)
+        .unwrap();
+    arch_tree
+        .define_arch(
+            arch_spc700.clone(),
+            ArchTree::ROOT_ARCH_NAME,
+            &res_spc700,
+        )
         .unwrap();
 
     let mut builder = BuiltinBuilder {
+        arch_tree,
         macros: MacroTable::new(),
         placeholder_addr: Rc::from("%addr"),
         placeholder_imm: Rc::from("%imm"),
+        reg_a,
     };
     builder.add_65xx_macros(&arch_65xx);
     builder.add_6502_macros(&arch_6502);
     builder.add_65c816_macros(&arch_65c816);
     builder.add_sm83_macros(&arch_sm83);
     builder.add_spc700_macros(&arch_spc700);
-    (arch_tree, builder.macros)
+    (builder.arch_tree, builder.macros)
 }
 
 //===========================================================================//
 
 struct BuiltinBuilder {
+    arch_tree: ArchTree,
     macros: MacroTable,
     placeholder_addr: Rc<str>,
     placeholder_imm: Rc<str>,
+    reg_a: Rc<str>,
 }
 
 impl BuiltinBuilder {
     fn add_65xx_macros(&mut self, arch: &Rc<str>) {
+        self.add_accum_opcode(arch, 0x0a, "ASL");
         self.add_addr16_opcode(arch, 0x2c, "BIT");
         self.add_branch_opcode(arch, 0x90, "BCC");
         self.add_branch_opcode(arch, 0xb0, "BCS");
@@ -72,11 +133,14 @@ impl BuiltinBuilder {
         self.add_no_arg_opcode(arch, 0xc8, "INY");
         self.add_addr16_opcode(arch, 0x4c, "JMP");
         self.add_addr16_opcode(arch, 0x20, "JSR");
+        self.add_accum_opcode(arch, 0x4a, "LSR");
         self.add_no_arg_opcode(arch, 0xea, "NOP");
         self.add_no_arg_opcode(arch, 0x48, "PHA");
         self.add_no_arg_opcode(arch, 0x08, "PHP");
         self.add_no_arg_opcode(arch, 0x68, "PLA");
         self.add_no_arg_opcode(arch, 0x28, "PLP");
+        self.add_accum_opcode(arch, 0x2a, "ROL");
+        self.add_accum_opcode(arch, 0x6a, "ROR");
         self.add_no_arg_opcode(arch, 0x40, "RTI");
         self.add_no_arg_opcode(arch, 0x60, "RTS");
         self.add_no_arg_opcode(arch, 0x38, "SEC");
@@ -110,6 +174,8 @@ impl BuiltinBuilder {
     fn add_65c816_macros(&mut self, arch: &Rc<str>) {
         self.add_branch_opcode(arch, 0x80, "BRA");
         self.add_imm_u8_opcode(arch, 0x02, "COP");
+        self.add_accum_opcode(arch, 0x3a, "DEC");
+        self.add_accum_opcode(arch, 0x1a, "INC");
         self.add_no_arg_opcode(arch, 0x8b, "PHB");
         self.add_no_arg_opcode(arch, 0x0b, "PHD");
         self.add_no_arg_opcode(arch, 0x4b, "PHK");
@@ -204,7 +270,21 @@ impl BuiltinBuilder {
             params: vec![],
             body: vec![constant_u8(opcode_byte)],
         };
-        self.macros.define(arch, definition).unwrap();
+        self.add_macro_definition(arch, definition);
+    }
+
+    fn add_accum_opcode(
+        &mut self,
+        arch: &Rc<str>,
+        opcode_byte: u8,
+        name: &str,
+    ) {
+        let definition = AsmDefMacroAst {
+            id: builtin_id(name),
+            params: vec![self.register_macro_arg(&self.reg_a)],
+            body: vec![constant_u8(opcode_byte)],
+        };
+        self.add_macro_definition(arch, definition);
     }
 
     fn add_imm_u8_opcode(
@@ -221,7 +301,7 @@ impl BuiltinBuilder {
                 placeholder_u8(&self.placeholder_imm),
             ],
         };
-        self.macros.define(arch, definition).unwrap();
+        self.add_macro_definition(arch, definition);
     }
 
     fn add_branch_opcode(
@@ -238,7 +318,7 @@ impl BuiltinBuilder {
                 relative_addr(&self.placeholder_addr),
             ],
         };
-        self.macros.define(arch, definition).unwrap();
+        self.add_macro_definition(arch, definition);
     }
 
     fn add_addr16_opcode(
@@ -255,7 +335,7 @@ impl BuiltinBuilder {
                 placeholder_u16le(&self.placeholder_addr),
             ],
         };
-        self.macros.define(arch, definition).unwrap();
+        self.add_macro_definition(arch, definition);
     }
 
     fn add_label16_opcode(
@@ -272,17 +352,16 @@ impl BuiltinBuilder {
                 placeholder_u16le(&self.placeholder_addr),
             ],
         };
-        self.macros.define(arch, definition).unwrap();
+        self.add_macro_definition(arch, definition);
     }
 
-    fn pound_imm_macro_arg(&self) -> AsmMacroArgAst {
-        AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
-            tokens: vec![
-                token(TokenValue::Pound),
-                token(TokenValue::Placeholder(self.placeholder_imm.clone())),
-            ],
-        }
+    fn add_macro_definition(
+        &mut self,
+        arch: &Rc<str>,
+        definition: AsmDefMacroAst,
+    ) {
+        let reserved = self.arch_tree.reserved_names(arch);
+        self.macros.define(arch, reserved, definition).unwrap();
     }
 
     fn addr_macro_arg(&self) -> AsmMacroArgAst {
@@ -301,6 +380,23 @@ impl BuiltinBuilder {
                 token(TokenValue::Bang),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
             ],
+        }
+    }
+
+    fn pound_imm_macro_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::Pound),
+                token(TokenValue::Placeholder(self.placeholder_imm.clone())),
+            ],
+        }
+    }
+
+    fn register_macro_arg(&self, name: &Rc<str>) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![token(TokenValue::Identifier(name.clone()))],
         }
     }
 }
