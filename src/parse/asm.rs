@@ -54,6 +54,8 @@ pub enum AsmStmtAst {
     U16le(ExprAst),
     /// A `.U24LE` directive.
     U24le(ExprAst),
+    /// A `.UTF8` directive.
+    Utf8(ExprAst),
 }
 
 impl AsmStmtAst {
@@ -111,6 +113,10 @@ impl AsmStmtAst {
                 .ignore_then(ExprAst::parser())
                 .then_ignore(linebreak())
                 .map(AsmStmtAst::U24le);
+            let utf8_dir = directive(".UTF8")
+                .ignore_then(ExprAst::parser())
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::Utf8);
             chumsky::prelude::choice((
                 label,
                 def_macro_dir,
@@ -119,6 +125,7 @@ impl AsmStmtAst {
                 u8_dir,
                 u16le_dir,
                 u24le_dir,
+                utf8_dir,
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
             ))
         })

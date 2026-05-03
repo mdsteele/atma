@@ -174,6 +174,15 @@ impl ExprValue {
         }
     }
 
+    /// Returns a referenced to the contained string value, or panics if this
+    /// value is not a string.
+    pub fn unwrap_str_ref(&self) -> &Rc<str> {
+        match self {
+            ExprValue::String(string) => string,
+            value => panic!("ExprValue::unwrap_str_ref on {value:?}"),
+        }
+    }
+
     /// Returns the contained [`List`](ExprValue::List) value, or panics if
     /// this value is not a list.
     pub fn unwrap_tuple(self) -> Rc<[ExprValue]> {

@@ -91,6 +91,7 @@ impl Assembler {
             AsmStmtAst::U8(_expr) => {}
             AsmStmtAst::U16le(_expr) => {}
             AsmStmtAst::U24le(_expr) => {}
+            AsmStmtAst::Utf8(_expr) => {}
         }
     }
 
@@ -135,6 +136,7 @@ impl Assembler {
             AsmStmtAst::U8(expr) => self.expand_u8(expr),
             AsmStmtAst::U16le(expr) => self.expand_u16le(expr),
             AsmStmtAst::U24le(expr) => self.expand_u24le(expr),
+            AsmStmtAst::Utf8(expr) => self.expand_utf8(expr),
         }
     }
 
@@ -184,7 +186,7 @@ impl Assembler {
             .typecheck_expression(&section_ast.name)
         {
             Some((expr, ExprType::String)) => match expr.static_value() {
-                Some(value) => Some(value.clone().unwrap_str()),
+                Some(value) => Some(value.unwrap_str_ref().clone()),
                 None => {
                     let message = "section name must be static".to_string();
                     let label = "this expression isn't static".to_string();
@@ -268,6 +270,41 @@ impl Assembler {
         let byte = self.expand_int_data_directive(PatchKind::U8, expr_ast);
         if let Some(chunk_env) = self.env.current_chunk() {
             chunk_env.data.push(byte as u8);
+        }
+    }
+
+    fn expand_utf8(&mut self, expr_ast: ExprAst) {
+        if self.env.current_chunk().is_none() {
+            let message =
+                ".UTF8 directive must be within a .SECTION".to_string();
+            self.errors.push(SourceError::new(expr_ast.span, message));
+        }
+        match self.typecheck_expression(&expr_ast) {
+            Some((expr, ExprType::String)) => {
+                let Some(value) = expr.static_value() else {
+                    let message = ".UTF8 value must be static".to_string();
+                    let label = "this expression isn't static".to_string();
+                    self.errors.push(
+                        SourceError::new(expr_ast.span, message)
+                            .with_label(expr_ast.span, label),
+                    );
+                    return;
+                };
+                if let Some(chunk_env) = self.env.current_chunk() {
+                    chunk_env
+                        .data
+                        .extend_from_slice(value.unwrap_str_ref().as_bytes());
+                }
+            }
+            Some((_, ty)) => {
+                let message = ".UTF8 value must be a string".to_string();
+                let label = format!("this expression has type {ty}");
+                self.errors.push(
+                    SourceError::new(expr_ast.span, message)
+                        .with_label(expr_ast.span, label),
+                );
+            }
+            None => {}
         }
     }
 
@@ -397,7 +434,7 @@ impl Assembler {
         let expr_span = expr_ast.span;
         match self.typecheck_expression(&expr_ast) {
             Some((expr, ExprType::String)) => match expr.static_value() {
-                Some(value) => Some(value.clone().unwrap_str()),
+                Some(value) => Some(value.unwrap_str_ref().clone()),
                 None => {
                     self.chunk_attr_non_static_error(attr_name, expr_span);
                     None
