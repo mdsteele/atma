@@ -31,7 +31,7 @@ impl MacroTable {
                 num_args: invoke_ast.args.len(),
             };
             if let Some(definitions) = self.definitions.get(&signature) {
-                for definition in definitions {
+                for definition in definitions.iter().rev() {
                     match definition.try_expand(&invoke_ast.args) {
                         Err(MacroError::FailedToMatchPattern) => continue,
                         Err(MacroError::FailedToParseArguments(errors)) => {

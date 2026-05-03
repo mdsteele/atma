@@ -246,7 +246,7 @@ fn format_direct_page(bus: &dyn SimBus, dp: u8) -> String {
 
 fn format_high_page(bus: &dyn SimBus, hp: u8) -> String {
     match bus.label_at(Addr::from(0xff00u16) | Addr::from(hp)) {
-        None => format!("${hp:02x}"),
+        None => format!("$ff{hp:02x}"),
         Some(label) => label.to_string(),
     }
 }
@@ -1181,22 +1181,52 @@ mod tests {
 
     #[test]
     fn disassemble_mov() {
-        assert_eq!(disassemble(&[0xcd, 0xef]), "MOV X, #$ef");
-        assert_eq!(disassemble(&[0xbd]), "MOV SP, X");
         assert_eq!(disassemble(&[0xe8, 0x00]), "MOV A, #$00");
-        assert_eq!(disassemble(&[0xc6]), "MOV (X), A");
-        assert_eq!(disassemble(&[0x8f, 0xaa, 0xf4]), "MOV $f4, #$aa");
-        assert_eq!(disassemble(&[0xeb, 0xf4]), "MOV Y, $f4");
+        assert_eq!(disassemble(&[0xe6]), "MOV A, (X)");
+        assert_eq!(disassemble(&[0xbf]), "MOV A, (X)+");
         assert_eq!(disassemble(&[0xe4, 0xf5]), "MOV A, $f5");
+        assert_eq!(disassemble(&[0xf4, 0xf5]), "MOV A, $f5 + X");
+        assert_eq!(disassemble(&[0xe5, 0x34, 0x12]), "MOV A, !$1234");
+        assert_eq!(disassemble(&[0xf5, 0x34, 0x12]), "MOV A, !$1234 + X");
+        assert_eq!(disassemble(&[0xf6, 0x34, 0x12]), "MOV A, !$1234 + Y");
+        assert_eq!(disassemble(&[0xe7, 0xcd]), "MOV A, [$cd + X]");
+        assert_eq!(disassemble(&[0xf7, 0xcd]), "MOV A, [$cd] + Y");
+        assert_eq!(disassemble(&[0xcd, 0xef]), "MOV X, #$ef");
+        assert_eq!(disassemble(&[0xf8, 0xf4]), "MOV X, $f4");
+        assert_eq!(disassemble(&[0xf9, 0xf4]), "MOV X, $f4 + Y");
+        assert_eq!(disassemble(&[0xe9, 0x34, 0x12]), "MOV X, !$1234");
+        assert_eq!(disassemble(&[0x8d, 0xef]), "MOV Y, #$ef");
+        assert_eq!(disassemble(&[0xeb, 0xf4]), "MOV Y, $f4");
+        assert_eq!(disassemble(&[0xfb, 0xf4]), "MOV Y, $f4 + X");
+        assert_eq!(disassemble(&[0xec, 0x34, 0x12]), "MOV Y, !$1234");
+        assert_eq!(disassemble(&[0xc6]), "MOV (X), A");
+        assert_eq!(disassemble(&[0xaf]), "MOV (X)+, A");
+        assert_eq!(disassemble(&[0xc4, 0xfe]), "MOV $fe, A");
+        assert_eq!(disassemble(&[0xd4, 0xfe]), "MOV $fe + X, A");
+        assert_eq!(disassemble(&[0xc5, 0x34, 0x12]), "MOV !$1234, A");
+        assert_eq!(disassemble(&[0xd5, 0x34, 0x12]), "MOV !$1234 + X, A");
+        assert_eq!(disassemble(&[0xd6, 0x34, 0x12]), "MOV !$1234 + Y, A");
+        assert_eq!(disassemble(&[0xc7, 0xfe]), "MOV [$fe + X], A");
+        assert_eq!(disassemble(&[0xd7, 0xfe]), "MOV [$fe] + Y, A");
+        assert_eq!(disassemble(&[0xd8, 0xf4]), "MOV $f4, X");
+        assert_eq!(disassemble(&[0xd9, 0xf4]), "MOV $f4 + Y, X");
+        assert_eq!(disassemble(&[0xc9, 0x34, 0x12]), "MOV !$1234, X");
         assert_eq!(disassemble(&[0xcb, 0xf4]), "MOV $f4, Y");
-        assert_eq!(disassemble(&[0xd7, 0x00]), "MOV [$00] + Y, A");
+        assert_eq!(disassemble(&[0xdb, 0xf4]), "MOV $f4 + X, Y");
+        assert_eq!(disassemble(&[0xcc, 0x34, 0x12]), "MOV !$1234, Y");
+        assert_eq!(disassemble(&[0x7d]), "MOV A, X");
         assert_eq!(disassemble(&[0xdd]), "MOV A, Y");
         assert_eq!(disassemble(&[0x5d]), "MOV X, A");
+        assert_eq!(disassemble(&[0xfd]), "MOV Y, A");
+        assert_eq!(disassemble(&[0x9d]), "MOV X, SP");
+        assert_eq!(disassemble(&[0xbd]), "MOV SP, X");
+        assert_eq!(disassemble(&[0xfa, 0xbb, 0xf4]), "MOV $f4, $bb");
+        assert_eq!(disassemble(&[0x8f, 0xaa, 0xf4]), "MOV $f4, #$aa");
     }
 
     #[test]
     fn disassemble_pcall() {
-        assert_eq!(disassemble(&[0x4f, 0x37]), "PCALL $37");
+        assert_eq!(disassemble(&[0x4f, 0x37]), "PCALL $ff37");
         assert_eq!(
             disassemble_with_label(&[0x4f, 0x80], 0xff80, "foo"),
             "PCALL foo"
