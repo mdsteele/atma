@@ -244,6 +244,7 @@ impl ConfigBuilder {
         self.declare_entry(ENTITY_SECTION, &entry.id);
         let mut load: Option<Rc<str>> = None;
         let mut start: Option<Addr> = None;
+        let mut size: Option<Size> = None;
         let mut align: Option<Align> = None;
         let mut within: Option<Align> = None;
         let mut fill: Option<u8> = None;
@@ -254,6 +255,7 @@ impl ConfigBuilder {
                 "align" => align = Some(self.section_align_attr(expr_ast)),
                 "fill" => fill = Some(self.section_fill_attr(expr_ast)),
                 "load" => load = Some(self.section_load_attr(expr_ast)),
+                "size" => size = Some(self.section_size_attr(expr_ast)),
                 "start" => start = Some(self.section_start_attr(expr_ast)),
                 "within" => within = Some(self.section_within_attr(expr_ast)),
                 _ => self.invalid_attr_error(ENTITY_SECTION, id_ast),
@@ -266,6 +268,7 @@ impl ConfigBuilder {
             name: entry.id.name,
             load: load.unwrap_or_default(),
             start,
+            size,
             align: align.unwrap_or_default(),
             within,
             fill,
@@ -306,6 +309,24 @@ impl ConfigBuilder {
             }
         }
         Addr::default()
+    }
+
+    fn section_size_attr(&mut self, expr_ast: ExprAst) -> Size {
+        let expr_span = expr_ast.span;
+        if let Some(bigint) =
+            self.static_int_attr(ENTITY_SECTION, "size", expr_ast)
+        {
+            match Size::try_from(&bigint) {
+                Ok(size) if size > Size::ZERO => return size,
+                _ => self.out_of_range_attr_error(
+                    ENTITY_SECTION,
+                    "size",
+                    expr_span,
+                    &bigint,
+                ),
+            }
+        }
+        Size::from(1u8)
     }
 
     fn section_within_attr(&mut self, expr_ast: ExprAst) -> Align {
@@ -628,6 +649,8 @@ pub struct SectionConfig {
     pub load: Rc<str>,
     /// If set, then the section must start at exactly this address.
     pub start: Option<Addr>,
+    /// If set, then the section will have exactly this size.
+    pub size: Option<Size>,
     /// The required alignment for this section, within its address space.
     pub align: Align,
     /// If set, then this entire section must not cross any alignment boundary

@@ -63,6 +63,9 @@ pub enum AddrMode {
     /// Operate on a byte in the current direct page, using the X register as
     /// the direct page offset.
     DirectPageX,
+    /// Operate on a byte in the current direct page, using the Y register as
+    /// the direct page offset.
+    DirectPageY,
     /// Operate on a byte in the current direct page, using the X register as
     /// the direct page offset, and incrementing X after the operation.
     DirectPageXInc,
@@ -98,6 +101,7 @@ impl AddrMode {
             AddrMode::HighPage => Operand::HighPage(next_byte(bus, pc)),
             AddrMode::DirectPage => Operand::DirectPage(next_byte(bus, pc)),
             AddrMode::DirectPageX => Operand::DirectPageX,
+            AddrMode::DirectPageY => Operand::DirectPageY,
             AddrMode::DirectPageXInc => Operand::DirectPageXInc,
             AddrMode::XIndexedDirectPage => {
                 Operand::XIndexedDirectPage(next_byte(bus, pc))
@@ -150,6 +154,8 @@ pub enum Operand {
     DirectPage(u8),
     /// Operate on the direct page address stored in the X register.
     DirectPageX,
+    /// Operate on the direct page address stored in the Y register.
+    DirectPageY,
     /// Operate on the direct page address stored in the X register,
     /// incrementing X after the operation.
     DirectPageXInc,
@@ -177,6 +183,7 @@ impl Operand {
             Operand::HighPage(_) => 1,
             Operand::DirectPage(_) => 1,
             Operand::DirectPageX => 0,
+            Operand::DirectPageY => 0,
             Operand::DirectPageXInc => 0,
             Operand::XIndexedDirectPage(_) => 1,
             Operand::YIndexedDirectPage(_) => 1,
@@ -209,6 +216,7 @@ impl Operand {
             Operand::HighPage(hp) => format_high_page(bus, hp),
             Operand::DirectPage(dp) => format_direct_page(bus, dp),
             Operand::DirectPageX => "(X)".to_string(),
+            Operand::DirectPageY => "(Y)".to_string(),
             Operand::DirectPageXInc => "(X)+".to_string(),
             Operand::XIndexedDirectPage(dp) => {
                 format!("{} + X", format_direct_page(bus, dp))
@@ -536,11 +544,89 @@ impl Operation {
                 AddrMode::DirectPageIndirectYIndexed,
             ),
 
+            0x08 => Operation::OrAAddr(AddrMode::Immediate),
+            0x18 => Operation::OrAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::Immediate,
+            ),
+            0x28 => Operation::AndAAddr(AddrMode::Immediate),
+            0x38 => Operation::AndAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::Immediate,
+            ),
+            0x48 => Operation::EorAAddr(AddrMode::Immediate),
+            0x58 => Operation::EorAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::Immediate,
+            ),
+            0x68 => Operation::CmpRegAddr(Reg::A, AddrMode::Immediate),
+            0x78 => Operation::CmpAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::Immediate,
+            ),
+            0x88 => Operation::AdcAAddr(AddrMode::Immediate),
+            0x98 => Operation::AdcAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::Immediate,
+            ),
+            0xa8 => Operation::SbcAAddr(AddrMode::Immediate),
+            0xb8 => Operation::SbcAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::Immediate,
+            ),
             0xc8 => Operation::CmpRegAddr(Reg::X, AddrMode::Immediate),
             0xd8 => Operation::MovAddrReg(AddrMode::DirectPage, Reg::X),
             0xe8 => Operation::MovRegAddr(Reg::A, AddrMode::Immediate),
             0xf8 => Operation::MovRegAddr(Reg::X, AddrMode::DirectPage),
 
+            0x09 => Operation::OrAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::DirectPage,
+            ),
+            0x19 => Operation::OrAddrAddr(
+                AddrMode::DirectPageX,
+                AddrMode::DirectPageY,
+            ),
+            0x29 => Operation::AndAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::DirectPage,
+            ),
+            0x39 => Operation::AndAddrAddr(
+                AddrMode::DirectPageX,
+                AddrMode::DirectPageY,
+            ),
+            0x49 => Operation::EorAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::DirectPage,
+            ),
+            0x59 => Operation::EorAddrAddr(
+                AddrMode::DirectPageX,
+                AddrMode::DirectPageY,
+            ),
+            0x69 => Operation::CmpAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::DirectPage,
+            ),
+            0x79 => Operation::CmpAddrAddr(
+                AddrMode::DirectPageX,
+                AddrMode::DirectPageY,
+            ),
+            0x89 => Operation::AdcAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::DirectPage,
+            ),
+            0x99 => Operation::AdcAddrAddr(
+                AddrMode::DirectPageX,
+                AddrMode::DirectPageY,
+            ),
+            0xa9 => Operation::SbcAddrAddr(
+                AddrMode::DirectPage,
+                AddrMode::DirectPage,
+            ),
+            0xb9 => Operation::SbcAddrAddr(
+                AddrMode::DirectPageX,
+                AddrMode::DirectPageY,
+            ),
             0xc9 => Operation::MovAddrReg(AddrMode::Absolute, Reg::X),
             0xd9 => {
                 Operation::MovAddrReg(AddrMode::YIndexedDirectPage, Reg::X)
@@ -605,16 +691,21 @@ impl Operation {
             0x7d => Operation::MovRegReg(Reg::A, Reg::X),
             0x8d => Operation::MovRegAddr(Reg::Y, AddrMode::Immediate),
             0x9d => Operation::MovRegReg(Reg::X, Reg::Sp),
+            0xad => Operation::CmpRegAddr(Reg::Y, AddrMode::Immediate),
             0xbd => Operation::MovRegReg(Reg::Sp, Reg::X),
             0xcd => Operation::MovRegAddr(Reg::X, AddrMode::Immediate),
             0xdd => Operation::MovRegReg(Reg::A, Reg::Y),
             0xed => Operation::Notc,
             0xfd => Operation::MovRegReg(Reg::Y, Reg::A),
 
+            0x1e => Operation::CmpRegAddr(Reg::X, AddrMode::Absolute),
             0x2e => Operation::Cbne(AddrMode::DirectPage, AddrMode::Relative),
+            0x3e => Operation::CmpRegAddr(Reg::X, AddrMode::DirectPage),
+            0x5e => Operation::CmpRegAddr(Reg::Y, AddrMode::Absolute),
             0x6e => {
                 Operation::DbnzAddr(AddrMode::DirectPage, AddrMode::Relative)
             }
+            0x7e => Operation::CmpRegAddr(Reg::Y, AddrMode::DirectPage),
             0x8e => Operation::Pop(Reg::Psw),
             0x9e => Operation::Div,
             0xae => Operation::Pop(Reg::A),
@@ -1067,6 +1158,38 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_adc() {
+        assert_eq!(disassemble(&[0x88, 0x12]), "ADC A, #$12");
+        assert_eq!(disassemble(&[0x86]), "ADC A, (X)");
+        assert_eq!(disassemble(&[0x84, 0x34]), "ADC A, $34");
+        assert_eq!(disassemble(&[0x94, 0x56]), "ADC A, $56 + X");
+        assert_eq!(disassemble(&[0x85, 0x34, 0x12]), "ADC A, !$1234");
+        assert_eq!(disassemble(&[0x95, 0x34, 0x12]), "ADC A, !$1234 + X");
+        assert_eq!(disassemble(&[0x96, 0x34, 0x12]), "ADC A, !$1234 + Y");
+        assert_eq!(disassemble(&[0x87, 0xcd]), "ADC A, [$cd + X]");
+        assert_eq!(disassemble(&[0x97, 0xab]), "ADC A, [$ab] + Y");
+        assert_eq!(disassemble(&[0x99]), "ADC (X), (Y)");
+        assert_eq!(disassemble(&[0x89, 0x34, 0x12]), "ADC $12, $34");
+        assert_eq!(disassemble(&[0x98, 0x78, 0x56]), "ADC $56, #$78");
+    }
+
+    #[test]
+    fn disassemble_and() {
+        assert_eq!(disassemble(&[0x28, 0x12]), "AND A, #$12");
+        assert_eq!(disassemble(&[0x26]), "AND A, (X)");
+        assert_eq!(disassemble(&[0x24, 0x34]), "AND A, $34");
+        assert_eq!(disassemble(&[0x34, 0x56]), "AND A, $56 + X");
+        assert_eq!(disassemble(&[0x25, 0x34, 0x12]), "AND A, !$1234");
+        assert_eq!(disassemble(&[0x35, 0x34, 0x12]), "AND A, !$1234 + X");
+        assert_eq!(disassemble(&[0x36, 0x34, 0x12]), "AND A, !$1234 + Y");
+        assert_eq!(disassemble(&[0x27, 0xcd]), "AND A, [$cd + X]");
+        assert_eq!(disassemble(&[0x37, 0xab]), "AND A, [$ab] + Y");
+        assert_eq!(disassemble(&[0x39]), "AND (X), (Y)");
+        assert_eq!(disassemble(&[0x29, 0x34, 0x12]), "AND $12, $34");
+        assert_eq!(disassemble(&[0x38, 0x78, 0x56]), "AND $56, #$78");
+    }
+
+    #[test]
     fn disassemble_branch() {
         assert_eq!(disassemble(&[0x90, 0x40]), "BCC $0042");
         assert_eq!(disassemble(&[0xb0, 0x7f]), "BCS $0081");
@@ -1107,6 +1230,28 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_cmp() {
+        assert_eq!(disassemble(&[0x68, 0x12]), "CMP A, #$12");
+        assert_eq!(disassemble(&[0x66]), "CMP A, (X)");
+        assert_eq!(disassemble(&[0x64, 0x34]), "CMP A, $34");
+        assert_eq!(disassemble(&[0x74, 0x56]), "CMP A, $56 + X");
+        assert_eq!(disassemble(&[0x65, 0x34, 0x12]), "CMP A, !$1234");
+        assert_eq!(disassemble(&[0x75, 0x34, 0x12]), "CMP A, !$1234 + X");
+        assert_eq!(disassemble(&[0x76, 0x34, 0x12]), "CMP A, !$1234 + Y");
+        assert_eq!(disassemble(&[0x67, 0xcd]), "CMP A, [$cd + X]");
+        assert_eq!(disassemble(&[0x77, 0xab]), "CMP A, [$ab] + Y");
+        assert_eq!(disassemble(&[0x79]), "CMP (X), (Y)");
+        assert_eq!(disassemble(&[0x69, 0x34, 0x12]), "CMP $12, $34");
+        assert_eq!(disassemble(&[0x78, 0x78, 0x56]), "CMP $56, #$78");
+        assert_eq!(disassemble(&[0xc8, 0x12]), "CMP X, #$12");
+        assert_eq!(disassemble(&[0x3e, 0x34]), "CMP X, $34");
+        assert_eq!(disassemble(&[0x1e, 0x34, 0x12]), "CMP X, !$1234");
+        assert_eq!(disassemble(&[0xad, 0x12]), "CMP Y, #$12");
+        assert_eq!(disassemble(&[0x7e, 0x34]), "CMP Y, $34");
+        assert_eq!(disassemble(&[0x5e, 0x34, 0x12]), "CMP Y, !$1234");
+    }
+
+    #[test]
     fn disassemble_dbnz() {
         assert_eq!(disassemble(&[0xfe, 0x12]), "DBNZ Y, $0014");
         assert_eq!(disassemble(&[0x6e, 0x34, 0x12]), "DBNZ $34, $0015");
@@ -1129,6 +1274,22 @@ mod tests {
         assert_eq!(disassemble(&[0x9b, 0x34]), "DEC $34 + X");
         assert_eq!(disassemble(&[0x8c, 0x34, 0x12]), "DEC !$1234");
         assert_eq!(disassemble(&[0x1a, 0x56]), "DECW $56");
+    }
+
+    #[test]
+    fn disassemble_eor() {
+        assert_eq!(disassemble(&[0x48, 0x12]), "EOR A, #$12");
+        assert_eq!(disassemble(&[0x46]), "EOR A, (X)");
+        assert_eq!(disassemble(&[0x44, 0x34]), "EOR A, $34");
+        assert_eq!(disassemble(&[0x54, 0x56]), "EOR A, $56 + X");
+        assert_eq!(disassemble(&[0x45, 0x34, 0x12]), "EOR A, !$1234");
+        assert_eq!(disassemble(&[0x55, 0x34, 0x12]), "EOR A, !$1234 + X");
+        assert_eq!(disassemble(&[0x56, 0x34, 0x12]), "EOR A, !$1234 + Y");
+        assert_eq!(disassemble(&[0x47, 0xcd]), "EOR A, [$cd + X]");
+        assert_eq!(disassemble(&[0x57, 0xab]), "EOR A, [$ab] + Y");
+        assert_eq!(disassemble(&[0x59]), "EOR (X), (Y)");
+        assert_eq!(disassemble(&[0x49, 0x34, 0x12]), "EOR $12, $34");
+        assert_eq!(disassemble(&[0x58, 0x78, 0x56]), "EOR $56, #$78");
     }
 
     #[test]
@@ -1225,6 +1386,22 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_or() {
+        assert_eq!(disassemble(&[0x08, 0x12]), "OR A, #$12");
+        assert_eq!(disassemble(&[0x06]), "OR A, (X)");
+        assert_eq!(disassemble(&[0x04, 0x34]), "OR A, $34");
+        assert_eq!(disassemble(&[0x14, 0x56]), "OR A, $56 + X");
+        assert_eq!(disassemble(&[0x05, 0x34, 0x12]), "OR A, !$1234");
+        assert_eq!(disassemble(&[0x15, 0x34, 0x12]), "OR A, !$1234 + X");
+        assert_eq!(disassemble(&[0x16, 0x34, 0x12]), "OR A, !$1234 + Y");
+        assert_eq!(disassemble(&[0x07, 0xcd]), "OR A, [$cd + X]");
+        assert_eq!(disassemble(&[0x17, 0xab]), "OR A, [$ab] + Y");
+        assert_eq!(disassemble(&[0x19]), "OR (X), (Y)");
+        assert_eq!(disassemble(&[0x09, 0x34, 0x12]), "OR $12, $34");
+        assert_eq!(disassemble(&[0x18, 0x78, 0x56]), "OR $56, #$78");
+    }
+
+    #[test]
     fn disassemble_pcall() {
         assert_eq!(disassemble(&[0x4f, 0x37]), "PCALL $ff37");
         assert_eq!(
@@ -1247,6 +1424,22 @@ mod tests {
         assert_eq!(disassemble(&[0x4d]), "PUSH X");
         assert_eq!(disassemble(&[0x6d]), "PUSH Y");
         assert_eq!(disassemble(&[0x0d]), "PUSH PSW");
+    }
+
+    #[test]
+    fn disassemble_sbc() {
+        assert_eq!(disassemble(&[0xa8, 0x12]), "SBC A, #$12");
+        assert_eq!(disassemble(&[0xa6]), "SBC A, (X)");
+        assert_eq!(disassemble(&[0xa4, 0x34]), "SBC A, $34");
+        assert_eq!(disassemble(&[0xb4, 0x56]), "SBC A, $56 + X");
+        assert_eq!(disassemble(&[0xa5, 0x34, 0x12]), "SBC A, !$1234");
+        assert_eq!(disassemble(&[0xb5, 0x34, 0x12]), "SBC A, !$1234 + X");
+        assert_eq!(disassemble(&[0xb6, 0x34, 0x12]), "SBC A, !$1234 + Y");
+        assert_eq!(disassemble(&[0xa7, 0xcd]), "SBC A, [$cd + X]");
+        assert_eq!(disassemble(&[0xb7, 0xab]), "SBC A, [$ab] + Y");
+        assert_eq!(disassemble(&[0xb9]), "SBC (X), (Y)");
+        assert_eq!(disassemble(&[0xa9, 0x34, 0x12]), "SBC $12, $34");
+        assert_eq!(disassemble(&[0xb8, 0x78, 0x56]), "SBC $56, #$78");
     }
 
     #[test]

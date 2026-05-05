@@ -86,6 +86,9 @@ impl ArrangedSection {
         mut section: LooseSection,
         errors: &mut Vec<LinkError>,
     ) -> ArrangedSection {
+        let section_range = Addr::MIN
+            .range_with_size(section.size.unwrap_or(Size::MAX))
+            .unwrap();
         section.chunks.sort_by_key(|chunk| std::cmp::Reverse(chunk.align));
         let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut arranged =
@@ -117,7 +120,7 @@ impl ArrangedSection {
             }
             if let Some(range) = try_place(
                 &range_set,
-                Range::FULL,
+                section_range,
                 chunk.size,
                 None,
                 chunk.align,
@@ -136,7 +139,8 @@ impl ArrangedSection {
         let section_size = range_set
             .last()
             .map(|r| Range::with_bounds(Addr::MIN, *r.end()).size())
-            .unwrap_or(Size::ZERO);
+            .unwrap_or(Size::ZERO)
+            .max(section.size.unwrap_or(Size::ZERO));
         ArrangedSection {
             name: section.name,
             load: section.load,

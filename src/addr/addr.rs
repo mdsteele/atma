@@ -336,6 +336,13 @@ mod tests {
     }
 
     #[test]
+    fn addr_as_u8() {
+        assert_eq!(Addr::MIN.as_u8(), 0x00u8);
+        assert_eq!(Addr::MAX.as_u8(), 0xffu8);
+        assert_eq!(Addr::from(0x1234u16).as_u8(), 0x34u8);
+    }
+
+    #[test]
     fn addr_is_aligned_to() {
         assert!(Addr::MIN.is_aligned_to(Align::MAX));
 

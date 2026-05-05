@@ -237,6 +237,10 @@ impl Spc700 {
                 self.microcode.push(Microcode::MakeAddrDp);
                 self.microcode.push(Microcode::GetReg(Reg::X));
             }
+            AddrMode::DirectPageY => {
+                self.microcode.push(Microcode::MakeAddrDp);
+                self.microcode.push(Microcode::GetReg(Reg::Y));
+            }
             AddrMode::DirectPageXInc => todo!(),
             AddrMode::XIndexedDirectPage => {
                 self.microcode.push(Microcode::IndexLo(Reg::X));

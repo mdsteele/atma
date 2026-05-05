@@ -33,6 +33,8 @@ pub(super) struct LooseSection {
     pub load: Rc<str>,
     /// If set, then the section must start at exactly this address.
     pub start: Option<Addr>,
+    /// If set, then the section will have exactly this size.
+    pub size: Option<Size>,
     /// The required alignment for this section, within its address space.
     pub align: Align,
     /// If set, then this entire section must not cross any alignment boundary
@@ -61,6 +63,7 @@ impl LooseSection {
                     name: section.name.clone(),
                     load: section.load.clone(),
                     start: section.start,
+                    size: section.size,
                     align: section.align,
                     within: section.within,
                     fill: section.fill,
