@@ -920,17 +920,19 @@ mod tests {
     }
 
     fn disassemble(code: &[u8]) -> String {
-        disassemble_with_bus(&*make_test_bus(code))
+        disassemble_with_bus(code, &*make_test_bus(code))
     }
 
     fn disassemble_with_label(code: &[u8], addr: u16, label: &str) -> String {
         let labels = HashMap::from([(label.to_string(), Addr::from(addr))]);
         let bus = LabeledBus::new(make_test_bus(code), labels);
-        disassemble_with_bus(&bus)
+        disassemble_with_bus(code, &bus)
     }
 
-    fn disassemble_with_bus(bus: &dyn SimBus) -> String {
-        Instruction::decode(bus, 0).format(0, bus)
+    fn disassemble_with_bus(code: &[u8], bus: &dyn SimBus) -> String {
+        let instruction = Instruction::decode(bus, 0);
+        assert_eq!(instruction.size() as usize, code.len());
+        instruction.format(0, bus)
     }
 
     #[test]
@@ -938,6 +940,8 @@ mod tests {
         assert_eq!(disassemble(&[0x3f]), "CCF");
         assert_eq!(disassemble(&[0x2f]), "CPL");
         assert_eq!(disassemble(&[0x27]), "DAA");
+        assert_eq!(disassemble(&[0xf3]), "DI");
+        assert_eq!(disassemble(&[0xfb]), "EI");
         assert_eq!(disassemble(&[0x76]), "HALT");
         assert_eq!(disassemble(&[0x00]), "NOP");
         assert_eq!(disassemble(&[0x17]), "RLA");
@@ -949,35 +953,51 @@ mod tests {
     }
 
     #[test]
-    fn disassemble_arithmetic_immediate() {
-        assert_eq!(disassemble(&[0xce, 0x12]), "ADC A, $12");
-        assert_eq!(disassemble(&[0xc6, 0x34]), "ADD A, $34");
-        assert_eq!(disassemble(&[0xe6, 0x56]), "AND A, $56");
-        assert_eq!(disassemble(&[0xfe, 0x78]), "CP A, $78");
-        assert_eq!(disassemble(&[0xf6, 0x9a]), "OR A, $9a");
-        assert_eq!(disassemble(&[0xde, 0xbc]), "SBC A, $bc");
-        assert_eq!(disassemble(&[0xd6, 0xde]), "SUB A, $de");
-        assert_eq!(disassemble(&[0xee, 0xef]), "XOR A, $ef");
-    }
-
-    #[test]
-    fn disassemble_arithmetic_register() {
+    fn disassemble_adc() {
+        assert_eq!(disassemble(&[0x88]), "ADC A, B");
+        assert_eq!(disassemble(&[0x89]), "ADC A, C");
+        assert_eq!(disassemble(&[0x8a]), "ADC A, D");
+        assert_eq!(disassemble(&[0x8b]), "ADC A, E");
+        assert_eq!(disassemble(&[0x8c]), "ADC A, H");
+        assert_eq!(disassemble(&[0x8d]), "ADC A, L");
+        assert_eq!(disassemble(&[0x8e]), "ADC A, [HL]");
         assert_eq!(disassemble(&[0x8f]), "ADC A, A");
-        assert_eq!(disassemble(&[0x80]), "ADD A, B");
-        assert_eq!(disassemble(&[0xa1]), "AND A, C");
-        assert_eq!(disassemble(&[0xba]), "CP A, D");
-        assert_eq!(disassemble(&[0xb3]), "OR A, E");
-        assert_eq!(disassemble(&[0x9c]), "SBC A, H");
-        assert_eq!(disassemble(&[0x95]), "SUB A, L");
-        assert_eq!(disassemble(&[0xae]), "XOR A, [HL]");
+        assert_eq!(disassemble(&[0xce, 0x12]), "ADC A, $12");
     }
 
     #[test]
-    fn disassemble_add_hl() {
+    fn disassemble_add() {
+        assert_eq!(disassemble(&[0x80]), "ADD A, B");
+        assert_eq!(disassemble(&[0x81]), "ADD A, C");
+        assert_eq!(disassemble(&[0x82]), "ADD A, D");
+        assert_eq!(disassemble(&[0x83]), "ADD A, E");
+        assert_eq!(disassemble(&[0x84]), "ADD A, H");
+        assert_eq!(disassemble(&[0x85]), "ADD A, L");
+        assert_eq!(disassemble(&[0x86]), "ADD A, [HL]");
+        assert_eq!(disassemble(&[0x87]), "ADD A, A");
+        assert_eq!(disassemble(&[0xc6, 0xde]), "ADD A, $de");
+    }
+
+    #[test]
+    fn disassemble_add16() {
         assert_eq!(disassemble(&[0x09]), "ADD HL, BC");
         assert_eq!(disassemble(&[0x19]), "ADD HL, DE");
         assert_eq!(disassemble(&[0x29]), "ADD HL, HL");
         assert_eq!(disassemble(&[0x39]), "ADD HL, SP");
+        assert_eq!(disassemble(&[0xe8, 0x10]), "ADD SP, 16");
+    }
+
+    #[test]
+    fn disassemble_and() {
+        assert_eq!(disassemble(&[0xa0]), "AND A, B");
+        assert_eq!(disassemble(&[0xa1]), "AND A, C");
+        assert_eq!(disassemble(&[0xa2]), "AND A, D");
+        assert_eq!(disassemble(&[0xa3]), "AND A, E");
+        assert_eq!(disassemble(&[0xa4]), "AND A, H");
+        assert_eq!(disassemble(&[0xa5]), "AND A, L");
+        assert_eq!(disassemble(&[0xa6]), "AND A, [HL]");
+        assert_eq!(disassemble(&[0xa7]), "AND A, A");
+        assert_eq!(disassemble(&[0xe6, 0x56]), "AND A, $56");
     }
 
     #[test]
@@ -995,6 +1015,19 @@ mod tests {
             disassemble_with_label(&[0xcc, 0x00, 0x00], 0x0000, "foo"),
             "CALL Z, foo"
         );
+    }
+
+    #[test]
+    fn disassemble_cp() {
+        assert_eq!(disassemble(&[0xb8]), "CP A, B");
+        assert_eq!(disassemble(&[0xb9]), "CP A, C");
+        assert_eq!(disassemble(&[0xba]), "CP A, D");
+        assert_eq!(disassemble(&[0xbb]), "CP A, E");
+        assert_eq!(disassemble(&[0xbc]), "CP A, H");
+        assert_eq!(disassemble(&[0xbd]), "CP A, L");
+        assert_eq!(disassemble(&[0xbe]), "CP A, [HL]");
+        assert_eq!(disassemble(&[0xbf]), "CP A, A");
+        assert_eq!(disassemble(&[0xfe, 0x78]), "CP A, $78");
     }
 
     #[test]
@@ -1092,6 +1125,74 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_ld_r8_r8() {
+        assert_eq!(disassemble(&[0x40]), "LD B, B");
+        assert_eq!(disassemble(&[0x41]), "LD B, C");
+        assert_eq!(disassemble(&[0x42]), "LD B, D");
+        assert_eq!(disassemble(&[0x43]), "LD B, E");
+        assert_eq!(disassemble(&[0x44]), "LD B, H");
+        assert_eq!(disassemble(&[0x45]), "LD B, L");
+        assert_eq!(disassemble(&[0x46]), "LD B, [HL]");
+        assert_eq!(disassemble(&[0x47]), "LD B, A");
+        assert_eq!(disassemble(&[0x48]), "LD C, B");
+        assert_eq!(disassemble(&[0x49]), "LD C, C");
+        assert_eq!(disassemble(&[0x4a]), "LD C, D");
+        assert_eq!(disassemble(&[0x4b]), "LD C, E");
+        assert_eq!(disassemble(&[0x4c]), "LD C, H");
+        assert_eq!(disassemble(&[0x4d]), "LD C, L");
+        assert_eq!(disassemble(&[0x4e]), "LD C, [HL]");
+        assert_eq!(disassemble(&[0x4f]), "LD C, A");
+        assert_eq!(disassemble(&[0x50]), "LD D, B");
+        assert_eq!(disassemble(&[0x51]), "LD D, C");
+        assert_eq!(disassemble(&[0x52]), "LD D, D");
+        assert_eq!(disassemble(&[0x53]), "LD D, E");
+        assert_eq!(disassemble(&[0x54]), "LD D, H");
+        assert_eq!(disassemble(&[0x55]), "LD D, L");
+        assert_eq!(disassemble(&[0x56]), "LD D, [HL]");
+        assert_eq!(disassemble(&[0x57]), "LD D, A");
+        assert_eq!(disassemble(&[0x58]), "LD E, B");
+        assert_eq!(disassemble(&[0x59]), "LD E, C");
+        assert_eq!(disassemble(&[0x5a]), "LD E, D");
+        assert_eq!(disassemble(&[0x5b]), "LD E, E");
+        assert_eq!(disassemble(&[0x5c]), "LD E, H");
+        assert_eq!(disassemble(&[0x5d]), "LD E, L");
+        assert_eq!(disassemble(&[0x5e]), "LD E, [HL]");
+        assert_eq!(disassemble(&[0x5f]), "LD E, A");
+        assert_eq!(disassemble(&[0x60]), "LD H, B");
+        assert_eq!(disassemble(&[0x61]), "LD H, C");
+        assert_eq!(disassemble(&[0x62]), "LD H, D");
+        assert_eq!(disassemble(&[0x63]), "LD H, E");
+        assert_eq!(disassemble(&[0x64]), "LD H, H");
+        assert_eq!(disassemble(&[0x65]), "LD H, L");
+        assert_eq!(disassemble(&[0x66]), "LD H, [HL]");
+        assert_eq!(disassemble(&[0x67]), "LD H, A");
+        assert_eq!(disassemble(&[0x68]), "LD L, B");
+        assert_eq!(disassemble(&[0x69]), "LD L, C");
+        assert_eq!(disassemble(&[0x6a]), "LD L, D");
+        assert_eq!(disassemble(&[0x6b]), "LD L, E");
+        assert_eq!(disassemble(&[0x6c]), "LD L, H");
+        assert_eq!(disassemble(&[0x6d]), "LD L, L");
+        assert_eq!(disassemble(&[0x6e]), "LD L, [HL]");
+        assert_eq!(disassemble(&[0x6f]), "LD L, A");
+        assert_eq!(disassemble(&[0x70]), "LD [HL], B");
+        assert_eq!(disassemble(&[0x71]), "LD [HL], C");
+        assert_eq!(disassemble(&[0x72]), "LD [HL], D");
+        assert_eq!(disassemble(&[0x73]), "LD [HL], E");
+        assert_eq!(disassemble(&[0x74]), "LD [HL], H");
+        assert_eq!(disassemble(&[0x75]), "LD [HL], L");
+        assert_eq!(disassemble(&[0x76]), "HALT");
+        assert_eq!(disassemble(&[0x77]), "LD [HL], A");
+        assert_eq!(disassemble(&[0x78]), "LD A, B");
+        assert_eq!(disassemble(&[0x79]), "LD A, C");
+        assert_eq!(disassemble(&[0x7a]), "LD A, D");
+        assert_eq!(disassemble(&[0x7b]), "LD A, E");
+        assert_eq!(disassemble(&[0x7c]), "LD A, H");
+        assert_eq!(disassemble(&[0x7d]), "LD A, L");
+        assert_eq!(disassemble(&[0x7e]), "LD A, [HL]");
+        assert_eq!(disassemble(&[0x7f]), "LD A, A");
+    }
+
+    #[test]
     fn disassemble_ld_a_memory() {
         assert_eq!(disassemble(&[0x0a]), "LD A, [BC]");
         assert_eq!(disassemble(&[0x02]), "LD [BC], A");
@@ -1149,6 +1250,19 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_or() {
+        assert_eq!(disassemble(&[0xb0]), "OR A, B");
+        assert_eq!(disassemble(&[0xb1]), "OR A, C");
+        assert_eq!(disassemble(&[0xb2]), "OR A, D");
+        assert_eq!(disassemble(&[0xb3]), "OR A, E");
+        assert_eq!(disassemble(&[0xb4]), "OR A, H");
+        assert_eq!(disassemble(&[0xb5]), "OR A, L");
+        assert_eq!(disassemble(&[0xb6]), "OR A, [HL]");
+        assert_eq!(disassemble(&[0xb7]), "OR A, A");
+        assert_eq!(disassemble(&[0xf6, 0x9a]), "OR A, $9a");
+    }
+
+    #[test]
     fn disassemble_pop() {
         assert_eq!(disassemble(&[0xf1]), "POP AF");
         assert_eq!(disassemble(&[0xc1]), "POP BC");
@@ -1185,6 +1299,45 @@ mod tests {
         assert_eq!(disassemble(&[0xf7]), "RST $30");
         assert_eq!(disassemble(&[0xff]), "RST $38");
         assert_eq!(disassemble_with_label(&[0xef], 0x0028, "foo"), "RST foo");
+    }
+
+    #[test]
+    fn disassemble_sbc() {
+        assert_eq!(disassemble(&[0x98]), "SBC A, B");
+        assert_eq!(disassemble(&[0x99]), "SBC A, C");
+        assert_eq!(disassemble(&[0x9a]), "SBC A, D");
+        assert_eq!(disassemble(&[0x9b]), "SBC A, E");
+        assert_eq!(disassemble(&[0x9c]), "SBC A, H");
+        assert_eq!(disassemble(&[0x9d]), "SBC A, L");
+        assert_eq!(disassemble(&[0x9e]), "SBC A, [HL]");
+        assert_eq!(disassemble(&[0x9f]), "SBC A, A");
+        assert_eq!(disassemble(&[0xde, 0x78]), "SBC A, $78");
+    }
+
+    #[test]
+    fn disassemble_sub() {
+        assert_eq!(disassemble(&[0x90]), "SUB A, B");
+        assert_eq!(disassemble(&[0x91]), "SUB A, C");
+        assert_eq!(disassemble(&[0x92]), "SUB A, D");
+        assert_eq!(disassemble(&[0x93]), "SUB A, E");
+        assert_eq!(disassemble(&[0x94]), "SUB A, H");
+        assert_eq!(disassemble(&[0x95]), "SUB A, L");
+        assert_eq!(disassemble(&[0x96]), "SUB A, [HL]");
+        assert_eq!(disassemble(&[0x97]), "SUB A, A");
+        assert_eq!(disassemble(&[0xd6, 0xde]), "SUB A, $de");
+    }
+
+    #[test]
+    fn disassemble_xor() {
+        assert_eq!(disassemble(&[0xa8]), "XOR A, B");
+        assert_eq!(disassemble(&[0xa9]), "XOR A, C");
+        assert_eq!(disassemble(&[0xaa]), "XOR A, D");
+        assert_eq!(disassemble(&[0xab]), "XOR A, E");
+        assert_eq!(disassemble(&[0xac]), "XOR A, H");
+        assert_eq!(disassemble(&[0xad]), "XOR A, L");
+        assert_eq!(disassemble(&[0xae]), "XOR A, [HL]");
+        assert_eq!(disassemble(&[0xaf]), "XOR A, A");
+        assert_eq!(disassemble(&[0xee, 0xef]), "XOR A, $ef");
     }
 
     #[test]
