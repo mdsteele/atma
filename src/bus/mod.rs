@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 mod dmg;
 mod label;
+mod lorom;
 mod mbc5;
 mod mmc3;
 mod nes;
@@ -15,6 +16,7 @@ mod ssmp;
 use crate::addr::Addr;
 pub use dmg::DmgBus;
 pub use label::LabeledBus;
+pub use lorom::new_lorom_bus;
 pub use mbc5::Mbc5Bus;
 pub use mmc3::Mmc3Bus;
 pub use nes::NesBus;

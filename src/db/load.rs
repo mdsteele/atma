@@ -1,8 +1,8 @@
 use super::env::SimEnv;
 use crate::addr::Addr;
 use crate::bus::{
-    DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_nsf_bus, new_open_bus,
-    new_ram_bus, new_rom_bus, new_snes_bus, new_ssmp_bus,
+    DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_lorom_bus, new_nsf_bus,
+    new_open_bus, new_ram_bus, new_rom_bus, new_snes_bus, new_ssmp_bus,
 };
 use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
@@ -495,8 +495,16 @@ impl SnesMappingMode {
             _ => todo!("{self:?}"),
         }
     }
+}
 
-    pub fn detect(rom_data: &[u8]) -> io::Result<SnesMappingMode> {
+struct SnesRomHeader {
+    title: String,
+    mode: SnesMappingMode,
+    sram_size: usize,
+}
+
+impl SnesRomHeader {
+    pub fn detect(rom_data: &[u8]) -> io::Result<SnesRomHeader> {
         let rom_size = rom_data.len();
         for mode in [
             SnesMappingMode::LoRom,
@@ -505,32 +513,66 @@ impl SnesMappingMode {
             SnesMappingMode::ExLoRom,
         ] {
             let header_addr = mode.header_rom_address();
-            if rom_size > mode.max_rom_size() || rom_size < header_addr + 32 {
+            if rom_size > mode.max_rom_size() || rom_size < header_addr + 0x20
+            {
                 continue;
             }
-            let header = &rom_data[header_addr..][..32];
-            let mode_byte = header[21];
+            let header = &rom_data[header_addr..][..0x20];
+            let mode_byte = header[0x15];
             if SnesMappingMode::from_mode_byte(mode_byte) != Some(mode) {
                 continue;
             }
             let checksum =
-                (u16::from(header[31]) << 8) | u16::from(header[30]);
+                (u16::from(header[0x1f]) << 8) | u16::from(header[0x1e]);
             let complement =
-                (u16::from(header[29]) << 8) | u16::from(header[28]);
+                (u16::from(header[0x1d]) << 8) | u16::from(header[0x1c]);
             if complement != !checksum {
                 continue;
             }
-            return Ok(mode);
+            let chipset = header[0x16];
+            let is_superfx = chipset & 0xf0 == 0x10;
+            let base_sram_shift = header[0x18];
+            let dev_id_byte = header[0x1a];
+            let has_expanded_header = dev_id_byte == 0x33;
+            let title = String::from_utf8_lossy(&header[0..0x15])
+                .trim_end()
+                .to_string();
+            let sram_shift = if has_expanded_header {
+                let expanded_header =
+                    &rom_data[(header_addr - 0x10)..][..0x10];
+                // SuperFX games with an expanded ROM header encode the amount
+                // of onboard cart RAM in the "Expansion RAM Size" field of the
+                // expanded header instead of in the normal "RAM size" field in
+                // the standard header, for some reason.  For details see
+                // https://sneslab.net/wiki/SNES_ROM_Header.
+                if is_superfx { expanded_header[0xd] } else { base_sram_shift }
+            } else if is_superfx {
+                // SuperFX games that are too old to use the expanded header
+                // (e.g. Star Fox) still have 32kB of cart RAM for use by the
+                // SuperFX, even though the RAM size field in the ROM header is
+                // set to zero.
+                5
+            } else {
+                base_sram_shift
+            };
+            let sram_size =
+                if sram_shift == 0 { 0 } else { 1024 << sram_shift };
+            return Ok(SnesRomHeader { title, mode, sram_size });
         }
         invalid_data!("could not find any SNES ROM header");
     }
 
     pub fn make_cpu_bus(self, rom_data: Box<[u8]>) -> Box<dyn SimBus> {
         let rom_bus = new_rom_bus(rom_data);
-        // TODO: handle SRAM
-        let cart: Box<dyn SimBus> = match self {
-            SnesMappingMode::HiRom => rom_bus,
-            _ => todo!("{self:?}"),
+        let sram_bus = if self.sram_size == 0 {
+            None
+        } else {
+            Some(new_ram_bus(vec![0u8; self.sram_size].into_boxed_slice()))
+        };
+        let cart: Box<dyn SimBus> = match self.mode {
+            SnesMappingMode::LoRom => new_lorom_bus(rom_bus, sram_bus),
+            SnesMappingMode::HiRom => rom_bus, // TODO: sram
+            _ => todo!("{:?}", self.mode),
         };
         new_snes_bus(cart)
     }
@@ -564,8 +606,11 @@ fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut rom_data = vec![0u8; rom_size.next_power_of_two()];
     reader.read_exact(&mut rom_data[..rom_size])?;
 
-    let mode = SnesMappingMode::detect(&rom_data)?;
-    let cpu_bus = mode.make_cpu_bus(rom_data.into_boxed_slice());
+    let header = SnesRomHeader::detect(&rom_data)?;
+    // TODO: Put these in SimEnv metadata instead of printing them here.
+    println!("Title: {}", header.title);
+
+    let cpu_bus = header.make_cpu_bus(rom_data.into_boxed_slice());
     let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
     let apu_bus =
         new_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice()));
