@@ -54,6 +54,8 @@ enum Microcode {
     IncAddrAbs,           // ADDR = (0xff0000 & ADDR) | (0xffff & (ADDR + 1))
     IncAddrLong,          // ADDR += 1
     IncPc16(u8),          // PC16 += offset
+    IndexXLong,           // ADDR += X
+    IndexYLong,           // ADDR += Y
     Jump,                 // PC = ADDR, clear microcode
     MakeAddrAbs(BankReg), // ADDR = (bank << 16) | (DATA << 8) | TEMP0
     MakeAddrDirect,       // ADDR = D + DATA
@@ -65,6 +67,7 @@ enum Microcode {
     PushByte,             // ADDR = S--, exec_write_byte
     ReadByte,             // DATA = [ADDR], watch(ADDR, Read)
     ReadWord(u8),         // DATA = [ADDR], watch(ADDR, Read), push microcode
+    SetDbr,               // DBR = DATA
     SetRegA,              // A = (DATA << 8) | TEMP0 (or just lower byte if M)
     SetRegD,              // D = (DATA << 8) | TEMP0
     SetRegX,              // X = (DATA << 8) | TEMP0
@@ -169,6 +172,8 @@ impl Wdc65c816 {
             Microcode::IncAddrAbs => self.exec_inc_addr_abs(),
             Microcode::IncAddrLong => self.exec_inc_addr_long(),
             Microcode::IncPc16(offset) => self.exec_inc_pc16(offset),
+            Microcode::IndexXLong => self.exec_index_long(self.reg_x),
+            Microcode::IndexYLong => self.exec_index_long(self.reg_y),
             Microcode::Jump => self.exec_jump(),
             Microcode::MakeAddrAbs(reg) => self.exec_make_addr_abs(reg),
             Microcode::MakeAddrDirect => self.exec_make_addr_direct(),
@@ -182,6 +187,7 @@ impl Wdc65c816 {
             Microcode::ReadWord(flag) => self.exec_read_word(bus, flag),
             Microcode::SetRegA => self.exec_set_reg_a(),
             Microcode::SetRegD => self.exec_set_reg_d(),
+            Microcode::SetDbr => self.exec_set_dbr(),
             Microcode::SetRegX => self.exec_set_reg_x(),
             Microcode::SetRegY => self.exec_set_reg_y(),
             Microcode::SetTemp0 => self.exec_set_temp0(),
@@ -205,6 +211,7 @@ impl Wdc65c816 {
             Mnemonic::Bmi => self.decode_op_bmi(),
             Mnemonic::Bne => self.decode_op_bne(),
             Mnemonic::Bpl => self.decode_op_bpl(),
+            Mnemonic::Bra => self.decode_op_bra(),
             Mnemonic::Bvc => self.decode_op_bvc(),
             Mnemonic::Bvs => self.decode_op_bvs(),
             Mnemonic::Clc => self.decode_op_clc(),
@@ -228,9 +235,13 @@ impl Wdc65c816 {
             Mnemonic::Pea => self.decode_op_pea(addr_mode),
             Mnemonic::Pei => self.decode_op_pei(addr_mode),
             Mnemonic::Per => self.decode_op_per(addr_mode),
+            Mnemonic::Pha => self.decode_op_pha(),
             Mnemonic::Phd => self.decode_op_phd(),
             Mnemonic::Phk => self.decode_op_phk(),
             Mnemonic::Php => self.decode_op_php(),
+            Mnemonic::Phx => self.decode_op_phx(),
+            Mnemonic::Phy => self.decode_op_phy(),
+            Mnemonic::Plb => self.decode_op_plb(),
             Mnemonic::Pld => self.decode_op_pld(),
             Mnemonic::Rep => self.decode_op_rep(addr_mode),
             Mnemonic::Rtl => self.decode_op_rtl(),
@@ -248,8 +259,10 @@ impl Wdc65c816 {
             Mnemonic::Sty => self.decode_op_sty(addr_mode),
             Mnemonic::Stz => self.decode_op_stz(addr_mode),
             Mnemonic::Tcd => self.decode_op_tcd(),
+            Mnemonic::Tcs => self.decode_op_tcs(),
             Mnemonic::Txs => self.decode_op_txs(),
             Mnemonic::Wdm => self.decode_op_wdm(addr_mode),
+            Mnemonic::Xba => self.decode_op_xba(),
             Mnemonic::Xce => self.decode_op_xce(),
             _ => todo!("{mnemonic} {addr_mode:?} at PC=${:06x}", self.pc()),
         }
@@ -273,7 +286,66 @@ impl Wdc65c816 {
                 self.microcode.push(Microcode::ReadByte);
                 self.microcode.push(Microcode::MakeAddrPc(1));
             }
+            AddrMode::AbsoluteIndirect => {
+                self.microcode.push(Microcode::MakeAddrAbs(bank_reg));
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::IncAddrAbs);
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrAbs(BankReg::Zero));
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(2));
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(1));
+            }
+            AddrMode::AbsoluteIndirectLong => {
+                self.microcode.push(Microcode::MakeAddrLong);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::IncAddrAbs);
+                self.microcode.push(Microcode::SetTemp1);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::IncAddrAbs);
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrAbs(BankReg::Zero));
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(2));
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(1));
+            }
+            AddrMode::AbsoluteXIndexed => {
+                self.microcode.push(Microcode::IndexXLong);
+                self.microcode.push(Microcode::MakeAddrAbs(bank_reg));
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(2));
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(1));
+            }
+            AddrMode::AbsoluteYIndexed => {
+                self.microcode.push(Microcode::IndexYLong);
+                self.microcode.push(Microcode::MakeAddrAbs(bank_reg));
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(2));
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(1));
+            }
             AddrMode::AbsoluteLong => {
+                self.microcode.push(Microcode::MakeAddrLong);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(3));
+                self.microcode.push(Microcode::SetTemp1);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(2));
+                self.microcode.push(Microcode::SetTemp0);
+                self.microcode.push(Microcode::ReadByte);
+                self.microcode.push(Microcode::MakeAddrPc(1));
+            }
+            AddrMode::AbsoluteLongXIndexed => {
+                self.microcode.push(Microcode::IndexXLong);
                 self.microcode.push(Microcode::MakeAddrLong);
                 self.microcode.push(Microcode::ReadByte);
                 self.microcode.push(Microcode::MakeAddrPc(3));
@@ -445,6 +517,11 @@ impl Wdc65c816 {
         Ok(())
     }
 
+    fn exec_index_long(&mut self, index: u16) -> Result<(), SimBreak> {
+        self.addr = self.addr.wrapping_add(u32::from(index)) & 0xffffff;
+        Ok(())
+    }
+
     fn exec_jump(&mut self) -> Result<(), SimBreak> {
         self.pc16 = self.addr as u16;
         self.pbr = (self.addr >> 16) as u8;
@@ -536,6 +613,12 @@ impl Wdc65c816 {
         self.exec_read_byte(bus)
     }
 
+    fn exec_set_dbr(&mut self) -> Result<(), SimBreak> {
+        self.dbr = self.data;
+        self.update_nz_flags(u16::from(self.dbr), true);
+        Ok(())
+    }
+
     fn exec_set_reg_a(&mut self) -> Result<(), SimBreak> {
         self.set_reg_a((u16::from(self.data) << 8) | u16::from(self.temp0));
         self.update_nz_flags(self.reg_c, self.get_flag(PROC_FLAG_M));
@@ -605,6 +688,10 @@ impl Wdc65c816 {
 
     fn decode_op_bpl(&mut self) {
         self.decode_branch(PROC_FLAG_N & !self.reg_p);
+    }
+
+    fn decode_op_bra(&mut self) {
+        self.decode_branch(1);
     }
 
     fn decode_op_bvc(&mut self) {
@@ -771,6 +858,15 @@ impl Wdc65c816 {
         self.decode_addr_mode(addr_mode, BankReg::Dbr);
     }
 
+    fn decode_op_pha(&mut self) {
+        self.microcode.push(Microcode::PushByte);
+        self.microcode.push(Microcode::GetRegCLo);
+        if !self.get_flag(PROC_FLAG_M) {
+            self.microcode.push(Microcode::PushByte);
+            self.microcode.push(Microcode::GetRegCHi);
+        }
+    }
+
     fn decode_op_phd(&mut self) {
         self.microcode.push(Microcode::PushByte);
         self.microcode.push(Microcode::GetRegDLo);
@@ -786,6 +882,29 @@ impl Wdc65c816 {
     fn decode_op_php(&mut self) {
         self.microcode.push(Microcode::PushByte);
         self.data = self.reg_p;
+    }
+
+    fn decode_op_phx(&mut self) {
+        self.microcode.push(Microcode::PushByte);
+        self.microcode.push(Microcode::GetRegXLo);
+        if !self.get_flag(PROC_FLAG_X) {
+            self.microcode.push(Microcode::PushByte);
+            self.microcode.push(Microcode::GetRegXHi);
+        }
+    }
+
+    fn decode_op_phy(&mut self) {
+        self.microcode.push(Microcode::PushByte);
+        self.microcode.push(Microcode::GetRegYLo);
+        if !self.get_flag(PROC_FLAG_X) {
+            self.microcode.push(Microcode::PushByte);
+            self.microcode.push(Microcode::GetRegYHi);
+        }
+    }
+
+    fn decode_op_plb(&mut self) {
+        self.microcode.push(Microcode::SetDbr);
+        self.microcode.push(Microcode::PullByte);
     }
 
     fn decode_op_pld(&mut self) {
@@ -888,6 +1007,11 @@ impl Wdc65c816 {
         self.update_nz_flags(self.reg_d, false);
     }
 
+    fn decode_op_tcs(&mut self) {
+        self.reg_s = self.reg_c;
+        self.force_registers();
+    }
+
     fn decode_op_txs(&mut self) {
         self.reg_s = self.reg_x;
         self.force_registers();
@@ -901,6 +1025,13 @@ impl Wdc65c816 {
         // ignored."
         self.microcode.push(Microcode::ReadByte);
         self.microcode.push(Microcode::MakeAddrPc(1));
+    }
+
+    fn decode_op_xba(&mut self) {
+        let lo_byte = self.reg_c & 0x00ff;
+        let hi_byte = self.reg_c >> 8;
+        self.reg_c = lo_byte << 8 | hi_byte;
+        self.update_nz_flags(self.reg_c, true);
     }
 
     fn decode_op_xce(&mut self) {
