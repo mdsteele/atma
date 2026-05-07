@@ -86,7 +86,7 @@ fn op_asl_zero_page() {
 fn op_bit_absolute() {
     test_opcode_with_data(
         &[0x2c, 0x03, 0x00, 0x41],
-        "BIT $0003",
+        "BIT !$0003",
         [0x06, 0x34, 0x56, 0x78, 0x88], // A, X, Y, S, P=ND
         [0x06, 0x34, 0x56, 0x78, 0x4a], // A, X, Y, S, P=VDZ
         0x0003,
@@ -193,7 +193,7 @@ fn op_lda_immediate() {
 fn op_lda_absolute() {
     test_opcode_with_data(
         &[0xad, 0x03, 0x00, 0x01],
-        "LDA $0003",
+        "LDA !$0003",
         [0x00, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         [0x01, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         0x0003,

@@ -77,7 +77,7 @@ fn assemble_jump_instructions() {
 }
 
 #[test]
-fn assemble_miscellaneous_instructions() {
+fn assemble_misc_instructions() {
     assert_asm("BRK", &[0x0f]);
     assert_asm("DAA A", &[0xdf]);
     assert_asm("DAS A", &[0xbe]);

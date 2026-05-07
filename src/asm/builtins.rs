@@ -15,6 +15,7 @@ const MACROS_65XX: &[(&str, u8, AddrMode)] = &[
     ("BCC", 0x90, AddrMode::Branch),
     ("BCS", 0xb0, AddrMode::Branch),
     ("BEQ", 0xf0, AddrMode::Branch),
+    ("BIT", 0x24, AddrMode::Addr8),
     ("BIT", 0x2c, AddrMode::BangAddr16),
     ("BMI", 0x30, AddrMode::Branch),
     ("BNE", 0xd0, AddrMode::Branch),
@@ -26,12 +27,38 @@ const MACROS_65XX: &[(&str, u8, AddrMode)] = &[
     ("CLD", 0xd8, AddrMode::Implied),
     ("CLI", 0x58, AddrMode::Implied),
     ("CLV", 0xb8, AddrMode::Implied),
+    ("DEC", 0xc6, AddrMode::Addr8),
+    ("DEC", 0xce, AddrMode::BangAddr16),
+    ("DEC", 0xd6, AddrMode::Addr8CommaReg(Reg::X)),
+    ("DEC", 0xde, AddrMode::BangAddr16CommaReg(Reg::X)),
     ("DEX", 0xca, AddrMode::Implied),
     ("DEY", 0x88, AddrMode::Implied),
+    ("INC", 0xe6, AddrMode::Addr8),
+    ("INC", 0xee, AddrMode::BangAddr16),
+    ("INC", 0xf6, AddrMode::Addr8CommaReg(Reg::X)),
+    ("INC", 0xfe, AddrMode::BangAddr16CommaReg(Reg::X)),
     ("INX", 0xe8, AddrMode::Implied),
     ("INY", 0xc8, AddrMode::Implied),
     ("JMP", 0x4c, AddrMode::BangAddr16),
     ("JSR", 0x20, AddrMode::BangAddr16),
+    ("LDA", 0xa5, AddrMode::Addr8),
+    ("LDA", 0xa1, AddrMode::ParAddr8CommaRegEns(Reg::X)),
+    ("LDA", 0xa9, AddrMode::PoundImm8),
+    ("LDA", 0xad, AddrMode::BangAddr16),
+    ("LDA", 0xb1, AddrMode::ParAddr8EnsCommaReg(Reg::Y)),
+    ("LDA", 0xb5, AddrMode::Addr8CommaReg(Reg::X)),
+    ("LDA", 0xb9, AddrMode::BangAddr16CommaReg(Reg::Y)),
+    ("LDA", 0xbd, AddrMode::BangAddr16CommaReg(Reg::X)),
+    ("LDX", 0xa6, AddrMode::Addr8),
+    ("LDX", 0xa2, AddrMode::PoundImm8),
+    ("LDX", 0xae, AddrMode::BangAddr16),
+    ("LDX", 0xb6, AddrMode::Addr8CommaReg(Reg::Y)),
+    ("LDX", 0xbe, AddrMode::BangAddr16CommaReg(Reg::Y)),
+    ("LDY", 0xa4, AddrMode::Addr8),
+    ("LDY", 0xa0, AddrMode::PoundImm8),
+    ("LDY", 0xac, AddrMode::BangAddr16),
+    ("LDY", 0xb4, AddrMode::Addr8CommaReg(Reg::X)),
+    ("LDY", 0xbc, AddrMode::BangAddr16CommaReg(Reg::X)),
     ("LSR", 0x4a, AddrMode::Reg(Reg::A)),
     ("NOP", 0xea, AddrMode::Implied),
     ("PHA", 0x48, AddrMode::Implied),
@@ -45,9 +72,19 @@ const MACROS_65XX: &[(&str, u8, AddrMode)] = &[
     ("SEC", 0x38, AddrMode::Implied),
     ("SED", 0xf8, AddrMode::Implied),
     ("SEI", 0x78, AddrMode::Implied),
+    ("STA", 0x85, AddrMode::Addr8),
+    ("STA", 0x81, AddrMode::ParAddr8CommaRegEns(Reg::X)),
     ("STA", 0x8d, AddrMode::BangAddr16),
+    ("STA", 0x91, AddrMode::ParAddr8EnsCommaReg(Reg::Y)),
+    ("STA", 0x95, AddrMode::Addr8CommaReg(Reg::X)),
+    ("STA", 0x99, AddrMode::BangAddr16CommaReg(Reg::Y)),
+    ("STA", 0x9d, AddrMode::BangAddr16CommaReg(Reg::X)),
+    ("STX", 0x86, AddrMode::Addr8),
     ("STX", 0x8e, AddrMode::BangAddr16),
+    ("STX", 0x96, AddrMode::Addr8CommaReg(Reg::Y)),
+    ("STY", 0x84, AddrMode::Addr8),
     ("STY", 0x8c, AddrMode::BangAddr16),
+    ("STY", 0x94, AddrMode::Addr8CommaReg(Reg::X)),
     ("TAX", 0xaa, AddrMode::Implied),
     ("TAY", 0xa8, AddrMode::Implied),
     ("TSX", 0xba, AddrMode::Implied),
@@ -63,18 +100,40 @@ const MACROS_6502: &[(&str, u8, AddrMode)] = &[
     ("CPX", 0xe0, AddrMode::PoundImm8),
     ("CPY", 0xc0, AddrMode::PoundImm8),
     ("EOR", 0x49, AddrMode::PoundImm8),
-    ("LDA", 0xa9, AddrMode::PoundImm8),
-    ("LDX", 0xa2, AddrMode::PoundImm8),
-    ("LDY", 0xa0, AddrMode::PoundImm8),
     ("ORA", 0x09, AddrMode::PoundImm8),
     ("SBC", 0xe9, AddrMode::PoundImm8),
 ];
 
 const MACROS_65C816: &[(&str, u8, AddrMode)] = &[
+    ("ADC", 0x69, AddrMode::PoundPoundImm16),
+    ("BIT", 0x34, AddrMode::Addr8CommaReg(Reg::X)),
+    ("BIT", 0x3c, AddrMode::BangAddr16CommaReg(Reg::X)),
+    ("BIT", 0x89, AddrMode::PoundImm8),
+    ("BIT", 0x89, AddrMode::PoundPoundImm16),
     ("BRA", 0x80, AddrMode::Branch),
     ("COP", 0x02, AddrMode::PoundImm8),
     ("DEC", 0x3a, AddrMode::Reg(Reg::A)),
     ("INC", 0x1a, AddrMode::Reg(Reg::A)),
+    ("JML", 0x5c, AddrMode::BangBangAddr24),
+    ("JML", 0xdc, AddrMode::BracBangAddr16Kets),
+    ("JMP", 0x6c, AddrMode::ParBangAddr16Ens),
+    ("JMP", 0x7c, AddrMode::ParBangAddr16CommaRegEns(Reg::X)),
+    ("JSL", 0x22, AddrMode::BangBangAddr24),
+    ("JSR", 0xfc, AddrMode::ParBangAddr16CommaRegEns(Reg::X)),
+    ("LDA", 0xa9, AddrMode::PoundPoundImm16),
+    ("LDA", 0xb2, AddrMode::ParAddr8Ens),
+    ("LDA", 0xa7, AddrMode::BracAddr8Kets),
+    ("LDA", 0xb7, AddrMode::BracAddr8KetsCommaReg(Reg::Y)),
+    ("LDA", 0xaf, AddrMode::BangBangAddr24),
+    ("LDA", 0xbf, AddrMode::BangBangAddr24CommaReg(Reg::X)),
+    ("LDA", 0xa3, AddrMode::Addr8CommaReg(Reg::S)),
+    ("LDA", 0xb3, AddrMode::ParAddr8CommaRegEnsCommaReg(Reg::S, Reg::Y)),
+    ("LDX", 0xa2, AddrMode::PoundPoundImm16),
+    ("LDY", 0xa0, AddrMode::PoundPoundImm16),
+    ("MVN", 0x54, AddrMode::PoundImm8CommaPoundImm8),
+    ("MVP", 0x44, AddrMode::PoundImm8CommaPoundImm8),
+    ("PEA", 0xf4, AddrMode::BangAddr16),
+    ("PEI", 0xd4, AddrMode::ParAddr8Ens),
     ("PHB", 0x8b, AddrMode::Implied),
     ("PHD", 0x0b, AddrMode::Implied),
     ("PHK", 0x4b, AddrMode::Implied),
@@ -87,8 +146,18 @@ const MACROS_65C816: &[(&str, u8, AddrMode)] = &[
     ("REP", 0xc2, AddrMode::PoundImm8),
     ("RTL", 0x6b, AddrMode::Implied),
     ("SEP", 0xe2, AddrMode::PoundImm8),
+    ("STA", 0x92, AddrMode::ParAddr8Ens),
+    ("STA", 0x87, AddrMode::BracAddr8Kets),
+    ("STA", 0x97, AddrMode::BracAddr8KetsCommaReg(Reg::Y)),
+    ("STA", 0x8f, AddrMode::BangBangAddr24),
+    ("STA", 0x9f, AddrMode::BangBangAddr24CommaReg(Reg::X)),
+    ("STA", 0x83, AddrMode::Addr8CommaReg(Reg::S)),
+    ("STA", 0x93, AddrMode::ParAddr8CommaRegEnsCommaReg(Reg::S, Reg::Y)),
     ("STP", 0xdb, AddrMode::Implied),
+    ("STZ", 0x64, AddrMode::Addr8),
+    ("STZ", 0x74, AddrMode::Addr8CommaReg(Reg::X)),
     ("STZ", 0x9c, AddrMode::BangAddr16),
+    ("STZ", 0x9e, AddrMode::BangAddr16CommaReg(Reg::X)),
     ("TCD", 0x5b, AddrMode::Implied),
     ("TCS", 0x1b, AddrMode::Implied),
     ("TDC", 0x7b, AddrMode::Implied),
@@ -99,6 +168,10 @@ const MACROS_65C816: &[(&str, u8, AddrMode)] = &[
     ("WDM", 0x42, AddrMode::PoundImm8),
     ("XBA", 0xeb, AddrMode::Implied),
     ("XCE", 0xfb, AddrMode::Implied),
+    // TODO: Remove these redundances with 65xx macros, once the tests can pass
+    // without them:
+    ("LDA", 0xa1, AddrMode::ParAddr8CommaRegEns(Reg::X)),
+    ("STA", 0x81, AddrMode::ParAddr8CommaRegEns(Reg::X)),
 ];
 
 const MACROS_SM83: &[(&str, u8, AddrMode)] = &[
@@ -369,14 +442,36 @@ enum AddrMode {
     BangAddr16CommaReg(Reg),
     /// FOO !addr + R1, R2
     BangAddr16PlusRegCommaReg(Reg, Reg),
+    /// FOO !!addr
+    BangBangAddr24,
+    /// FOO !!addr, R
+    BangBangAddr24CommaReg(Reg),
+    /// FOO [addr]
+    BracAddr8Kets,
+    /// FOO [addr], R
+    BracAddr8KetsCommaReg(Reg),
     /// FOO [addr] + R1, R2
     BracAddr8KetsPlusRegCommaReg(Reg, Reg),
     /// FOO [addr + R1], R2
     BracAddr8PlusRegKetsCommaReg(Reg, Reg),
+    /// FOO [!addr]
+    BracBangAddr16Kets,
     /// FOO [!addr + R]
     BracBangAddr16PlusRegKets(Reg),
     /// FOO addr
     Branch,
+    /// FOO (addr, R)
+    ParAddr8CommaRegEns(Reg),
+    /// FOO (addr, R1), R2
+    ParAddr8CommaRegEnsCommaReg(Reg, Reg),
+    /// FOO (addr)
+    ParAddr8Ens,
+    /// FOO (addr), R
+    ParAddr8EnsCommaReg(Reg),
+    /// FOO (!addr, R)
+    ParBangAddr16CommaRegEns(Reg),
+    /// FOO (!addr)
+    ParBangAddr16Ens,
     /// FOO (R1), (R2)
     ParRegEnsCommaParRegEns(Reg, Reg),
     /// FOO (R1), R2
@@ -385,6 +480,10 @@ enum AddrMode {
     ParRegEnsPlusCommaReg(Reg, Reg),
     /// FOO #imm
     PoundImm8,
+    /// FOO #imm, #imm2
+    PoundImm8CommaPoundImm8,
+    /// FOO ##imm
+    PoundPoundImm16,
     /// FOO
     Implied,
     /// FOO R
@@ -421,6 +520,7 @@ enum Reg {
     H,
     L,
     Psw,
+    S,
     Sp,
     X,
     Y,
@@ -512,6 +612,7 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
         placeholder_addr: Rc::from("%addr"),
         placeholder_addr2: Rc::from("%addr2"),
         placeholder_imm: Rc::from("%imm"),
+        placeholder_imm2: Rc::from("%imm2"),
         reg_a,
         reg_b,
         reg_c,
@@ -520,6 +621,7 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
         reg_h,
         reg_l,
         reg_psw,
+        reg_s,
         reg_sp,
         reg_x,
         reg_y,
@@ -541,6 +643,7 @@ struct BuiltinBuilder {
     placeholder_addr: Rc<str>,
     placeholder_addr2: Rc<str>,
     placeholder_imm: Rc<str>,
+    placeholder_imm2: Rc<str>,
     reg_a: Rc<str>,
     reg_b: Rc<str>,
     reg_c: Rc<str>,
@@ -549,6 +652,7 @@ struct BuiltinBuilder {
     reg_h: Rc<str>,
     reg_l: Rc<str>,
     reg_psw: Rc<str>,
+    reg_s: Rc<str>,
     reg_sp: Rc<str>,
     reg_x: Rc<str>,
     reg_y: Rc<str>,
@@ -598,16 +702,41 @@ impl BuiltinBuilder {
             AddrMode::BangAddr16CommaReg(r1) => {
                 vec![self.bang_addr_arg(), self.reg_arg(r1)]
             }
+            AddrMode::BangBangAddr24 => vec![self.bang_bang_addr_arg()],
+            AddrMode::BangBangAddr24CommaReg(r1) => {
+                vec![self.bang_bang_addr_arg(), self.reg_arg(r1)]
+            }
+            AddrMode::BracAddr8Kets => vec![self.brac_addr_kets_arg()],
+            AddrMode::BracAddr8KetsCommaReg(r1) => {
+                vec![self.brac_addr_kets_arg(), self.reg_arg(r1)]
+            }
             AddrMode::BracAddr8KetsPlusRegCommaReg(r1, r2) => {
                 vec![self.brac_addr_kets_plus_reg_arg(r1), self.reg_arg(r2)]
             }
             AddrMode::BracAddr8PlusRegKetsCommaReg(r1, r2) => {
                 vec![self.brac_addr_plus_reg_kets_arg(r1), self.reg_arg(r2)]
             }
+            AddrMode::BracBangAddr16Kets => {
+                vec![self.brac_bang_addr_kets_arg()]
+            }
             AddrMode::BracBangAddr16PlusRegKets(r1) => {
                 vec![self.brac_bang_addr_plus_reg_kets_arg(r1)]
             }
             AddrMode::Implied => vec![],
+            AddrMode::ParAddr8CommaRegEns(r1) => {
+                vec![self.par_addr_comma_reg_ens_arg(r1)]
+            }
+            AddrMode::ParAddr8CommaRegEnsCommaReg(r1, r2) => {
+                vec![self.par_addr_comma_reg_ens_arg(r1), self.reg_arg(r2)]
+            }
+            AddrMode::ParAddr8Ens => vec![self.par_addr_ens_arg()],
+            AddrMode::ParAddr8EnsCommaReg(r1) => {
+                vec![self.par_addr_ens_arg(), self.reg_arg(r1)]
+            }
+            AddrMode::ParBangAddr16CommaRegEns(r1) => {
+                vec![self.par_bang_addr_comma_reg_ens_arg(r1)]
+            }
+            AddrMode::ParBangAddr16Ens => vec![self.par_bang_addr_ens_arg()],
             AddrMode::ParRegEnsCommaParRegEns(r1, r2) => {
                 vec![self.par_reg_ens_arg(r1), self.par_reg_ens_arg(r2)]
             }
@@ -618,6 +747,10 @@ impl BuiltinBuilder {
                 vec![self.par_reg_ens_arg(r1), self.reg_arg(r2)]
             }
             AddrMode::PoundImm8 => vec![self.pound_imm_arg()],
+            AddrMode::PoundImm8CommaPoundImm8 => {
+                vec![self.pound_imm_arg(), self.pound_imm2_arg()]
+            }
+            AddrMode::PoundPoundImm16 => vec![self.pound_pound_imm_arg()],
             AddrMode::Reg(r1) => vec![self.reg_arg(r1)],
             AddrMode::RegCommaAddr8(r1) => {
                 vec![self.reg_arg(r1), self.addr_arg()]
@@ -655,8 +788,14 @@ impl BuiltinBuilder {
             | AddrMode::Addr8PlusReg(_)
             | AddrMode::Addr8PlusRegCommaReg(_, _)
             | AddrMode::Addr8CommaReg(_)
+            | AddrMode::BracAddr8Kets
+            | AddrMode::BracAddr8KetsCommaReg(_)
             | AddrMode::BracAddr8KetsPlusRegCommaReg(_, _)
             | AddrMode::BracAddr8PlusRegKetsCommaReg(_, _)
+            | AddrMode::ParAddr8CommaRegEns(_)
+            | AddrMode::ParAddr8CommaRegEnsCommaReg(_, _)
+            | AddrMode::ParAddr8Ens
+            | AddrMode::ParAddr8EnsCommaReg(_)
             | AddrMode::RegCommaAddr8(_)
             | AddrMode::RegCommaAddr8PlusReg(_, _)
             | AddrMode::RegCommaBracAddr8PlusRegKets(_, _)
@@ -678,7 +817,10 @@ impl BuiltinBuilder {
             | AddrMode::BangAddr16
             | AddrMode::BangAddr16PlusRegCommaReg(_, _)
             | AddrMode::BangAddr16CommaReg(_)
+            | AddrMode::BracBangAddr16Kets
             | AddrMode::BracBangAddr16PlusRegKets(_)
+            | AddrMode::ParBangAddr16CommaRegEns(_)
+            | AddrMode::ParBangAddr16Ens
             | AddrMode::RegCommaBangAddr16(_)
             | AddrMode::RegCommaBangAddr16PlusReg(_, _) => vec![
                 constant_u8(opcode_byte),
@@ -688,6 +830,12 @@ impl BuiltinBuilder {
                 constant_u8(opcode_byte),
                 high_page_addr(&self.placeholder_addr),
             ],
+            AddrMode::BangBangAddr24 | AddrMode::BangBangAddr24CommaReg(_) => {
+                vec![
+                    constant_u8(opcode_byte),
+                    placeholder_u24le(&self.placeholder_addr),
+                ]
+            }
             AddrMode::Branch => vec![
                 constant_u8(opcode_byte),
                 relative_addr(&self.placeholder_addr),
@@ -705,6 +853,15 @@ impl BuiltinBuilder {
             AddrMode::PoundImm8 | AddrMode::RegCommaPoundImm8(_) => vec![
                 constant_u8(opcode_byte),
                 placeholder_u8(&self.placeholder_imm),
+            ],
+            AddrMode::PoundImm8CommaPoundImm8 => vec![
+                constant_u8(opcode_byte),
+                placeholder_u8(&self.placeholder_imm2),
+                placeholder_u8(&self.placeholder_imm),
+            ],
+            AddrMode::PoundPoundImm16 => vec![
+                constant_u8(opcode_byte),
+                placeholder_u16le(&self.placeholder_imm),
             ],
         };
         let definition = AsmDefMacroAst { id: builtin_id(name), params, body };
@@ -751,6 +908,17 @@ impl BuiltinBuilder {
         }
     }
 
+    fn bang_bang_addr_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::Bang),
+                token(TokenValue::Bang),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+            ],
+        }
+    }
+
     fn bang_addr_plus_reg_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
             span: SrcSpan::BUILTIN,
@@ -759,6 +927,17 @@ impl BuiltinBuilder {
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
                 token(TokenValue::Plus),
                 self.register_token(reg),
+            ],
+        }
+    }
+
+    fn brac_addr_kets_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::BracketOpen),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+                token(TokenValue::BracketClose),
             ],
         }
     }
@@ -789,6 +968,18 @@ impl BuiltinBuilder {
         }
     }
 
+    fn brac_bang_addr_kets_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::BracketOpen),
+                token(TokenValue::Bang),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+                token(TokenValue::BracketClose),
+            ],
+        }
+    }
+
     fn brac_bang_addr_plus_reg_kets_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
             span: SrcSpan::BUILTIN,
@@ -799,6 +990,56 @@ impl BuiltinBuilder {
                 token(TokenValue::Plus),
                 self.register_token(reg),
                 token(TokenValue::BracketClose),
+            ],
+        }
+    }
+
+    fn par_addr_comma_reg_ens_arg(&self, reg: Reg) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::ParenOpen),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+                token(TokenValue::Comma),
+                self.register_token(reg),
+                token(TokenValue::ParenClose),
+            ],
+        }
+    }
+
+    fn par_addr_ens_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::ParenOpen),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+                token(TokenValue::ParenClose),
+            ],
+        }
+    }
+
+    fn par_bang_addr_ens_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::ParenOpen),
+                token(TokenValue::Bang),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+                token(TokenValue::ParenClose),
+            ],
+        }
+    }
+
+    fn par_bang_addr_comma_reg_ens_arg(&self, reg: Reg) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::ParenOpen),
+                token(TokenValue::Bang),
+                token(TokenValue::Placeholder(self.placeholder_addr.clone())),
+                token(TokenValue::Comma),
+                self.register_token(reg),
+                token(TokenValue::ParenClose),
             ],
         }
     }
@@ -836,6 +1077,27 @@ impl BuiltinBuilder {
         }
     }
 
+    fn pound_imm2_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::Pound),
+                token(TokenValue::Placeholder(self.placeholder_imm2.clone())),
+            ],
+        }
+    }
+
+    fn pound_pound_imm_arg(&self) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::BUILTIN,
+            tokens: vec![
+                token(TokenValue::Pound),
+                token(TokenValue::Pound),
+                token(TokenValue::Placeholder(self.placeholder_imm.clone())),
+            ],
+        }
+    }
+
     fn reg_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
             span: SrcSpan::BUILTIN,
@@ -853,6 +1115,7 @@ impl BuiltinBuilder {
             Reg::H => &self.reg_h,
             Reg::L => &self.reg_l,
             Reg::Psw => &self.reg_psw,
+            Reg::S => &self.reg_s,
             Reg::Sp => &self.reg_sp,
             Reg::X => &self.reg_x,
             Reg::Y => &self.reg_y,
@@ -933,6 +1196,10 @@ fn placeholder_u8(placeholder: &Rc<str>) -> AsmStmtAst {
 
 fn placeholder_u16le(placeholder: &Rc<str>) -> AsmStmtAst {
     AsmStmtAst::U16le(placeholder_expr(placeholder))
+}
+
+fn placeholder_u24le(placeholder: &Rc<str>) -> AsmStmtAst {
+    AsmStmtAst::U24le(placeholder_expr(placeholder))
 }
 
 fn placeholder_expr(placeholder: &Rc<str>) -> ExprAst {
