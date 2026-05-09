@@ -18,6 +18,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 const ENTITY_ADDRSPACE: &str = "address space";
+const ENTITY_EXPORT: &str = "exported symbol";
 const ENTITY_MEMORY: &str = "memory region";
 const ENTITY_SECTION: &str = "section";
 
@@ -30,6 +31,7 @@ struct ConfigBuilder {
     addrspaces: Vec<AddrspaceConfig>,
     memory: Vec<MemoryConfig>,
     sections: Vec<SectionConfig>,
+    exports: Vec<ExportConfig>,
     errors: Vec<SourceError>,
 }
 
@@ -40,6 +42,7 @@ impl ConfigBuilder {
             addrspaces: Vec::new(),
             memory: Vec::new(),
             sections: Vec::new(),
+            exports: Vec::new(),
             errors: Vec::new(),
         }
     }
@@ -50,6 +53,7 @@ impl ConfigBuilder {
                 addrspaces: self.addrspaces,
                 memory: self.memory,
                 sections: self.sections,
+                exports: self.exports,
             })
         } else {
             Err(self.errors)
@@ -60,6 +64,9 @@ impl ConfigBuilder {
         match dir_ast {
             LinkDirectiveAst::Addrspaces(entries) => {
                 self.visit_addrspaces_dir(entries)
+            }
+            LinkDirectiveAst::Exports(entries) => {
+                self.visit_exports_dir(entries)
             }
             LinkDirectiveAst::Let(id, expr) => self.visit_let_dir(id, expr),
             LinkDirectiveAst::Memory(entries) => {
@@ -123,6 +130,67 @@ impl ConfigBuilder {
 
     fn addrspace_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
         self.static_fill_attr(ENTITY_ADDRSPACE, expr_ast)
+    }
+
+    fn visit_exports_dir(&mut self, entries: Vec<LinkEntryAst>) {
+        for entry in entries {
+            self.visit_exports_entry(entry);
+        }
+    }
+
+    fn visit_exports_entry(&mut self, entry: LinkEntryAst) {
+        // TODO: error if this name is already exported
+        let mut space: Option<Rc<str>> = None;
+        let mut addr: Option<Addr> = None;
+        let mut prev_attrs = PrevAttrs::new();
+        for (id_ast, expr_ast) in entry.attrs {
+            self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
+            match &*id_ast.name {
+                "addr" => addr = Some(self.export_addr_attr(expr_ast)),
+                "space" => space = Some(self.export_space_attr(expr_ast)),
+                _ => self.invalid_attr_error(ENTITY_EXPORT, id_ast),
+            }
+        }
+        if space.is_none() {
+            self.missing_attr_error("space", &entry.id);
+        }
+        if addr.is_none() {
+            self.missing_attr_error("addr", &entry.id);
+        }
+        self.exports.push(ExportConfig {
+            name: entry.id.name,
+            space: space.unwrap_or_default(),
+            address: addr.unwrap_or_default(),
+        });
+    }
+
+    fn export_addr_attr(&mut self, expr_ast: ExprAst) -> Addr {
+        // TODO: allow addr to be non-static
+        let expr_span = expr_ast.span;
+        if let Some(bigint) =
+            self.static_int_attr(ENTITY_EXPORT, "addr", expr_ast)
+        {
+            match Addr::try_from(&bigint) {
+                Ok(addr) => return addr,
+                Err(()) => self.out_of_range_attr_error(
+                    ENTITY_EXPORT,
+                    "addr",
+                    expr_span,
+                    &bigint,
+                ),
+            }
+        }
+        Addr::MIN
+    }
+
+    fn export_space_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
+        self.static_entity_attr(
+            ENTITY_EXPORT,
+            "space",
+            expr_ast,
+            ENTITY_ADDRSPACE,
+        )
+        .unwrap_or_default()
     }
 
     fn visit_let_dir(&mut self, id_ast: IdentifierAst, expr_ast: ExprAst) {
@@ -576,6 +644,8 @@ pub struct LinkConfig {
     pub memory: Vec<MemoryConfig>,
     /// Configurations for the data sections to be linked together.
     pub sections: Vec<SectionConfig>,
+    /// Symbols defined and exported by the linker config.
+    pub exports: Vec<ExportConfig>,
 }
 
 impl LinkConfig {
@@ -660,6 +730,19 @@ pub struct SectionConfig {
     /// this byte value. Otherwise, they will be filled with this sections's
     /// memory region's fill byte.
     pub fill: Option<u8>,
+}
+
+//===========================================================================//
+
+/// A linker configuration for a single exported symbol.
+#[derive(Debug)]
+pub struct ExportConfig {
+    /// The name of the exported symbol.
+    pub name: Rc<str>,
+    /// The name of the address space that this symbol exists in.
+    pub space: Rc<str>,
+    /// The address of the symbol.
+    pub address: Addr, // TODO: allow this to be a non-static expression
 }
 
 //===========================================================================//

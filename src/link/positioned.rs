@@ -213,8 +213,8 @@ fn section_ordering(lhs: &ArrangedSection, rhs: &ArrangedSection) -> Ordering {
 pub(super) struct PositionedBinary {
     /// The memory regions for this binary.
     pub regions: Vec<PositionedRegion>,
-    /// For each object file, the address space and starting address for each chunk in that
-    /// object file.
+    /// For each object file, the address space and starting address for each
+    /// chunk in that object file.
     pub file_chunk_starts: Vec<Vec<AbsoluteLabel>>,
     /// The address of each exported symbol across the binary.
     pub exported_symbols: HashMap<Rc<str>, AbsoluteLabel>,
@@ -258,6 +258,15 @@ impl PositionedBinary {
         }
 
         let mut exported_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
+        for export in &config.exports {
+            exported_symbols.insert(
+                export.name.clone(),
+                AbsoluteLabel {
+                    space: export.space.clone(),
+                    address: export.address,
+                },
+            );
+        }
         for (object_index, object_file) in object_files.iter().enumerate() {
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
                 let chunk_id = ChunkId { object_index, chunk_index };
