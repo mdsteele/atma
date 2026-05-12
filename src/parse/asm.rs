@@ -38,6 +38,8 @@ impl AsmModuleAst {
 /// assembly file.
 #[derive(Clone, Debug)]
 pub enum AsmStmtAst {
+    /// An anonymous local scope.
+    AnonymousScope(Vec<AsmStmtAst>),
     /// A `.DEFMACRO` directive.
     DefMacro(AsmDefMacroAst),
     /// An `.IMPORT` directive.
@@ -46,6 +48,8 @@ pub enum AsmStmtAst {
     Invoke(AsmInvokeAst),
     /// A label.
     Label(IdentifierAst),
+    /// A named local scope.
+    NamedScope(IdentifierAst, Vec<AsmStmtAst>),
     /// A `.SECTION` block.
     Section(AsmSectionAst),
     /// A `.U8` directive.
@@ -67,14 +71,25 @@ impl AsmStmtAst {
             .repeated()
             .collect::<Vec<_>>();
         chumsky::prelude::recursive(|statement| {
-            let label = IdentifierAst::parser()
-                .then_ignore(symbol(TokenValue::Colon))
-                .then_ignore(symbol(TokenValue::Linebreak).repeated())
-                .map(AsmStmtAst::Label);
             let stmt_block = symbol(TokenValue::BraceOpen)
                 .ignore_then(linebreak())
                 .ignore_then(statement.repeated().collect::<Vec<_>>())
                 .then_ignore(symbol(TokenValue::BraceClose));
+            let anonymous_scope = stmt_block
+                .clone()
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::AnonymousScope);
+            let label_or_named_scope = IdentifierAst::parser()
+                .then_ignore(symbol(TokenValue::Colon))
+                .then(stmt_block.clone().then_ignore(linebreak()).or_not())
+                .then_ignore(symbol(TokenValue::Linebreak).repeated())
+                .map(|(id, opt_scope)| {
+                    if let Some(body) = opt_scope {
+                        AsmStmtAst::NamedScope(id, body)
+                    } else {
+                        AsmStmtAst::Label(id)
+                    }
+                });
             let def_macro_dir = directive(".DEFMACRO")
                 .ignore_then(IdentifierAst::parser())
                 .then(
@@ -118,7 +133,8 @@ impl AsmStmtAst {
                 .then_ignore(linebreak())
                 .map(AsmStmtAst::Utf8);
             chumsky::prelude::choice((
-                label,
+                anonymous_scope,
+                label_or_named_scope,
                 def_macro_dir,
                 import_dir,
                 section_dir,

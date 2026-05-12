@@ -16,6 +16,7 @@ pub(super) struct AsmTypeEnv {
     labels: HashMap<Rc<str>, SrcSpan>,
     arch_stack: Vec<Rc<str>>,
     chunk_stack: Vec<ChunkEnv>,
+    scope_stack: Vec<ScopeEnv>,
 }
 
 impl AsmTypeEnv {
@@ -24,6 +25,7 @@ impl AsmTypeEnv {
             labels: HashMap::new(),
             arch_stack: vec![Rc::from(ArchTree::ROOT_ARCH_NAME)],
             chunk_stack: Vec::new(),
+            scope_stack: Vec::new(),
         }
     }
 
@@ -39,9 +41,14 @@ impl AsmTypeEnv {
         id_ast: &IdentifierAst,
     ) -> SourceResult<()> {
         debug_assert!(!id_ast.is_placeholder);
-        if let Some(&prev_span) = self.labels.get(&id_ast.name) {
+        let full_name = if let Some(prefix) = self.current_scope_prefix() {
+            Rc::from(format!("{prefix}{}", id_ast.name))
+        } else {
+            id_ast.name.clone()
+        };
+        if let Some(&prev_span) = self.labels.get(&full_name) {
             let message =
-                format!("symbol was already declared: {}", id_ast.name);
+                format!("symbol was already declared: {}", full_name);
             let label1 = "previously declared here".to_string();
             let label2 = "redeclared here".to_string();
             Err(vec![
@@ -50,7 +57,7 @@ impl AsmTypeEnv {
                     .with_label(id_ast.span, label2),
             ])
         } else {
-            self.labels.insert(id_ast.name.clone(), id_ast.span);
+            self.labels.insert(full_name, id_ast.span);
             Ok(())
         }
     }
@@ -80,6 +87,39 @@ impl AsmTypeEnv {
     pub fn set_current_arch(&mut self, arch: Rc<str>) {
         debug_assert!(!self.arch_stack.is_empty());
         *self.arch_stack.last_mut().unwrap() = arch;
+    }
+
+    pub fn begin_scope(&mut self, name: &Rc<str>) {
+        let prefix = if let Some(outer) = self.current_scope_prefix() {
+            Rc::from(format!("{}{name}::", outer))
+        } else {
+            Rc::from(format!("{name}::"))
+        };
+        self.scope_stack.push(ScopeEnv { prefix });
+    }
+
+    fn current_scope_prefix(&self) -> Option<&str> {
+        self.scope_stack.last().map(|scope| &*scope.prefix)
+    }
+
+    pub fn end_scope(&mut self) {
+        debug_assert!(!self.scope_stack.is_empty());
+        self.scope_stack.pop();
+    }
+
+    /// Returns the fully-qualified name for the symbol with the given name in
+    /// the current scope, or `None` if no such symbol exists.
+    pub fn look_up_symbol(&self, name: &str) -> Option<Rc<str>> {
+        for scope in self.scope_stack.iter().rev() {
+            let full = format!("{}{name}", scope.prefix);
+            if let Some((full, _)) = self.labels.get_key_value(full.as_str()) {
+                return Some(full.clone());
+            }
+        }
+        if let Some((full, _)) = self.labels.get_key_value(name) {
+            return Some(full.clone());
+        }
+        None
     }
 
     pub fn typecheck_expression(
@@ -122,19 +162,18 @@ impl ExprEnv for AsmTypeEnv {
         span: SrcSpan,
         name: &Rc<str>,
     ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
-        if self.labels.contains_key(name) {
+        if let Some(full_name) = self.look_up_symbol(name) {
             let value = ExprValue::Label(ExprLabel::SymbolRelative {
-                name: name.clone(),
+                name: full_name,
                 offset: BigInt::ZERO,
             });
             let op = ObjExprOp::Push(value.clone());
-            Ok((op, ExprType::Label, Some(value)))
-        } else {
-            Err(vec![ExprTypeError::UnknownIdentifier {
-                span,
-                name: name.clone(),
-            }])
+            return Ok((op, ExprType::Label, Some(value)));
         }
+        Err(vec![ExprTypeError::UnknownIdentifier {
+            span,
+            name: name.clone(),
+        }])
     }
 }
 
@@ -156,6 +195,12 @@ impl ChunkEnv {
             patches: Vec::new(),
         }
     }
+}
+
+//===========================================================================//
+
+struct ScopeEnv {
+    prefix: Rc<str>,
 }
 
 //===========================================================================//

@@ -34,7 +34,7 @@ pub fn assemble_source(source: &str) -> SourceResult<ObjFile> {
 
 fn assemble_ast(module: AsmModuleAst) -> SourceResult<ObjFile> {
     let mut assembler = Assembler::new();
-    assembler.scope_module(&module);
+    assembler.predeclare_module(&module);
     assembler.expand_module(module);
     assembler.finish()
 }
@@ -44,6 +44,7 @@ fn assemble_ast(module: AsmModuleAst) -> SourceResult<ObjFile> {
 struct Assembler {
     arch_tree: ArchTree,
     macros: MacroTable,
+    next_anonymous_scope_number: u32,
     env: AsmTypeEnv,
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
@@ -57,6 +58,7 @@ impl Assembler {
         Assembler {
             arch_tree,
             macros,
+            next_anonymous_scope_number: 0,
             env: AsmTypeEnv::new(),
             next_chunk_index: 0,
             chunks: BTreeMap::new(),
@@ -67,27 +69,31 @@ impl Assembler {
 
     /// Scans over a module AST (without expanding macros) and collects
     /// existing labels and scopes into the environment.
-    fn scope_module(&mut self, module: &AsmModuleAst) {
-        self.scope_statements(&module.statements);
+    fn predeclare_module(&mut self, module: &AsmModuleAst) {
+        self.predeclare_statements(&module.statements);
     }
 
     /// Scans over a list of statement ASTs (without expanding macros) and
     /// collects existing labels and scopes into the environment.
-    fn scope_statements(&mut self, statements: &[AsmStmtAst]) {
+    fn predeclare_statements(&mut self, statements: &[AsmStmtAst]) {
         for statement in statements {
-            self.scope_statement(statement);
+            self.predeclare_statement(statement);
         }
     }
 
     /// Scans over a statement AST (without expanding macros) and collects
     /// existing labels and scopes into the environment.
-    fn scope_statement(&mut self, statement: &AsmStmtAst) {
+    fn predeclare_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
+            AsmStmtAst::AnonymousScope(_) => {}
             AsmStmtAst::DefMacro(_) => {}
-            AsmStmtAst::Import(id) => self.scope_import(id),
+            AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::Invoke(_) => {}
-            AsmStmtAst::Label(id) => self.scope_label(id),
-            AsmStmtAst::Section(section) => self.scope_section(section),
+            AsmStmtAst::Label(id) => self.predeclare_label(id),
+            AsmStmtAst::NamedScope(id, body) => {
+                self.predeclare_named_scope(id, body)
+            }
+            AsmStmtAst::Section(section) => self.predeclare_section(section),
             AsmStmtAst::U8(_expr) => {}
             AsmStmtAst::U16le(_expr) => {}
             AsmStmtAst::U24le(_expr) => {}
@@ -95,20 +101,31 @@ impl Assembler {
         }
     }
 
-    fn scope_import(&mut self, id_ast: &IdentifierAst) {
+    fn predeclare_import(&mut self, id_ast: &IdentifierAst) {
         // TODO: error if name is reserved in current arch
         let result = self.env.declare_import(id_ast);
         self.merge_errors(result);
     }
 
-    fn scope_label(&mut self, id_ast: &IdentifierAst) {
+    fn predeclare_label(&mut self, id_ast: &IdentifierAst) {
         // TODO: error if name is reserved in current arch
         let result = self.env.declare_label(id_ast);
         self.merge_errors(result);
     }
 
-    fn scope_section(&mut self, section_ast: &AsmSectionAst) {
-        self.scope_statements(&section_ast.body);
+    fn predeclare_named_scope(
+        &mut self,
+        id: &IdentifierAst,
+        body: &[AsmStmtAst],
+    ) {
+        self.predeclare_label(id);
+        self.env.begin_scope(&id.name);
+        self.predeclare_statements(body);
+        self.env.end_scope();
+    }
+
+    fn predeclare_section(&mut self, section_ast: &AsmSectionAst) {
+        self.predeclare_statements(&section_ast.body);
     }
 
     /// Consumes a module AST, expanding macros and directives into chunk data.
@@ -128,16 +145,31 @@ impl Assembler {
     /// data.
     fn expand_statement(&mut self, statement: AsmStmtAst) {
         match statement {
+            AsmStmtAst::AnonymousScope(body) => {
+                self.expand_anonymous_scope(body)
+            }
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
             AsmStmtAst::Label(id) => self.expand_label(id),
+            AsmStmtAst::NamedScope(id, body) => {
+                self.expand_named_scope(id, body)
+            }
             AsmStmtAst::Section(section) => self.expand_section(section),
             AsmStmtAst::U8(expr) => self.expand_u8(expr),
             AsmStmtAst::U16le(expr) => self.expand_u16le(expr),
             AsmStmtAst::U24le(expr) => self.expand_u24le(expr),
             AsmStmtAst::Utf8(expr) => self.expand_utf8(expr),
         }
+    }
+
+    fn expand_anonymous_scope(&mut self, body: Vec<AsmStmtAst>) {
+        let name = format!("${:x}", self.next_anonymous_scope_number);
+        self.next_anonymous_scope_number += 1;
+        self.env.begin_scope(&Rc::<str>::from(name));
+        self.predeclare_statements(&body);
+        self.expand_statements(body);
+        self.env.end_scope();
     }
 
     fn expand_import(&mut self, id_ast: IdentifierAst) {
@@ -159,7 +191,7 @@ impl Assembler {
         let arches = self.arch_tree.get_all_ancestors(self.env.current_arch());
         match self.macros.expand(&arches, invoke_ast) {
             Ok(statements) => {
-                self.scope_statements(&statements);
+                self.predeclare_statements(&statements);
                 self.expand_statements(statements);
             }
             Err(mut errors) => {
@@ -169,16 +201,29 @@ impl Assembler {
     }
 
     fn expand_label(&mut self, id_ast: IdentifierAst) {
+        let full_name = self.env.look_up_symbol(&id_ast.name).unwrap();
         let Some(chunk_env) = self.env.current_chunk() else {
             let message = "labels must be within a .SECTION".to_string();
             self.errors.push(SourceError::new(id_ast.span, message));
             return;
         };
         chunk_env.symbols.push(ObjSymbol {
-            name: id_ast.name,
+            name: full_name,
             exported: true, // TODO
             offset: Offset::try_from(chunk_env.data.len()).unwrap(),
         });
+    }
+
+    fn expand_named_scope(
+        &mut self,
+        id: IdentifierAst,
+        body: Vec<AsmStmtAst>,
+    ) {
+        let scope_name = id.name.clone();
+        self.expand_label(id);
+        self.env.begin_scope(&scope_name);
+        self.expand_statements(body);
+        self.env.end_scope();
     }
 
     fn expand_section(&mut self, section_ast: AsmSectionAst) {
