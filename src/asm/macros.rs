@@ -1,7 +1,7 @@
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::parse::{
-    AsmDefMacroAst, AsmInvokeAst, AsmMacroArgAst, AsmStmtAst, ExprAst,
-    ExprAstNode, IdentifierAst, Token, TokenValue,
+    AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmMacroArgAst, AsmStmtAst,
+    ExprAst, ExprAstNode, IdentifierAst, Token, TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -118,12 +118,18 @@ impl<'a> MacroBuilder<'a> {
     fn scan_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
             AsmStmtAst::Import(id) | AsmStmtAst::Label(id) => {
-                self.scan_identifier(id)
+                self.scan_identifier(id);
             }
-            AsmStmtAst::U8(expr)
-            | AsmStmtAst::U16le(expr)
-            | AsmStmtAst::U24le(expr) => self.scan_expression(expr),
+            AsmStmtAst::IntData(int_data) => {
+                self.scan_expressions(&int_data.expressions);
+            }
             other => todo!("scan_statement {other:?}"), // TODO
+        }
+    }
+
+    fn scan_expressions(&mut self, expressions: &[ExprAst]) {
+        for expr in expressions {
+            self.scan_expression(expr);
         }
     }
 
@@ -480,17 +486,16 @@ impl MacroExpansion {
             AsmStmtAst::Import(id) => {
                 AsmStmtAst::Import(self.expand_identifier(id))
             }
+            AsmStmtAst::IntData(int_data) => {
+                AsmStmtAst::IntData(AsmIntDataAst {
+                    directive_span: int_data.directive_span,
+                    int_type: int_data.int_type,
+                    expressions: self
+                        .expand_expressions(&int_data.expressions),
+                })
+            }
             AsmStmtAst::Label(id) => {
                 AsmStmtAst::Label(self.expand_identifier(id))
-            }
-            AsmStmtAst::U8(expr) => {
-                AsmStmtAst::U8(self.expand_expression(expr))
-            }
-            AsmStmtAst::U16le(expr) => {
-                AsmStmtAst::U16le(self.expand_expression(expr))
-            }
-            AsmStmtAst::U24le(expr) => {
-                AsmStmtAst::U24le(self.expand_expression(expr))
             }
             other => todo!("macro expand {other:?}"), // TODO
         }

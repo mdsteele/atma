@@ -2,8 +2,8 @@ use super::arch::ArchTree;
 use super::macros::MacroTable;
 use crate::error::SrcSpan;
 use crate::parse::{
-    AsmDefMacroAst, AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst,
-    ExprAstNode, IdentifierAst, Token, TokenValue,
+    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmMacroArgAst, AsmStmtAst,
+    BinOpAst, ExprAst, ExprAstNode, IdentifierAst, Token, TokenValue,
 };
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -1143,7 +1143,7 @@ fn constant_expr(value: u8) -> ExprAst {
 }
 
 fn constant_u8(value: u8) -> AsmStmtAst {
-    AsmStmtAst::U8(constant_expr(value))
+    int_data_stmt(AsmIntTypeAst::U8, constant_expr(value))
 }
 
 fn high_page_addr(placeholder: &Rc<str>) -> AsmStmtAst {
@@ -1156,7 +1156,7 @@ fn high_page_addr(placeholder: &Rc<str>) -> AsmStmtAst {
             Box::new(constant_expr(0xff)),
         ),
     };
-    AsmStmtAst::U8(expr)
+    int_data_stmt(AsmIntTypeAst::U8, expr)
 }
 
 fn relative_addr(placeholder: &Rc<str>) -> AsmStmtAst {
@@ -1187,19 +1187,19 @@ fn relative_addr(placeholder: &Rc<str>) -> AsmStmtAst {
             Box::new(constant_expr(0xff)),
         ),
     };
-    AsmStmtAst::U8(expr)
+    int_data_stmt(AsmIntTypeAst::U8, expr)
 }
 
 fn placeholder_u8(placeholder: &Rc<str>) -> AsmStmtAst {
-    AsmStmtAst::U8(placeholder_expr(placeholder))
+    int_data_stmt(AsmIntTypeAst::U8, placeholder_expr(placeholder))
 }
 
 fn placeholder_u16le(placeholder: &Rc<str>) -> AsmStmtAst {
-    AsmStmtAst::U16le(placeholder_expr(placeholder))
+    int_data_stmt(AsmIntTypeAst::U16le, placeholder_expr(placeholder))
 }
 
 fn placeholder_u24le(placeholder: &Rc<str>) -> AsmStmtAst {
-    AsmStmtAst::U24le(placeholder_expr(placeholder))
+    int_data_stmt(AsmIntTypeAst::U24le, placeholder_expr(placeholder))
 }
 
 fn placeholder_expr(placeholder: &Rc<str>) -> ExprAst {
@@ -1207,6 +1207,14 @@ fn placeholder_expr(placeholder: &Rc<str>) -> ExprAst {
         span: SrcSpan::BUILTIN,
         node: ExprAstNode::Placeholder(placeholder.clone()),
     }
+}
+
+fn int_data_stmt(int_type: AsmIntTypeAst, expr: ExprAst) -> AsmStmtAst {
+    AsmStmtAst::IntData(AsmIntDataAst {
+        directive_span: SrcSpan::BUILTIN,
+        int_type,
+        expressions: vec![expr],
+    })
 }
 
 fn token(value: TokenValue) -> Token {

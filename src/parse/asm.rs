@@ -44,6 +44,8 @@ pub enum AsmStmtAst {
     DefMacro(AsmDefMacroAst),
     /// An `.IMPORT` directive.
     Import(IdentifierAst),
+    /// An integer data directive (e.g. `.U8` or `.U16LE`).
+    IntData(AsmIntDataAst),
     /// A macro invocation.
     Invoke(AsmInvokeAst),
     /// A label.
@@ -52,14 +54,8 @@ pub enum AsmStmtAst {
     NamedScope(IdentifierAst, Vec<AsmStmtAst>),
     /// A `.SECTION` block.
     Section(AsmSectionAst),
-    /// A `.U8` directive.
-    U8(ExprAst),
-    /// A `.U16LE` directive.
-    U16le(ExprAst),
-    /// A `.U24LE` directive.
-    U24le(ExprAst),
     /// A `.UTF8` directive.
-    Utf8(ExprAst),
+    Utf8Data(AsmUtf8DataAst),
 }
 
 impl AsmStmtAst {
@@ -116,33 +112,15 @@ impl AsmStmtAst {
                 .map(|((name, attrs), body)| {
                     AsmStmtAst::Section(AsmSectionAst { name, attrs, body })
                 });
-            let u8_dir = directive(".U8")
-                .ignore_then(ExprAst::parser())
-                .then_ignore(linebreak())
-                .map(AsmStmtAst::U8);
-            let u16le_dir = directive(".U16LE")
-                .ignore_then(ExprAst::parser())
-                .then_ignore(linebreak())
-                .map(AsmStmtAst::U16le);
-            let u24le_dir = directive(".U24LE")
-                .ignore_then(ExprAst::parser())
-                .then_ignore(linebreak())
-                .map(AsmStmtAst::U24le);
-            let utf8_dir = directive(".UTF8")
-                .ignore_then(ExprAst::parser())
-                .then_ignore(linebreak())
-                .map(AsmStmtAst::Utf8);
             chumsky::prelude::choice((
                 anonymous_scope,
                 label_or_named_scope,
                 def_macro_dir,
                 import_dir,
                 section_dir,
-                u8_dir,
-                u16le_dir,
-                u24le_dir,
-                utf8_dir,
+                AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
+                AsmUtf8DataAst::parser().map(AsmStmtAst::Utf8Data),
             ))
         })
     }
@@ -159,6 +137,72 @@ pub struct AsmDefMacroAst {
     pub params: Vec<AsmMacroArgAst>,
     /// The statements inside the macro body.
     pub body: Vec<AsmStmtAst>,
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for an integer data directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmIntDataAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The type of integer data.
+    pub int_type: AsmIntTypeAst,
+    /// The expressions for the integer data to insert.
+    pub expressions: Vec<ExprAst>,
+}
+
+impl AsmIntDataAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmIntDataAst, Extra<'a>> + Clone {
+        AsmIntTypeAst::parser()
+            .then(
+                ExprAst::parser()
+                    .separated_by(symbol(TokenValue::Comma))
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(linebreak())
+            .map(|((directive_span, int_type), expressions)| AsmIntDataAst {
+                directive_span,
+                int_type,
+                expressions,
+            })
+    }
+}
+
+//===========================================================================//
+
+/// Types of integer data directives in assembly code.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AsmIntTypeAst {
+    /// An 8-bit unsigned integer.
+    U8,
+    /// A 16-bit unsigned little-endian integer.
+    U16le,
+    /// A 24-bit unsigned little-endian integer.
+    U24le,
+}
+
+impl AsmIntTypeAst {
+    pub(crate) fn directive(self) -> &'static str {
+        match self {
+            AsmIntTypeAst::U8 => ".U8",
+            AsmIntTypeAst::U16le => ".U16LE",
+            AsmIntTypeAst::U24le => ".U24LE",
+        }
+    }
+
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], (SrcSpan, AsmIntTypeAst), Extra<'a>> + Clone
+    {
+        let u8_dir = directive(".U8").map(|span| (span, AsmIntTypeAst::U8));
+        let u16le_dir =
+            directive(".U16LE").map(|span| (span, AsmIntTypeAst::U16le));
+        let u24le_dir =
+            directive(".U24LE").map(|span| (span, AsmIntTypeAst::U24le));
+        chumsky::prelude::choice((u8_dir, u16le_dir, u24le_dir))
+    }
 }
 
 //===========================================================================//
@@ -275,6 +319,35 @@ pub struct AsmSectionAst {
     pub attrs: Vec<(IdentifierAst, ExprAst)>,
     /// The statements inside the section block.
     pub body: Vec<AsmStmtAst>,
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a UTF8 data directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmUtf8DataAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The expressions for the string data to insert.
+    pub expressions: Vec<ExprAst>,
+}
+
+impl AsmUtf8DataAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmUtf8DataAst, Extra<'a>> + Clone {
+        directive(".UTF8")
+            .then(
+                ExprAst::parser()
+                    .separated_by(symbol(TokenValue::Comma))
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(linebreak())
+            .map(|(directive_span, expressions)| AsmUtf8DataAst {
+                directive_span,
+                expressions,
+            })
+    }
 }
 
 //===========================================================================//

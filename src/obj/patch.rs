@@ -49,14 +49,6 @@ pub enum PatchKind {
 }
 
 impl PatchKind {
-    pub(crate) fn directive(self) -> &'static str {
-        match self {
-            PatchKind::U8 => ".U8",
-            PatchKind::U16le => ".U16LE",
-            PatchKind::U24le => ".U24LE",
-        }
-    }
-
     pub(crate) fn num_bytes(self) -> usize {
         match self {
             PatchKind::U8 => 1,

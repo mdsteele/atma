@@ -12,13 +12,14 @@ use crate::obj::{
     ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol, PatchKind,
 };
 use crate::parse::{
-    AsmDefMacroAst, AsmInvokeAst, AsmModuleAst, AsmSectionAst, AsmStmtAst,
-    ExprAst, IdentifierAst,
+    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmModuleAst,
+    AsmSectionAst, AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
 use arch::ArchTree;
 use expr::AsmTypeEnv;
 use macros::MacroTable;
 use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -88,16 +89,14 @@ impl Assembler {
             AsmStmtAst::AnonymousScope(_) => {}
             AsmStmtAst::DefMacro(_) => {}
             AsmStmtAst::Import(id) => self.predeclare_import(id),
+            AsmStmtAst::IntData(_) => {}
             AsmStmtAst::Invoke(_) => {}
             AsmStmtAst::Label(id) => self.predeclare_label(id),
             AsmStmtAst::NamedScope(id, body) => {
                 self.predeclare_named_scope(id, body)
             }
             AsmStmtAst::Section(section) => self.predeclare_section(section),
-            AsmStmtAst::U8(_expr) => {}
-            AsmStmtAst::U16le(_expr) => {}
-            AsmStmtAst::U24le(_expr) => {}
-            AsmStmtAst::Utf8(_expr) => {}
+            AsmStmtAst::Utf8Data(_) => {}
         }
     }
 
@@ -150,16 +149,14 @@ impl Assembler {
             }
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
+            AsmStmtAst::IntData(data) => self.expand_int_data(data),
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
             AsmStmtAst::Label(id) => self.expand_label(id),
             AsmStmtAst::NamedScope(id, body) => {
                 self.expand_named_scope(id, body)
             }
             AsmStmtAst::Section(section) => self.expand_section(section),
-            AsmStmtAst::U8(expr) => self.expand_u8(expr),
-            AsmStmtAst::U16le(expr) => self.expand_u16le(expr),
-            AsmStmtAst::U24le(expr) => self.expand_u24le(expr),
-            AsmStmtAst::Utf8(expr) => self.expand_utf8(expr),
+            AsmStmtAst::Utf8Data(data) => self.expand_utf8_data(data),
         }
     }
 
@@ -294,126 +291,154 @@ impl Assembler {
         }
     }
 
-    fn expand_u16le(&mut self, expr_ast: ExprAst) {
-        let word = self.expand_int_data_directive(PatchKind::U16le, expr_ast);
-        if let Some(chunk_env) = self.env.current_chunk() {
-            chunk_env.data.push(word as u8);
-            chunk_env.data.push((word >> 8) as u8);
-        }
-    }
-
-    fn expand_u24le(&mut self, expr_ast: ExprAst) {
-        let long = self.expand_int_data_directive(PatchKind::U24le, expr_ast);
-        if let Some(chunk_env) = self.env.current_chunk() {
-            chunk_env.data.push(long as u8);
-            chunk_env.data.push((long >> 8) as u8);
-            chunk_env.data.push((long >> 16) as u8);
-        }
-    }
-
-    fn expand_u8(&mut self, expr_ast: ExprAst) {
-        let byte = self.expand_int_data_directive(PatchKind::U8, expr_ast);
-        if let Some(chunk_env) = self.env.current_chunk() {
-            chunk_env.data.push(byte as u8);
-        }
-    }
-
-    fn expand_utf8(&mut self, expr_ast: ExprAst) {
+    fn expand_utf8_data(&mut self, data_ast: AsmUtf8DataAst) {
         if self.env.current_chunk().is_none() {
             let message =
                 ".UTF8 directive must be within a .SECTION".to_string();
-            self.errors.push(SourceError::new(expr_ast.span, message));
+            self.errors
+                .push(SourceError::new(data_ast.directive_span, message));
         }
-        match self.typecheck_expression(&expr_ast) {
-            Some((expr, ExprType::String)) => {
-                let Some(value) = expr.static_value() else {
-                    let message = ".UTF8 value must be static".to_string();
-                    let label = "this expression isn't static".to_string();
+        for expr_ast in data_ast.expressions {
+            match self.typecheck_expression(&expr_ast) {
+                Some((expr, ExprType::Integer)) => {
+                    let Some(value) = expr.static_value() else {
+                        let message = ".UTF8 value must be static".to_string();
+                        let label = "this expression isn't static".to_string();
+                        self.errors.push(
+                            SourceError::new(expr_ast.span, message)
+                                .with_label(expr_ast.span, label),
+                        );
+                        return;
+                    };
+                    let bigint = value.unwrap_int_ref();
+                    let Some(chr) = bigint.to_u32().and_then(char::from_u32)
+                    else {
+                        let message =
+                            "invalid unicode scalar value".to_string();
+                        let label = format!(
+                            "the value of this expression is {bigint}"
+                        );
+                        self.errors.push(
+                            SourceError::new(expr_ast.span, message)
+                                .with_label(expr_ast.span, label),
+                        );
+                        return;
+                    };
+                    if let Some(chunk_env) = self.env.current_chunk() {
+                        chunk_env
+                            .data
+                            .extend_from_slice(chr.to_string().as_bytes());
+                    }
+                }
+                Some((expr, ExprType::String)) => {
+                    let Some(value) = expr.static_value() else {
+                        let message = ".UTF8 value must be static".to_string();
+                        let label = "this expression isn't static".to_string();
+                        self.errors.push(
+                            SourceError::new(expr_ast.span, message)
+                                .with_label(expr_ast.span, label),
+                        );
+                        return;
+                    };
+                    if let Some(chunk_env) = self.env.current_chunk() {
+                        chunk_env.data.extend_from_slice(
+                            value.unwrap_str_ref().as_bytes(),
+                        );
+                    }
+                }
+                Some((_, ty)) => {
+                    let message = ".UTF8 value must be a string".to_string();
+                    let label = format!("this expression has type {ty}");
                     self.errors.push(
                         SourceError::new(expr_ast.span, message)
                             .with_label(expr_ast.span, label),
                     );
-                    return;
-                };
-                if let Some(chunk_env) = self.env.current_chunk() {
-                    chunk_env
-                        .data
-                        .extend_from_slice(value.unwrap_str_ref().as_bytes());
                 }
+                None => {}
             }
-            Some((_, ty)) => {
-                let message = ".UTF8 value must be a string".to_string();
-                let label = format!("this expression has type {ty}");
-                self.errors.push(
-                    SourceError::new(expr_ast.span, message)
-                        .with_label(expr_ast.span, label),
-                );
-            }
-            None => {}
         }
     }
 
-    /// Shared implementation for directives that insert an integer (of some
-    /// size and signedness) into the chunk data. Returns the static integer
-    /// value that should be written into the chunk data; if a link-time patch
-    /// is required, this static value will just be zero, and an appropriate
-    /// `ObjPatch` will be added to the current chunk.
-    fn expand_int_data_directive(
-        &mut self,
-        kind: PatchKind,
-        expr_ast: ExprAst,
-    ) -> i64 {
+    fn expand_int_data(&mut self, int_data: AsmIntDataAst) {
         if self.env.current_chunk().is_none() {
             let message = format!(
                 "{} directive must be within a .SECTION",
-                kind.directive()
+                int_data.int_type.directive()
             );
-            self.errors.push(SourceError::new(expr_ast.span, message));
+            self.errors
+                .push(SourceError::new(int_data.directive_span, message));
         }
-        match self.typecheck_expression(&expr_ast) {
-            Some((mut expr, ExprType::Label)) => {
-                // TODO: If the label belongs to a chunk with an explicit start
-                // address, then the label's address value is static and no
-                // patch is necessary.
-                expr.ops.push(ObjExprOp::LabelAddr);
-                self.try_add_patch(kind, expr);
-            }
-            Some((expr, ExprType::Integer)) => match expr.static_value() {
-                Some(value) => {
-                    let bigint = value.unwrap_int_ref();
-                    match kind.value_in_range(bigint) {
-                        Ok(value) => return value,
-                        Err(range) => {
-                            let message = format!(
-                                "{} value is statically out of range ({}-{})",
-                                kind.directive(),
-                                range.start(),
-                                range.end()
-                            );
-                            let label = format!(
-                                "the value of this expression is {bigint}"
-                            );
-                            self.errors.push(
-                                SourceError::new(expr_ast.span, message)
-                                    .with_label(expr_ast.span, label),
-                            );
+        let kind = int_patch_kind(int_data.int_type);
+        for expr_ast in int_data.expressions {
+            let static_value: i64 = match self.typecheck_expression(&expr_ast)
+            {
+                Some((mut expr, ExprType::Label)) => {
+                    // TODO: If the label belongs to a chunk with an explicit start
+                    // address, then the label's address value is static and no
+                    // patch is necessary.
+                    expr.ops.push(ObjExprOp::LabelAddr);
+                    self.try_add_patch(kind, expr);
+                    0
+                }
+                Some((expr, ExprType::Integer)) => match expr.static_value() {
+                    Some(value) => {
+                        let bigint = value.unwrap_int_ref();
+                        match kind.value_in_range(bigint) {
+                            Ok(value) => value,
+                            Err(range) => {
+                                let message = format!(
+                                    "{} value is statically out of range ({}-{})",
+                                    int_data.int_type.directive(),
+                                    range.start(),
+                                    range.end()
+                                );
+                                let label = format!(
+                                    "the value of this expression is {bigint}"
+                                );
+                                self.errors.push(
+                                    SourceError::new(expr_ast.span, message)
+                                        .with_label(expr_ast.span, label),
+                                );
+                                0
+                            }
                         }
                     }
+                    None => {
+                        self.try_add_patch(kind, expr);
+                        0
+                    }
+                },
+                Some((_, ty)) => {
+                    let message = format!(
+                        "{} value must be an integer",
+                        int_data.int_type.directive()
+                    );
+                    let label = format!("this expression has type {ty}");
+                    self.errors.push(
+                        SourceError::new(expr_ast.span, message)
+                            .with_label(expr_ast.span, label),
+                    );
+                    0
                 }
-                None => self.try_add_patch(kind, expr),
-            },
-            Some((_, ty)) => {
-                let message =
-                    format!("{} value must be an integer", kind.directive());
-                let label = format!("this expression has type {ty}");
-                self.errors.push(
-                    SourceError::new(expr_ast.span, message)
-                        .with_label(expr_ast.span, label),
-                );
+                None => 0,
+            };
+            if let Some(chunk_env) = self.env.current_chunk() {
+                match kind {
+                    PatchKind::U8 => {
+                        chunk_env.data.push(static_value as u8);
+                    }
+                    PatchKind::U16le => {
+                        chunk_env.data.push(static_value as u8);
+                        chunk_env.data.push((static_value >> 8) as u8);
+                    }
+                    PatchKind::U24le => {
+                        chunk_env.data.push(static_value as u8);
+                        chunk_env.data.push((static_value >> 8) as u8);
+                        chunk_env.data.push((static_value >> 16) as u8);
+                    }
+                }
             }
-            None => {}
         }
-        0
     }
 
     fn set_current_arch(&mut self, arch: Rc<str>) {
@@ -587,6 +612,16 @@ impl Assembler {
         } else {
             Err(self.errors)
         }
+    }
+}
+
+//===========================================================================//
+
+fn int_patch_kind(int_type: AsmIntTypeAst) -> PatchKind {
+    match int_type {
+        AsmIntTypeAst::U8 => PatchKind::U8,
+        AsmIntTypeAst::U16le => PatchKind::U16le,
+        AsmIntTypeAst::U24le => PatchKind::U24le,
     }
 }
 

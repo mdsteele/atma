@@ -1,5 +1,6 @@
 use super::error::{ParseError, ParseResult};
 use super::lex::{Token, TokenLexer, TokenValue};
+use crate::error::SrcSpan;
 use chumsky::{self, Parser};
 use std::rc::Rc;
 
@@ -49,16 +50,17 @@ where
 
 pub(super) fn directive<'a>(
     word: &'static str,
-) -> impl Parser<'a, &'a [Token], (), Extra<'a>> + Clone {
+) -> impl Parser<'a, &'a [Token], SrcSpan, Extra<'a>> + Clone {
     chumsky::prelude::any()
-        .filter(move |token: &Token| {
-            if let TokenValue::Directive(id) = &token.value {
-                id.eq_ignore_ascii_case(word)
+        .try_map(|token: Token, span| {
+            if let TokenValue::Directive(id) = token.value
+                && id.eq_ignore_ascii_case(word)
+            {
+                Ok(token.span)
             } else {
-                false
+                Err(chumsky::error::Rich::custom(span, ""))
             }
         })
-        .ignored()
         .labelled(word)
 }
 
