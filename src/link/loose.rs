@@ -13,6 +13,9 @@ pub(super) struct LooseChunk {
     pub id: ChunkId,
     /// The size of the chunk, in bytes.
     pub size: Size,
+    /// If set, then the chunk must start at this exact address within its
+    /// address space.
+    pub start: Option<Addr>,
     /// The required alignment for this chunk's data, within its address space.
     pub align: Align,
     /// If set, then this entire chunk must not cross any alignment boundary of
@@ -44,7 +47,8 @@ pub(super) struct LooseSection {
     /// this byte value. Otherwise, they will be filled with this sections's
     /// memory region's fill byte.
     pub fill: Option<u8>,
-    /// The chunks in this section.
+    /// All the chunks in this section, listed in the same order in which they
+    /// appear across the object files.
     pub chunks: Vec<LooseChunk>,
 }
 
@@ -90,6 +94,7 @@ impl LooseSection {
                     let loose_chunk = LooseChunk {
                         id: ChunkId { object_index, chunk_index },
                         size: chunk.size,
+                        start: chunk.start,
                         align: chunk.align,
                         within: chunk.within,
                         fill: chunk.fill,

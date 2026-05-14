@@ -1,7 +1,7 @@
 use super::binary::BinaryIo;
 use super::patch::ObjPatch;
 use super::symbol::ObjSymbol;
-use crate::addr::{Align, Size};
+use crate::addr::{Addr, Align, Size};
 use std::io;
 use std::rc::Rc;
 
@@ -18,6 +18,9 @@ pub struct ObjChunk {
     /// not be less than `data.len()`, or else the linker will return an error
     /// when trying to place this chunk.
     pub size: Size,
+    /// If set, then the chunk must start at this exact address within its
+    /// address space.
+    pub start: Option<Addr>,
     /// The required alignment for this chunk's data, within its address space.
     pub align: Align,
     /// If set, then this entire chunk (data + padding) must not cross any
@@ -38,6 +41,7 @@ impl BinaryIo for ObjChunk {
         let section_name = Rc::<str>::read_from(reader)?;
         let data = Box::<[u8]>::read_from(reader)?;
         let size = Size::read_from(reader)?;
+        let start = Option::<Addr>::read_from(reader)?;
         let align = Align::read_from(reader)?;
         let within = Option::<Align>::read_from(reader)?;
         let fill = Option::<u8>::read_from(reader)?;
@@ -47,6 +51,7 @@ impl BinaryIo for ObjChunk {
             section_name,
             data,
             size,
+            start,
             align,
             within,
             fill,
@@ -59,6 +64,7 @@ impl BinaryIo for ObjChunk {
         self.section_name.write_to(writer)?;
         self.data.write_to(writer)?;
         self.size.write_to(writer)?;
+        self.start.write_to(writer)?;
         self.align.write_to(writer)?;
         self.within.write_to(writer)?;
         self.fill.write_to(writer)?;

@@ -86,7 +86,7 @@ impl ArrangedSection {
         mut section: LooseSection,
         errors: &mut Vec<LinkError>,
     ) -> ArrangedSection {
-        let section_range = Addr::MIN
+        let relative_range = Addr::MIN
             .range_with_size(section.size.unwrap_or(Size::MAX))
             .unwrap();
         section.chunks.sort_by_key(|chunk| std::cmp::Reverse(chunk.align));
@@ -94,6 +94,24 @@ impl ArrangedSection {
         let mut arranged =
             Vec::<ArrangedChunk>::with_capacity(section.chunks.len());
         for chunk in section.chunks {
+            let relative_start = if let Some(chunk_start) = chunk.start {
+                // A chunk may only specify an explicit start address if its
+                // section also has an explicit start address.
+                let Some(section_start) = section.start else {
+                    errors.push(LinkError::ChunkCannotBePlaced);
+                    continue;
+                };
+                // The chunk's start address must be greater than or equal to
+                // the section's start address, or it will of course not fit in
+                // the section.
+                if chunk_start < section_start {
+                    errors.push(LinkError::ChunkCannotBePlaced);
+                    continue;
+                }
+                Some(Addr::MIN + (chunk_start - section_start))
+            } else {
+                None
+            };
             if let Some(within) = chunk.within {
                 // If the chunk is larger than its `within` constraint, then we
                 // cannot possibly place it without violating that constraint.
@@ -120,9 +138,9 @@ impl ArrangedSection {
             }
             if let Some(range) = try_place(
                 &range_set,
-                section_range,
+                relative_range,
                 chunk.size,
-                None,
+                relative_start,
                 chunk.align,
                 chunk.within,
             ) {

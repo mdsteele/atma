@@ -5,7 +5,7 @@ mod builtins;
 mod expr;
 mod macros;
 
-use crate::addr::{Align, Offset, Size};
+use crate::addr::{Addr, Align, AlignTryFromError, Offset, Size};
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::ExprType;
 use crate::obj::{
@@ -20,7 +20,7 @@ use expr::AsmTypeEnv;
 use macros::MacroTable;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -251,16 +251,21 @@ impl Assembler {
             None => None,
         };
 
+        let mut align: Option<Align> = None;
         let mut arch: Option<Rc<str>> = None;
-        let align = Align::default(); // TODO: support align attribute
-        let within: Option<Align> = None; // TODO: support within attribute
         let mut fill: Option<u8> = None;
+        let mut start: Option<Addr> = None;
+        let mut within: Option<Align> = None;
+        let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for (id_ast, expr_ast) in section_ast.attrs {
-            // TODO: error if repeated attr name
+            self.chunk_declare_attr(&mut prev_attrs, &id_ast);
             match &*id_ast.name {
-                "arch" => arch = self.chunk_arch_attr(expr_ast),
+                "align" => align = Some(self.chunk_align_attr(expr_ast)),
+                "arch" => arch = Some(self.chunk_arch_attr(expr_ast)),
                 "fill" => fill = Some(self.chunk_fill_attr(expr_ast)),
-                _ => {} // TODO: error for unknown attr name
+                "start" => start = Some(self.chunk_start_attr(expr_ast)),
+                "within" => within = Some(self.chunk_within_attr(expr_ast)),
+                _ => self.chunk_invalid_attr_error(id_ast),
             }
         }
 
@@ -280,7 +285,8 @@ impl Assembler {
                 section_name,
                 data: Box::from(chunk_env.data),
                 size,
-                align,
+                start,
+                align: align.unwrap_or_default(),
                 within,
                 fill,
                 symbols: Rc::from(chunk_env.symbols),
@@ -446,15 +452,19 @@ impl Assembler {
         self.env.set_current_arch(arch);
     }
 
-    fn chunk_arch_attr(&mut self, expr_ast: ExprAst) -> Option<Rc<str>> {
+    fn chunk_align_attr(&mut self, expr_ast: ExprAst) -> Align {
+        self.chunk_static_align_attr("align", expr_ast)
+    }
+
+    fn chunk_arch_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
         let expr_span = expr_ast.span;
         if let Some(arch) = self.chunk_static_str_attr("arch", expr_ast) {
             if self.arch_tree.contains_arch(&arch) {
-                return Some(arch);
+                return arch;
             }
             self.unknown_arch_error(expr_span, &arch);
         }
-        None
+        self.env.current_arch().clone()
     }
 
     fn chunk_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
@@ -467,6 +477,56 @@ impl Assembler {
             }
         }
         u8::default()
+    }
+
+    fn chunk_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
+        let expr_span = expr_ast.span;
+        if let Some(bigint) = self.chunk_static_int_attr("start", expr_ast) {
+            match Addr::try_from(&bigint) {
+                Ok(addr) => return addr,
+                Err(()) => self.chunk_attr_out_of_range_error(
+                    "start", expr_span, &bigint,
+                ),
+            }
+        }
+        Addr::MIN
+    }
+
+    fn chunk_within_attr(&mut self, expr_ast: ExprAst) -> Align {
+        self.chunk_static_align_attr("within", expr_ast)
+    }
+
+    fn chunk_static_align_attr(
+        &mut self,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> Align {
+        let expr_span = expr_ast.span;
+        if let Some(bigint) = self.chunk_static_int_attr(attr_name, expr_ast) {
+            match Align::try_from(&bigint) {
+                Ok(align) => return align,
+                Err(error) => {
+                    let message = match error {
+                        AlignTryFromError::NotAPowerOfTwo => {
+                            format!("`{attr_name}` must be a power of two")
+                        }
+                        AlignTryFromError::TooLargePowerOfTwo => {
+                            format!(
+                                "`{attr_name}` must be at most {}",
+                                0x8000_0000u32
+                            )
+                        }
+                    };
+                    let label =
+                        format!("the value of this expression is {bigint}");
+                    self.errors.push(
+                        SourceError::new(expr_span, message)
+                            .with_label(expr_span, label),
+                    );
+                }
+            }
+        }
+        Align::default()
     }
 
     fn chunk_static_int_attr(
@@ -523,6 +583,28 @@ impl Assembler {
         }
     }
 
+    fn chunk_declare_attr(
+        &mut self,
+        prev_attrs: &mut HashMap<Rc<str>, SrcSpan>,
+        id_ast: &IdentifierAst,
+    ) {
+        if let Some(&prev_span) = prev_attrs.get(&id_ast.name) {
+            let message = format!(
+                "Duplicate `{}` attribute for `.SECTION`",
+                id_ast.name
+            );
+            let label1 = "Previously declared here".to_string();
+            let label2 = "Duplicated here".to_string();
+            self.errors.push(
+                SourceError::new(id_ast.span, message)
+                    .with_label(prev_span, label1)
+                    .with_label(id_ast.span, label2),
+            );
+        } else {
+            prev_attrs.insert(id_ast.name.clone(), id_ast.span);
+        }
+    }
+
     fn chunk_attr_non_static_error(
         &mut self,
         attr_name: &str,
@@ -562,6 +644,12 @@ impl Assembler {
         self.errors.push(
             SourceError::new(expr_span, message).with_label(expr_span, label),
         );
+    }
+
+    fn chunk_invalid_attr_error(&mut self, attr_id: IdentifierAst) {
+        let message =
+            format!("Invalid `.SECTION` attribute: `{}`", attr_id.name);
+        self.errors.push(SourceError::new(attr_id.span, message));
     }
 
     fn unknown_arch_error(&mut self, expr_span: SrcSpan, arch: &str) {
