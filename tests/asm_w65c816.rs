@@ -225,4 +225,20 @@ fn assemble_stz_instructions() {
     assert_asm("STZ $12, X", &[0x74, 0x12], FLAG_NONE);
 }
 
+#[test]
+fn assemble_transfer_instructions() {
+    assert_asm("TAX", &[0xaa], FLAG_NONE);
+    assert_asm("TAY", &[0xa8], FLAG_NONE);
+    assert_asm("TCD", &[0x5b], FLAG_NONE);
+    assert_asm("TCS", &[0x1b], FLAG_NONE);
+    assert_asm("TDC", &[0x7b], FLAG_NONE);
+    assert_asm("TSC", &[0x3b], FLAG_NONE);
+    assert_asm("TSX", &[0xba], FLAG_NONE);
+    assert_asm("TXA", &[0x8a], FLAG_NONE);
+    assert_asm("TXS", &[0x9a], FLAG_NONE);
+    assert_asm("TXY", &[0x9b], FLAG_NONE);
+    assert_asm("TYA", &[0x98], FLAG_NONE);
+    assert_asm("TYX", &[0xbb], FLAG_NONE);
+}
+
 //===========================================================================//
