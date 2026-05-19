@@ -16,8 +16,9 @@ fn assert_asm(source: &str, binary: &[u8]) {
     let mut rom_data = vec![0u8; obj_data.len().next_power_of_two()];
     rom_data[..obj_data.len()].copy_from_slice(obj_data);
     let rom_bus = atma::bus::new_rom_bus(rom_data.into_boxed_slice());
-    let instruction = atma::dis::spc700::Instruction::decode(&*rom_bus, 0);
-    let disassembled = instruction.format(&*rom_bus, 0);
+    let pc = 0;
+    let instruction = atma::dis::spc700::Instruction::decode(&*rom_bus, pc);
+    let disassembled = instruction.format(&*rom_bus, pc);
 
     assert_eq!(
         obj_data, binary,

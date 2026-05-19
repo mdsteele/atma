@@ -478,6 +478,262 @@ const MACROS_SPC700: &[(&str, u8, AddrMode)] = &[
     ("XCN", 0x9f, AddrMode::Reg(Reg::A)),
 ];
 
+const MACROS_SUPERFX: &[(&str, u8, AddrMode)] = &[
+    ("ADD", 0x50, AddrMode::Reg(Reg::R0)),
+    ("ADD", 0x51, AddrMode::Reg(Reg::R1)),
+    ("ADD", 0x52, AddrMode::Reg(Reg::R2)),
+    ("ADD", 0x53, AddrMode::Reg(Reg::R3)),
+    ("ADD", 0x54, AddrMode::Reg(Reg::R4)),
+    ("ADD", 0x55, AddrMode::Reg(Reg::R5)),
+    ("ADD", 0x56, AddrMode::Reg(Reg::R6)),
+    ("ADD", 0x57, AddrMode::Reg(Reg::R7)),
+    ("ADD", 0x58, AddrMode::Reg(Reg::R8)),
+    ("ADD", 0x59, AddrMode::Reg(Reg::R9)),
+    ("ADD", 0x5a, AddrMode::Reg(Reg::R10)),
+    ("ADD", 0x5b, AddrMode::Reg(Reg::R11)),
+    ("ADD", 0x5c, AddrMode::Reg(Reg::R12)),
+    ("ADD", 0x5d, AddrMode::Reg(Reg::R13)),
+    ("ADD", 0x5e, AddrMode::Reg(Reg::R14)),
+    ("ADD", 0x5f, AddrMode::Reg(Reg::R15)),
+    ("ALT1", 0x3d, AddrMode::Implied),
+    ("ALT2", 0x3e, AddrMode::Implied),
+    ("ALT3", 0x3f, AddrMode::Implied),
+    ("AND", 0x71, AddrMode::Reg(Reg::R1)),
+    ("AND", 0x72, AddrMode::Reg(Reg::R2)),
+    ("AND", 0x73, AddrMode::Reg(Reg::R3)),
+    ("AND", 0x74, AddrMode::Reg(Reg::R4)),
+    ("AND", 0x75, AddrMode::Reg(Reg::R5)),
+    ("AND", 0x76, AddrMode::Reg(Reg::R6)),
+    ("AND", 0x77, AddrMode::Reg(Reg::R7)),
+    ("AND", 0x78, AddrMode::Reg(Reg::R8)),
+    ("AND", 0x79, AddrMode::Reg(Reg::R9)),
+    ("AND", 0x7a, AddrMode::Reg(Reg::R10)),
+    ("AND", 0x7b, AddrMode::Reg(Reg::R11)),
+    ("AND", 0x7c, AddrMode::Reg(Reg::R12)),
+    ("AND", 0x7d, AddrMode::Reg(Reg::R13)),
+    ("AND", 0x7e, AddrMode::Reg(Reg::R14)),
+    ("AND", 0x7f, AddrMode::Reg(Reg::R15)),
+    ("ASR", 0x96, AddrMode::Implied),
+    ("BCC", 0x0c, AddrMode::Branch),
+    ("BCS", 0x0d, AddrMode::Branch),
+    ("BEQ", 0x09, AddrMode::Branch),
+    ("BGE", 0x06, AddrMode::Branch),
+    ("BLT", 0x07, AddrMode::Branch),
+    ("BMI", 0x0b, AddrMode::Branch),
+    ("BNE", 0x08, AddrMode::Branch),
+    ("BPL", 0x0a, AddrMode::Branch),
+    ("BRA", 0x05, AddrMode::Branch),
+    ("BVC", 0x0e, AddrMode::Branch),
+    ("BVS", 0x0f, AddrMode::Branch),
+    ("CACHE", 0x02, AddrMode::Implied),
+    ("COLOR", 0x4e, AddrMode::Implied),
+    ("DEC", 0xe0, AddrMode::Reg(Reg::R0)),
+    ("DEC", 0xe1, AddrMode::Reg(Reg::R1)),
+    ("DEC", 0xe2, AddrMode::Reg(Reg::R2)),
+    ("DEC", 0xe3, AddrMode::Reg(Reg::R3)),
+    ("DEC", 0xe4, AddrMode::Reg(Reg::R4)),
+    ("DEC", 0xe5, AddrMode::Reg(Reg::R5)),
+    ("DEC", 0xe6, AddrMode::Reg(Reg::R6)),
+    ("DEC", 0xe7, AddrMode::Reg(Reg::R7)),
+    ("DEC", 0xe8, AddrMode::Reg(Reg::R8)),
+    ("DEC", 0xe9, AddrMode::Reg(Reg::R9)),
+    ("DEC", 0xea, AddrMode::Reg(Reg::R10)),
+    ("DEC", 0xeb, AddrMode::Reg(Reg::R11)),
+    ("DEC", 0xec, AddrMode::Reg(Reg::R12)),
+    ("DEC", 0xed, AddrMode::Reg(Reg::R13)),
+    ("DEC", 0xee, AddrMode::Reg(Reg::R14)),
+    ("FMULT", 0x9f, AddrMode::Implied),
+    ("FROM", 0xb0, AddrMode::Reg(Reg::R0)),
+    ("FROM", 0xb1, AddrMode::Reg(Reg::R1)),
+    ("FROM", 0xb2, AddrMode::Reg(Reg::R2)),
+    ("FROM", 0xb3, AddrMode::Reg(Reg::R3)),
+    ("FROM", 0xb4, AddrMode::Reg(Reg::R4)),
+    ("FROM", 0xb5, AddrMode::Reg(Reg::R5)),
+    ("FROM", 0xb6, AddrMode::Reg(Reg::R6)),
+    ("FROM", 0xb7, AddrMode::Reg(Reg::R7)),
+    ("FROM", 0xb8, AddrMode::Reg(Reg::R8)),
+    ("FROM", 0xb9, AddrMode::Reg(Reg::R9)),
+    ("FROM", 0xba, AddrMode::Reg(Reg::R10)),
+    ("FROM", 0xbb, AddrMode::Reg(Reg::R11)),
+    ("FROM", 0xbc, AddrMode::Reg(Reg::R12)),
+    ("FROM", 0xbd, AddrMode::Reg(Reg::R13)),
+    ("FROM", 0xbe, AddrMode::Reg(Reg::R14)),
+    ("FROM", 0xbf, AddrMode::Reg(Reg::R15)),
+    ("GETB", 0xef, AddrMode::Implied),
+    ("GETC", 0xdf, AddrMode::Implied),
+    ("HIB", 0xc0, AddrMode::Implied),
+    ("IBT", 0xa0, AddrMode::RegCommaPoundImm8(Reg::R0)),
+    ("IBT", 0xa1, AddrMode::RegCommaPoundImm8(Reg::R1)),
+    ("IBT", 0xa2, AddrMode::RegCommaPoundImm8(Reg::R2)),
+    ("IBT", 0xa3, AddrMode::RegCommaPoundImm8(Reg::R3)),
+    ("IBT", 0xa4, AddrMode::RegCommaPoundImm8(Reg::R4)),
+    ("IBT", 0xa5, AddrMode::RegCommaPoundImm8(Reg::R5)),
+    ("IBT", 0xa6, AddrMode::RegCommaPoundImm8(Reg::R6)),
+    ("IBT", 0xa7, AddrMode::RegCommaPoundImm8(Reg::R7)),
+    ("IBT", 0xa8, AddrMode::RegCommaPoundImm8(Reg::R8)),
+    ("IBT", 0xa9, AddrMode::RegCommaPoundImm8(Reg::R9)),
+    ("IBT", 0xaa, AddrMode::RegCommaPoundImm8(Reg::R10)),
+    ("IBT", 0xab, AddrMode::RegCommaPoundImm8(Reg::R11)),
+    ("IBT", 0xac, AddrMode::RegCommaPoundImm8(Reg::R12)),
+    ("IBT", 0xad, AddrMode::RegCommaPoundImm8(Reg::R13)),
+    ("IBT", 0xae, AddrMode::RegCommaPoundImm8(Reg::R14)),
+    ("IBT", 0xaf, AddrMode::RegCommaPoundImm8(Reg::R15)),
+    ("INC", 0xd0, AddrMode::Reg(Reg::R0)),
+    ("INC", 0xd1, AddrMode::Reg(Reg::R1)),
+    ("INC", 0xd2, AddrMode::Reg(Reg::R2)),
+    ("INC", 0xd3, AddrMode::Reg(Reg::R3)),
+    ("INC", 0xd4, AddrMode::Reg(Reg::R4)),
+    ("INC", 0xd5, AddrMode::Reg(Reg::R5)),
+    ("INC", 0xd6, AddrMode::Reg(Reg::R6)),
+    ("INC", 0xd7, AddrMode::Reg(Reg::R7)),
+    ("INC", 0xd8, AddrMode::Reg(Reg::R8)),
+    ("INC", 0xd9, AddrMode::Reg(Reg::R9)),
+    ("INC", 0xda, AddrMode::Reg(Reg::R10)),
+    ("INC", 0xdb, AddrMode::Reg(Reg::R11)),
+    ("INC", 0xdc, AddrMode::Reg(Reg::R12)),
+    ("INC", 0xdd, AddrMode::Reg(Reg::R13)),
+    ("INC", 0xde, AddrMode::Reg(Reg::R14)),
+    ("IWT", 0xf0, AddrMode::RegCommaPoundImm16(Reg::R0)),
+    ("IWT", 0xf1, AddrMode::RegCommaPoundImm16(Reg::R1)),
+    ("IWT", 0xf2, AddrMode::RegCommaPoundImm16(Reg::R2)),
+    ("IWT", 0xf3, AddrMode::RegCommaPoundImm16(Reg::R3)),
+    ("IWT", 0xf4, AddrMode::RegCommaPoundImm16(Reg::R4)),
+    ("IWT", 0xf5, AddrMode::RegCommaPoundImm16(Reg::R5)),
+    ("IWT", 0xf6, AddrMode::RegCommaPoundImm16(Reg::R6)),
+    ("IWT", 0xf7, AddrMode::RegCommaPoundImm16(Reg::R7)),
+    ("IWT", 0xf8, AddrMode::RegCommaPoundImm16(Reg::R8)),
+    ("IWT", 0xf9, AddrMode::RegCommaPoundImm16(Reg::R9)),
+    ("IWT", 0xfa, AddrMode::RegCommaPoundImm16(Reg::R10)),
+    ("IWT", 0xfb, AddrMode::RegCommaPoundImm16(Reg::R11)),
+    ("IWT", 0xfc, AddrMode::RegCommaPoundImm16(Reg::R12)),
+    ("IWT", 0xfd, AddrMode::RegCommaPoundImm16(Reg::R13)),
+    ("IWT", 0xfe, AddrMode::RegCommaPoundImm16(Reg::R14)),
+    ("IWT", 0xff, AddrMode::RegCommaPoundImm16(Reg::R15)),
+    ("JMP", 0x98, AddrMode::Reg(Reg::R8)),
+    ("JMP", 0x99, AddrMode::Reg(Reg::R9)),
+    ("JMP", 0x9a, AddrMode::Reg(Reg::R10)),
+    ("JMP", 0x9b, AddrMode::Reg(Reg::R11)),
+    ("JMP", 0x9c, AddrMode::Reg(Reg::R12)),
+    ("JMP", 0x9d, AddrMode::Reg(Reg::R13)),
+    ("LDW", 0x40, AddrMode::ParRegEns(Reg::R0)),
+    ("LDW", 0x41, AddrMode::ParRegEns(Reg::R1)),
+    ("LDW", 0x42, AddrMode::ParRegEns(Reg::R2)),
+    ("LDW", 0x43, AddrMode::ParRegEns(Reg::R3)),
+    ("LDW", 0x44, AddrMode::ParRegEns(Reg::R4)),
+    ("LDW", 0x45, AddrMode::ParRegEns(Reg::R5)),
+    ("LDW", 0x46, AddrMode::ParRegEns(Reg::R6)),
+    ("LDW", 0x47, AddrMode::ParRegEns(Reg::R7)),
+    ("LDW", 0x48, AddrMode::ParRegEns(Reg::R8)),
+    ("LDW", 0x49, AddrMode::ParRegEns(Reg::R9)),
+    ("LDW", 0x4a, AddrMode::ParRegEns(Reg::R10)),
+    ("LDW", 0x4b, AddrMode::ParRegEns(Reg::R11)),
+    // TODO: LINK instructions
+    ("LOB", 0x9e, AddrMode::Implied),
+    ("LOOP", 0x3c, AddrMode::Implied),
+    ("LSR", 0x03, AddrMode::Implied),
+    ("MERGE", 0x70, AddrMode::Implied),
+    ("MULT", 0x80, AddrMode::Reg(Reg::R0)),
+    ("MULT", 0x81, AddrMode::Reg(Reg::R1)),
+    ("MULT", 0x82, AddrMode::Reg(Reg::R2)),
+    ("MULT", 0x83, AddrMode::Reg(Reg::R3)),
+    ("MULT", 0x84, AddrMode::Reg(Reg::R4)),
+    ("MULT", 0x85, AddrMode::Reg(Reg::R5)),
+    ("MULT", 0x86, AddrMode::Reg(Reg::R6)),
+    ("MULT", 0x87, AddrMode::Reg(Reg::R7)),
+    ("MULT", 0x88, AddrMode::Reg(Reg::R8)),
+    ("MULT", 0x89, AddrMode::Reg(Reg::R9)),
+    ("MULT", 0x8a, AddrMode::Reg(Reg::R10)),
+    ("MULT", 0x8b, AddrMode::Reg(Reg::R11)),
+    ("MULT", 0x8c, AddrMode::Reg(Reg::R12)),
+    ("MULT", 0x8d, AddrMode::Reg(Reg::R13)),
+    ("MULT", 0x8e, AddrMode::Reg(Reg::R14)),
+    ("MULT", 0x8f, AddrMode::Reg(Reg::R15)),
+    ("NOP", 0x01, AddrMode::Implied),
+    ("NOT", 0x4f, AddrMode::Implied),
+    ("OR", 0xc1, AddrMode::Reg(Reg::R1)),
+    ("OR", 0xc2, AddrMode::Reg(Reg::R2)),
+    ("OR", 0xc3, AddrMode::Reg(Reg::R3)),
+    ("OR", 0xc4, AddrMode::Reg(Reg::R4)),
+    ("OR", 0xc5, AddrMode::Reg(Reg::R5)),
+    ("OR", 0xc6, AddrMode::Reg(Reg::R6)),
+    ("OR", 0xc7, AddrMode::Reg(Reg::R7)),
+    ("OR", 0xc8, AddrMode::Reg(Reg::R8)),
+    ("OR", 0xc9, AddrMode::Reg(Reg::R9)),
+    ("OR", 0xca, AddrMode::Reg(Reg::R10)),
+    ("OR", 0xcb, AddrMode::Reg(Reg::R11)),
+    ("OR", 0xcc, AddrMode::Reg(Reg::R12)),
+    ("OR", 0xcd, AddrMode::Reg(Reg::R13)),
+    ("OR", 0xce, AddrMode::Reg(Reg::R14)),
+    ("OR", 0xcf, AddrMode::Reg(Reg::R15)),
+    ("PLOT", 0x4c, AddrMode::Implied),
+    ("ROL", 0x04, AddrMode::Implied),
+    ("ROR", 0x97, AddrMode::Implied),
+    ("SBK", 0x90, AddrMode::Implied),
+    ("SEX", 0x95, AddrMode::Implied),
+    ("STOP", 0x00, AddrMode::Implied),
+    ("STW", 0x30, AddrMode::ParRegEns(Reg::R0)),
+    ("STW", 0x31, AddrMode::ParRegEns(Reg::R1)),
+    ("STW", 0x32, AddrMode::ParRegEns(Reg::R2)),
+    ("STW", 0x33, AddrMode::ParRegEns(Reg::R3)),
+    ("STW", 0x34, AddrMode::ParRegEns(Reg::R4)),
+    ("STW", 0x35, AddrMode::ParRegEns(Reg::R5)),
+    ("STW", 0x36, AddrMode::ParRegEns(Reg::R6)),
+    ("STW", 0x37, AddrMode::ParRegEns(Reg::R7)),
+    ("STW", 0x38, AddrMode::ParRegEns(Reg::R8)),
+    ("STW", 0x39, AddrMode::ParRegEns(Reg::R9)),
+    ("STW", 0x3a, AddrMode::ParRegEns(Reg::R10)),
+    ("STW", 0x3b, AddrMode::ParRegEns(Reg::R11)),
+    ("SUB", 0x60, AddrMode::Reg(Reg::R0)),
+    ("SUB", 0x61, AddrMode::Reg(Reg::R1)),
+    ("SUB", 0x62, AddrMode::Reg(Reg::R2)),
+    ("SUB", 0x63, AddrMode::Reg(Reg::R3)),
+    ("SUB", 0x64, AddrMode::Reg(Reg::R4)),
+    ("SUB", 0x65, AddrMode::Reg(Reg::R5)),
+    ("SUB", 0x66, AddrMode::Reg(Reg::R6)),
+    ("SUB", 0x67, AddrMode::Reg(Reg::R7)),
+    ("SUB", 0x68, AddrMode::Reg(Reg::R8)),
+    ("SUB", 0x69, AddrMode::Reg(Reg::R9)),
+    ("SUB", 0x6a, AddrMode::Reg(Reg::R10)),
+    ("SUB", 0x6b, AddrMode::Reg(Reg::R11)),
+    ("SUB", 0x6c, AddrMode::Reg(Reg::R12)),
+    ("SUB", 0x6d, AddrMode::Reg(Reg::R13)),
+    ("SUB", 0x6e, AddrMode::Reg(Reg::R14)),
+    ("SUB", 0x6f, AddrMode::Reg(Reg::R15)),
+    ("SWAP", 0x4d, AddrMode::Implied),
+    ("TO", 0x10, AddrMode::Reg(Reg::R0)),
+    ("TO", 0x11, AddrMode::Reg(Reg::R1)),
+    ("TO", 0x12, AddrMode::Reg(Reg::R2)),
+    ("TO", 0x13, AddrMode::Reg(Reg::R3)),
+    ("TO", 0x14, AddrMode::Reg(Reg::R4)),
+    ("TO", 0x15, AddrMode::Reg(Reg::R5)),
+    ("TO", 0x16, AddrMode::Reg(Reg::R6)),
+    ("TO", 0x17, AddrMode::Reg(Reg::R7)),
+    ("TO", 0x18, AddrMode::Reg(Reg::R8)),
+    ("TO", 0x19, AddrMode::Reg(Reg::R9)),
+    ("TO", 0x1a, AddrMode::Reg(Reg::R10)),
+    ("TO", 0x1b, AddrMode::Reg(Reg::R11)),
+    ("TO", 0x1c, AddrMode::Reg(Reg::R12)),
+    ("TO", 0x1d, AddrMode::Reg(Reg::R13)),
+    ("TO", 0x1e, AddrMode::Reg(Reg::R14)),
+    ("TO", 0x1f, AddrMode::Reg(Reg::R15)),
+    ("WITH", 0x20, AddrMode::Reg(Reg::R0)),
+    ("WITH", 0x21, AddrMode::Reg(Reg::R1)),
+    ("WITH", 0x22, AddrMode::Reg(Reg::R2)),
+    ("WITH", 0x23, AddrMode::Reg(Reg::R3)),
+    ("WITH", 0x24, AddrMode::Reg(Reg::R4)),
+    ("WITH", 0x25, AddrMode::Reg(Reg::R5)),
+    ("WITH", 0x26, AddrMode::Reg(Reg::R6)),
+    ("WITH", 0x27, AddrMode::Reg(Reg::R7)),
+    ("WITH", 0x28, AddrMode::Reg(Reg::R8)),
+    ("WITH", 0x29, AddrMode::Reg(Reg::R9)),
+    ("WITH", 0x2a, AddrMode::Reg(Reg::R10)),
+    ("WITH", 0x2b, AddrMode::Reg(Reg::R11)),
+    ("WITH", 0x2c, AddrMode::Reg(Reg::R12)),
+    ("WITH", 0x2d, AddrMode::Reg(Reg::R13)),
+    ("WITH", 0x2e, AddrMode::Reg(Reg::R14)),
+    ("WITH", 0x2f, AddrMode::Reg(Reg::R15)),
+];
+
 //===========================================================================//
 
 #[derive(Clone, Copy)]
@@ -534,6 +790,8 @@ enum AddrMode {
     ParBangAddr16CommaRegEns(Reg),
     /// FOO (!addr)
     ParBangAddr16Ens,
+    /// FOO (R)
+    ParRegEns(Reg),
     /// FOO (R1), (R2)
     ParRegEnsCommaParRegEns(Reg, Reg),
     /// FOO (R1), R2
@@ -568,10 +826,13 @@ enum AddrMode {
     RegCommaParRegEnsPlus(Reg, Reg),
     /// FOO R1, #imm
     RegCommaPoundImm8(Reg),
+    /// FOO R1, #imm
+    RegCommaPoundImm16(Reg),
     /// FOO R1, R2
     RegCommaReg(Reg, Reg),
 }
 
+/// Register names used across various architectures.
 #[derive(Clone, Copy)]
 enum Reg {
     A,
@@ -582,6 +843,22 @@ enum Reg {
     H,
     L,
     Psw,
+    R0,
+    R1,
+    R2,
+    R3,
+    R4,
+    R5,
+    R6,
+    R7,
+    R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
     S,
     Sp,
     X,
@@ -599,6 +876,7 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
     let arch_65c816 = Rc::<str>::from("65C816");
     let arch_sm83 = Rc::<str>::from("SM83");
     let arch_spc700 = Rc::<str>::from("SPC700");
+    let arch_superfx = Rc::<str>::from("SuperFX");
 
     let reg_a = Rc::<str>::from("A");
     let reg_af = Rc::<str>::from("AF");
@@ -614,6 +892,22 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
     let reg_nc = Rc::<str>::from("NC");
     let reg_nz = Rc::<str>::from("NZ");
     let reg_psw = Rc::<str>::from("PSW");
+    let reg_r0 = Rc::<str>::from("R0");
+    let reg_r1 = Rc::<str>::from("R1");
+    let reg_r2 = Rc::<str>::from("R2");
+    let reg_r3 = Rc::<str>::from("R3");
+    let reg_r4 = Rc::<str>::from("R4");
+    let reg_r5 = Rc::<str>::from("R5");
+    let reg_r6 = Rc::<str>::from("R6");
+    let reg_r7 = Rc::<str>::from("R7");
+    let reg_r8 = Rc::<str>::from("R8");
+    let reg_r9 = Rc::<str>::from("R9");
+    let reg_r10 = Rc::<str>::from("R10");
+    let reg_r11 = Rc::<str>::from("R11");
+    let reg_r12 = Rc::<str>::from("R12");
+    let reg_r13 = Rc::<str>::from("R13");
+    let reg_r14 = Rc::<str>::from("R14");
+    let reg_r15 = Rc::<str>::from("R15");
     let reg_s = Rc::<str>::from("S");
     let reg_sp = Rc::<str>::from("SP");
     let reg_x = Rc::<str>::from("X");
@@ -649,6 +943,24 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
         reg_y.clone(),
         reg_ya.clone(),
     ];
+    let res_superfx = vec![
+        reg_r0.clone(),
+        reg_r1.clone(),
+        reg_r2.clone(),
+        reg_r3.clone(),
+        reg_r4.clone(),
+        reg_r5.clone(),
+        reg_r6.clone(),
+        reg_r7.clone(),
+        reg_r8.clone(),
+        reg_r9.clone(),
+        reg_r10.clone(),
+        reg_r11.clone(),
+        reg_r12.clone(),
+        reg_r13.clone(),
+        reg_r14.clone(),
+        reg_r15.clone(),
+    ];
 
     arch_tree
         .define_arch(arch_65xx.clone(), ArchTree::ROOT_ARCH_NAME, &res_65xx)
@@ -667,6 +979,13 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
             &res_spc700,
         )
         .unwrap();
+    arch_tree
+        .define_arch(
+            arch_superfx.clone(),
+            ArchTree::ROOT_ARCH_NAME,
+            &res_superfx,
+        )
+        .unwrap();
 
     let mut builder = BuiltinBuilder {
         arch_tree,
@@ -683,6 +1002,22 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
         reg_h,
         reg_l,
         reg_psw,
+        reg_r0,
+        reg_r1,
+        reg_r2,
+        reg_r3,
+        reg_r4,
+        reg_r5,
+        reg_r6,
+        reg_r7,
+        reg_r8,
+        reg_r9,
+        reg_r10,
+        reg_r11,
+        reg_r12,
+        reg_r13,
+        reg_r14,
+        reg_r15,
         reg_s,
         reg_sp,
         reg_x,
@@ -694,6 +1029,7 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
     builder.add_macros(&arch_65c816, MACROS_65C816);
     builder.add_macros(&arch_sm83, MACROS_SM83);
     builder.add_macros(&arch_spc700, MACROS_SPC700);
+    builder.add_macros(&arch_superfx, MACROS_SUPERFX);
     (builder.arch_tree, builder.macros)
 }
 
@@ -714,6 +1050,22 @@ struct BuiltinBuilder {
     reg_h: Rc<str>,
     reg_l: Rc<str>,
     reg_psw: Rc<str>,
+    reg_r0: Rc<str>,
+    reg_r1: Rc<str>,
+    reg_r2: Rc<str>,
+    reg_r3: Rc<str>,
+    reg_r4: Rc<str>,
+    reg_r5: Rc<str>,
+    reg_r6: Rc<str>,
+    reg_r7: Rc<str>,
+    reg_r8: Rc<str>,
+    reg_r9: Rc<str>,
+    reg_r10: Rc<str>,
+    reg_r11: Rc<str>,
+    reg_r12: Rc<str>,
+    reg_r13: Rc<str>,
+    reg_r14: Rc<str>,
+    reg_r15: Rc<str>,
     reg_s: Rc<str>,
     reg_sp: Rc<str>,
     reg_x: Rc<str>,
@@ -799,6 +1151,7 @@ impl BuiltinBuilder {
                 vec![self.par_bang_addr_comma_reg_ens_arg(r1)]
             }
             AddrMode::ParBangAddr16Ens => vec![self.par_bang_addr_ens_arg()],
+            AddrMode::ParRegEns(r1) => vec![self.par_reg_ens_arg(r1)],
             AddrMode::ParRegEnsCommaParRegEns(r1, r2) => {
                 vec![self.par_reg_ens_arg(r1), self.par_reg_ens_arg(r2)]
             }
@@ -838,7 +1191,8 @@ impl BuiltinBuilder {
             AddrMode::RegCommaParRegEnsPlus(r1, r2) => {
                 vec![self.reg_arg(r1), self.par_reg_ens_plus_arg(r2)]
             }
-            AddrMode::RegCommaPoundImm8(r1) => {
+            AddrMode::RegCommaPoundImm8(r1)
+            | AddrMode::RegCommaPoundImm16(r1) => {
                 vec![self.reg_arg(r1), self.pound_imm_arg()]
             }
             AddrMode::RegCommaReg(r1, r2) => {
@@ -903,6 +1257,7 @@ impl BuiltinBuilder {
                 relative_addr(&self.placeholder_addr),
             ],
             AddrMode::Implied
+            | AddrMode::ParRegEns(_)
             | AddrMode::ParRegEnsCommaParRegEns(_, _)
             | AddrMode::ParRegEnsPlusCommaReg(_, _)
             | AddrMode::ParRegEnsCommaReg(_, _)
@@ -921,10 +1276,12 @@ impl BuiltinBuilder {
                 placeholder_u8(&self.placeholder_imm2),
                 placeholder_u8(&self.placeholder_imm),
             ],
-            AddrMode::PoundPoundImm16 => vec![
-                constant_u8(opcode_byte),
-                placeholder_u16le(&self.placeholder_imm),
-            ],
+            AddrMode::PoundPoundImm16 | AddrMode::RegCommaPoundImm16(_) => {
+                vec![
+                    constant_u8(opcode_byte),
+                    placeholder_u16le(&self.placeholder_imm),
+                ]
+            }
         };
         let definition = AsmDefMacroAst { id: builtin_id(name), params, body };
         let reserved = self.arch_tree.reserved_names(arch);
@@ -1177,6 +1534,22 @@ impl BuiltinBuilder {
             Reg::H => &self.reg_h,
             Reg::L => &self.reg_l,
             Reg::Psw => &self.reg_psw,
+            Reg::R0 => &self.reg_r0,
+            Reg::R1 => &self.reg_r1,
+            Reg::R2 => &self.reg_r2,
+            Reg::R3 => &self.reg_r3,
+            Reg::R4 => &self.reg_r4,
+            Reg::R5 => &self.reg_r5,
+            Reg::R6 => &self.reg_r6,
+            Reg::R7 => &self.reg_r7,
+            Reg::R8 => &self.reg_r8,
+            Reg::R9 => &self.reg_r9,
+            Reg::R10 => &self.reg_r10,
+            Reg::R11 => &self.reg_r11,
+            Reg::R12 => &self.reg_r12,
+            Reg::R13 => &self.reg_r13,
+            Reg::R14 => &self.reg_r14,
+            Reg::R15 => &self.reg_r15,
             Reg::S => &self.reg_s,
             Reg::Sp => &self.reg_sp,
             Reg::X => &self.reg_x,

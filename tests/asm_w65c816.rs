@@ -22,11 +22,14 @@ fn assert_asm(source: &str, binary: &[u8], flags: u8) {
     let mut rom_data = vec![0u8; obj_data.len().next_power_of_two()];
     rom_data[..obj_data.len()].copy_from_slice(obj_data);
     let rom_bus = atma::bus::new_rom_bus(rom_data.into_boxed_slice());
+    let pc = 0;
     let flag_m = flags & FLAG_M != 0;
     let flag_x = flags & FLAG_X != 0;
+    let dpr = 0x0000u16;
+    let dbr = 0x00u8;
     let instruction =
-        atma::dis::w65c816::Instruction::decode(&*rom_bus, 0, flag_m, flag_x);
-    let disassembled = instruction.format(&*rom_bus, 0, 0x0000, 0x0000);
+        atma::dis::w65c816::Instruction::decode(&*rom_bus, pc, flag_m, flag_x);
+    let disassembled = instruction.format(&*rom_bus, pc, dpr, dbr);
 
     assert_eq!(
         obj_data, binary,
