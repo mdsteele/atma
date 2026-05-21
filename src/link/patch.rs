@@ -2,7 +2,9 @@ use super::error::LinkError;
 use super::types::AbsoluteLabel;
 use crate::addr::Addr;
 use crate::expr::{ExprLabel, ExprValue};
-use crate::obj::{ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, PatchKind};
+use crate::obj::{
+    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, PatchKind,
+};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -70,8 +72,10 @@ impl PatchedFile {
 
         let mut patched_chunks = Vec::<PatchedChunk>::new();
         let mut patcher = FilePatcher::new(chunk_starts, symbol_addrs, errors);
-        for chunk in object_file.chunks {
-            patched_chunks.push(patcher.patch_chunk(chunk));
+        if patcher.check_assertions(object_file.asserts) {
+            for chunk in object_file.chunks {
+                patched_chunks.push(patcher.patch_chunk(chunk));
+            }
         }
         PatchedFile { chunks: patched_chunks }
     }
@@ -111,6 +115,40 @@ impl<'a> FilePatcher<'a> {
         errors: &'a mut Vec<LinkError>,
     ) -> FilePatcher<'a> {
         FilePatcher { chunk_starts, symbol_addrs, errors }
+    }
+
+    pub fn check_assertions(&mut self, asserts: Vec<ObjAssert>) -> bool {
+        asserts.into_iter().all(|assert| self.check_assertion(assert))
+    }
+
+    fn check_assertion(&mut self, assert: ObjAssert) -> bool {
+        match self.eval_patch_expr(assert.condition) {
+            None => false, // evaluation failed with errors
+            Some(ExprValue::Boolean(true)) => true,
+            Some(ExprValue::Boolean(false)) => {
+                if let Some(message_expr) = assert.message {
+                    match self.eval_patch_expr(message_expr) {
+                        None => {} // evaluation failed with errors
+                        Some(ExprValue::String(message_string)) => {
+                            self.errors.push(LinkError::AssertionFailed {
+                                message: Some(message_string),
+                            });
+                        }
+                        Some(_) => {
+                            self.errors.push(LinkError::PatchValueWrongType);
+                        }
+                    }
+                } else {
+                    self.errors
+                        .push(LinkError::AssertionFailed { message: None });
+                }
+                false
+            }
+            Some(_) => {
+                self.errors.push(LinkError::PatchValueWrongType);
+                false
+            }
+        }
     }
 
     pub fn patch_chunk(&mut self, chunk: ObjChunk) -> PatchedChunk {

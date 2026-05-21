@@ -40,6 +40,8 @@ impl AsmModuleAst {
 pub enum AsmStmtAst {
     /// An anonymous local scope.
     AnonymousScope(Vec<AsmStmtAst>),
+    /// An `.ASSERT` directive.
+    Assert(AsmAssertAst),
     /// A `.DEFMACRO` directive.
     DefMacro(AsmDefMacroAst),
     /// An `.IMPORT` directive.
@@ -86,6 +88,17 @@ impl AsmStmtAst {
                         AsmStmtAst::Label(id)
                     }
                 });
+            let assert_dir = directive(".ASSERT")
+                .ignore_then(ExprAst::parser())
+                .then(
+                    symbol(TokenValue::Comma)
+                        .ignore_then(ExprAst::parser())
+                        .or_not(),
+                )
+                .then_ignore(linebreak())
+                .map(|(condition, message)| {
+                    AsmStmtAst::Assert(AsmAssertAst { condition, message })
+                });
             let def_macro_dir = directive(".DEFMACRO")
                 .ignore_then(IdentifierAst::parser())
                 .then(
@@ -115,6 +128,7 @@ impl AsmStmtAst {
             chumsky::prelude::choice((
                 anonymous_scope,
                 label_or_named_scope,
+                assert_dir,
                 def_macro_dir,
                 import_dir,
                 section_dir,
@@ -124,6 +138,18 @@ impl AsmStmtAst {
             ))
         })
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for an assertion in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmAssertAst {
+    /// The boolean condition that is expected to be true.
+    pub condition: ExprAst,
+    /// An optional error message that should be emitted if the assertion
+    /// fails.
+    pub message: Option<ExprAst>,
 }
 
 //===========================================================================//

@@ -37,6 +37,8 @@ const OP_TUPLE_ITEM: u8 = 0x36;
 
 /// An expression in an assembly file.
 pub struct ObjExpr {
+    /// The operations to perform to evaluate the expression.  Must be
+    /// nonempty.
     pub(crate) ops: Vec<ObjExprOp>,
 }
 
@@ -62,7 +64,28 @@ impl BinaryIo for ObjExpr {
     }
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        debug_assert!(!self.ops.is_empty());
         self.ops.write_to(writer)
+    }
+
+    fn read_option_from<R: io::BufRead>(
+        reader: &mut R,
+    ) -> io::Result<Option<Self>> {
+        let ops = Vec::<ObjExprOp>::read_from(reader)?;
+        if ops.is_empty() { Ok(None) } else { Ok(Some(ObjExpr { ops })) }
+    }
+
+    fn write_option_to<W: io::Write>(
+        option: &Option<Self>,
+        writer: &mut W,
+    ) -> io::Result<()> {
+        match option {
+            None => Vec::<ObjExprOp>::new().write_to(writer),
+            Some(value) => {
+                debug_assert!(!value.ops.is_empty());
+                value.ops.write_to(writer)
+            }
+        }
     }
 }
 

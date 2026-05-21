@@ -9,11 +9,13 @@ use crate::addr::{Addr, Align, AlignTryFromError, Offset, Size};
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::ExprType;
 use crate::obj::{
-    ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol, PatchKind,
+    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol,
+    PatchKind,
 };
 use crate::parse::{
-    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmModuleAst,
-    AsmSectionAst, AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
+    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst,
+    AsmModuleAst, AsmSectionAst, AsmStmtAst, AsmUtf8DataAst, ExprAst,
+    IdentifierAst,
 };
 use arch::ArchTree;
 use expr::AsmTypeEnv;
@@ -50,6 +52,7 @@ struct Assembler {
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<Rc<str>>,
+    asserts: Vec<ObjAssert>,
     errors: Vec<SourceError>,
 }
 
@@ -64,6 +67,7 @@ impl Assembler {
             next_chunk_index: 0,
             chunks: BTreeMap::new(),
             imports: Vec::new(),
+            asserts: Vec::new(),
             errors: Vec::new(),
         }
     }
@@ -87,6 +91,7 @@ impl Assembler {
     fn predeclare_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
             AsmStmtAst::AnonymousScope(_) => {}
+            AsmStmtAst::Assert(_) => {}
             AsmStmtAst::DefMacro(_) => {}
             AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::IntData(_) => {}
@@ -147,6 +152,7 @@ impl Assembler {
             AsmStmtAst::AnonymousScope(body) => {
                 self.expand_anonymous_scope(body)
             }
+            AsmStmtAst::Assert(assert) => self.expand_assert(assert),
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::IntData(data) => self.expand_int_data(data),
@@ -167,6 +173,82 @@ impl Assembler {
         self.predeclare_statements(&body);
         self.expand_statements(body);
         self.env.end_scope();
+    }
+
+    fn expand_assert(&mut self, assert_ast: AsmAssertAst) {
+        let opt_message_expr: Option<ObjExpr> = match &assert_ast.message {
+            None => None,
+            Some(expr_ast) => match self.typecheck_expression(expr_ast) {
+                Some((expr, ExprType::String)) => Some(expr),
+                Some((_, ty)) => {
+                    let message =
+                        ".ASSERT message must be a string".to_string();
+                    let label = format!("this expression has type {ty}");
+                    self.errors.push(
+                        SourceError::new(expr_ast.span, message)
+                            .with_label(expr_ast.span, label),
+                    );
+                    None
+                }
+                None => None,
+            },
+        };
+        let condition_expr: ObjExpr = match self
+            .typecheck_expression(&assert_ast.condition)
+        {
+            Some((condition_expr, ExprType::Boolean)) => match condition_expr
+                .static_value()
+            {
+                None => condition_expr,
+                Some(value) => {
+                    if value.unwrap_bool() {
+                        return;
+                    } else {
+                        match &opt_message_expr {
+                            None => {
+                                let message = "Assertion failed".to_string();
+                                self.errors.push(SourceError::new(
+                                    assert_ast.condition.span,
+                                    message,
+                                ));
+                                return;
+                            }
+                            Some(message_expr) => {
+                                match message_expr.static_value() {
+                                    Some(message_value) => {
+                                        let message = format!(
+                                            "Assertion failed: {}",
+                                            message_value.unwrap_str_ref()
+                                        );
+                                        self.errors.push(SourceError::new(
+                                            assert_ast.condition.span,
+                                            message,
+                                        ));
+                                        return;
+                                    }
+                                    None => condition_expr,
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            Some((_, ty)) => {
+                let message =
+                    ".ASSERT condition must be a boolean".to_string();
+                let label = format!("this expression has type {ty}");
+                self.errors.push(
+                    SourceError::new(assert_ast.condition.span, message)
+                        .with_label(assert_ast.condition.span, label),
+                );
+                return;
+            }
+            None => return,
+        };
+        self.asserts.push(ObjAssert {
+            condition: condition_expr,
+            message: opt_message_expr,
+        });
     }
 
     fn expand_import(&mut self, id_ast: IdentifierAst) {
@@ -696,6 +778,7 @@ impl Assembler {
             Ok(ObjFile {
                 chunks: self.chunks.into_values().collect(),
                 imports: self.imports,
+                asserts: self.asserts,
             })
         } else {
             Err(self.errors)

@@ -113,9 +113,9 @@ pub enum ExprValue {
 impl ExprValue {
     /// Returns the contained [`Boolean`](ExprValue::Boolean) value, or panics
     /// if this value is not a boolean.
-    pub fn unwrap_bool(self) -> bool {
+    pub fn unwrap_bool(&self) -> bool {
         match self {
-            ExprValue::Boolean(boolean) => boolean,
+            &ExprValue::Boolean(boolean) => boolean,
             value => panic!("ExprValue::unwrap_bool on {value:?}"),
         }
     }
