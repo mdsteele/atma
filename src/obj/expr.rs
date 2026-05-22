@@ -11,27 +11,30 @@ const OP_ANY_CMP_LT: u8 = 0x02;
 const OP_ANY_CMP_GE: u8 = 0x03;
 const OP_ANY_CMP_GT: u8 = 0x04;
 const OP_ANY_CMP_NE: u8 = 0x05;
-const OP_INT_ADD: u8 = 0x10;
-const OP_INT_BIT_AND: u8 = 0x11;
-const OP_INT_BIT_OR: u8 = 0x12;
-const OP_INT_BIT_XOR: u8 = 0x13;
-const OP_INT_DIV: u8 = 0x14;
-const OP_INT_MOD: u8 = 0x15;
-const OP_INT_MUL: u8 = 0x16;
-const OP_INT_POW: u8 = 0x17;
-const OP_INT_SHL: u8 = 0x18;
-const OP_INT_SHR: u8 = 0x19;
-const OP_INT_SUB: u8 = 0x1a;
-const OP_LABEL_ADD_INT: u8 = 0x20;
-const OP_LABEL_SUB: u8 = 0x21;
+const OP_BOOL_BIT_AND: u8 = 0x11;
+const OP_BOOL_BIT_OR: u8 = 0x12;
+const OP_BOOL_BIT_XOR: u8 = 0x13;
+const OP_INT_ADD: u8 = 0x20;
+const OP_INT_BIT_AND: u8 = 0x21;
+const OP_INT_BIT_OR: u8 = 0x22;
+const OP_INT_BIT_XOR: u8 = 0x23;
+const OP_INT_DIV: u8 = 0x24;
+const OP_INT_MOD: u8 = 0x25;
+const OP_INT_MUL: u8 = 0x26;
+const OP_INT_POW: u8 = 0x27;
+const OP_INT_SHL: u8 = 0x28;
+const OP_INT_SHR: u8 = 0x29;
+const OP_INT_SUB: u8 = 0x2a;
+const OP_LABEL_ADD_INT: u8 = 0x30;
+const OP_LABEL_SUB: u8 = 0x31;
 // Other ops:
-const OP_GET_VALUE: u8 = 0x30;
-const OP_LABEL_ADDR: u8 = 0x31;
-const OP_LIST_INDEX: u8 = 0x32;
-const OP_MAKE_LIST: u8 = 0x33;
-const OP_MAKE_TUPLE: u8 = 0x34;
-const OP_PUSH: u8 = 0x35;
-const OP_TUPLE_ITEM: u8 = 0x36;
+const OP_GET_VALUE: u8 = 0x40;
+const OP_LABEL_ADDR: u8 = 0x41;
+const OP_LIST_INDEX: u8 = 0x42;
+const OP_MAKE_LIST: u8 = 0x43;
+const OP_MAKE_TUPLE: u8 = 0x44;
+const OP_PUSH: u8 = 0x45;
+const OP_TUPLE_ITEM: u8 = 0x46;
 
 //===========================================================================//
 
@@ -149,6 +152,9 @@ impl BinaryIo for ObjExprOp {
             OP_ANY_CMP_GE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpGe)),
             OP_ANY_CMP_GT => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpGt)),
             OP_ANY_CMP_NE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpNe)),
+            OP_BOOL_BIT_AND => Ok(ObjExprOp::BinOp(ExprBinOp::BoolBitAnd)),
+            OP_BOOL_BIT_OR => Ok(ObjExprOp::BinOp(ExprBinOp::BoolBitOr)),
+            OP_BOOL_BIT_XOR => Ok(ObjExprOp::BinOp(ExprBinOp::BoolBitXor)),
             OP_INT_ADD => Ok(ObjExprOp::BinOp(ExprBinOp::IntAdd)),
             OP_INT_BIT_AND => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitAnd)),
             OP_INT_BIT_OR => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitOr)),
@@ -200,6 +206,15 @@ impl BinaryIo for ObjExprOp {
             }
             ObjExprOp::BinOp(ExprBinOp::AnyCmpNe) => {
                 OP_ANY_CMP_NE.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::BoolBitAnd) => {
+                OP_BOOL_BIT_AND.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::BoolBitOr) => {
+                OP_BOOL_BIT_OR.write_to(writer)
+            }
+            ObjExprOp::BinOp(ExprBinOp::BoolBitXor) => {
+                OP_BOOL_BIT_XOR.write_to(writer)
             }
             ObjExprOp::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(writer),
             ObjExprOp::BinOp(ExprBinOp::IntBitAnd) => {

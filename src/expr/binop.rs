@@ -43,6 +43,9 @@ pub(crate) enum ExprBinOp {
     AnyCmpGe,
     AnyCmpGt,
     AnyCmpNe,
+    BoolBitAnd,
+    BoolBitOr,
+    BoolBitXor,
     IntAdd,
     IntBitAnd,
     IntBitOr,
@@ -73,11 +76,20 @@ impl ExprBinOp {
             (BinOpAst::Add, ExprType::Label, ExprType::Integer) => {
                 Ok((ExprBinOp::LabelAddInt, ExprType::Label))
             }
+            (BinOpAst::BitAnd, ExprType::Boolean, ExprType::Boolean) => {
+                Ok((ExprBinOp::BoolBitAnd, ExprType::Boolean))
+            }
             (BinOpAst::BitAnd, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntBitAnd, ExprType::Integer))
             }
+            (BinOpAst::BitOr, ExprType::Boolean, ExprType::Boolean) => {
+                Ok((ExprBinOp::BoolBitOr, ExprType::Boolean))
+            }
             (BinOpAst::BitOr, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntBitOr, ExprType::Integer))
+            }
+            (BinOpAst::BitXor, ExprType::Boolean, ExprType::Boolean) => {
+                Ok((ExprBinOp::BoolBitXor, ExprType::Boolean))
             }
             (BinOpAst::BitXor, ExprType::Integer, ExprType::Integer) => {
                 Ok((ExprBinOp::IntBitXor, ExprType::Integer))
@@ -149,6 +161,15 @@ impl ExprBinOp {
             ExprBinOp::AnyCmpGe => Ok(ExprValue::Boolean(lhs >= rhs)),
             ExprBinOp::AnyCmpGt => Ok(ExprValue::Boolean(lhs > rhs)),
             ExprBinOp::AnyCmpNe => Ok(ExprValue::Boolean(lhs != rhs)),
+            ExprBinOp::BoolBitAnd => {
+                Ok(ExprValue::Boolean(lhs.unwrap_bool() & rhs.unwrap_bool()))
+            }
+            ExprBinOp::BoolBitOr => {
+                Ok(ExprValue::Boolean(lhs.unwrap_bool() | rhs.unwrap_bool()))
+            }
+            ExprBinOp::BoolBitXor => {
+                Ok(ExprValue::Boolean(lhs.unwrap_bool() ^ rhs.unwrap_bool()))
+            }
             ExprBinOp::IntAdd => {
                 Ok(ExprValue::Integer(lhs.unwrap_int() + rhs.unwrap_int()))
             }

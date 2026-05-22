@@ -202,6 +202,14 @@ fn assemble_ldw_instructions() {
 }
 
 #[test]
+fn assemble_link_instructions() {
+    assert_asm("LINK #1", &[0x91]);
+    assert_asm("LINK #2", &[0x92]);
+    assert_asm("LINK #3", &[0x93]);
+    assert_asm("LINK #4", &[0x94]);
+}
+
+#[test]
 fn assemble_misc_instructions() {
     assert_asm("ALT1", &[0x3d]);
     assert_asm("ALT2", &[0x3e]);

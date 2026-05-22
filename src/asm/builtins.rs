@@ -2,8 +2,9 @@ use super::arch::ArchTree;
 use super::macros::MacroTable;
 use crate::error::SrcSpan;
 use crate::parse::{
-    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmMacroArgAst, AsmStmtAst,
-    BinOpAst, ExprAst, ExprAstNode, IdentifierAst, Token, TokenValue,
+    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst,
+    AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst, ExprAstNode, IdentifierAst,
+    Token, TokenValue,
 };
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -627,7 +628,7 @@ const MACROS_SUPERFX: &[(&str, u8, AddrMode)] = &[
     ("LDW", 0x49, AddrMode::ParRegEns(Reg::R9)),
     ("LDW", 0x4a, AddrMode::ParRegEns(Reg::R10)),
     ("LDW", 0x4b, AddrMode::ParRegEns(Reg::R11)),
-    // TODO: LINK instructions
+    ("LINK", 0x91, AddrMode::SuperFxLink),
     ("LOB", 0x9e, AddrMode::Implied),
     ("LOOP", 0x3c, AddrMode::Implied),
     ("LSR", 0x03, AddrMode::Implied),
@@ -830,6 +831,8 @@ enum AddrMode {
     RegCommaPoundImm16(Reg),
     /// FOO R1, R2
     RegCommaReg(Reg, Reg),
+    /// FOO #imm
+    SuperFxLink,
 }
 
 /// Register names used across various architectures.
@@ -1161,7 +1164,9 @@ impl BuiltinBuilder {
             AddrMode::ParRegEnsCommaReg(r1, r2) => {
                 vec![self.par_reg_ens_arg(r1), self.reg_arg(r2)]
             }
-            AddrMode::PoundImm8 => vec![self.pound_imm_arg()],
+            AddrMode::PoundImm8 | AddrMode::SuperFxLink => {
+                vec![self.pound_imm_arg()]
+            }
             AddrMode::PoundImm8CommaPoundImm8 => {
                 vec![self.pound_imm_arg(), self.pound_imm2_arg()]
             }
@@ -1282,6 +1287,7 @@ impl BuiltinBuilder {
                     placeholder_u16le(&self.placeholder_imm),
                 ]
             }
+            AddrMode::SuperFxLink => super_fx_link(&self.placeholder_imm),
         };
         let definition = AsmDefMacroAst { id: builtin_id(name), params, body };
         let reserved = self.arch_tree.reserved_names(arch);
@@ -1570,6 +1576,17 @@ fn builtin_id(name: &str) -> IdentifierAst {
     }
 }
 
+fn binop_expr(op: BinOpAst, lhs: ExprAst, rhs: ExprAst) -> ExprAst {
+    ExprAst {
+        span: SrcSpan::BUILTIN,
+        node: ExprAstNode::BinOp(
+            (SrcSpan::BUILTIN, op),
+            Box::new(lhs),
+            Box::new(rhs),
+        ),
+    }
+}
+
 fn constant_expr(value: u8) -> ExprAst {
     ExprAst {
         span: SrcSpan::BUILTIN,
@@ -1583,45 +1600,24 @@ fn constant_u8(value: u8) -> AsmStmtAst {
 
 fn high_page_addr(placeholder: &Rc<str>) -> AsmStmtAst {
     // TODO: add assert that high byte of address is valid
-    let expr = ExprAst {
-        span: SrcSpan::BUILTIN,
-        node: ExprAstNode::BinOp(
-            (SrcSpan::BUILTIN, BinOpAst::BitAnd),
-            Box::new(placeholder_expr(placeholder)),
-            Box::new(constant_expr(0xff)),
-        ),
-    };
+    let expr = binop_expr(
+        BinOpAst::BitAnd,
+        placeholder_expr(placeholder),
+        constant_expr(0xff),
+    );
     int_data_stmt(AsmIntTypeAst::U8, expr)
 }
 
 fn relative_addr(placeholder: &Rc<str>) -> AsmStmtAst {
     let here =
         ExprAst { span: SrcSpan::BUILTIN, node: ExprAstNode::HereLabel };
-    let next = ExprAst {
-        span: SrcSpan::BUILTIN,
-        node: ExprAstNode::BinOp(
-            (SrcSpan::BUILTIN, BinOpAst::Add),
-            Box::new(here),
-            Box::new(constant_expr(1)),
-        ),
-    };
-    let relative = ExprAst {
-        span: SrcSpan::BUILTIN,
-        node: ExprAstNode::BinOp(
-            (SrcSpan::BUILTIN, BinOpAst::Sub),
-            Box::new(placeholder_expr(placeholder)),
-            Box::new(next),
-        ),
-    };
+    let relative = binop_expr(
+        BinOpAst::Sub,
+        placeholder_expr(placeholder),
+        binop_expr(BinOpAst::Add, here, constant_expr(1)),
+    );
     // TODO: use .S8 instead of .U8 & $ff
-    let expr = ExprAst {
-        span: SrcSpan::BUILTIN,
-        node: ExprAstNode::BinOp(
-            (SrcSpan::BUILTIN, BinOpAst::BitAnd),
-            Box::new(relative),
-            Box::new(constant_expr(0xff)),
-        ),
-    };
+    let expr = binop_expr(BinOpAst::BitAnd, relative, constant_expr(0xff));
     int_data_stmt(AsmIntTypeAst::U8, expr)
 }
 
@@ -1642,6 +1638,41 @@ fn placeholder_expr(placeholder: &Rc<str>) -> ExprAst {
         span: SrcSpan::BUILTIN,
         node: ExprAstNode::Placeholder(placeholder.clone()),
     }
+}
+
+fn super_fx_link(placeholder: &Rc<str>) -> Vec<AsmStmtAst> {
+    // TODO: use a let statement to only eval the placeholder expression once
+    // TODO: use logical AND
+    let condition_expr = binop_expr(
+        BinOpAst::BitAnd,
+        binop_expr(
+            BinOpAst::CmpGe,
+            placeholder_expr(placeholder),
+            constant_expr(1),
+        ),
+        binop_expr(
+            BinOpAst::CmpLe,
+            placeholder_expr(placeholder),
+            constant_expr(4),
+        ),
+    );
+    let message_expr = ExprAst {
+        span: SrcSpan::BUILTIN,
+        node: ExprAstNode::StrLiteral(Rc::from(
+            "LINK immediate value must be in the range [1, 4]",
+        )),
+    };
+    let assert_stmt = AsmStmtAst::Assert(AsmAssertAst {
+        condition: condition_expr,
+        message: Some(message_expr),
+    });
+    let opcode_expr = binop_expr(
+        BinOpAst::Add,
+        constant_expr(0x90),
+        placeholder_expr(placeholder),
+    );
+    let opcode_stmt = int_data_stmt(AsmIntTypeAst::U8, opcode_expr);
+    vec![assert_stmt, opcode_stmt]
 }
 
 fn int_data_stmt(int_type: AsmIntTypeAst, expr: ExprAst) -> AsmStmtAst {

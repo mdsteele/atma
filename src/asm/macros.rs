@@ -1,7 +1,7 @@
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::parse::{
-    AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmMacroArgAst, AsmStmtAst,
-    ExprAst, ExprAstNode, IdentifierAst, Token, TokenValue,
+    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmMacroArgAst,
+    AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst, Token, TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -14,7 +14,6 @@ pub(super) struct MacroTable {
 
 impl MacroTable {
     pub fn new() -> MacroTable {
-        // TODO: pre-populate with architecture-specific instruction mnemonics
         MacroTable { definitions: HashMap::new() }
     }
 
@@ -117,6 +116,12 @@ impl<'a> MacroBuilder<'a> {
 
     fn scan_statement(&mut self, statement: &AsmStmtAst) {
         match statement {
+            AsmStmtAst::Assert(assert) => {
+                self.scan_expression(&assert.condition);
+                if let Some(message) = &assert.message {
+                    self.scan_expression(message);
+                }
+            }
             AsmStmtAst::Import(id) | AsmStmtAst::Label(id) => {
                 self.scan_identifier(id);
             }
@@ -483,6 +488,13 @@ impl MacroExpansion {
 
     fn expand_statement(&self, statement: &AsmStmtAst) -> AsmStmtAst {
         match statement {
+            AsmStmtAst::Assert(assert) => AsmStmtAst::Assert(AsmAssertAst {
+                condition: self.expand_expression(&assert.condition),
+                message: assert
+                    .message
+                    .as_ref()
+                    .map(|expr| self.expand_expression(expr)),
+            }),
             AsmStmtAst::Import(id) => {
                 AsmStmtAst::Import(self.expand_identifier(id))
             }
