@@ -1,5 +1,6 @@
 use super::arch::ArchTree;
 use super::macros::MacroTable;
+use crate::addr::Endianness;
 use crate::error::SrcSpan;
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst,
@@ -966,20 +967,43 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
     ];
 
     arch_tree
-        .define_arch(arch_65xx.clone(), ArchTree::ROOT_ARCH_NAME, &res_65xx)
+        .define_arch(
+            arch_65xx.clone(),
+            ArchTree::ROOT_ARCH_NAME,
+            &res_65xx,
+            Some(Endianness::LittleEndian),
+        )
         .unwrap();
-    arch_tree.define_arch(arch_6502.clone(), &arch_65xx, &[]).unwrap();
     arch_tree
-        .define_arch(arch_65c816.clone(), &arch_65xx, &res_65c816)
+        .define_arch(
+            arch_6502.clone(),
+            &arch_65xx,
+            &[],
+            Some(Endianness::LittleEndian),
+        )
         .unwrap();
     arch_tree
-        .define_arch(arch_sm83.clone(), ArchTree::ROOT_ARCH_NAME, &res_sm83)
+        .define_arch(
+            arch_65c816.clone(),
+            &arch_65xx,
+            &res_65c816,
+            Some(Endianness::LittleEndian),
+        )
+        .unwrap();
+    arch_tree
+        .define_arch(
+            arch_sm83.clone(),
+            ArchTree::ROOT_ARCH_NAME,
+            &res_sm83,
+            Some(Endianness::LittleEndian),
+        )
         .unwrap();
     arch_tree
         .define_arch(
             arch_spc700.clone(),
             ArchTree::ROOT_ARCH_NAME,
             &res_spc700,
+            Some(Endianness::LittleEndian),
         )
         .unwrap();
     arch_tree
@@ -987,6 +1011,7 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
             arch_superfx.clone(),
             ArchTree::ROOT_ARCH_NAME,
             &res_superfx,
+            Some(Endianness::LittleEndian),
         )
         .unwrap();
 

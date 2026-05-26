@@ -360,9 +360,18 @@ fn write_int_patch(
         ObjPatchIntType::U8 => {
             data[offset] = value as u8;
         }
+        ObjPatchIntType::U16be => {
+            data[offset] = (value >> 8) as u8;
+            data[offset + 1] = value as u8;
+        }
         ObjPatchIntType::U16le => {
             data[offset] = value as u8;
             data[offset + 1] = (value >> 8) as u8;
+        }
+        ObjPatchIntType::U24be => {
+            data[offset] = (value >> 16) as u8;
+            data[offset + 1] = (value >> 8) as u8;
+            data[offset + 2] = value as u8;
         }
         ObjPatchIntType::U24le => {
             data[offset] = value as u8;

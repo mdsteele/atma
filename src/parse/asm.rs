@@ -230,17 +230,41 @@ impl AsmIntDataAst {
 pub enum AsmIntTypeAst {
     /// An 8-bit unsigned integer.
     U8,
+    /// A 16-bit unsigned integer, using the current architecture's native
+    /// endianness.
+    U16,
+    /// A 16-bit unsigned big-endian integer.
+    U16be,
     /// A 16-bit unsigned little-endian integer.
     U16le,
+    /// A 24-bit unsigned integer, using the current architecture's native
+    /// endianness.
+    U24,
+    /// A 24-bit unsigned big-endian integer.
+    U24be,
     /// A 24-bit unsigned little-endian integer.
     U24le,
 }
 
 impl AsmIntTypeAst {
+    const ALL: &[AsmIntTypeAst] = &[
+        AsmIntTypeAst::U8,
+        AsmIntTypeAst::U16,
+        AsmIntTypeAst::U16be,
+        AsmIntTypeAst::U16le,
+        AsmIntTypeAst::U24,
+        AsmIntTypeAst::U24be,
+        AsmIntTypeAst::U24le,
+    ];
+
     pub(crate) fn directive(self) -> &'static str {
         match self {
             AsmIntTypeAst::U8 => ".U8",
+            AsmIntTypeAst::U16 => ".U16",
+            AsmIntTypeAst::U16be => ".U16BE",
             AsmIntTypeAst::U16le => ".U16LE",
+            AsmIntTypeAst::U24 => ".U24",
+            AsmIntTypeAst::U24be => ".U24BE",
             AsmIntTypeAst::U24le => ".U24LE",
         }
     }
@@ -248,12 +272,16 @@ impl AsmIntTypeAst {
     fn parser<'a>()
     -> impl Parser<'a, &'a [Token], (SrcSpan, AsmIntTypeAst), Extra<'a>> + Clone
     {
-        let u8_dir = directive(".U8").map(|span| (span, AsmIntTypeAst::U8));
-        let u16le_dir =
-            directive(".U16LE").map(|span| (span, AsmIntTypeAst::U16le));
-        let u24le_dir =
-            directive(".U24LE").map(|span| (span, AsmIntTypeAst::U24le));
-        chumsky::prelude::choice((u8_dir, u16le_dir, u24le_dir))
+        chumsky::prelude::choice(
+            AsmIntTypeAst::ALL
+                .iter()
+                .copied()
+                .map(|int_type| {
+                    directive(int_type.directive())
+                        .map(move |span| (span, int_type))
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }
 

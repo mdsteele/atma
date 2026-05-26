@@ -1,3 +1,4 @@
+use crate::addr::Endianness;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -19,7 +20,11 @@ impl ArchTree {
         let mut arches = HashMap::new();
         arches.insert(
             Rc::from(ArchTree::ROOT_ARCH_NAME),
-            ArchDefinition { parent: None, reserved: HashSet::new() },
+            ArchDefinition {
+                parent: None,
+                reserved: HashSet::new(),
+                native_endianness: None,
+            },
         );
         ArchTree { arches }
     }
@@ -44,6 +49,17 @@ impl ArchTree {
         }
     }
 
+    /// Given an architecture name, returns the native endianness of that
+    /// architecture, or `None` if that architecture has no defined endianness.
+    ///
+    /// Panics if no such architecture is defined.
+    pub fn native_endianness(&self, name: &str) -> Option<Endianness> {
+        match self.arches.get(name) {
+            Some(def) => def.native_endianness,
+            None => panic!("No such architecture: {name:?}"),
+        }
+    }
+
     /// Given an architecture name, returns a list of all architectures that
     /// architecture is descended from, starting with the architecture itself
     /// and ending with the root architecture.  If no such architecture is
@@ -63,13 +79,15 @@ impl ArchTree {
         arches
     }
 
-    /// Defines a new architecture with the specified name and parent
-    /// architecture.
+    /// Defines a new architecture with the specified name, parent architecture
+    /// name, reserved identifier names (e.g. for registers), and native
+    /// endianness (if any).
     pub fn define_arch(
         &mut self,
         name: Rc<str>,
         parent: &str,
         reserved_names: &[Rc<str>],
+        native_endianness: Option<Endianness>,
     ) -> Result<(), DefineArchError> {
         if self.contains_arch(&name) {
             return Err(DefineArchError::ArchAlreadyExists);
@@ -81,8 +99,14 @@ impl ArchTree {
         for name in reserved_names {
             reserved.insert(name.clone());
         }
-        self.arches
-            .insert(name, ArchDefinition { parent: Some(parent), reserved });
+        self.arches.insert(
+            name,
+            ArchDefinition {
+                parent: Some(parent),
+                reserved,
+                native_endianness,
+            },
+        );
         Ok(())
     }
 }
@@ -109,6 +133,12 @@ struct ArchDefinition {
     /// tokens that require matching one of these names exactly will do so
     /// case-insensitively.
     reserved: HashSet<Rc<str>>,
+    /// The native endianness for this architecture, if any.  When this is
+    /// `Some`, assembler directives like `.U16` and `.U24` will use this
+    /// endianness; when this is `None`, it is an error to use those
+    /// directives, and endianness must instead be specified explicitly using
+    /// directives like `.U16BE` or `.U24LE`.
+    native_endianness: Option<Endianness>,
 }
 
 //===========================================================================//

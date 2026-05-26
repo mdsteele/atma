@@ -87,8 +87,12 @@ impl BinaryIo for ObjPatchData {
 pub enum ObjPatchIntType {
     /// Patch a single data byte with an unsigned 8-bit integer.
     U8,
+    /// Patch two data bytes with a big-endian unsigned 16-bit integer.
+    U16be,
     /// Patch two data bytes with a little-endian unsigned 16-bit integer.
     U16le,
+    /// Patch three data bytes with a big-endian unsigned 24-bit integer.
+    U24be,
     /// Patch three data bytes with a little-endian unsigned 24-bit integer.
     U24le,
 }
@@ -97,7 +101,9 @@ impl ObjPatchIntType {
     pub(crate) fn num_bytes(self) -> usize {
         match self {
             ObjPatchIntType::U8 => 1,
+            ObjPatchIntType::U16be => 2,
             ObjPatchIntType::U16le => 2,
+            ObjPatchIntType::U24be => 3,
             ObjPatchIntType::U24le => 3,
         }
     }
@@ -122,16 +128,18 @@ impl ObjPatchIntType {
     fn range(self) -> RangeInclusive<i64> {
         match self {
             ObjPatchIntType::U8 => 0..=0xff,
-            ObjPatchIntType::U16le => 0..=0xffff,
-            ObjPatchIntType::U24le => 0..=0xffffff,
+            ObjPatchIntType::U16be | ObjPatchIntType::U16le => 0..=0xffff,
+            ObjPatchIntType::U24be | ObjPatchIntType::U24le => 0..=0xffffff,
         }
     }
 
     fn decode_from_byte(byte: u8) -> io::Result<ObjPatchIntType> {
         match byte {
             0 => Ok(ObjPatchIntType::U8),
-            1 => Ok(ObjPatchIntType::U16le),
-            2 => Ok(ObjPatchIntType::U24le),
+            1 => Ok(ObjPatchIntType::U16be),
+            2 => Ok(ObjPatchIntType::U16le),
+            3 => Ok(ObjPatchIntType::U24be),
+            4 => Ok(ObjPatchIntType::U24le),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid ObjPatchIntType byte: {}", byte),
@@ -148,8 +156,10 @@ impl BinaryIo for ObjPatchIntType {
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         match self {
             ObjPatchIntType::U8 => 0u8.write_to(writer),
-            ObjPatchIntType::U16le => 1u8.write_to(writer),
-            ObjPatchIntType::U24le => 2u8.write_to(writer),
+            ObjPatchIntType::U16be => 1u8.write_to(writer),
+            ObjPatchIntType::U16le => 2u8.write_to(writer),
+            ObjPatchIntType::U24be => 3u8.write_to(writer),
+            ObjPatchIntType::U24le => 4u8.write_to(writer),
         }
     }
 }
@@ -198,7 +208,9 @@ mod tests {
     #[test]
     fn obj_patch_int_type_round_trips() {
         assert_round_trips(ObjPatchIntType::U8);
+        assert_round_trips(ObjPatchIntType::U16be);
         assert_round_trips(ObjPatchIntType::U16le);
+        assert_round_trips(ObjPatchIntType::U24be);
         assert_round_trips(ObjPatchIntType::U24le);
     }
 }

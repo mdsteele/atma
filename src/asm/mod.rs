@@ -5,7 +5,7 @@ mod builtins;
 mod expr;
 mod macros;
 
-use crate::addr::{Addr, Align, AlignTryFromError, Offset, Size};
+use crate::addr::{Addr, Align, AlignTryFromError, Endianness, Offset, Size};
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::ExprType;
 use crate::obj::{
@@ -359,7 +359,7 @@ impl Assembler {
         } else {
             1
         };
-        let type_size = data_type_size(reserve_ast.data_type);
+        let type_size = self.data_type_size(reserve_ast.data_type);
         if let Some(chunk_env) = self.env.current_chunk() {
             // TODO: error on overflow
             chunk_env.add_padding((type_size * count) as usize);
@@ -518,7 +518,17 @@ impl Assembler {
             self.errors
                 .push(SourceError::new(int_data.directive_span, message));
         }
-        let int_type = int_patch_type(int_data.int_type);
+        let Some(int_type) = self.int_patch_type(int_data.int_type) else {
+            let message = format!(
+                "Cannot use {} directive under architecture {:?}, which has \
+                 no defined endianness",
+                int_data.int_type.directive(),
+                self.env.current_arch()
+            );
+            self.errors
+                .push(SourceError::new(int_data.directive_span, message));
+            return;
+        };
         for expr_ast in int_data.expressions {
             let static_value: i64 = match self.typecheck_expression(&expr_ast)
             {
@@ -580,9 +590,18 @@ impl Assembler {
                     ObjPatchIntType::U8 => {
                         data.push(static_value as u8);
                     }
+                    ObjPatchIntType::U16be => {
+                        data.push((static_value >> 8) as u8);
+                        data.push(static_value as u8);
+                    }
                     ObjPatchIntType::U16le => {
                         data.push(static_value as u8);
                         data.push((static_value >> 8) as u8);
+                    }
+                    ObjPatchIntType::U24be => {
+                        data.push((static_value >> 16) as u8);
+                        data.push((static_value >> 8) as u8);
+                        data.push(static_value as u8);
                     }
                     ObjPatchIntType::U24le => {
                         data.push(static_value as u8);
@@ -597,6 +616,52 @@ impl Assembler {
     fn set_current_arch(&mut self, arch: Rc<str>) {
         debug_assert!(self.arch_tree.contains_arch(&arch));
         self.env.set_current_arch(arch);
+    }
+
+    fn data_type_size(&self, data_type: AsmDataTypeAst) -> u64 {
+        match data_type {
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U8) => 1,
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U16) => 2,
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U16be) => 2,
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U16le) => 2,
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U24) => 3,
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U24be) => 3,
+            AsmDataTypeAst::Int(_, AsmIntTypeAst::U24le) => 3,
+        }
+    }
+
+    fn int_patch_type(
+        &self,
+        int_type: AsmIntTypeAst,
+    ) -> Option<ObjPatchIntType> {
+        match int_type {
+            AsmIntTypeAst::U8 => Some(ObjPatchIntType::U8),
+            AsmIntTypeAst::U16 => self.endian_patch_type(
+                ObjPatchIntType::U16be,
+                ObjPatchIntType::U16le,
+            ),
+            AsmIntTypeAst::U16be => Some(ObjPatchIntType::U16be),
+            AsmIntTypeAst::U16le => Some(ObjPatchIntType::U16le),
+            AsmIntTypeAst::U24 => self.endian_patch_type(
+                ObjPatchIntType::U24be,
+                ObjPatchIntType::U24le,
+            ),
+            AsmIntTypeAst::U24be => Some(ObjPatchIntType::U24be),
+            AsmIntTypeAst::U24le => Some(ObjPatchIntType::U24le),
+        }
+    }
+
+    fn endian_patch_type(
+        &self,
+        be_type: ObjPatchIntType,
+        le_type: ObjPatchIntType,
+    ) -> Option<ObjPatchIntType> {
+        let arch = self.env.current_arch();
+        match self.arch_tree.native_endianness(arch) {
+            Some(Endianness::BigEndian) => Some(be_type),
+            Some(Endianness::LittleEndian) => Some(le_type),
+            None => None,
+        }
     }
 
     fn chunk_align_attr(&mut self, expr_ast: ExprAst) -> Align {
@@ -847,24 +912,6 @@ impl Assembler {
         } else {
             Err(self.errors)
         }
-    }
-}
-
-//===========================================================================//
-
-fn data_type_size(data_type: AsmDataTypeAst) -> u64 {
-    match data_type {
-        AsmDataTypeAst::Int(_, AsmIntTypeAst::U8) => 1,
-        AsmDataTypeAst::Int(_, AsmIntTypeAst::U16le) => 2,
-        AsmDataTypeAst::Int(_, AsmIntTypeAst::U24le) => 3,
-    }
-}
-
-fn int_patch_type(int_type: AsmIntTypeAst) -> ObjPatchIntType {
-    match int_type {
-        AsmIntTypeAst::U8 => ObjPatchIntType::U8,
-        AsmIntTypeAst::U16le => ObjPatchIntType::U16le,
-        AsmIntTypeAst::U24le => ObjPatchIntType::U24le,
     }
 }
 
