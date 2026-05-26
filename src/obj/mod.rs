@@ -14,7 +14,7 @@ pub use chunk::ObjChunk;
 pub use expr::ObjExpr;
 pub(crate) use expr::ObjExprOp;
 pub use file::ObjFile;
-pub use patch::{ObjPatch, PatchKind};
+pub use patch::{ObjPatch, ObjPatchData, ObjPatchIntType};
 pub use symbol::ObjSymbol;
 
 #[cfg(test)]

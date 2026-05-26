@@ -670,7 +670,7 @@ impl LinkConfig {
             PositionedBinary::position(self, &object_files)?;
         let patched_files = PatchedFile::patch_all(
             object_files,
-            &positioned_binary.file_chunk_starts,
+            &positioned_binary.file_chunk_metadata,
             &positioned_binary.exported_symbols,
         )?;
         Ok(LinkFragment::from_patched_files(patched_files, &positioned_binary))

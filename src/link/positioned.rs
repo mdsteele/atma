@@ -2,7 +2,7 @@ use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::config::LinkConfig;
 use super::error::LinkError;
 use super::place::try_place;
-use super::types::{AbsoluteLabel, ChunkId};
+use super::types::{AbsoluteLabel, ChunkId, ChunkMetadata};
 use crate::addr::{Addr, Size};
 use crate::obj::ObjFile;
 use rangemap::RangeInclusiveSet;
@@ -62,7 +62,7 @@ pub(super) struct PositionedSection {
     /// The size of this section in the final binary, in bytes, or zero if this
     /// region should not appear in the final binary.
     pub binary_size: u64,
-    /// The chunks in this section.
+    /// The chunks in this section, sorted by their offsets within the binary.
     pub chunks: Vec<PositionedChunk>,
     /// Any padded portions of this section will be filled with this byte
     /// value.
@@ -111,7 +111,8 @@ pub(super) struct PositionedRegion {
     /// The size of this memory region in the final binary, in bytes, or zero
     /// if this region should not appear in the final binary.
     pub binary_size: u64,
-    /// The sections in this memory region.
+    /// The sections in this memory region, sorted by their offsets within the
+    /// binary.
     pub sections: Vec<PositionedSection>,
     /// Any padded portions of this memory region will be filled with this byte
     /// value.
@@ -213,9 +214,8 @@ fn section_ordering(lhs: &ArrangedSection, rhs: &ArrangedSection) -> Ordering {
 pub(super) struct PositionedBinary {
     /// The memory regions for this binary.
     pub regions: Vec<PositionedRegion>,
-    /// For each object file, the address space and starting address for each
-    /// chunk in that object file.
-    pub file_chunk_starts: Vec<Vec<AbsoluteLabel>>,
+    /// For each object file, metadata about each chunk in that object file.
+    pub file_chunk_metadata: Vec<Vec<ChunkMetadata>>,
     /// The address of each exported symbol across the binary.
     pub exported_symbols: HashMap<Rc<str>, AbsoluteLabel>,
 }
@@ -240,15 +240,18 @@ impl PositionedBinary {
             })
             .collect::<Vec<PositionedRegion>>();
 
-        let mut chunk_starts = HashMap::<ChunkId, AbsoluteLabel>::new();
+        let mut chunk_metadata = HashMap::<ChunkId, ChunkMetadata>::new();
         for region in &positioned_regions {
             for section in &region.sections {
                 for chunk in &section.chunks {
-                    let chunk_start = AbsoluteLabel {
-                        space: region.space.clone(),
-                        address: chunk.start,
+                    let metadata = ChunkMetadata {
+                        start: AbsoluteLabel {
+                            space: region.space.clone(),
+                            address: chunk.start,
+                        },
+                        fill: chunk.fill,
                     };
-                    chunk_starts.insert(chunk.id, chunk_start);
+                    chunk_metadata.insert(chunk.id, metadata);
                 }
             }
         }
@@ -270,7 +273,7 @@ impl PositionedBinary {
         for (object_index, object_file) in object_files.iter().enumerate() {
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
                 let chunk_id = ChunkId { object_index, chunk_index };
-                let chunk_start = chunk_starts[&chunk_id].clone();
+                let chunk_start = chunk_metadata[&chunk_id].start.clone();
                 for symbol in chunk.symbols.iter() {
                     if !symbol.exported {
                         continue;
@@ -296,13 +299,13 @@ impl PositionedBinary {
             return Err(errors);
         }
 
-        let file_chunk_starts = object_files
+        let file_chunk_metadata = object_files
             .iter()
             .enumerate()
             .map(|(object_index, object_file)| {
                 (0..object_file.chunks.len())
                     .map(|chunk_index| {
-                        chunk_starts[&ChunkId { object_index, chunk_index }]
+                        chunk_metadata[&ChunkId { object_index, chunk_index }]
                             .clone()
                     })
                     .collect::<Vec<_>>()
@@ -311,7 +314,7 @@ impl PositionedBinary {
 
         Ok(PositionedBinary {
             regions: positioned_regions,
-            file_chunk_starts,
+            file_chunk_metadata,
             exported_symbols,
         })
     }

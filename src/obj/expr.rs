@@ -39,6 +39,7 @@ const OP_TUPLE_ITEM: u8 = 0x46;
 //===========================================================================//
 
 /// An expression in an assembly file.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObjExpr {
     /// The operations to perform to evaluate the expression.  Must be
     /// nonempty.
@@ -106,7 +107,7 @@ impl From<bool> for ObjExpr {
 
 //===========================================================================//
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ObjExprOp {
     /// Pops the top two values from the value stack, evaluates the specified
     /// binary operation using the second-from-the-top value as the left-hand

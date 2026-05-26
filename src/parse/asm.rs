@@ -54,6 +54,8 @@ pub enum AsmStmtAst {
     Label(IdentifierAst),
     /// A named local scope.
     NamedScope(IdentifierAst, Vec<AsmStmtAst>),
+    /// A `.RESERVE` directive.
+    Reserve(AsmReserveAst),
     /// A `.SECTION` block.
     Section(AsmSectionAst),
     /// A `.UTF8` directive.
@@ -88,17 +90,6 @@ impl AsmStmtAst {
                         AsmStmtAst::Label(id)
                     }
                 });
-            let assert_dir = directive(".ASSERT")
-                .ignore_then(ExprAst::parser())
-                .then(
-                    symbol(TokenValue::Comma)
-                        .ignore_then(ExprAst::parser())
-                        .or_not(),
-                )
-                .then_ignore(linebreak())
-                .map(|(condition, message)| {
-                    AsmStmtAst::Assert(AsmAssertAst { condition, message })
-                });
             let def_macro_dir = directive(".DEFMACRO")
                 .ignore_then(IdentifierAst::parser())
                 .then(
@@ -128,9 +119,10 @@ impl AsmStmtAst {
             chumsky::prelude::choice((
                 anonymous_scope,
                 label_or_named_scope,
-                assert_dir,
+                AsmAssertAst::parser().map(AsmStmtAst::Assert),
                 def_macro_dir,
                 import_dir,
+                AsmReserveAst::parser().map(AsmStmtAst::Reserve),
                 section_dir,
                 AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
@@ -150,6 +142,40 @@ pub struct AsmAssertAst {
     /// An optional error message that should be emitted if the assertion
     /// fails.
     pub message: Option<ExprAst>,
+}
+
+impl AsmAssertAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmAssertAst, Extra<'a>> + Clone {
+        directive(".ASSERT")
+            .ignore_then(ExprAst::parser())
+            .then(
+                symbol(TokenValue::Comma)
+                    .ignore_then(ExprAst::parser())
+                    .or_not(),
+            )
+            .then_ignore(linebreak())
+            .map(|(condition, message)| AsmAssertAst { condition, message })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a reference to a data type in an assembly
+/// file.
+#[derive(Clone, Debug)]
+pub enum AsmDataTypeAst {
+    /// An integer data type.
+    Int(SrcSpan, AsmIntTypeAst),
+    // TODO: Struct(IdentifierAst),
+}
+
+impl AsmDataTypeAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmDataTypeAst, Extra<'a>> + Clone {
+        AsmIntTypeAst::parser()
+            .map(|(span, int_type)| AsmDataTypeAst::Int(span, int_type))
+    }
 }
 
 //===========================================================================//
@@ -329,6 +355,40 @@ impl AsmMacroArgAst {
                     .span
                     .merged_with(tokens.last().unwrap().span);
                 AsmMacroArgAst { span, tokens }
+            })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a reserve declaration in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmReserveAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The type of data to reserve space for.
+    pub data_type: AsmDataTypeAst,
+    /// Optionally, how many instances of the data type to reserve space for
+    /// (rather than the default of one).
+    pub count: Option<ExprAst>,
+}
+
+impl AsmReserveAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmReserveAst, Extra<'a>> + Clone {
+        directive(".RESERVE")
+            .then(
+                AsmDataTypeAst::parser().then(
+                    symbol(TokenValue::Comma)
+                        .ignore_then(ExprAst::parser())
+                        .or_not(),
+                ),
+            )
+            .then_ignore(linebreak())
+            .map(|(directive_span, (data_type, count))| AsmReserveAst {
+                directive_span,
+                data_type,
+                count,
             })
     }
 }

@@ -61,7 +61,7 @@ pub(super) struct ArrangedSection {
     pub fill: Option<u8>,
     /// The total size of this section's data, in bytes.
     pub size: Size,
-    /// The chunks in this section.
+    /// The chunks in this section, sorted by their section-relative offsets.
     pub chunks: Vec<ArrangedChunk>,
 }
 
@@ -181,7 +181,8 @@ pub(super) struct ArrangedRegion {
     pub space: Rc<str>,
     /// The range of addresses covered by this memory region.
     pub range: Range,
-    /// The sections in this memory region.
+    /// The sections in this memory region, listed in the same order in which
+    /// they are declared in the linker config.
     pub sections: Vec<ArrangedSection>,
     /// Any padded portions of this memory region will be filled with this byte
     /// value.

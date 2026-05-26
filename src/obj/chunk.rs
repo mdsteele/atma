@@ -31,7 +31,7 @@ pub struct ObjChunk {
     /// fill byte.
     pub fill: Option<u8>,
     /// Relative symbols defined in this chunk.
-    pub symbols: Rc<[ObjSymbol]>,
+    pub symbols: Box<[ObjSymbol]>,
     /// Patches to apply to this chunk's data when linking.
     pub patches: Box<[ObjPatch]>,
 }
@@ -45,7 +45,7 @@ impl BinaryIo for ObjChunk {
         let align = Align::read_from(reader)?;
         let within = Option::<Align>::read_from(reader)?;
         let fill = Option::<u8>::read_from(reader)?;
-        let symbols = Rc::<[ObjSymbol]>::read_from(reader)?;
+        let symbols = Box::<[ObjSymbol]>::read_from(reader)?;
         let patches = Box::<[ObjPatch]>::read_from(reader)?;
         Ok(ObjChunk {
             section_name,

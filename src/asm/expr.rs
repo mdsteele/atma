@@ -1,10 +1,11 @@
 use super::arch::ArchTree;
+use crate::addr::Offset;
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
     ExprValue,
 };
-use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjSymbol};
+use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
 use crate::parse::{ExprAst, IdentifierAst};
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -180,10 +181,11 @@ impl ExprEnv for AsmTypeEnv {
 //===========================================================================//
 
 pub(super) struct ChunkEnv {
-    pub chunk_index: usize,
-    pub data: Vec<u8>,
-    pub symbols: Vec<ObjSymbol>,
-    pub patches: Vec<ObjPatch>,
+    chunk_index: usize,
+    data: Vec<u8>,
+    padding: usize,
+    patches: Vec<ObjPatch>,
+    symbols: Vec<ObjSymbol>,
 }
 
 impl ChunkEnv {
@@ -191,10 +193,59 @@ impl ChunkEnv {
         ChunkEnv {
             chunk_index,
             data: Vec::new(),
-            symbols: Vec::new(),
+            padding: 0,
             patches: Vec::new(),
+            symbols: Vec::new(),
         }
     }
+
+    pub fn total_size(&self) -> usize {
+        // TODO: check for overflow
+        self.data.len() + self.padding
+    }
+
+    pub fn data_mut(&mut self) -> &mut Vec<u8> {
+        if self.padding > 0 {
+            // TODO: If chunk has explicit fill byte, then no need for patch.
+            self.add_patch(ObjPatch {
+                // TODO: check for overflow
+                offset: Offset::try_from(self.data.len()).unwrap(),
+                data: ObjPatchData::Fill(self.padding),
+            });
+            self.data.resize(self.data.len() + self.padding, 0u8);
+            self.padding = 0;
+        }
+        &mut self.data
+    }
+
+    pub fn add_padding(&mut self, padding: usize) {
+        // TODO: check for overflow
+        self.padding += padding;
+    }
+
+    pub fn add_patch(&mut self, patch: ObjPatch) {
+        self.patches.push(patch);
+    }
+
+    pub fn add_symbol(&mut self, symbol: ObjSymbol) {
+        self.symbols.push(symbol);
+    }
+
+    pub fn finish(self) -> FinishedChunk {
+        FinishedChunk {
+            data: Box::from(self.data),
+            patches: Box::from(self.patches),
+            symbols: Box::from(self.symbols),
+        }
+    }
+}
+
+//===========================================================================//
+
+pub(super) struct FinishedChunk {
+    pub data: Box<[u8]>,
+    pub patches: Box<[ObjPatch]>,
+    pub symbols: Box<[ObjSymbol]>,
 }
 
 //===========================================================================//

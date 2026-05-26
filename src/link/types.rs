@@ -34,3 +34,13 @@ impl AbsoluteLabel {
 }
 
 //===========================================================================//
+
+#[derive(Clone)]
+pub(super) struct ChunkMetadata {
+    /// The the address space and starting address for the chunk.
+    pub start: AbsoluteLabel,
+    /// The fill byte to use for any `Fill` patches in the chunk.
+    pub fill: u8,
+}
+
+//===========================================================================//

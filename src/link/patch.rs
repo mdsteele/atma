@@ -1,9 +1,10 @@
 use super::error::LinkError;
-use super::types::AbsoluteLabel;
+use super::types::{AbsoluteLabel, ChunkMetadata};
 use crate::addr::Addr;
 use crate::expr::{ExprLabel, ExprValue};
 use crate::obj::{
-    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, PatchKind,
+    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
+    ObjPatchIntType,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -20,18 +21,18 @@ pub struct PatchedFile {
 impl PatchedFile {
     pub(super) fn patch_all(
         object_files: Vec<ObjFile>,
-        file_chunk_starts: &[Vec<AbsoluteLabel>],
+        file_chunk_metadata: &[Vec<ChunkMetadata>],
         exported_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
     ) -> Result<Vec<PatchedFile>, Vec<LinkError>> {
-        debug_assert_eq!(object_files.len(), file_chunk_starts.len());
+        debug_assert_eq!(object_files.len(), file_chunk_metadata.len());
         let mut errors = Vec::<LinkError>::new();
         let patched_files = object_files
             .into_iter()
-            .zip(file_chunk_starts)
-            .map(|(file, chunk_starts)| {
+            .zip(file_chunk_metadata)
+            .map(|(file, chunk_metadata)| {
                 PatchedFile::patch(
                     file,
-                    chunk_starts,
+                    chunk_metadata,
                     exported_symbols,
                     &mut errors,
                 )
@@ -42,7 +43,7 @@ impl PatchedFile {
 
     fn patch(
         object_file: ObjFile,
-        chunk_starts: &[AbsoluteLabel],
+        chunk_metadata: &[ChunkMetadata],
         exported_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
         errors: &mut Vec<LinkError>,
     ) -> PatchedFile {
@@ -71,10 +72,13 @@ impl PatchedFile {
         }
 
         let mut patched_chunks = Vec::<PatchedChunk>::new();
-        let mut patcher = FilePatcher::new(chunk_starts, symbol_addrs, errors);
+        let mut patcher =
+            FilePatcher::new(chunk_metadata, symbol_addrs, errors);
         if patcher.check_assertions(object_file.asserts) {
-            for chunk in object_file.chunks {
-                patched_chunks.push(patcher.patch_chunk(chunk));
+            for (chunk_index, chunk) in
+                object_file.chunks.into_iter().enumerate()
+            {
+                patched_chunks.push(patcher.patch_chunk(chunk_index, chunk));
             }
         }
         PatchedFile { chunks: patched_chunks }
@@ -99,8 +103,8 @@ impl PatchedChunk {
 //===========================================================================//
 
 struct FilePatcher<'a> {
-    /// The address space and start address for each chunk in this object file.
-    chunk_starts: &'a [AbsoluteLabel],
+    /// Metadata for each chunk in this object file.
+    chunk_metadata: &'a [ChunkMetadata],
     /// For each symbol declared in the object file, local or imported, this
     /// stores the address space and run address of the symbol, or `None` if
     /// the symbol couldn't be resolved.
@@ -110,11 +114,11 @@ struct FilePatcher<'a> {
 
 impl<'a> FilePatcher<'a> {
     pub fn new(
-        chunk_starts: &'a [AbsoluteLabel],
+        chunk_metadata: &'a [ChunkMetadata],
         symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
         errors: &'a mut Vec<LinkError>,
     ) -> FilePatcher<'a> {
-        FilePatcher { chunk_starts, symbol_addrs, errors }
+        FilePatcher { chunk_metadata, symbol_addrs, errors }
     }
 
     pub fn check_assertions(&mut self, asserts: Vec<ObjAssert>) -> bool {
@@ -151,38 +155,57 @@ impl<'a> FilePatcher<'a> {
         }
     }
 
-    pub fn patch_chunk(&mut self, chunk: ObjChunk) -> PatchedChunk {
+    pub fn patch_chunk(
+        &mut self,
+        chunk_index: usize,
+        chunk: ObjChunk,
+    ) -> PatchedChunk {
         let mut data = chunk.data;
         for patch in chunk.patches.into_iter() {
-            self.apply_patch(patch, &mut data);
+            self.apply_patch(chunk_index, patch, &mut data);
         }
         PatchedChunk { data }
     }
 
-    fn apply_patch(&mut self, patch: ObjPatch, data: &mut [u8]) {
+    fn apply_patch(
+        &mut self,
+        chunk_index: usize,
+        patch: ObjPatch,
+        data: &mut [u8],
+    ) {
         if let Ok(start) = usize::try_from(patch.offset)
-            && let Some(end) = start.checked_add(patch.kind.num_bytes())
+            && let Some(end) = start.checked_add(patch.data.num_bytes())
             && end <= data.len()
         {
-            match self.eval_patch_expr(patch.expr) {
-                None => {} // evaluation failed with errors
-                Some(ExprValue::Integer(bigint)) => {
-                    match patch.kind.value_in_range(&bigint) {
-                        Ok(int) => {
-                            write_patch_value(patch.kind, start, int, data)
+            match patch.data {
+                ObjPatchData::Fill(size) => {
+                    let metadata = &self.chunk_metadata[chunk_index];
+                    write_fill_patch(start, size, metadata.fill, data);
+                }
+                ObjPatchData::Integer(int_type, expr) => {
+                    match self.eval_patch_expr(expr) {
+                        None => {} // evaluation failed with errors
+                        Some(ExprValue::Integer(bigint)) => {
+                            match int_type.value_in_range(&bigint) {
+                                Ok(int) => {
+                                    write_int_patch(
+                                        int_type, start, int, data,
+                                    );
+                                }
+                                Err(_range) => {
+                                    self.errors.push(
+                                        LinkError::PatchValueOutOfRange {
+                                            int_type,
+                                            value: bigint,
+                                        },
+                                    );
+                                }
+                            }
                         }
-                        Err(_range) => {
-                            self.errors.push(
-                                LinkError::PatchValueOutOfRange {
-                                    kind: patch.kind,
-                                    value: bigint,
-                                },
-                            );
+                        Some(_value) => {
+                            self.errors.push(LinkError::PatchValueWrongType);
                         }
                     }
-                }
-                Some(_value) => {
-                    self.errors.push(LinkError::PatchValueWrongType);
                 }
             }
         } else {
@@ -270,26 +293,28 @@ impl<'a> FilePatcher<'a> {
                 })
             }
             ExprLabel::ChunkAbsolute { chunk_index, address } => {
-                if chunk_index >= self.chunk_starts.len() {
+                if chunk_index >= self.chunk_metadata.len() {
                     // Reference to a chunk that doesn't exist in this object
                     // file.
                     self.errors.push(LinkError::MalformedPatchExpression);
                     return None;
                 }
-                let chunk_start = self.chunk_starts[chunk_index].clone();
+                let metadata = &self.chunk_metadata[chunk_index];
+                let space = metadata.start.space.clone();
                 Some(AbsoluteLabel {
-                    space: chunk_start.space,
+                    space,
                     address: Addr::wrap_bigint(&address),
                 })
             }
             ExprLabel::ChunkRelative { chunk_index, offset } => {
-                if chunk_index >= self.chunk_starts.len() {
+                if chunk_index >= self.chunk_metadata.len() {
                     // Reference to a chunk that doesn't exist in this object
                     // file.
                     self.errors.push(LinkError::MalformedPatchExpression);
                     return None;
                 }
-                let chunk_start = self.chunk_starts[chunk_index].clone();
+                let metadata = &self.chunk_metadata[chunk_index];
+                let chunk_start = metadata.start.clone();
                 Some(chunk_start.plus_offset(&offset))
             }
             ExprLabel::SymbolRelative { name, offset } => {
@@ -314,22 +339,32 @@ impl<'a> FilePatcher<'a> {
 
 //===========================================================================//
 
-fn write_patch_value(
-    kind: PatchKind,
+fn write_fill_patch(
+    offset: usize,
+    size: usize,
+    fill_byte: u8,
+    data: &mut [u8],
+) {
+    debug_assert!(offset + size <= data.len());
+    data[offset..(offset + size)].fill(fill_byte);
+}
+
+fn write_int_patch(
+    int_type: ObjPatchIntType,
     offset: usize,
     value: i64,
     data: &mut [u8],
 ) {
-    debug_assert!(offset + kind.num_bytes() <= data.len());
-    match kind {
-        PatchKind::U8 => {
+    debug_assert!(offset + int_type.num_bytes() <= data.len());
+    match int_type {
+        ObjPatchIntType::U8 => {
             data[offset] = value as u8;
         }
-        PatchKind::U16le => {
+        ObjPatchIntType::U16le => {
             data[offset] = value as u8;
             data[offset + 1] = (value >> 8) as u8;
         }
-        PatchKind::U24le => {
+        ObjPatchIntType::U24le => {
             data[offset] = value as u8;
             data[offset + 1] = (value >> 8) as u8;
             data[offset + 2] = (value >> 16) as u8;

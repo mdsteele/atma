@@ -1,5 +1,5 @@
 use crate::addr::Size;
-use crate::obj::PatchKind;
+use crate::obj::ObjPatchIntType;
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -49,11 +49,11 @@ pub enum LinkError {
     /// data. This shouldn't happen for valid object files (as the assembler
     /// should have generated a valid patch offset).
     PatchOffsetOutOfRange,
-    /// A patch expression evaluated to a value that is out of range for that
-    /// patch's kind.
+    /// An integer patch expression evaluated to a value that is out of range
+    /// for that patch's integer type.
     PatchValueOutOfRange {
         /// The kind of patch that failed.
-        kind: PatchKind,
+        int_type: ObjPatchIntType,
         /// The out-of-range expression value.
         value: BigInt,
     },

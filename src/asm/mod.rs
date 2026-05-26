@@ -9,13 +9,13 @@ use crate::addr::{Addr, Align, AlignTryFromError, Offset, Size};
 use crate::error::{SourceError, SourceResult, SrcSpan};
 use crate::expr::ExprType;
 use crate::obj::{
-    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjSymbol,
-    PatchKind,
+    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
+    ObjPatchIntType, ObjSymbol,
 };
 use crate::parse::{
-    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst,
-    AsmModuleAst, AsmSectionAst, AsmStmtAst, AsmUtf8DataAst, ExprAst,
-    IdentifierAst,
+    AsmAssertAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
+    AsmIntTypeAst, AsmInvokeAst, AsmModuleAst, AsmReserveAst, AsmSectionAst,
+    AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
 use arch::ArchTree;
 use expr::AsmTypeEnv;
@@ -100,6 +100,7 @@ impl Assembler {
             AsmStmtAst::NamedScope(id, body) => {
                 self.predeclare_named_scope(id, body)
             }
+            AsmStmtAst::Reserve(_) => {}
             AsmStmtAst::Section(section) => self.predeclare_section(section),
             AsmStmtAst::Utf8Data(_) => {}
         }
@@ -161,6 +162,7 @@ impl Assembler {
             AsmStmtAst::NamedScope(id, body) => {
                 self.expand_named_scope(id, body)
             }
+            AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
             AsmStmtAst::Section(section) => self.expand_section(section),
             AsmStmtAst::Utf8Data(data) => self.expand_utf8_data(data),
         }
@@ -286,10 +288,10 @@ impl Assembler {
             self.errors.push(SourceError::new(id_ast.span, message));
             return;
         };
-        chunk_env.symbols.push(ObjSymbol {
+        chunk_env.add_symbol(ObjSymbol {
             name: full_name,
             exported: true, // TODO
-            offset: Offset::try_from(chunk_env.data.len()).unwrap(),
+            offset: Offset::try_from(chunk_env.total_size()).unwrap(), // TODO
         });
     }
 
@@ -303,6 +305,65 @@ impl Assembler {
         self.env.begin_scope(&scope_name);
         self.expand_statements(body);
         self.env.end_scope();
+    }
+
+    fn expand_reserve(&mut self, reserve_ast: AsmReserveAst) {
+        if self.env.current_chunk().is_none() {
+            let message =
+                ".RESERVE directive must be within a .SECTION".to_string();
+            self.errors
+                .push(SourceError::new(reserve_ast.directive_span, message));
+        }
+        let count: u64 = if let Some(expr_ast) = &reserve_ast.count {
+            match self.typecheck_expression(expr_ast) {
+                Some((expr, ExprType::Integer)) => match expr.static_value() {
+                    Some(value) => match value.unwrap_int_ref().to_u64() {
+                        Some(count) => count,
+                        None => {
+                            let message =
+                                "reserve count is too large".to_string();
+                            let label = format!(
+                                "this value of this expression is \
+                                             {value}"
+                            );
+                            self.errors.push(
+                                SourceError::new(expr_ast.span, message)
+                                    .with_label(expr_ast.span, label),
+                            );
+                            return;
+                        }
+                    },
+                    None => {
+                        let message =
+                            "reserve count must be static".to_string();
+                        let label = "this expression isn't static".to_string();
+                        self.errors.push(
+                            SourceError::new(expr_ast.span, message)
+                                .with_label(expr_ast.span, label),
+                        );
+                        return;
+                    }
+                },
+                Some((_, ty)) => {
+                    let message =
+                        "reserve count must be an integer".to_string();
+                    let label = format!("this expression has type {ty}");
+                    self.errors.push(
+                        SourceError::new(expr_ast.span, message)
+                            .with_label(expr_ast.span, label),
+                    );
+                    return;
+                }
+                None => return,
+            }
+        } else {
+            1
+        };
+        let type_size = data_type_size(reserve_ast.data_type);
+        if let Some(chunk_env) = self.env.current_chunk() {
+            // TODO: error on overflow
+            chunk_env.add_padding((type_size * count) as usize);
+        }
     }
 
     fn expand_section(&mut self, section_ast: AsmSectionAst) {
@@ -361,18 +422,19 @@ impl Assembler {
         self.expand_statements(section_ast.body);
         let chunk_env = self.env.end_chunk();
         // TODO: error if size is too large
-        let size = Size::try_from(chunk_env.data.len()).unwrap();
+        let size = Size::try_from(chunk_env.total_size()).unwrap();
+        let finished_chunk = chunk_env.finish();
         if let Some(section_name) = name {
             let chunk = ObjChunk {
                 section_name,
-                data: Box::from(chunk_env.data),
+                data: finished_chunk.data,
                 size,
                 start,
                 align: align.unwrap_or_default(),
                 within,
                 fill,
-                symbols: Rc::from(chunk_env.symbols),
-                patches: Box::from(chunk_env.patches),
+                symbols: finished_chunk.symbols,
+                patches: finished_chunk.patches,
             };
             debug_assert!(!self.chunks.contains_key(&chunk_index));
             self.chunks.insert(chunk_index, chunk);
@@ -414,7 +476,7 @@ impl Assembler {
                     };
                     if let Some(chunk_env) = self.env.current_chunk() {
                         chunk_env
-                            .data
+                            .data_mut()
                             .extend_from_slice(chr.to_string().as_bytes());
                     }
                 }
@@ -429,7 +491,7 @@ impl Assembler {
                         return;
                     };
                     if let Some(chunk_env) = self.env.current_chunk() {
-                        chunk_env.data.extend_from_slice(
+                        chunk_env.data_mut().extend_from_slice(
                             value.unwrap_str_ref().as_bytes(),
                         );
                     }
@@ -456,26 +518,27 @@ impl Assembler {
             self.errors
                 .push(SourceError::new(int_data.directive_span, message));
         }
-        let kind = int_patch_kind(int_data.int_type);
+        let int_type = int_patch_type(int_data.int_type);
         for expr_ast in int_data.expressions {
             let static_value: i64 = match self.typecheck_expression(&expr_ast)
             {
                 Some((mut expr, ExprType::Label)) => {
-                    // TODO: If the label belongs to a chunk with an explicit start
-                    // address, then the label's address value is static and no
-                    // patch is necessary.
+                    // TODO: If the label belongs to a chunk with an explicit
+                    // start address, then the label's address value is static
+                    // and no patch is necessary.
                     expr.ops.push(ObjExprOp::LabelAddr);
-                    self.try_add_patch(kind, expr);
+                    self.try_add_patch(ObjPatchData::Integer(int_type, expr));
                     0
                 }
                 Some((expr, ExprType::Integer)) => match expr.static_value() {
                     Some(value) => {
                         let bigint = value.unwrap_int_ref();
-                        match kind.value_in_range(bigint) {
+                        match int_type.value_in_range(bigint) {
                             Ok(value) => value,
                             Err(range) => {
                                 let message = format!(
-                                    "{} value is statically out of range ({}-{})",
+                                    "{} value is statically out of range \
+                                     ({}-{})",
                                     int_data.int_type.directive(),
                                     range.start(),
                                     range.end()
@@ -492,7 +555,8 @@ impl Assembler {
                         }
                     }
                     None => {
-                        self.try_add_patch(kind, expr);
+                        let data = ObjPatchData::Integer(int_type, expr);
+                        self.try_add_patch(data);
                         0
                     }
                 },
@@ -511,18 +575,19 @@ impl Assembler {
                 None => 0,
             };
             if let Some(chunk_env) = self.env.current_chunk() {
-                match kind {
-                    PatchKind::U8 => {
-                        chunk_env.data.push(static_value as u8);
+                let data = chunk_env.data_mut();
+                match int_type {
+                    ObjPatchIntType::U8 => {
+                        data.push(static_value as u8);
                     }
-                    PatchKind::U16le => {
-                        chunk_env.data.push(static_value as u8);
-                        chunk_env.data.push((static_value >> 8) as u8);
+                    ObjPatchIntType::U16le => {
+                        data.push(static_value as u8);
+                        data.push((static_value >> 8) as u8);
                     }
-                    PatchKind::U24le => {
-                        chunk_env.data.push(static_value as u8);
-                        chunk_env.data.push((static_value >> 8) as u8);
-                        chunk_env.data.push((static_value >> 16) as u8);
+                    ObjPatchIntType::U24le => {
+                        data.push(static_value as u8);
+                        data.push((static_value >> 8) as u8);
+                        data.push((static_value >> 16) as u8);
                     }
                 }
             }
@@ -743,12 +808,11 @@ impl Assembler {
     /// current end of its static data. Does nothing if there is no current
     /// chunk; it is assumed that the caller will have already flagged an error
     /// in that case.
-    fn try_add_patch(&mut self, kind: PatchKind, expr: ObjExpr) {
+    fn try_add_patch(&mut self, data: ObjPatchData) {
         if let Some(chunk_env) = self.env.current_chunk() {
             // TODO: Error instead of crash if offset is too large.
-            let offset = Offset::try_from(chunk_env.data.len()).unwrap();
-            let patch = ObjPatch { offset, kind, expr };
-            chunk_env.patches.push(patch);
+            let offset = Offset::try_from(chunk_env.total_size()).unwrap();
+            chunk_env.add_patch(ObjPatch { offset, data });
         }
     }
 
@@ -788,11 +852,19 @@ impl Assembler {
 
 //===========================================================================//
 
-fn int_patch_kind(int_type: AsmIntTypeAst) -> PatchKind {
+fn data_type_size(data_type: AsmDataTypeAst) -> u64 {
+    match data_type {
+        AsmDataTypeAst::Int(_, AsmIntTypeAst::U8) => 1,
+        AsmDataTypeAst::Int(_, AsmIntTypeAst::U16le) => 2,
+        AsmDataTypeAst::Int(_, AsmIntTypeAst::U24le) => 3,
+    }
+}
+
+fn int_patch_type(int_type: AsmIntTypeAst) -> ObjPatchIntType {
     match int_type {
-        AsmIntTypeAst::U8 => PatchKind::U8,
-        AsmIntTypeAst::U16le => PatchKind::U16le,
-        AsmIntTypeAst::U24le => PatchKind::U24le,
+        AsmIntTypeAst::U8 => ObjPatchIntType::U8,
+        AsmIntTypeAst::U16le => ObjPatchIntType::U16le,
+        AsmIntTypeAst::U24le => ObjPatchIntType::U24le,
     }
 }
 
