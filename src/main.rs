@@ -132,8 +132,11 @@ fn command_asm(
     let source = io::read_to_string(fs::File::open(&source_path)?)?;
     let obj = match assemble_source(&source) {
         Ok(obj) => obj,
-        Err(source_errors) => {
-            return Err(CliError::Source(source, source_errors));
+        Err(asm_errors) => {
+            return Err(CliError::Source(
+                source,
+                SourceError::from_errors(asm_errors),
+            ));
         }
     };
     if let Some(output_path) = opt_output_path {

@@ -4,7 +4,7 @@ use crate::addr::Offset;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::io;
-use std::ops::RangeInclusive;
+use std::range::RangeInclusive;
 
 //===========================================================================//
 
@@ -127,9 +127,13 @@ impl ObjPatchIntType {
 
     fn range(self) -> RangeInclusive<i64> {
         match self {
-            ObjPatchIntType::U8 => 0..=0xff,
-            ObjPatchIntType::U16be | ObjPatchIntType::U16le => 0..=0xffff,
-            ObjPatchIntType::U24be | ObjPatchIntType::U24le => 0..=0xffffff,
+            ObjPatchIntType::U8 => RangeInclusive { start: 0, last: 0xff },
+            ObjPatchIntType::U16be | ObjPatchIntType::U16le => {
+                RangeInclusive { start: 0, last: 0xffff }
+            }
+            ObjPatchIntType::U24be | ObjPatchIntType::U24le => {
+                RangeInclusive { start: 0, last: 0xffffff }
+            }
         }
     }
 

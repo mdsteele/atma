@@ -2,12 +2,13 @@
 
 mod arch;
 mod builtins;
+mod error;
 mod expr;
 mod macros;
 
-use crate::addr::{Addr, Align, AlignTryFromError, Endianness, Offset, Size};
-use crate::error::{SourceError, SourceResult, SrcSpan};
-use crate::expr::ExprType;
+use crate::addr::{Addr, Align, Endianness, Offset, Size};
+use crate::error::SrcSpan;
+use crate::expr::{ExprType, ExprValue};
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
     ObjPatchIntType, ObjSymbol,
@@ -18,24 +19,28 @@ use crate::parse::{
     AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
 use arch::ArchTree;
+pub use error::{AsmError, AsmResult};
 use expr::AsmTypeEnv;
 use macros::MacroTable;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::collections::{BTreeMap, HashMap};
+use std::range::RangeInclusive;
 use std::rc::Rc;
 
 //===========================================================================//
 
 /// Assembles an object file from source code.
-pub fn assemble_source(source: &str) -> SourceResult<ObjFile> {
-    assemble_ast(
-        AsmModuleAst::parse_source(source)
-            .map_err(SourceError::from_errors)?,
-    )
+pub fn assemble_source(source: &str) -> AsmResult<ObjFile> {
+    assemble_ast(AsmModuleAst::parse_source(source).map_err(|errors| {
+        errors
+            .into_iter()
+            .map(|error| AsmError::ParseError { error })
+            .collect::<Vec<_>>()
+    })?)
 }
 
-fn assemble_ast(module: AsmModuleAst) -> SourceResult<ObjFile> {
+fn assemble_ast(module: AsmModuleAst) -> AsmResult<ObjFile> {
     let mut assembler = Assembler::new();
     assembler.predeclare_module(&module);
     assembler.expand_module(module);
@@ -53,7 +58,7 @@ struct Assembler {
     chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<Rc<str>>,
     asserts: Vec<ObjAssert>,
-    errors: Vec<SourceError>,
+    errors: Vec<AsmError>,
 }
 
 impl Assembler {
@@ -178,74 +183,47 @@ impl Assembler {
     }
 
     fn expand_assert(&mut self, assert_ast: AsmAssertAst) {
-        let opt_message_expr: Option<ObjExpr> = match &assert_ast.message {
-            None => None,
-            Some(expr_ast) => match self.typecheck_expression(expr_ast) {
-                Some((expr, ExprType::String)) => Some(expr),
-                Some((_, ty)) => {
-                    let message =
-                        ".ASSERT message must be a string".to_string();
-                    let label = format!("this expression has type {ty}");
-                    self.errors.push(
-                        SourceError::new(expr_ast.span, message)
-                            .with_label(expr_ast.span, label),
-                    );
-                    None
-                }
-                None => None,
-            },
-        };
-        let condition_expr: ObjExpr = match self
-            .typecheck_expression(&assert_ast.condition)
-        {
-            Some((condition_expr, ExprType::Boolean)) => match condition_expr
-                .static_value()
-            {
-                None => condition_expr,
-                Some(value) => {
-                    if value.unwrap_bool() {
-                        return;
-                    } else {
-                        match &opt_message_expr {
-                            None => {
-                                let message = "Assertion failed".to_string();
-                                self.errors.push(SourceError::new(
-                                    assert_ast.condition.span,
-                                    message,
-                                ));
-                                return;
-                            }
+        let opt_message_expr: Option<ObjExpr> =
+            assert_ast.message.and_then(|expr_ast| {
+                self.typecheck_dir_expr_as(
+                    (".ASSERT", "message"),
+                    &expr_ast,
+                    ExprType::String,
+                )
+            });
+        let condition_span = assert_ast.condition.span;
+        let condition_expr: ObjExpr = 'condition: {
+            match self.typecheck_dir_expr_as(
+                (".ASSERT", "condition"),
+                &assert_ast.condition,
+                ExprType::Boolean,
+            ) {
+                None => return,
+                Some(condition_expr) => match condition_expr.static_value() {
+                    None => condition_expr,
+                    Some(ExprValue::Boolean(true)) => return,
+                    Some(_) => {
+                        let additional_message = match &opt_message_expr {
+                            None => None,
                             Some(message_expr) => {
                                 match message_expr.static_value() {
-                                    Some(message_value) => {
-                                        let message = format!(
-                                            "Assertion failed: {}",
-                                            message_value.unwrap_str_ref()
-                                        );
-                                        self.errors.push(SourceError::new(
-                                            assert_ast.condition.span,
-                                            message,
-                                        ));
-                                        return;
+                                    Some(value) => {
+                                        Some(value.unwrap_str_ref().clone())
                                     }
-                                    None => condition_expr,
+                                    None => break 'condition condition_expr,
                                 }
                             }
-                        }
+                        };
+                        self.errors.push(
+                            AsmError::AssertionStaticallyFailed {
+                                condition_span,
+                                additional_message,
+                            },
+                        );
+                        return;
                     }
-                }
-            },
-            Some((_, ty)) => {
-                let message =
-                    ".ASSERT condition must be a boolean".to_string();
-                let label = format!("this expression has type {ty}");
-                self.errors.push(
-                    SourceError::new(assert_ast.condition.span, message)
-                        .with_label(assert_ast.condition.span, label),
-                );
-                return;
+                },
             }
-            None => return,
         };
         self.asserts.push(ObjAssert {
             condition: condition_expr,
@@ -284,8 +262,10 @@ impl Assembler {
     fn expand_label(&mut self, id_ast: IdentifierAst) {
         let full_name = self.env.look_up_symbol(&id_ast.name).unwrap();
         let Some(chunk_env) = self.env.current_chunk() else {
-            let message = "labels must be within a .SECTION".to_string();
-            self.errors.push(SourceError::new(id_ast.span, message));
+            self.errors.push(AsmError::DirectiveNotInSection {
+                directive: "label",
+                span: id_ast.span,
+            });
             return;
         };
         chunk_env.add_symbol(ObjSymbol {
@@ -309,51 +289,30 @@ impl Assembler {
 
     fn expand_reserve(&mut self, reserve_ast: AsmReserveAst) {
         if self.env.current_chunk().is_none() {
-            let message =
-                ".RESERVE directive must be within a .SECTION".to_string();
-            self.errors
-                .push(SourceError::new(reserve_ast.directive_span, message));
+            self.errors.push(AsmError::DirectiveNotInSection {
+                directive: ".RESERVE",
+                span: reserve_ast.directive_span,
+            });
         }
         let count: u64 = if let Some(expr_ast) = &reserve_ast.count {
-            match self.typecheck_expression(expr_ast) {
-                Some((expr, ExprType::Integer)) => match expr.static_value() {
-                    Some(value) => match value.unwrap_int_ref().to_u64() {
-                        Some(count) => count,
-                        None => {
-                            let message =
-                                "reserve count is too large".to_string();
-                            let label = format!(
-                                "this value of this expression is \
-                                             {value}"
-                            );
-                            self.errors.push(
-                                SourceError::new(expr_ast.span, message)
-                                    .with_label(expr_ast.span, label),
-                            );
-                            return;
-                        }
-                    },
+            match self.typecheck_static_dir_expr_as(
+                (".RESERVE", "count"),
+                expr_ast,
+                ExprType::Integer,
+            ) {
+                Some(value) => match value.unwrap_int_ref().to_u64() {
+                    Some(count) => count,
                     None => {
-                        let message =
-                            "reserve count must be static".to_string();
-                        let label = "this expression isn't static".to_string();
-                        self.errors.push(
-                            SourceError::new(expr_ast.span, message)
-                                .with_label(expr_ast.span, label),
-                        );
+                        self.errors.push(AsmError::DirectiveExprOutOfRange {
+                            directive: ".RESERVE",
+                            component: "count",
+                            expr_span: expr_ast.span,
+                            expr_value: value.unwrap_int_ref().clone(),
+                            valid_range: bigint_range(u64::MIN, u64::MAX),
+                        });
                         return;
                     }
                 },
-                Some((_, ty)) => {
-                    let message =
-                        "reserve count must be an integer".to_string();
-                    let label = format!("this expression has type {ty}");
-                    self.errors.push(
-                        SourceError::new(expr_ast.span, message)
-                            .with_label(expr_ast.span, label),
-                    );
-                    return;
-                }
                 None => return,
             }
         } else {
@@ -367,32 +326,13 @@ impl Assembler {
     }
 
     fn expand_section(&mut self, section_ast: AsmSectionAst) {
-        let name: Option<Rc<str>> = match self
-            .typecheck_expression(&section_ast.name)
-        {
-            Some((expr, ExprType::String)) => match expr.static_value() {
-                Some(value) => Some(value.unwrap_str_ref().clone()),
-                None => {
-                    let message = "section name must be static".to_string();
-                    let label = "this expression isn't static".to_string();
-                    self.errors.push(
-                        SourceError::new(section_ast.name.span, message)
-                            .with_label(section_ast.name.span, label),
-                    );
-                    None
-                }
-            },
-            Some((_, ty)) => {
-                let message = "section name must be a string".to_string();
-                let label = format!("this expression has type {ty}");
-                self.errors.push(
-                    SourceError::new(section_ast.name.span, message)
-                        .with_label(section_ast.name.span, label),
-                );
-                None
-            }
-            None => None,
-        };
+        let name: Option<Rc<str>> = self
+            .typecheck_static_dir_expr_as(
+                (".SECTION", "name"),
+                &section_ast.name,
+                ExprType::String,
+            )
+            .map(|value| value.unwrap_str_ref().clone());
 
         let mut align: Option<Align> = None;
         let mut arch: Option<Rc<str>> = None;
@@ -408,7 +348,13 @@ impl Assembler {
                 "fill" => fill = Some(self.chunk_fill_attr(expr_ast)),
                 "start" => start = Some(self.chunk_start_attr(expr_ast)),
                 "within" => within = Some(self.chunk_within_attr(expr_ast)),
-                _ => self.chunk_invalid_attr_error(id_ast),
+                _ => {
+                    self.errors.push(AsmError::InvalidAttrName {
+                        directive: ".SECTION",
+                        attr_name: id_ast.name,
+                        attr_span: id_ast.span,
+                    });
+                }
             }
         }
 
@@ -443,34 +389,30 @@ impl Assembler {
 
     fn expand_utf8_data(&mut self, data_ast: AsmUtf8DataAst) {
         if self.env.current_chunk().is_none() {
-            let message =
-                ".UTF8 directive must be within a .SECTION".to_string();
-            self.errors
-                .push(SourceError::new(data_ast.directive_span, message));
+            self.errors.push(AsmError::DirectiveNotInSection {
+                directive: ".UTF8",
+                span: data_ast.directive_span,
+            });
         }
         for expr_ast in data_ast.expressions {
             match self.typecheck_expression(&expr_ast) {
                 Some((expr, ExprType::Integer)) => {
                     let Some(value) = expr.static_value() else {
-                        let message = ".UTF8 value must be static".to_string();
-                        let label = "this expression isn't static".to_string();
-                        self.errors.push(
-                            SourceError::new(expr_ast.span, message)
-                                .with_label(expr_ast.span, label),
-                        );
+                        self.errors.push(AsmError::DirectiveExprNotStatic {
+                            directive: ".UTF8",
+                            component: "value",
+                            expr_span: expr_ast.span,
+                        });
                         return;
                     };
                     let bigint = value.unwrap_int_ref();
                     let Some(chr) = bigint.to_u32().and_then(char::from_u32)
                     else {
-                        let message =
-                            "invalid unicode scalar value".to_string();
-                        let label = format!(
-                            "the value of this expression is {bigint}"
-                        );
                         self.errors.push(
-                            SourceError::new(expr_ast.span, message)
-                                .with_label(expr_ast.span, label),
+                            AsmError::InvalidUnicodeScalarValue {
+                                expr_span: expr_ast.span,
+                                expr_value: bigint.clone(),
+                            },
                         );
                         return;
                     };
@@ -482,12 +424,11 @@ impl Assembler {
                 }
                 Some((expr, ExprType::String)) => {
                     let Some(value) = expr.static_value() else {
-                        let message = ".UTF8 value must be static".to_string();
-                        let label = "this expression isn't static".to_string();
-                        self.errors.push(
-                            SourceError::new(expr_ast.span, message)
-                                .with_label(expr_ast.span, label),
-                        );
+                        self.errors.push(AsmError::DirectiveExprNotStatic {
+                            directive: ".UTF8",
+                            component: "value",
+                            expr_span: expr_ast.span,
+                        });
                         return;
                     };
                     if let Some(chunk_env) = self.env.current_chunk() {
@@ -497,12 +438,13 @@ impl Assembler {
                     }
                 }
                 Some((_, ty)) => {
-                    let message = ".UTF8 value must be a string".to_string();
-                    let label = format!("this expression has type {ty}");
-                    self.errors.push(
-                        SourceError::new(expr_ast.span, message)
-                            .with_label(expr_ast.span, label),
-                    );
+                    self.errors.push(AsmError::DirectiveExprTypeError {
+                        directive: ".UTF8",
+                        component: "value",
+                        expr_span: expr_ast.span,
+                        expr_type: ty,
+                        valid_types: vec![ExprType::String, ExprType::Integer],
+                    });
                 }
                 None => {}
             }
@@ -510,23 +452,19 @@ impl Assembler {
     }
 
     fn expand_int_data(&mut self, int_data: AsmIntDataAst) {
+        let directive = int_data.int_type.directive();
         if self.env.current_chunk().is_none() {
-            let message = format!(
-                "{} directive must be within a .SECTION",
-                int_data.int_type.directive()
-            );
-            self.errors
-                .push(SourceError::new(int_data.directive_span, message));
+            self.errors.push(AsmError::DirectiveNotInSection {
+                directive,
+                span: int_data.directive_span,
+            });
         }
         let Some(int_type) = self.int_patch_type(int_data.int_type) else {
-            let message = format!(
-                "Cannot use {} directive under architecture {:?}, which has \
-                 no defined endianness",
-                int_data.int_type.directive(),
-                self.env.current_arch()
-            );
-            self.errors
-                .push(SourceError::new(int_data.directive_span, message));
+            self.errors.push(AsmError::ArchHasNoEndianness {
+                directive,
+                span: int_data.directive_span,
+                arch: self.env.current_arch().clone(),
+            });
             return;
         };
         for expr_ast in int_data.expressions {
@@ -546,19 +484,17 @@ impl Assembler {
                         match int_type.value_in_range(bigint) {
                             Ok(value) => value,
                             Err(range) => {
-                                let message = format!(
-                                    "{} value is statically out of range \
-                                     ({}-{})",
-                                    int_data.int_type.directive(),
-                                    range.start(),
-                                    range.end()
-                                );
-                                let label = format!(
-                                    "the value of this expression is {bigint}"
-                                );
                                 self.errors.push(
-                                    SourceError::new(expr_ast.span, message)
-                                        .with_label(expr_ast.span, label),
+                                    AsmError::DirectiveExprOutOfRange {
+                                        directive,
+                                        component: "value",
+                                        expr_span: expr_ast.span,
+                                        expr_value: bigint.clone(),
+                                        valid_range: RangeInclusive {
+                                            start: BigInt::from(range.start),
+                                            last: BigInt::from(range.last),
+                                        },
+                                    },
                                 );
                                 0
                             }
@@ -571,15 +507,13 @@ impl Assembler {
                     }
                 },
                 Some((_, ty)) => {
-                    let message = format!(
-                        "{} value must be an integer",
-                        int_data.int_type.directive()
-                    );
-                    let label = format!("this expression has type {ty}");
-                    self.errors.push(
-                        SourceError::new(expr_ast.span, message)
-                            .with_label(expr_ast.span, label),
-                    );
+                    self.errors.push(AsmError::DirectiveExprTypeError {
+                        directive,
+                        component: "value",
+                        expr_span: expr_ast.span,
+                        expr_type: ty,
+                        valid_types: vec![ExprType::Integer, ExprType::Label],
+                    });
                     0
                 }
                 None => 0,
@@ -674,7 +608,10 @@ impl Assembler {
             if self.arch_tree.contains_arch(&arch) {
                 return arch;
             }
-            self.unknown_arch_error(expr_span, &arch);
+            self.errors.push(AsmError::UnknownArch {
+                arch: arch.clone(),
+                span: expr_span,
+            });
         }
         self.env.current_arch().clone()
     }
@@ -684,8 +621,15 @@ impl Assembler {
         if let Some(bigint) = self.chunk_static_int_attr("fill", expr_ast) {
             match u8::try_from(&bigint) {
                 Ok(byte) => return byte,
-                Err(_) => self
-                    .chunk_attr_out_of_range_error("fill", expr_span, &bigint),
+                Err(_) => {
+                    self.errors.push(AsmError::DirectiveExprOutOfRange {
+                        directive: ".SECTION",
+                        component: "fill",
+                        expr_span,
+                        expr_value: bigint,
+                        valid_range: bigint_range(u8::MIN, u8::MAX),
+                    })
+                }
             }
         }
         u8::default()
@@ -696,9 +640,15 @@ impl Assembler {
         if let Some(bigint) = self.chunk_static_int_attr("start", expr_ast) {
             match Addr::try_from(&bigint) {
                 Ok(addr) => return addr,
-                Err(()) => self.chunk_attr_out_of_range_error(
-                    "start", expr_span, &bigint,
-                ),
+                Err(_) => {
+                    self.errors.push(AsmError::DirectiveExprOutOfRange {
+                        directive: ".SECTION",
+                        component: "start",
+                        expr_span,
+                        expr_value: bigint,
+                        valid_range: bigint_range(Addr::MIN, Addr::MAX),
+                    })
+                }
             }
         }
         Addr::MIN
@@ -710,7 +660,7 @@ impl Assembler {
 
     fn chunk_static_align_attr(
         &mut self,
-        attr_name: &str,
+        attr_name: &'static str,
         expr_ast: ExprAst,
     ) -> Align {
         let expr_span = expr_ast.span;
@@ -718,23 +668,13 @@ impl Assembler {
             match Align::try_from(&bigint) {
                 Ok(align) => return align,
                 Err(error) => {
-                    let message = match error {
-                        AlignTryFromError::NotAPowerOfTwo => {
-                            format!("`{attr_name}` must be a power of two")
-                        }
-                        AlignTryFromError::TooLargePowerOfTwo => {
-                            format!(
-                                "`{attr_name}` must be at most {}",
-                                0x8000_0000u32
-                            )
-                        }
-                    };
-                    let label =
-                        format!("the value of this expression is {bigint}");
-                    self.errors.push(
-                        SourceError::new(expr_span, message)
-                            .with_label(expr_span, label),
-                    );
+                    self.errors.push(AsmError::InvalidAlignmentValue {
+                        directive: ".SECTION",
+                        attr_name,
+                        error,
+                        expr_span,
+                        expr_value: bigint,
+                    });
                 }
             }
         }
@@ -743,56 +683,28 @@ impl Assembler {
 
     fn chunk_static_int_attr(
         &mut self,
-        attr_name: &str,
+        attr_name: &'static str,
         expr_ast: ExprAst,
     ) -> Option<BigInt> {
-        let expr_span = expr_ast.span;
-        match self.typecheck_expression(&expr_ast) {
-            Some((expr, ExprType::Integer)) => match expr.static_value() {
-                Some(value) => Some(value.clone().unwrap_int()),
-                None => {
-                    self.chunk_attr_non_static_error(attr_name, expr_span);
-                    None
-                }
-            },
-            Some((_, expr_type)) => {
-                self.chunk_attr_type_error(
-                    attr_name,
-                    &ExprType::Integer,
-                    expr_span,
-                    &expr_type,
-                );
-                None
-            }
-            None => None,
-        }
+        self.typecheck_static_dir_expr_as(
+            (".SECTION", attr_name),
+            &expr_ast,
+            ExprType::Integer,
+        )
+        .map(|value| value.unwrap_int_ref().clone())
     }
 
     fn chunk_static_str_attr(
         &mut self,
-        attr_name: &str,
+        attr_name: &'static str,
         expr_ast: ExprAst,
     ) -> Option<Rc<str>> {
-        let expr_span = expr_ast.span;
-        match self.typecheck_expression(&expr_ast) {
-            Some((expr, ExprType::String)) => match expr.static_value() {
-                Some(value) => Some(value.unwrap_str_ref().clone()),
-                None => {
-                    self.chunk_attr_non_static_error(attr_name, expr_span);
-                    None
-                }
-            },
-            Some((_, expr_type)) => {
-                self.chunk_attr_type_error(
-                    attr_name,
-                    &ExprType::String,
-                    expr_span,
-                    &expr_type,
-                );
-                None
-            }
-            None => None,
-        }
+        self.typecheck_static_dir_expr_as(
+            (".SECTION", attr_name),
+            &expr_ast,
+            ExprType::String,
+        )
+        .map(|value| value.unwrap_str_ref().clone())
     }
 
     fn chunk_declare_attr(
@@ -801,72 +713,15 @@ impl Assembler {
         id_ast: &IdentifierAst,
     ) {
         if let Some(&prev_span) = prev_attrs.get(&id_ast.name) {
-            let message = format!(
-                "Duplicate `{}` attribute for `.SECTION`",
-                id_ast.name
-            );
-            let label1 = "Previously declared here".to_string();
-            let label2 = "Duplicated here".to_string();
-            self.errors.push(
-                SourceError::new(id_ast.span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(id_ast.span, label2),
-            );
+            self.errors.push(AsmError::DuplicateAttrName {
+                directive: ".SECTION",
+                attr_name: id_ast.name.clone(),
+                attr_span: id_ast.span,
+                prev_span,
+            });
         } else {
             prev_attrs.insert(id_ast.name.clone(), id_ast.span);
         }
-    }
-
-    fn chunk_attr_non_static_error(
-        &mut self,
-        attr_name: &str,
-        expr_span: SrcSpan,
-    ) {
-        let message =
-            format!(".SECTION `{attr_name}` attribute must be static");
-        let label = "this expression isn't static".to_string();
-        self.errors.push(
-            SourceError::new(expr_span, message).with_label(expr_span, label),
-        );
-    }
-
-    fn chunk_attr_out_of_range_error(
-        &mut self,
-        attr_name: &str,
-        expr_span: SrcSpan,
-        value: &BigInt,
-    ) {
-        let message = format!(".SECTION `{attr_name}` is out of range");
-        let label = format!("the value of this expression is {value}");
-        self.errors.push(
-            SourceError::new(expr_span, message).with_label(expr_span, label),
-        );
-    }
-
-    fn chunk_attr_type_error(
-        &mut self,
-        attr_name: &str,
-        expected_type: &ExprType,
-        expr_span: SrcSpan,
-        actual_type: &ExprType,
-    ) {
-        let message =
-            format!(".SECTION `{attr_name}` must have type {expected_type}");
-        let label = format!("this expression has type {actual_type}");
-        self.errors.push(
-            SourceError::new(expr_span, message).with_label(expr_span, label),
-        );
-    }
-
-    fn chunk_invalid_attr_error(&mut self, attr_id: IdentifierAst) {
-        let message =
-            format!("Invalid `.SECTION` attribute: `{}`", attr_id.name);
-        self.errors.push(SourceError::new(attr_id.span, message));
-    }
-
-    fn unknown_arch_error(&mut self, expr_span: SrcSpan, arch: &str) {
-        let message = format!("the `{arch}` architecture was never defined");
-        self.errors.push(SourceError::new(expr_span, message));
     }
 
     /// Attempts to add an `ObjPatch` to the current chunk starting at the
@@ -881,6 +736,57 @@ impl Assembler {
         }
     }
 
+    fn typecheck_static_dir_expr_as(
+        &mut self,
+        (directive, component): (&'static str, &'static str),
+        expr_ast: &ExprAst,
+        required_type: ExprType,
+    ) -> Option<ExprValue> {
+        match self.typecheck_dir_expr_as(
+            (directive, component),
+            expr_ast,
+            required_type,
+        ) {
+            Some(expr) => match expr.static_value() {
+                Some(value) => Some(value.clone()),
+                None => {
+                    self.errors.push(AsmError::DirectiveExprNotStatic {
+                        directive,
+                        component,
+                        expr_span: expr_ast.span,
+                    });
+                    None
+                }
+            },
+            None => None,
+        }
+    }
+
+    fn typecheck_dir_expr_as(
+        &mut self,
+        (directive, component): (&'static str, &'static str),
+        expr_ast: &ExprAst,
+        required_type: ExprType,
+    ) -> Option<ObjExpr> {
+        match self.typecheck_expression(expr_ast) {
+            Some((expr, expr_type)) => {
+                if expr_type == required_type {
+                    Some(expr)
+                } else {
+                    self.errors.push(AsmError::DirectiveExprTypeError {
+                        directive,
+                        component,
+                        expr_span: expr_ast.span,
+                        expr_type,
+                        valid_types: vec![required_type],
+                    });
+                    None
+                }
+            }
+            None => None,
+        }
+    }
+
     fn typecheck_expression(
         &mut self,
         expr_ast: &ExprAst,
@@ -888,21 +794,21 @@ impl Assembler {
         // TODO: error if contains a name that is reserved in current arch
         match self.env.typecheck_expression(expr_ast) {
             Ok(expr_and_type) => Some(expr_and_type),
-            Err(errors) => {
-                self.errors.extend(errors);
+            Err(mut errors) => {
+                self.errors.append(&mut errors);
                 None
             }
         }
     }
 
-    fn merge_errors(&mut self, result: SourceResult<()>) {
+    fn merge_errors(&mut self, result: AsmResult<()>) {
         match result {
             Ok(()) => {}
             Err(mut errors) => self.errors.append(&mut errors),
         }
     }
 
-    fn finish(self) -> SourceResult<ObjFile> {
+    fn finish(self) -> AsmResult<ObjFile> {
         if self.errors.is_empty() {
             Ok(ObjFile {
                 chunks: self.chunks.into_values().collect(),
@@ -913,6 +819,10 @@ impl Assembler {
             Err(self.errors)
         }
     }
+}
+
+fn bigint_range<T: Into<BigInt>>(start: T, last: T) -> RangeInclusive<BigInt> {
+    RangeInclusive { start: start.into(), last: last.into() }
 }
 
 //===========================================================================//

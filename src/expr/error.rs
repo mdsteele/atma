@@ -12,6 +12,7 @@ pub type ExprTypeResult<T> = Result<T, Vec<ExprTypeError>>;
 //===========================================================================//
 
 /// An error encountered while typechecking an expression.
+#[derive(Debug)]
 pub enum ExprTypeError {
     /// Found a binary operator that cannot be applied to its arguments'
     /// expression types.

@@ -1,6 +1,7 @@
 use super::arch::ArchTree;
+use super::error::{AsmError, AsmResult};
 use crate::addr::Offset;
-use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::error::SrcSpan;
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
     ExprValue,
@@ -30,17 +31,11 @@ impl AsmTypeEnv {
         }
     }
 
-    pub fn declare_import(
-        &mut self,
-        id_ast: &IdentifierAst,
-    ) -> SourceResult<()> {
+    pub fn declare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
         self.declare_label(id_ast)
     }
 
-    pub fn declare_label(
-        &mut self,
-        id_ast: &IdentifierAst,
-    ) -> SourceResult<()> {
+    pub fn declare_label(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
         debug_assert!(!id_ast.is_placeholder);
         let full_name = if let Some(prefix) = self.current_scope_prefix() {
             Rc::from(format!("{prefix}{}", id_ast.name))
@@ -48,15 +43,11 @@ impl AsmTypeEnv {
             id_ast.name.clone()
         };
         if let Some(&prev_span) = self.labels.get(&full_name) {
-            let message =
-                format!("symbol was already declared: {}", full_name);
-            let label1 = "previously declared here".to_string();
-            let label2 = "redeclared here".to_string();
-            Err(vec![
-                SourceError::new(id_ast.span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(id_ast.span, label2),
-            ])
+            Err(vec![AsmError::SymbolAlreadyDeclared {
+                full_name,
+                name_span: id_ast.span,
+                prev_span,
+            }])
         } else {
             self.labels.insert(full_name, id_ast.span);
             Ok(())
@@ -126,13 +117,16 @@ impl AsmTypeEnv {
     pub fn typecheck_expression(
         &self,
         expr: &ExprAst,
-    ) -> SourceResult<(ObjExpr, ExprType)> {
+    ) -> AsmResult<(ObjExpr, ExprType)> {
         match ExprCompiler::new(self).typecheck(expr) {
             Ok((ops, expr_type, _static_value)) => {
                 debug_assert!(!ops.is_empty());
                 Ok((ObjExpr { ops }, expr_type))
             }
-            Err(errors) => Err(SourceError::from_errors(errors)),
+            Err(errors) => Err(errors
+                .into_iter()
+                .map(|error| AsmError::ExprTypeError { error })
+                .collect()),
         }
     }
 }
