@@ -3,7 +3,7 @@ use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::error::SourceError;
+use atma::error::{Errs, SourceError};
 use atma::link::{LinkConfig, LinkError, LinkFragment};
 use atma::obj::{BinaryIo, ObjFile};
 use atma::proc::SimBreak;
@@ -61,7 +61,7 @@ enum Command {
 
 enum CliError {
     Io(io::Error),
-    Source(String, Vec<SourceError>),
+    Source(String, Errs<SourceError>),
     Link(Vec<LinkError>),
     AdsRuntimeError(AdsRuntimeError),
 }
@@ -313,7 +313,7 @@ fn report_link_error(error: LinkError) {
     eprintln!("Link error: {error:?}");
 }
 
-fn report_source_errors(source: &str, errors: Vec<SourceError>) {
+fn report_source_errors(source: &str, errors: Errs<SourceError>) {
     for error in errors {
         report_source_error(source, error);
     }

@@ -4,7 +4,7 @@ use super::fragment::LinkFragment;
 use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
 use crate::addr::{Addr, Align, AlignTryFromError, Range, Size};
-use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::error::{Errs, SourceError, SourceResult, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::{ObjExpr, ObjFile};
 use crate::parse::{
@@ -32,7 +32,6 @@ struct ConfigBuilder {
     memory: Vec<MemoryConfig>,
     sections: Vec<SectionConfig>,
     exports: Vec<ExportConfig>,
-    errors: Vec<SourceError>,
 }
 
 impl ConfigBuilder {
@@ -43,24 +42,30 @@ impl ConfigBuilder {
             memory: Vec::new(),
             sections: Vec::new(),
             exports: Vec::new(),
-            errors: Vec::new(),
         }
     }
 
-    pub(crate) fn finish(self) -> SourceResult<LinkConfig> {
-        if self.errors.is_empty() {
-            Ok(LinkConfig {
-                addrspaces: self.addrspaces,
-                memory: self.memory,
-                sections: self.sections,
-                exports: self.exports,
-            })
-        } else {
-            Err(self.errors)
+    pub(crate) fn build(
+        mut self,
+        ast: LinkConfigAst,
+    ) -> SourceResult<LinkConfig> {
+        let mut errors = Errs::<SourceError>::new();
+        for dir_ast in ast.directives {
+            errors.also(self.visit_directive(dir_ast));
         }
+        errors.result()?;
+        Ok(LinkConfig {
+            addrspaces: self.addrspaces,
+            memory: self.memory,
+            sections: self.sections,
+            exports: self.exports,
+        })
     }
 
-    pub(crate) fn visit_directive(&mut self, dir_ast: LinkDirectiveAst) {
+    fn visit_directive(
+        &mut self,
+        dir_ast: LinkDirectiveAst,
+    ) -> SourceResult<()> {
         match dir_ast {
             LinkDirectiveAst::Addrspaces(entries) => {
                 self.visit_addrspaces_dir(entries)
@@ -78,168 +83,249 @@ impl ConfigBuilder {
         }
     }
 
-    fn visit_addrspaces_dir(&mut self, entries: Vec<LinkEntryAst>) {
+    fn visit_addrspaces_dir(
+        &mut self,
+        entries: Vec<LinkEntryAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
         for entry in entries {
-            self.visit_addrspaces_entry(entry);
+            errs.also(self.visit_addrspaces_entry(entry));
         }
+        errs.result()
     }
 
-    fn visit_addrspaces_entry(&mut self, entry: LinkEntryAst) {
-        self.declare_entry(ENTITY_ADDRSPACE, &entry.id);
+    fn visit_addrspaces_entry(
+        &mut self,
+        entry: LinkEntryAst,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        errs.also(self.declare_entry(ENTITY_ADDRSPACE, &entry.id));
         let mut bits: Option<u32> = None;
         let mut fill: Option<u8> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
-            self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
+            errs.also(self.declare_attr(
+                &entry.id.name,
+                &mut prev_attrs,
+                &id_ast,
+            ));
             match &*id_ast.name {
-                "bits" => bits = Some(self.addrspace_bits_attr(expr_ast)),
-                "fill" => fill = Some(self.addrspace_fill_attr(expr_ast)),
-                _ => self.invalid_attr_error(ENTITY_ADDRSPACE, id_ast),
+                "bits" => {
+                    bits = Some(
+                        errs.ok_or_default(self.addrspace_bits_attr(expr_ast)),
+                    )
+                }
+                "fill" => {
+                    fill = Some(
+                        errs.ok_or_default(self.addrspace_fill_attr(expr_ast)),
+                    )
+                }
+                _ => errs
+                    .push(self.invalid_attr_error(ENTITY_ADDRSPACE, id_ast)),
             }
         }
         if bits.is_none() {
-            self.missing_attr_error("bits", &entry.id);
+            errs.push(self.missing_attr_error("bits", &entry.id));
         }
         self.addrspaces.push(AddrspaceConfig {
             name: entry.id.name,
             bits: bits.unwrap_or(u32::BITS),
             fill: fill.unwrap_or_default(),
         });
+        errs.result()
     }
 
-    fn addrspace_bits_attr(&mut self, expr_ast: ExprAst) -> u32 {
+    fn addrspace_bits_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u32> {
         let expr_span = expr_ast.span;
-        let mut bits = Addr::BITS;
-        if let Some(bigint) =
-            self.static_int_attr(ENTITY_ADDRSPACE, "bits", expr_ast)
-        {
-            match bigint.to_u32() {
-                Some(int) if (1..=Addr::BITS).contains(&int) => {
-                    bits = int;
-                }
-                _ => self.out_of_range_attr_error(
-                    ENTITY_ADDRSPACE,
-                    "bits",
-                    expr_span,
-                    &bigint,
-                ),
-            }
+        let bigint =
+            self.static_int_attr(ENTITY_ADDRSPACE, "bits", expr_ast)?;
+        match bigint.to_u32() {
+            Some(int) if (1..=Addr::BITS).contains(&int) => Ok(int),
+            _ => Err(Errs::one(self.out_of_range_attr_error(
+                ENTITY_ADDRSPACE,
+                "bits",
+                expr_span,
+                &bigint,
+            ))),
         }
-        bits
     }
 
-    fn addrspace_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+    fn addrspace_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_ADDRSPACE, expr_ast)
     }
 
-    fn visit_exports_dir(&mut self, entries: Vec<LinkEntryAst>) {
+    fn visit_exports_dir(
+        &mut self,
+        entries: Vec<LinkEntryAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
         for entry in entries {
-            self.visit_exports_entry(entry);
+            errs.also(self.visit_exports_entry(entry));
         }
+        errs.result()
     }
 
-    fn visit_exports_entry(&mut self, entry: LinkEntryAst) {
+    fn visit_exports_entry(
+        &mut self,
+        entry: LinkEntryAst,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
         // TODO: error if this name is already exported
         let mut space: Option<Rc<str>> = None;
         let mut addr: Option<Addr> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
-            self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
+            errs.also(self.declare_attr(
+                &entry.id.name,
+                &mut prev_attrs,
+                &id_ast,
+            ));
             match &*id_ast.name {
-                "addr" => addr = Some(self.export_addr_attr(expr_ast)),
-                "space" => space = Some(self.export_space_attr(expr_ast)),
-                _ => self.invalid_attr_error(ENTITY_EXPORT, id_ast),
+                "addr" => {
+                    addr = Some(
+                        errs.ok_or_default(self.export_addr_attr(expr_ast)),
+                    )
+                }
+                "space" => {
+                    space = Some(
+                        errs.ok_or_default(self.export_space_attr(expr_ast)),
+                    )
+                }
+                _ => errs.push(self.invalid_attr_error(ENTITY_EXPORT, id_ast)),
             }
         }
         if space.is_none() {
-            self.missing_attr_error("space", &entry.id);
+            errs.push(self.missing_attr_error("space", &entry.id));
         }
         if addr.is_none() {
-            self.missing_attr_error("addr", &entry.id);
+            errs.push(self.missing_attr_error("addr", &entry.id));
         }
         self.exports.push(ExportConfig {
             name: entry.id.name,
             space: space.unwrap_or_default(),
             address: addr.unwrap_or_default(),
         });
+        errs.result()
     }
 
-    fn export_addr_attr(&mut self, expr_ast: ExprAst) -> Addr {
+    fn export_addr_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
         // TODO: allow addr to be non-static
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(ENTITY_EXPORT, "addr", expr_ast)
-        {
-            match Addr::try_from(&bigint) {
-                Ok(addr) => return addr,
-                Err(()) => self.out_of_range_attr_error(
-                    ENTITY_EXPORT,
-                    "addr",
-                    expr_span,
-                    &bigint,
-                ),
-            }
-        }
-        Addr::MIN
+        let bigint = self.static_int_attr(ENTITY_EXPORT, "addr", expr_ast)?;
+        Addr::try_from(&bigint).map_err(|()| {
+            Errs::one(self.out_of_range_attr_error(
+                ENTITY_EXPORT,
+                "addr",
+                expr_span,
+                &bigint,
+            ))
+        })
     }
 
-    fn export_space_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
+    fn export_space_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_EXPORT,
             "space",
             expr_ast,
             ENTITY_ADDRSPACE,
         )
-        .unwrap_or_default()
     }
 
-    fn visit_let_dir(&mut self, id_ast: IdentifierAst, expr_ast: ExprAst) {
-        let (_expr, var_type, static_value) =
-            self.typecheck_expression(expr_ast);
-        // TODO: save expr to be evaluated later
+    fn visit_let_dir(
+        &mut self,
+        id_ast: IdentifierAst,
+        expr_ast: ExprAst,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        let (var_type, static_value) =
+            match self.typecheck_expression(expr_ast) {
+                Ok((_expr, var_type, static_value)) => {
+                    // TODO: save expr to be evaluated later
+                    (var_type, static_value)
+                }
+                Err(errors) => {
+                    errs.append(errors);
+                    (ExprType::Bottom, None)
+                }
+            };
         self.env.add_declaration(id_ast, var_type, static_value);
+        errs.result()
     }
 
-    fn visit_memory_dir(&mut self, entries: Vec<LinkEntryAst>) {
+    fn visit_memory_dir(
+        &mut self,
+        entries: Vec<LinkEntryAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
         for entry in entries {
-            self.visit_memory_entry(entry);
+            errs.also(self.visit_memory_entry(entry));
         }
+        errs.result()
     }
 
-    fn visit_memory_entry(&mut self, entry: LinkEntryAst) {
-        self.declare_entry(ENTITY_MEMORY, &entry.id);
+    fn visit_memory_entry(&mut self, entry: LinkEntryAst) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        errs.also(self.declare_entry(ENTITY_MEMORY, &entry.id));
         let mut space: Option<Rc<str>> = None;
         let mut start: Option<Addr> = None;
         let mut size: Option<Size> = None;
         let mut fill: Option<u8> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
-            self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
+            errs.also(self.declare_attr(
+                &entry.id.name,
+                &mut prev_attrs,
+                &id_ast,
+            ));
             match &*id_ast.name {
-                "fill" => fill = Some(self.memory_fill_attr(expr_ast)),
-                "size" => size = Some(self.memory_size_attr(expr_ast)),
-                "space" => space = Some(self.memory_space_attr(expr_ast)),
-                "start" => start = Some(self.memory_start_attr(expr_ast)),
-                _ => self.invalid_attr_error(ENTITY_MEMORY, id_ast),
+                "fill" => {
+                    fill = Some(
+                        errs.ok_or_default(self.memory_fill_attr(expr_ast)),
+                    )
+                }
+                "size" => {
+                    size = Some(errs.ok_or(
+                        self.memory_size_attr(expr_ast),
+                        Size::from(1u32),
+                    ))
+                }
+                "space" => {
+                    space = Some(
+                        errs.ok_or_default(self.memory_space_attr(expr_ast)),
+                    )
+                }
+                "start" => {
+                    start = Some(
+                        errs.ok_or_default(self.memory_start_attr(expr_ast)),
+                    )
+                }
+                _ => errs.push(self.invalid_attr_error(ENTITY_MEMORY, id_ast)),
             }
         }
         if space.is_none() {
-            self.missing_attr_error("space", &entry.id);
+            errs.push(self.missing_attr_error("space", &entry.id));
         }
         if start.is_none() {
-            self.missing_attr_error("start", &entry.id);
+            errs.push(self.missing_attr_error("start", &entry.id));
         }
         if size.is_none() {
-            self.missing_attr_error("size", &entry.id);
+            errs.push(self.missing_attr_error("size", &entry.id));
         }
         let range = match (start, size) {
-            (Some(start), Some(size)) => match start.range_with_size(size) {
-                Some(range) => range,
-                None => {
-                    self.memory_range_overflow_error(&entry.id, start, size);
-                    start.range_within(Align::MAX)
+            (Some(start), Some(size)) => {
+                match start.range_with_size(size) {
+                    Some(range) => range,
+                    None => {
+                        errs.push(self.memory_range_overflow_error(
+                            &entry.id, start, size,
+                        ));
+                        start.range_within(Align::MAX)
+                    }
                 }
-            },
+            }
             (Some(start), None) => start.range_within(Align::MAX),
             (None, Some(size)) => Addr::MIN.range_with_size(size).unwrap(),
             (None, None) => Range::FULL,
@@ -250,66 +336,69 @@ impl ConfigBuilder {
             range,
             fill,
         });
+        errs.result()
     }
 
-    fn memory_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+    fn memory_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_MEMORY, expr_ast)
     }
 
-    fn memory_size_attr(&mut self, expr_ast: ExprAst) -> Size {
+    fn memory_size_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Size> {
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(ENTITY_MEMORY, "size", expr_ast)
-        {
-            match Size::try_from(&bigint) {
-                Ok(size) if size > Size::ZERO => return size,
-                _ => self.out_of_range_attr_error(
-                    ENTITY_MEMORY,
-                    "size",
-                    expr_span,
-                    &bigint,
-                ),
-            }
+        let bigint = self.static_int_attr(ENTITY_MEMORY, "size", expr_ast)?;
+        match Size::try_from(&bigint) {
+            Ok(size) if size > Size::ZERO => Ok(size),
+            _ => Err(Errs::one(self.out_of_range_attr_error(
+                ENTITY_MEMORY,
+                "size",
+                expr_span,
+                &bigint,
+            ))),
         }
-        Size::from(1u8)
     }
 
-    fn memory_space_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
+    fn memory_space_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_MEMORY,
             "space",
             expr_ast,
             ENTITY_ADDRSPACE,
         )
-        .unwrap_or_default()
     }
 
-    fn memory_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
+    fn memory_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(ENTITY_MEMORY, "start", expr_ast)
-        {
-            match Addr::try_from(&bigint) {
-                Ok(addr) => return addr,
-                Err(()) => self.out_of_range_attr_error(
-                    ENTITY_MEMORY,
-                    "start",
-                    expr_span,
-                    &bigint,
-                ),
-            }
-        }
-        Addr::MIN
+        let bigint = self.static_int_attr(ENTITY_MEMORY, "start", expr_ast)?;
+        Addr::try_from(&bigint).map_err(|()| {
+            Errs::one(self.out_of_range_attr_error(
+                ENTITY_MEMORY,
+                "start",
+                expr_span,
+                &bigint,
+            ))
+        })
     }
 
-    fn visit_sections_dir(&mut self, entries: Vec<LinkEntryAst>) {
+    fn visit_sections_dir(
+        &mut self,
+        entries: Vec<LinkEntryAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
         for entry in entries {
-            self.visit_section_entry(entry);
+            errs.also(self.visit_section_entry(entry));
         }
+        errs.result()
     }
 
-    fn visit_section_entry(&mut self, entry: LinkEntryAst) {
-        self.declare_entry(ENTITY_SECTION, &entry.id);
+    fn visit_section_entry(
+        &mut self,
+        entry: LinkEntryAst,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        errs.also(self.declare_entry(ENTITY_SECTION, &entry.id));
         let mut load: Option<Rc<str>> = None;
         let mut start: Option<Addr> = None;
         let mut size: Option<Size> = None;
@@ -318,19 +407,52 @@ impl ConfigBuilder {
         let mut fill: Option<u8> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
-            self.declare_attr(&entry.id.name, &mut prev_attrs, &id_ast);
+            errs.also(self.declare_attr(
+                &entry.id.name,
+                &mut prev_attrs,
+                &id_ast,
+            ));
             match &*id_ast.name {
-                "align" => align = Some(self.section_align_attr(expr_ast)),
-                "fill" => fill = Some(self.section_fill_attr(expr_ast)),
-                "load" => load = Some(self.section_load_attr(expr_ast)),
-                "size" => size = Some(self.section_size_attr(expr_ast)),
-                "start" => start = Some(self.section_start_attr(expr_ast)),
-                "within" => within = Some(self.section_within_attr(expr_ast)),
-                _ => self.invalid_attr_error(ENTITY_SECTION, id_ast),
+                "align" => {
+                    align = Some(
+                        errs.ok_or_default(self.section_align_attr(expr_ast)),
+                    )
+                }
+                "fill" => {
+                    fill = Some(
+                        errs.ok_or_default(self.section_fill_attr(expr_ast)),
+                    )
+                }
+                "load" => {
+                    load = Some(
+                        errs.ok_or_default(self.section_load_attr(expr_ast)),
+                    )
+                }
+                "size" => {
+                    size = Some(errs.ok_or(
+                        self.section_size_attr(expr_ast),
+                        Size::from(1u32),
+                    ))
+                }
+                "start" => {
+                    start = Some(
+                        errs.ok_or_default(self.section_start_attr(expr_ast)),
+                    )
+                }
+                "within" => {
+                    within =
+                        Some(errs.ok_or(
+                            self.section_within_attr(expr_ast),
+                            Align::MAX,
+                        ))
+                }
+                _ => {
+                    errs.push(self.invalid_attr_error(ENTITY_SECTION, id_ast))
+                }
             }
         }
         if load.is_none() {
-            self.missing_attr_error("load", &entry.id);
+            errs.push(self.missing_attr_error("load", &entry.id));
         }
         self.sections.push(SectionConfig {
             name: entry.id.name,
@@ -341,63 +463,64 @@ impl ConfigBuilder {
             within,
             fill,
         });
+        errs.result()
     }
 
-    fn section_align_attr(&mut self, expr_ast: ExprAst) -> Align {
+    fn section_align_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<Align> {
         self.static_align_attr(ENTITY_SECTION, "align", expr_ast)
     }
 
-    fn section_fill_attr(&mut self, expr_ast: ExprAst) -> u8 {
+    fn section_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_SECTION, expr_ast)
     }
 
-    fn section_load_attr(&mut self, expr_ast: ExprAst) -> Rc<str> {
+    fn section_load_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_SECTION,
             "load",
             expr_ast,
             ENTITY_MEMORY,
         )
-        .unwrap_or_default()
     }
 
-    fn section_start_attr(&mut self, expr_ast: ExprAst) -> Addr {
+    fn section_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(ENTITY_SECTION, "start", expr_ast)
-        {
-            match Addr::try_from(&bigint) {
-                Ok(addr) => return addr,
-                Err(()) => self.out_of_range_attr_error(
-                    ENTITY_SECTION,
-                    "start",
-                    expr_span,
-                    &bigint,
-                ),
-            }
-        }
-        Addr::default()
+        let bigint =
+            self.static_int_attr(ENTITY_SECTION, "start", expr_ast)?;
+        Addr::try_from(&bigint).map_err(|()| {
+            Errs::one(self.out_of_range_attr_error(
+                ENTITY_SECTION,
+                "start",
+                expr_span,
+                &bigint,
+            ))
+        })
     }
 
-    fn section_size_attr(&mut self, expr_ast: ExprAst) -> Size {
+    fn section_size_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Size> {
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(ENTITY_SECTION, "size", expr_ast)
-        {
-            match Size::try_from(&bigint) {
-                Ok(size) if size > Size::ZERO => return size,
-                _ => self.out_of_range_attr_error(
-                    ENTITY_SECTION,
-                    "size",
-                    expr_span,
-                    &bigint,
-                ),
-            }
+        let bigint = self.static_int_attr(ENTITY_SECTION, "size", expr_ast)?;
+        match Size::try_from(&bigint) {
+            Ok(size) if size > Size::ZERO => Ok(size),
+            _ => Err(Errs::one(self.out_of_range_attr_error(
+                ENTITY_SECTION,
+                "size",
+                expr_span,
+                &bigint,
+            ))),
         }
-        Size::from(1u8)
     }
 
-    fn section_within_attr(&mut self, expr_ast: ExprAst) -> Align {
+    fn section_within_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<Align> {
         self.static_align_attr(ENTITY_SECTION, "within", expr_ast)
     }
 
@@ -406,35 +529,24 @@ impl ConfigBuilder {
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
-    ) -> Align {
+    ) -> SourceResult<Align> {
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(entry_kind, attr_name, expr_ast)
-        {
-            match Align::try_from(&bigint) {
-                Ok(align) => return align,
-                Err(error) => {
-                    let message = match error {
-                        AlignTryFromError::NotAPowerOfTwo => {
-                            format!("`{attr_name}` must be a power of two")
-                        }
-                        AlignTryFromError::TooLargePowerOfTwo => {
-                            format!(
-                                "`{attr_name}` must be at most {}",
-                                0x8000_0000u32
-                            )
-                        }
-                    };
-                    let label =
-                        format!("the value of this expression is {bigint}");
-                    self.errors.push(
-                        SourceError::new(expr_span, message)
-                            .with_label(expr_span, label),
-                    );
+        let bigint = self.static_int_attr(entry_kind, attr_name, expr_ast)?;
+        Align::try_from(&bigint).map_err(|error| {
+            let message = match error {
+                AlignTryFromError::NotAPowerOfTwo => {
+                    format!("`{attr_name}` must be a power of two")
                 }
-            }
-        }
-        Align::default()
+                AlignTryFromError::TooLargePowerOfTwo => {
+                    format!("`{attr_name}` must be at most {}", 0x8000_0000u32)
+                }
+            };
+            let label = format!("the value of this expression is {bigint}");
+            Errs::one(
+                SourceError::new(expr_span, message)
+                    .with_label(expr_span, label),
+            )
+        })
     }
 
     fn static_entity_attr(
@@ -443,50 +555,46 @@ impl ConfigBuilder {
         attr_name: &str,
         expr_ast: ExprAst,
         entity_kind: &str,
-    ) -> Option<Rc<str>> {
+    ) -> SourceResult<Rc<str>> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast) {
+        match self.typecheck_expression(expr_ast)? {
             (_, ExprType::Entity(kind), static_value)
                 if &*kind == entity_kind =>
             {
                 if let Some(value) = static_value {
-                    Some(value.unwrap_entity())
+                    Ok(value.unwrap_entity())
                 } else {
-                    self.non_static_attr_error(
+                    Err(Errs::one(self.non_static_attr_error(
                         entry_kind, attr_name, expr_span,
-                    );
-                    None
+                    )))
                 }
             }
-            (_, ExprType::Bottom, _) => None,
             (_, expr_type, _) => {
                 let message = format!(
                     "{entry_kind} `{attr_name}` must have \
                                        type {entity_kind}"
                 );
                 let label = format!("this expression has type {expr_type}");
-                self.errors.push(
+                Err(Errs::one(
                     SourceError::new(expr_span, message)
                         .with_label(expr_span, label),
-                );
-                None
+                ))
             }
         }
     }
 
-    fn static_fill_attr(&mut self, entry_kind: &str, expr_ast: ExprAst) -> u8 {
+    fn static_fill_attr(
+        &mut self,
+        entry_kind: &str,
+        expr_ast: ExprAst,
+    ) -> SourceResult<u8> {
         let expr_span = expr_ast.span;
-        if let Some(bigint) =
-            self.static_int_attr(entry_kind, "fill", expr_ast)
-        {
-            match u8::try_from(&bigint) {
-                Ok(byte) => return byte,
-                Err(_) => self.out_of_range_attr_error(
-                    entry_kind, "fill", expr_span, &bigint,
-                ),
-            }
-        }
-        u8::default()
+        let bigint = self.static_int_attr(entry_kind, "fill", expr_ast)?;
+        u8::try_from(&bigint).map_err(|_| {
+            Errs::one(self.out_of_range_attr_error(
+                entry_kind, "fill", expr_span, &bigint,
+            ))
+        })
     }
 
     fn static_int_attr(
@@ -494,24 +602,21 @@ impl ConfigBuilder {
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
-    ) -> Option<BigInt> {
+    ) -> SourceResult<BigInt> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast) {
-            (_, ExprType::Integer, Some(value)) => Some(value.unwrap_int()),
-            (_, ExprType::Integer, None) => {
-                self.non_static_attr_error(entry_kind, attr_name, expr_span);
-                None
-            }
-            (_, ExprType::Bottom, _) => None,
+        match self.typecheck_expression(expr_ast)? {
+            (_, ExprType::Integer, Some(value)) => Ok(value.unwrap_int()),
+            (_, ExprType::Integer, None) => Err(Errs::one(
+                self.non_static_attr_error(entry_kind, attr_name, expr_span),
+            )),
             (_, expr_type, _) => {
                 let message =
                     format!("{entry_kind} `{attr_name}` must be an integer");
                 let label = format!("this expression has type {expr_type}");
-                self.errors.push(
+                Err(Errs::one(
                     SourceError::new(expr_span, message)
                         .with_label(expr_span, label),
-                );
-                None
+                ))
             }
         }
     }
@@ -519,25 +624,24 @@ impl ConfigBuilder {
     fn typecheck_expression(
         &mut self,
         expr_ast: ExprAst,
-    ) -> (ObjExpr, ExprType, Option<ExprValue>) {
-        match self.env.typecheck_expression(&expr_ast) {
-            Ok(typechecked) => typechecked,
-            Err(mut errors) => {
-                self.errors.append(&mut errors);
-                (ObjExpr::from(false), ExprType::Bottom, None)
-            }
-        }
+    ) -> SourceResult<(ObjExpr, ExprType, Option<ExprValue>)> {
+        self.env.typecheck_expression(&expr_ast)
     }
 
-    fn declare_entry(&mut self, entry_kind: &str, entry_id: &IdentifierAst) {
+    fn declare_entry(
+        &mut self,
+        entry_kind: &str,
+        entry_id: &IdentifierAst,
+    ) -> SourceResult<()> {
         if let Some(decl) = self.env.get_declaration(&entry_id.name) {
-            self.duplicate_id_error(entry_id, decl.id_span);
+            Err(Errs::one(self.duplicate_id_error(entry_id, decl.id_span)))
         } else {
             self.env.add_declaration(
                 entry_id.clone(),
                 ExprType::Entity(Rc::from(entry_kind)),
                 Some(ExprValue::Entity(entry_id.name.clone())),
             );
+            Ok(())
         }
     }
 
@@ -546,7 +650,7 @@ impl ConfigBuilder {
         entry_name: &str,
         prev_attrs: &mut PrevAttrs,
         id_ast: &IdentifierAst,
-    ) {
+    ) -> SourceResult<()> {
         if let Some(&prev_span) = prev_attrs.get(&id_ast.name) {
             let message = format!(
                 "Duplicate `{}` attribute for `{entry_name}`",
@@ -554,35 +658,38 @@ impl ConfigBuilder {
             );
             let label1 = "Previously declared here".to_string();
             let label2 = "Duplicated here".to_string();
-            self.errors.push(
+            Err(Errs::one(
                 SourceError::new(id_ast.span, message)
                     .with_label(prev_span, label1)
                     .with_label(id_ast.span, label2),
-            );
+            ))
         } else {
             prev_attrs.insert(id_ast.name.clone(), id_ast.span);
+            Ok(())
         }
     }
 
-    fn duplicate_id_error(&mut self, id: &IdentifierAst, prev_span: SrcSpan) {
+    fn duplicate_id_error(
+        &mut self,
+        id: &IdentifierAst,
+        prev_span: SrcSpan,
+    ) -> SourceError {
         let message = format!("`{}` was already declared", id.name);
         let label1 = "Previously declared here".to_string();
         let label2 = "Declared again here".to_string();
-        self.errors.push(
-            SourceError::new(id.span, message)
-                .with_label(prev_span, label1)
-                .with_label(id.span, label2),
-        );
+        SourceError::new(id.span, message)
+            .with_label(prev_span, label1)
+            .with_label(id.span, label2)
     }
 
     fn invalid_attr_error(
         &mut self,
         entry_kind: &str,
         attr_id: IdentifierAst,
-    ) {
+    ) -> SourceError {
         let message =
             format!("Invalid {entry_kind} attribute: `{}`", attr_id.name);
-        self.errors.push(SourceError::new(attr_id.span, message));
+        SourceError::new(attr_id.span, message)
     }
 
     fn memory_range_overflow_error(
@@ -590,17 +697,21 @@ impl ConfigBuilder {
         entry_id: &IdentifierAst,
         start: Addr,
         size: Size,
-    ) {
+    ) -> SourceError {
         let message = format!(
             "Memory range overflows address size \
              (start=${start:x}, size=${size:x})"
         );
-        self.errors.push(SourceError::new(entry_id.span, message));
+        SourceError::new(entry_id.span, message)
     }
 
-    fn missing_attr_error(&mut self, attr: &str, entry_id: &IdentifierAst) {
+    fn missing_attr_error(
+        &mut self,
+        attr: &str,
+        entry_id: &IdentifierAst,
+    ) -> SourceError {
         let message = format!("Missing required `{attr}` attribute");
-        self.errors.push(SourceError::new(entry_id.span, message));
+        SourceError::new(entry_id.span, message)
     }
 
     fn non_static_attr_error(
@@ -608,13 +719,11 @@ impl ConfigBuilder {
         entry_kind: &str,
         attr_name: &str,
         expr_span: SrcSpan,
-    ) {
+    ) -> SourceError {
         let message =
             format!("{entry_kind} `{attr_name}` attribute must be static");
         let label = "this expression isn't static".to_string();
-        self.errors.push(
-            SourceError::new(expr_span, message).with_label(expr_span, label),
-        );
+        SourceError::new(expr_span, message).with_label(expr_span, label)
     }
 
     fn out_of_range_attr_error(
@@ -623,12 +732,10 @@ impl ConfigBuilder {
         attr_name: &str,
         expr_span: SrcSpan,
         value: &BigInt,
-    ) {
+    ) -> SourceError {
         let message = format!("{entry_kind} `{attr_name}` is out of range");
         let label = format!("the value of this expression is {value}");
-        self.errors.push(
-            SourceError::new(expr_span, message).with_label(expr_span, label),
-        );
+        SourceError::new(expr_span, message).with_label(expr_span, label)
     }
 }
 
@@ -653,11 +760,7 @@ impl LinkConfig {
     pub fn from_source(source: &str) -> SourceResult<LinkConfig> {
         let ast = LinkConfigAst::parse_source(source)
             .map_err(SourceError::from_errors)?;
-        let mut builder = ConfigBuilder::new();
-        for dir_ast in ast.directives {
-            builder.visit_directive(dir_ast);
-        }
-        builder.finish()
+        ConfigBuilder::new().build(ast)
     }
 
     /// Given a set of object files, patches all chunks and returns them in the
