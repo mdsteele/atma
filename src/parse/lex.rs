@@ -226,7 +226,7 @@ enum TokenKind {
     ParenOpen,
     #[token("%")]
     Percent,
-    #[regex(r"%[_A-Za-z][_A-Za-z0-9]*")]
+    #[regex(r"%[A-Z][_A-Z0-9]*")]
     Placeholder,
     #[token("+")]
     Plus,
@@ -554,6 +554,18 @@ mod tests {
     }
 
     #[test]
+    fn bool_literal() {
+        assert_eq!(
+            read_all("%false"),
+            vec![token(0..6, TokenValue::BoolLiteral(false))]
+        );
+        assert_eq!(
+            read_all("%true"),
+            vec![token(0..5, TokenValue::BoolLiteral(true))]
+        );
+    }
+
+    #[test]
     fn decimal_literal() {
         assert_eq!(
             read_all("12345"),
@@ -566,6 +578,14 @@ mod tests {
         assert_eq!(
             read_all("$f0FA9a"),
             vec![token(0..7, TokenValue::IntLiteral(BigInt::from(0xf0fa9a)))]
+        );
+    }
+
+    #[test]
+    fn placeholder() {
+        assert_eq!(
+            read_all("%ADDR"),
+            vec![token(0..5, TokenValue::Placeholder(Rc::from("%ADDR")))]
         );
     }
 
