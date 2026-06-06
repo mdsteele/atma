@@ -62,7 +62,7 @@ enum Command {
 enum CliError {
     Io(io::Error),
     Source(String, Errs<SourceError>),
-    Link(Vec<LinkError>),
+    Link(Errs<LinkError>),
     AdsRuntimeError(AdsRuntimeError),
 }
 
@@ -72,8 +72,8 @@ impl From<io::Error> for CliError {
     }
 }
 
-impl From<Vec<LinkError>> for CliError {
-    fn from(errors: Vec<LinkError>) -> CliError {
+impl From<Errs<LinkError>> for CliError {
+    fn from(errors: Errs<LinkError>) -> CliError {
         CliError::Link(errors)
     }
 }
@@ -303,7 +303,7 @@ fn format_registers(sim_env: &SimEnv) -> String {
 
 //===========================================================================//
 
-fn report_link_errors(errors: Vec<LinkError>) {
+fn report_link_errors(errors: Errs<LinkError>) {
     for error in errors {
         report_link_error(error);
     }

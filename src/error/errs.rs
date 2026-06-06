@@ -20,6 +20,11 @@ impl<E> Errs<E> {
         Errs { errors: vec![error] }
     }
 
+    /// Returns `true` if there are no errors in the error list.
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+
     /// Appends a single error to the error list.
     pub fn push(&mut self, error: E) {
         self.errors.push(error);

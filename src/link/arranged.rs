@@ -4,6 +4,7 @@ use super::loose::{LooseChunk, LooseSection};
 use super::place::try_place;
 use super::types::ChunkId;
 use crate::addr::{Addr, Align, Offset, Range, Size};
+use crate::error::Errs;
 use crate::obj::ObjFile;
 use rangemap::RangeInclusiveSet;
 use std::collections::HashMap;
@@ -71,21 +72,25 @@ impl ArrangedSection {
     fn arrange(
         config: &LinkConfig,
         object_files: &[ObjFile],
-        errors: &mut Vec<LinkError>,
-    ) -> Vec<ArrangedSection> {
-        let sections = LooseSection::collect(config, object_files, errors);
-        sections
+    ) -> (Vec<ArrangedSection>, Errs<LinkError>) {
+        let mut errs = Errs::<LinkError>::new();
+        let loose_sections =
+            errs.with(LooseSection::collect(config, object_files));
+        let arranged_sections = loose_sections
             .into_iter()
-            .map(|section| ArrangedSection::arrange_one(section, errors))
-            .collect::<Vec<ArrangedSection>>()
+            .map(|loose_section| {
+                errs.with(ArrangedSection::arrange_one(loose_section))
+            })
+            .collect::<Vec<ArrangedSection>>();
+        (arranged_sections, errs)
     }
 
     /// Arranges the chunks relative to the eventual starting address of the
     /// section.
     fn arrange_one(
         mut section: LooseSection,
-        errors: &mut Vec<LinkError>,
-    ) -> ArrangedSection {
+    ) -> (ArrangedSection, Errs<LinkError>) {
+        let mut errs = Errs::<LinkError>::new();
         let relative_range = Addr::MIN
             .range_with_size(section.size.unwrap_or(Size::MAX))
             .unwrap();
@@ -98,14 +103,14 @@ impl ArrangedSection {
                 // A chunk may only specify an explicit start address if its
                 // section also has an explicit start address.
                 let Some(section_start) = section.start else {
-                    errors.push(LinkError::ChunkCannotBePlaced);
+                    errs.push(LinkError::ChunkCannotBePlaced);
                     continue;
                 };
                 // The chunk's start address must be greater than or equal to
                 // the section's start address, or it will of course not fit in
                 // the section.
                 if chunk_start < section_start {
-                    errors.push(LinkError::ChunkCannotBePlaced);
+                    errs.push(LinkError::ChunkCannotBePlaced);
                     continue;
                 }
                 Some(Addr::MIN + (chunk_start - section_start))
@@ -116,7 +121,7 @@ impl ArrangedSection {
                 // If the chunk is larger than its `within` constraint, then we
                 // cannot possibly place it without violating that constraint.
                 if chunk.size > Size::from(within) {
-                    errors.push(LinkError::ChunkCannotBePlaced);
+                    errs.push(LinkError::ChunkCannotBePlaced);
                     continue;
                 }
                 // Specifhing a `within` constraint for a chunk forces the
@@ -150,7 +155,7 @@ impl ArrangedSection {
                 ));
                 range_set.insert(range.into());
             } else {
-                errors.push(LinkError::ChunkCannotBePlaced);
+                errs.push(LinkError::ChunkCannotBePlaced);
             }
         }
         arranged.sort_by_key(|chunk| chunk.offset);
@@ -159,7 +164,7 @@ impl ArrangedSection {
             .map(|r| Range::with_bounds(Addr::MIN, *r.end()).size())
             .unwrap_or(Size::ZERO)
             .max(section.size.unwrap_or(Size::ZERO));
-        ArrangedSection {
+        let arranged_section = ArrangedSection {
             name: section.name,
             load: section.load,
             start: section.start,
@@ -168,7 +173,8 @@ impl ArrangedSection {
             fill: section.fill,
             size: section_size,
             chunks: arranged,
-        }
+        };
+        (arranged_section, errs)
     }
 }
 
@@ -193,8 +199,7 @@ impl ArrangedRegion {
     pub(super) fn collect(
         config: &LinkConfig,
         object_files: &[ObjFile],
-        errors: &mut Vec<LinkError>,
-    ) -> Vec<ArrangedRegion> {
+    ) -> (Vec<ArrangedRegion>, Errs<LinkError>) {
         let mut addrspaces = HashMap::<Rc<str>, &AddrspaceConfig>::new();
         for addrspace in &config.addrspaces {
             addrspaces.insert(addrspace.name.clone(), addrspace);
@@ -216,11 +221,12 @@ impl ArrangedRegion {
             });
         }
 
-        for section in ArrangedSection::arrange(config, object_files, errors) {
+        let (sections, errs) = ArrangedSection::arrange(config, object_files);
+        for section in sections {
             let region_index = region_name_to_index[&section.load];
             arranged_regions[region_index].sections.push(section);
         }
-        arranged_regions
+        (arranged_regions, errs)
     }
 }
 

@@ -1,4 +1,4 @@
-use super::error::LinkError;
+use super::error::LinkResult;
 use super::expr::LinkTypeEnv;
 use super::fragment::LinkFragment;
 use super::patch::PatchedFile;
@@ -768,7 +768,7 @@ impl LinkConfig {
     pub fn link_objects(
         &self,
         object_files: Vec<ObjFile>,
-    ) -> Result<Vec<LinkFragment>, Vec<LinkError>> {
+    ) -> LinkResult<Vec<LinkFragment>> {
         let positioned_binary =
             PositionedBinary::position(self, &object_files)?;
         let patched_files = PatchedFile::patch_all(

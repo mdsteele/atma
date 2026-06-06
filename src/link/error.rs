@@ -1,7 +1,13 @@
 use crate::addr::Size;
+use crate::error::Errs;
 use crate::obj::ObjPatchIntType;
 use num_bigint::BigInt;
 use std::rc::Rc;
+
+//===========================================================================//
+
+/// A specialized `Result` type for linking object files.
+pub type LinkResult<T> = Result<T, Errs<LinkError>>;
 
 //===========================================================================//
 

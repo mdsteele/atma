@@ -2,6 +2,7 @@ use super::config::LinkConfig;
 use super::error::LinkError;
 use super::types::ChunkId;
 use crate::addr::{Addr, Align, Size};
+use crate::error::Errs;
 use crate::obj::ObjFile;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -56,8 +57,8 @@ impl LooseSection {
     pub(super) fn collect(
         config: &LinkConfig,
         object_files: &[ObjFile],
-        errors: &mut Vec<LinkError>,
-    ) -> Vec<LooseSection> {
+    ) -> (Vec<LooseSection>, Errs<LinkError>) {
+        let mut errs = Errs::<LinkError>::new();
         let mut loose_sections = Vec::<LooseSection>::new();
         let section_name_to_index: HashMap<Rc<str>, usize> = {
             let mut map = HashMap::new();
@@ -82,7 +83,7 @@ impl LooseSection {
                     match section_name_to_index.get(&chunk.section_name) {
                         Some(index) => *index,
                         None => {
-                            errors.push(LinkError::ChunkSectionDoesNotExist {
+                            errs.push(LinkError::ChunkSectionDoesNotExist {
                                 section_name: chunk.section_name.clone(),
                             });
                             continue;
@@ -101,14 +102,14 @@ impl LooseSection {
                     };
                     loose_sections[section_index].chunks.push(loose_chunk);
                 } else {
-                    errors.push(LinkError::ChunkDataLargerThanSize {
+                    errs.push(LinkError::ChunkDataLargerThanSize {
                         chunk_data_len: chunk.data.len(),
                         chunk_size: chunk.size,
                     });
                 }
             }
         }
-        loose_sections
+        (loose_sections, errs)
     }
 }
 

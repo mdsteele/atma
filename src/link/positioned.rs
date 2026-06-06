@@ -1,9 +1,10 @@
 use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::config::LinkConfig;
-use super::error::LinkError;
+use super::error::{LinkError, LinkResult};
 use super::place::try_place;
 use super::types::{AbsoluteLabel, ChunkId, ChunkMetadata};
 use crate::addr::{Addr, Size};
+use crate::error::Errs;
 use crate::obj::ObjFile;
 use rangemap::RangeInclusiveSet;
 use std::cmp::Ordering;
@@ -120,11 +121,31 @@ pub(super) struct PositionedRegion {
 }
 
 impl PositionedRegion {
+    fn position_all(
+        config: &LinkConfig,
+        object_files: &[ObjFile],
+    ) -> LinkResult<Vec<PositionedRegion>> {
+        let mut errs = Errs::<LinkError>::new();
+        let mut cumulative_offset: u64 = 0;
+        let regions = errs.with(ArrangedRegion::collect(config, object_files));
+        let positioned_regions = regions
+            .into_iter()
+            .filter_map(|region| {
+                errs.ok(PositionedRegion::position(
+                    region,
+                    &mut cumulative_offset,
+                ))
+            })
+            .collect::<Vec<PositionedRegion>>();
+        errs.result()?;
+        Ok(positioned_regions)
+    }
+
     fn position(
         region: ArrangedRegion,
         cumulative_offset: &mut u64,
-        errors: &mut Vec<LinkError>,
-    ) -> PositionedRegion {
+    ) -> LinkResult<PositionedRegion> {
+        let mut errs = Errs::<LinkError>::new();
         let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut positioned_sections =
             Vec::<PositionedSection>::with_capacity(region.sections.len());
@@ -134,7 +155,7 @@ impl PositionedRegion {
         arranged_sections.sort_by(section_ordering);
         for section in arranged_sections {
             if section.size == Size::ZERO {
-                errors.push(LinkError::SectionIsEmpty {
+                errs.push(LinkError::SectionIsEmpty {
                     section_name: section.name,
                 });
                 continue;
@@ -159,7 +180,7 @@ impl PositionedRegion {
                 ));
                 range_set.insert(section_range.into());
             } else {
-                errors.push(LinkError::SectionCannotBePlaced {
+                errs.push(LinkError::SectionCannotBePlaced {
                     section_name: section.name,
                 });
             }
@@ -177,7 +198,7 @@ impl PositionedRegion {
                 *cumulative_offset = sum;
                 size
             } else {
-                errors.push(LinkError::BinaryTooLarge {
+                errs.push(LinkError::BinaryTooLarge {
                     region_name: region.name.clone(),
                 });
                 0
@@ -185,12 +206,13 @@ impl PositionedRegion {
         } else {
             0
         };
-        PositionedRegion {
+        errs.result()?;
+        Ok(PositionedRegion {
             space: region.space,
             binary_size: region_binary_size,
             sections: positioned_sections,
             fill: region.fill,
-        }
+        })
     }
 }
 
@@ -224,41 +246,11 @@ impl PositionedBinary {
     pub(super) fn position(
         config: &LinkConfig,
         object_files: &[ObjFile],
-    ) -> Result<PositionedBinary, Vec<LinkError>> {
-        let mut errors = Vec::<LinkError>::new();
-        let mut cumulative_offset: u64 = 0;
-        let regions =
-            ArrangedRegion::collect(config, object_files, &mut errors);
-        let positioned_regions = regions
-            .into_iter()
-            .map(|region| {
-                PositionedRegion::position(
-                    region,
-                    &mut cumulative_offset,
-                    &mut errors,
-                )
-            })
-            .collect::<Vec<PositionedRegion>>();
-
-        let mut chunk_metadata = HashMap::<ChunkId, ChunkMetadata>::new();
-        for region in &positioned_regions {
-            for section in &region.sections {
-                for chunk in &section.chunks {
-                    let metadata = ChunkMetadata {
-                        start: AbsoluteLabel {
-                            space: region.space.clone(),
-                            address: chunk.start,
-                        },
-                        fill: chunk.fill,
-                    };
-                    chunk_metadata.insert(chunk.id, metadata);
-                }
-            }
-        }
-
-        if !errors.is_empty() {
-            return Err(errors);
-        }
+    ) -> LinkResult<PositionedBinary> {
+        let positioned_regions =
+            PositionedRegion::position_all(config, object_files)?;
+        let chunk_metadata =
+            PositionedBinary::make_chunk_metadata(&positioned_regions);
 
         let mut exported_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
         for export in &config.exports {
@@ -270,6 +262,8 @@ impl PositionedBinary {
                 },
             );
         }
+
+        let mut errs = Errs::<LinkError>::new();
         for (object_index, object_file) in object_files.iter().enumerate() {
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
                 let chunk_id = ChunkId { object_index, chunk_index };
@@ -287,17 +281,14 @@ impl PositionedBinary {
                         },
                     );
                     if collision.is_some() {
-                        errors.push(LinkError::SymbolExportCollision {
+                        errs.push(LinkError::SymbolExportCollision {
                             symbol_name: symbol.name.clone(),
                         });
                     }
                 }
             }
         }
-
-        if !errors.is_empty() {
-            return Err(errors);
-        }
+        errs.result()?;
 
         let file_chunk_metadata = object_files
             .iter()
@@ -317,6 +308,27 @@ impl PositionedBinary {
             file_chunk_metadata,
             exported_symbols,
         })
+    }
+
+    fn make_chunk_metadata(
+        positioned_regions: &[PositionedRegion],
+    ) -> HashMap<ChunkId, ChunkMetadata> {
+        let mut chunk_metadata = HashMap::<ChunkId, ChunkMetadata>::new();
+        for region in positioned_regions {
+            for section in &region.sections {
+                for chunk in &section.chunks {
+                    let metadata = ChunkMetadata {
+                        start: AbsoluteLabel {
+                            space: region.space.clone(),
+                            address: chunk.start,
+                        },
+                        fill: chunk.fill,
+                    };
+                    chunk_metadata.insert(chunk.id, metadata);
+                }
+            }
+        }
+        chunk_metadata
     }
 }
 
