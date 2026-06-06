@@ -71,17 +71,18 @@ impl AsmStmtAst {
             .repeated()
             .collect::<Vec<_>>();
         chumsky::prelude::recursive(|statement| {
-            let stmt_block = symbol(TokenValue::BraceOpen)
+            let stmts = statement.repeated().collect::<Vec<_>>();
+            let braced_stmts = symbol(TokenValue::BraceOpen)
                 .ignore_then(linebreak())
-                .ignore_then(statement.repeated().collect::<Vec<_>>())
+                .ignore_then(stmts.clone())
                 .then_ignore(symbol(TokenValue::BraceClose));
-            let anonymous_scope = stmt_block
+            let anonymous_scope = braced_stmts
                 .clone()
                 .then_ignore(linebreak())
                 .map(AsmStmtAst::AnonymousScope);
             let label_or_named_scope = IdentifierAst::parser()
                 .then_ignore(symbol(TokenValue::Colon))
-                .then(stmt_block.clone().then_ignore(linebreak()).or_not())
+                .then(braced_stmts.clone().then_ignore(linebreak()).or_not())
                 .then_ignore(symbol(TokenValue::Linebreak).repeated())
                 .map(|(id, opt_scope)| {
                     if let Some(body) = opt_scope {
@@ -97,7 +98,7 @@ impl AsmStmtAst {
                         .separated_by(symbol(TokenValue::Comma))
                         .collect::<Vec<_>>(),
                 )
-                .then(stmt_block.clone().with_ctx(Context {
+                .then(braced_stmts.clone().with_ctx(Context {
                     allow_placeholder_as_identifier: true,
                 }))
                 .then_ignore(linebreak())
@@ -111,7 +112,9 @@ impl AsmStmtAst {
             let section_dir = directive(".SECTION")
                 .ignore_then(ExprAst::parser())
                 .then(attributes)
-                .then(stmt_block)
+                .then_ignore(linebreak())
+                .then(stmts)
+                .then_ignore(directive(".END"))
                 .then_ignore(linebreak())
                 .map(|((name, attrs), body)| {
                     AsmStmtAst::Section(AsmSectionAst { name, attrs, body })

@@ -5,7 +5,7 @@ use atma;
 fn assert_asm(source: &str, binary: &[u8]) {
     let arch = "6502";
     let obj_source =
-        format!(".SECTION \"TEST\", arch=\"{arch}\" {{\n{source}\n}}\n");
+        format!(".SECTION \"TEST\", arch=\"{arch}\"\n{source}\n.END\n");
     let obj_file = atma::asm::assemble_source(&obj_source)
         .expect(&format!("Failed to assemble {source:?} for {arch}"));
     assert_eq!(obj_file.chunks.len(), 1);
