@@ -34,6 +34,13 @@ pub enum AsmError {
         /// The additional message value for the assertion, if any.
         additional_message: Option<Rc<str>>,
     },
+    /// Tried to declare something using a built-in identifier.
+    DeclNameIsBuiltin {
+        /// The source code span for the identifier that we tried to declare.
+        span: SrcSpan,
+        /// The name of the identifier that we tried to declare.
+        name: Rc<str>,
+    },
     /// A static directive attribute had a non-static expression.
     DirectiveExprNotStatic {
         /// The directive name (e.g. `".SECTION"`).
@@ -208,6 +215,12 @@ impl ToSourceError for AsmError {
                     "Assertion failed".to_string()
                 };
                 SourceError::new(condition_span, message)
+            }
+            AsmError::DeclNameIsBuiltin { span, name } => {
+                let message = format!(
+                    "cannot declare `{name}`; identifiers starting with `%` are reserved"
+                );
+                SourceError::new(span, message)
             }
             AsmError::DirectiveExprNotStatic {
                 directive,

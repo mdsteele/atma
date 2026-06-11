@@ -1,3 +1,4 @@
+use super::func::ExprFunc;
 use super::label::ExprLabel;
 use crate::obj::BinaryIo;
 use num_bigint::BigInt;
@@ -11,14 +12,15 @@ use std::rc::Rc;
 const TAG_FALSE: u8 = 0;
 const TAG_TRUE: u8 = 1;
 const TAG_ENTITY: u8 = 2;
-const TAG_INTEGER: u8 = 3;
-const TAG_LABEL_ADDR_ABS: u8 = 4;
-const TAG_LABEL_CHUNK_ABS: u8 = 5;
-const TAG_LABEL_CHUNK_REL: u8 = 6;
-const TAG_LABEL_SYMBOL_REL: u8 = 7;
-const TAG_LIST: u8 = 8;
-const TAG_STRING: u8 = 9;
-const TAG_TUPLE: u8 = 10;
+const TAG_FUNCTION: u8 = 3;
+const TAG_INTEGER: u8 = 4;
+const TAG_LABEL_ADDR_ABS: u8 = 5;
+const TAG_LABEL_CHUNK_ABS: u8 = 6;
+const TAG_LABEL_CHUNK_REL: u8 = 7;
+const TAG_LABEL_SYMBOL_REL: u8 = 8;
+const TAG_LIST: u8 = 9;
+const TAG_STRING: u8 = 10;
+const TAG_TUPLE: u8 = 11;
 
 //===========================================================================//
 
@@ -31,16 +33,18 @@ pub enum ExprType {
     Bottom,
     /// An opaque object type with the given human-readable type name.
     Entity(Rc<str>),
+    /// A function type, with the given input and output types.
+    Function(Rc<(ExprType, ExprType)>),
     /// The (unlimited-precision) integer type.
     Integer,
     /// The type comprising memory locations within an assembly file, compiled
     /// binary, or runtime address space.
     Label,
-    /// A homogenous list type.
+    /// A homogenous list type, with elements of the given type.
     List(Rc<ExprType>),
     /// The string type.
     String,
-    /// A heterogenous tuple type.
+    /// A heterogenous tuple type, with elements of the given types.
     Tuple(Rc<[ExprType]>),
 }
 
@@ -53,6 +57,7 @@ impl ExprType {
             ExprType::Boolean => true,
             ExprType::Bottom => false,
             ExprType::Entity(_) => false,
+            ExprType::Function(_) => false,
             ExprType::Integer => true,
             ExprType::Label => false,
             ExprType::List(item_type) => item_type.is_ord(),
@@ -70,6 +75,13 @@ impl fmt::Display for ExprType {
             ExprType::Boolean => f.write_str("bool"),
             ExprType::Bottom => f.write_str("bottom"),
             ExprType::Entity(type_name) => f.write_str(type_name),
+            ExprType::Function(types) => {
+                f.write_str("[")?;
+                types.0.fmt(f)?;
+                f.write_str(" -> ")?;
+                types.1.fmt(f)?;
+                f.write_str("]")
+            }
             ExprType::Label => f.write_str("label"),
             ExprType::List(item_type) => {
                 f.write_str("{")?;
@@ -98,6 +110,8 @@ pub enum ExprValue {
     /// An opaque object with the specified human-readable string
     /// representation.
     Entity(Rc<str>),
+    /// A function.
+    Function(ExprFunc),
     /// An integer value (with no minimum/maximum range).
     Integer(BigInt),
     /// A memory location.
@@ -126,6 +140,15 @@ impl ExprValue {
         match self {
             ExprValue::Entity(repr) => repr,
             value => panic!("ExprValue::unwrap_entity on {value:?}"),
+        }
+    }
+
+    /// Returns the contained [`Function`](ExprValue::Function) value, or
+    /// panics if this value is not a function.
+    pub fn unwrap_func(self) -> ExprFunc {
+        match self {
+            ExprValue::Function(func) => func,
+            value => panic!("ExprValue::unwrap_func on {value:?}"),
         }
     }
 
@@ -199,6 +222,9 @@ impl BinaryIo for ExprValue {
             TAG_FALSE => Ok(ExprValue::Boolean(false)),
             TAG_TRUE => Ok(ExprValue::Boolean(true)),
             TAG_ENTITY => Ok(ExprValue::Entity(Rc::<str>::read_from(reader)?)),
+            TAG_FUNCTION => {
+                Ok(ExprValue::Function(ExprFunc::read_from(reader)?))
+            }
             TAG_INTEGER => Ok(ExprValue::Integer(BigInt::read_from(reader)?)),
             TAG_LABEL_ADDR_ABS => {
                 let space = Rc::<str>::read_from(reader)?;
@@ -253,6 +279,10 @@ impl BinaryIo for ExprValue {
             ExprValue::Entity(repr) => {
                 TAG_ENTITY.write_to(writer)?;
                 repr.write_to(writer)
+            }
+            ExprValue::Function(func) => {
+                TAG_FUNCTION.write_to(writer)?;
+                func.write_to(writer)
             }
             ExprValue::Integer(integer) => {
                 TAG_INTEGER.write_to(writer)?;
@@ -311,6 +341,7 @@ impl fmt::Display for ExprValue {
         match self {
             ExprValue::Boolean(value) => write!(f, "%{value}"),
             ExprValue::Entity(repr) => f.write_str(repr),
+            ExprValue::Function(func) => func.fmt(f),
             ExprValue::Integer(value) => value.fmt(f),
             ExprValue::Label(label) => label.fmt(f),
             ExprValue::List(values) => {
@@ -375,6 +406,10 @@ mod tests {
     use num_bigint::BigInt;
     use std::rc::Rc;
 
+    fn func_type(input: ExprType, output: ExprType) -> ExprType {
+        ExprType::Function(Rc::from((input, output)))
+    }
+
     fn int_value(value: i32) -> ExprValue {
         ExprValue::Integer(BigInt::from(value))
     }
@@ -385,44 +420,79 @@ mod tests {
 
     #[test]
     fn display_basic_type() {
-        assert_eq!(format!("{}", ExprType::Boolean), "bool");
-        assert_eq!(format!("{}", ExprType::Integer), "int");
-        assert_eq!(format!("{}", ExprType::Label), "label");
-        assert_eq!(format!("{}", ExprType::String), "str");
+        assert_eq!(ExprType::Boolean.to_string(), "bool");
+        assert_eq!(ExprType::Integer.to_string(), "int");
+        assert_eq!(ExprType::Label.to_string(), "label");
+        assert_eq!(ExprType::String.to_string(), "str");
+    }
+
+    #[test]
+    fn display_function_type() {
+        assert_eq!(
+            func_type(ExprType::Integer, ExprType::Boolean).to_string(),
+            "[int -> bool]"
+        );
+        assert_eq!(
+            func_type(
+                ExprType::Integer,
+                func_type(ExprType::Boolean, ExprType::String)
+            )
+            .to_string(),
+            "[int -> [bool -> str]]"
+        );
+        assert_eq!(
+            func_type(
+                func_type(ExprType::Integer, ExprType::Boolean),
+                ExprType::String
+            )
+            .to_string(),
+            "[[int -> bool] -> str]"
+        );
+        assert_eq!(
+            func_type(
+                ExprType::Tuple(Rc::from([
+                    ExprType::String,
+                    ExprType::Integer
+                ])),
+                ExprType::List(Rc::from(ExprType::String))
+            )
+            .to_string(),
+            "[(str, int) -> {str}]"
+        );
     }
 
     #[test]
     fn display_list_type() {
         let ty = ExprType::List(Rc::from(ExprType::Integer));
-        assert_eq!(format!("{}", ty), "{int}");
+        assert_eq!(ty.to_string(), "{int}");
         let ty = ExprType::List(Rc::from(ty));
-        assert_eq!(format!("{}", ty), "{{int}}");
+        assert_eq!(ty.to_string(), "{{int}}");
         let ty = ExprType::List(Rc::from(ExprType::Tuple(Rc::from([
             ExprType::String,
             ty,
         ]))));
-        assert_eq!(format!("{}", ty), "{(str, {{int}})}");
+        assert_eq!(ty.to_string(), "{(str, {{int}})}");
     }
 
     #[test]
     fn display_tuple_type() {
-        assert_eq!(format!("{}", ExprType::Tuple(Rc::from([]))), "()");
+        assert_eq!(ExprType::Tuple(Rc::from([])).to_string(), "()");
         let ty =
             ExprType::Tuple(Rc::from([ExprType::Boolean, ExprType::String]));
-        assert_eq!(format!("{}", ty), "(bool, str)");
+        assert_eq!(ty.to_string(), "(bool, str)");
     }
 
     #[test]
     fn display_boolean_value() {
-        assert_eq!(format!("{}", ExprValue::Boolean(false)), "%false");
-        assert_eq!(format!("{}", ExprValue::Boolean(true)), "%true");
+        assert_eq!(ExprValue::Boolean(false).to_string(), "%false");
+        assert_eq!(ExprValue::Boolean(true).to_string(), "%true");
     }
 
     #[test]
     fn display_integer_value() {
-        assert_eq!(format!("{}", int_value(17)), "17");
-        assert_eq!(format!("{}", int_value(0)), "0");
-        assert_eq!(format!("{}", int_value(-42)), "-42");
+        assert_eq!(int_value(17).to_string(), "17");
+        assert_eq!(int_value(0).to_string(), "0");
+        assert_eq!(int_value(-42).to_string(), "-42");
     }
 
     #[test]
@@ -431,39 +501,39 @@ mod tests {
             name: Rc::from("Foo"),
             offset: BigInt::from(0x20u32),
         });
-        assert_eq!(format!("{}", value), "Foo + $20");
+        assert_eq!(value.to_string(), "Foo + $20");
     }
 
     #[test]
     fn display_string_value() {
-        assert_eq!(format!("{}", str_value("")), "\"\"");
-        assert_eq!(format!("{}", str_value("foo")), "\"foo\"");
-        assert_eq!(format!("{}", str_value("\"")), "\"\\\"\"");
+        assert_eq!(str_value("").to_string(), "\"\"");
+        assert_eq!(str_value("foo").to_string(), "\"foo\"");
+        assert_eq!(str_value("\"").to_string(), "\"\\\"\"");
     }
 
     #[test]
     fn display_list_value() {
         let value = ExprValue::List(Rc::from([]));
-        assert_eq!(format!("{}", value), "{}");
+        assert_eq!(value.to_string(), "{}");
         let value = ExprValue::List(Rc::from([int_value(17)]));
-        assert_eq!(format!("{}", value), "{17}");
+        assert_eq!(value.to_string(), "{17}");
         let value = ExprValue::List(Rc::from([
             int_value(4),
             int_value(-3),
             int_value(0),
         ]));
-        assert_eq!(format!("{}", value), "{4, -3, 0}");
+        assert_eq!(value.to_string(), "{4, -3, 0}");
     }
 
     #[test]
     fn display_tuple_value() {
         let value = ExprValue::Tuple(Rc::from([]));
-        assert_eq!(format!("{}", value), "()");
+        assert_eq!(value.to_string(), "()");
         let value = ExprValue::Tuple(Rc::from([
             int_value(37),
             ExprValue::Boolean(true),
         ]));
-        assert_eq!(format!("{}", value), "(37, %true)");
+        assert_eq!(value.to_string(), "(37, %true)");
     }
 
     #[test]

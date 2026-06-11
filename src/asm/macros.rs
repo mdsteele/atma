@@ -2,7 +2,8 @@ use super::error::{AsmError, AsmResult};
 use crate::error::SrcSpan;
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmMacroArgAst,
-    AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst, Token, TokenValue,
+    AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, Token,
+    TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -163,7 +164,8 @@ impl<'a> MacroBuilder<'a> {
             ExprAstNode::UnOp(_, subexpr) => {
                 self.scan_expression(subexpr);
             }
-            ExprAstNode::BinOp(_, lhs, rhs)
+            ExprAstNode::Apply(lhs, rhs)
+            | ExprAstNode::BinOp(_, lhs, rhs)
             | ExprAstNode::Index(_, lhs, rhs) => {
                 self.scan_expression(lhs);
                 self.scan_expression(rhs);
@@ -178,7 +180,7 @@ impl<'a> MacroBuilder<'a> {
     }
 
     fn scan_identifier(&mut self, identifier: &IdentifierAst) {
-        if identifier.is_placeholder {
+        if identifier.kind == IdentifierKind::Placeholder {
             self.unify_placeholder(
                 identifier.span,
                 &identifier.name,
@@ -537,6 +539,13 @@ impl MacroExpansion {
 
     fn expand_expression(&self, expression: &ExprAst) -> ExprAst {
         match &expression.node {
+            ExprAstNode::Apply(lhs, rhs) => ExprAst {
+                span: expression.span,
+                node: ExprAstNode::Apply(
+                    Box::from(self.expand_expression(lhs)),
+                    Box::from(self.expand_expression(rhs)),
+                ),
+            },
             ExprAstNode::BinOp(op, lhs, rhs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::BinOp(

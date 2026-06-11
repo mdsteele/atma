@@ -3,11 +3,11 @@ use super::error::{AsmError, AsmResult};
 use crate::addr::Offset;
 use crate::error::SrcSpan;
 use crate::expr::{
-    ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
-    ExprValue,
+    ExprCompiler, ExprEnv, ExprFunc, ExprLabel, ExprType, ExprTypeError,
+    ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
-use crate::parse::{ExprAst, IdentifierAst};
+use crate::parse::{ExprAst, IdentifierAst, IdentifierKind};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -15,6 +15,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 pub(super) struct AsmTypeEnv {
+    builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     labels: HashMap<Rc<str>, SrcSpan>,
     arch_stack: Vec<Rc<str>>,
     chunk_stack: Vec<ChunkEnv>,
@@ -23,7 +24,17 @@ pub(super) struct AsmTypeEnv {
 
 impl AsmTypeEnv {
     pub fn new() -> AsmTypeEnv {
+        let mut builtins = HashMap::<Rc<str>, (ExprValue, ExprType)>::new();
+        let expr_type = ExprType::Function(Rc::new((
+            ExprType::Integer,
+            ExprType::Integer,
+        )));
+        for func in [ExprFunc::Cbrtz, ExprFunc::Sqrtz] {
+            let value = ExprValue::Function(func);
+            builtins.insert(Rc::from(func.name()), (value, expr_type.clone()));
+        }
         AsmTypeEnv {
+            builtins,
             labels: HashMap::new(),
             arch_stack: vec![Rc::from(ArchTree::ROOT_ARCH_NAME)],
             chunk_stack: Vec::new(),
@@ -36,7 +47,16 @@ impl AsmTypeEnv {
     }
 
     pub fn declare_label(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
-        debug_assert!(!id_ast.is_placeholder);
+        match id_ast.kind {
+            IdentifierKind::Standard => {}
+            IdentifierKind::Builtin => {
+                return Err(vec![AsmError::DeclNameIsBuiltin {
+                    span: id_ast.span,
+                    name: id_ast.name.clone(),
+                }]);
+            }
+            IdentifierKind::Placeholder => unreachable!(),
+        }
         let full_name = if let Some(prefix) = self.current_scope_prefix() {
             Rc::from(format!("{prefix}{}", id_ast.name))
         } else {
@@ -164,6 +184,10 @@ impl ExprEnv for AsmTypeEnv {
             });
             let op = ObjExprOp::Push(value.clone());
             return Ok((op, ExprType::Label, Some(value)));
+        }
+        if let Some((value, expr_type)) = self.builtins.get(name) {
+            let op = ObjExprOp::Push(value.clone());
+            return Ok((op, expr_type.clone(), Some(value.clone())));
         }
         Err(vec![ExprTypeError::UnknownIdentifier {
             span,

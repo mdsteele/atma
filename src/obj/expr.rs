@@ -28,13 +28,14 @@ const OP_INT_SUB: u8 = 0x2a;
 const OP_LABEL_ADD_INT: u8 = 0x30;
 const OP_LABEL_SUB: u8 = 0x31;
 // Other ops:
-const OP_GET_VALUE: u8 = 0x40;
-const OP_LABEL_ADDR: u8 = 0x41;
-const OP_LIST_INDEX: u8 = 0x42;
-const OP_MAKE_LIST: u8 = 0x43;
-const OP_MAKE_TUPLE: u8 = 0x44;
-const OP_PUSH: u8 = 0x45;
-const OP_TUPLE_ITEM: u8 = 0x46;
+const OP_APPLY: u8 = 0x40;
+const OP_GET_VALUE: u8 = 0x41;
+const OP_LABEL_ADDR: u8 = 0x42;
+const OP_LIST_INDEX: u8 = 0x43;
+const OP_MAKE_LIST: u8 = 0x44;
+const OP_MAKE_TUPLE: u8 = 0x45;
+const OP_PUSH: u8 = 0x46;
+const OP_TUPLE_ITEM: u8 = 0x47;
 
 //===========================================================================//
 
@@ -109,6 +110,10 @@ impl From<bool> for ObjExpr {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ObjExprOp {
+    /// Pops the top two values from the value stack, calls the
+    /// second-from-the-top value with the topmost value as an argument, then
+    /// pushes the result onto the value stack.
+    Apply,
     /// Pops the top two values from the value stack, evaluates the specified
     /// binary operation using the second-from-the-top value as the left-hand
     /// side and the topmost value as the right-hand side, then pushes the
@@ -147,40 +152,37 @@ impl BinaryIo for ObjExprOp {
     fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
         match u8::read_from(reader)? {
             // Binary ops:
-            OP_ANY_CMP_EQ => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpEq)),
-            OP_ANY_CMP_LE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpLe)),
-            OP_ANY_CMP_LT => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpLt)),
-            OP_ANY_CMP_GE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpGe)),
-            OP_ANY_CMP_GT => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpGt)),
-            OP_ANY_CMP_NE => Ok(ObjExprOp::BinOp(ExprBinOp::AnyCmpNe)),
-            OP_BOOL_BIT_AND => Ok(ObjExprOp::BinOp(ExprBinOp::BoolBitAnd)),
-            OP_BOOL_BIT_OR => Ok(ObjExprOp::BinOp(ExprBinOp::BoolBitOr)),
-            OP_BOOL_BIT_XOR => Ok(ObjExprOp::BinOp(ExprBinOp::BoolBitXor)),
-            OP_INT_ADD => Ok(ObjExprOp::BinOp(ExprBinOp::IntAdd)),
-            OP_INT_BIT_AND => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitAnd)),
-            OP_INT_BIT_OR => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitOr)),
-            OP_INT_BIT_XOR => Ok(ObjExprOp::BinOp(ExprBinOp::IntBitXor)),
-            OP_INT_DIV => Ok(ObjExprOp::BinOp(ExprBinOp::IntDiv)),
-            OP_INT_MOD => Ok(ObjExprOp::BinOp(ExprBinOp::IntMod)),
-            OP_INT_MUL => Ok(ObjExprOp::BinOp(ExprBinOp::IntMul)),
-            OP_INT_POW => Ok(ObjExprOp::BinOp(ExprBinOp::IntPow)),
-            OP_INT_SHL => Ok(ObjExprOp::BinOp(ExprBinOp::IntShl)),
-            OP_INT_SHR => Ok(ObjExprOp::BinOp(ExprBinOp::IntShr)),
-            OP_INT_SUB => Ok(ObjExprOp::BinOp(ExprBinOp::IntSub)),
-            OP_LABEL_ADD_INT => Ok(ObjExprOp::BinOp(ExprBinOp::LabelAddInt)),
-            OP_LABEL_SUB => Ok(ObjExprOp::BinOp(ExprBinOp::LabelSub)),
+            OP_ANY_CMP_EQ => Ok(Self::BinOp(ExprBinOp::AnyCmpEq)),
+            OP_ANY_CMP_LE => Ok(Self::BinOp(ExprBinOp::AnyCmpLe)),
+            OP_ANY_CMP_LT => Ok(Self::BinOp(ExprBinOp::AnyCmpLt)),
+            OP_ANY_CMP_GE => Ok(Self::BinOp(ExprBinOp::AnyCmpGe)),
+            OP_ANY_CMP_GT => Ok(Self::BinOp(ExprBinOp::AnyCmpGt)),
+            OP_ANY_CMP_NE => Ok(Self::BinOp(ExprBinOp::AnyCmpNe)),
+            OP_BOOL_BIT_AND => Ok(Self::BinOp(ExprBinOp::BoolBitAnd)),
+            OP_BOOL_BIT_OR => Ok(Self::BinOp(ExprBinOp::BoolBitOr)),
+            OP_BOOL_BIT_XOR => Ok(Self::BinOp(ExprBinOp::BoolBitXor)),
+            OP_INT_ADD => Ok(Self::BinOp(ExprBinOp::IntAdd)),
+            OP_INT_BIT_AND => Ok(Self::BinOp(ExprBinOp::IntBitAnd)),
+            OP_INT_BIT_OR => Ok(Self::BinOp(ExprBinOp::IntBitOr)),
+            OP_INT_BIT_XOR => Ok(Self::BinOp(ExprBinOp::IntBitXor)),
+            OP_INT_DIV => Ok(Self::BinOp(ExprBinOp::IntDiv)),
+            OP_INT_MOD => Ok(Self::BinOp(ExprBinOp::IntMod)),
+            OP_INT_MUL => Ok(Self::BinOp(ExprBinOp::IntMul)),
+            OP_INT_POW => Ok(Self::BinOp(ExprBinOp::IntPow)),
+            OP_INT_SHL => Ok(Self::BinOp(ExprBinOp::IntShl)),
+            OP_INT_SHR => Ok(Self::BinOp(ExprBinOp::IntShr)),
+            OP_INT_SUB => Ok(Self::BinOp(ExprBinOp::IntSub)),
+            OP_LABEL_ADD_INT => Ok(Self::BinOp(ExprBinOp::LabelAddInt)),
+            OP_LABEL_SUB => Ok(Self::BinOp(ExprBinOp::LabelSub)),
             // Other ops:
-            OP_GET_VALUE => Ok(ObjExprOp::GetValue(usize::read_from(reader)?)),
-            OP_LABEL_ADDR => Ok(ObjExprOp::LabelAddr),
-            OP_LIST_INDEX => Ok(ObjExprOp::ListIndex),
-            OP_MAKE_LIST => Ok(ObjExprOp::MakeList(usize::read_from(reader)?)),
-            OP_MAKE_TUPLE => {
-                Ok(ObjExprOp::MakeTuple(usize::read_from(reader)?))
-            }
-            OP_PUSH => Ok(ObjExprOp::Push(ExprValue::read_from(reader)?)),
-            OP_TUPLE_ITEM => {
-                Ok(ObjExprOp::TupleItem(usize::read_from(reader)?))
-            }
+            OP_APPLY => Ok(Self::Apply),
+            OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(reader)?)),
+            OP_LABEL_ADDR => Ok(Self::LabelAddr),
+            OP_LIST_INDEX => Ok(Self::ListIndex),
+            OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(reader)?)),
+            OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(reader)?)),
+            OP_PUSH => Ok(Self::Push(ExprValue::read_from(reader)?)),
+            OP_TUPLE_ITEM => Ok(Self::TupleItem(usize::read_from(reader)?)),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("unknown expression opcode: 0x{:02x}", byte),
@@ -190,75 +192,60 @@ impl BinaryIo for ObjExprOp {
 
     fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         match self {
-            ObjExprOp::BinOp(ExprBinOp::AnyCmpEq) => {
-                OP_ANY_CMP_EQ.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::AnyCmpLe) => {
-                OP_ANY_CMP_LE.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::AnyCmpLt) => {
-                OP_ANY_CMP_LT.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::AnyCmpGe) => {
-                OP_ANY_CMP_GE.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::AnyCmpGt) => {
-                OP_ANY_CMP_GT.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::AnyCmpNe) => {
-                OP_ANY_CMP_NE.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::BoolBitAnd) => {
+            Self::Apply => OP_APPLY.write_to(writer),
+            Self::BinOp(ExprBinOp::AnyCmpEq) => OP_ANY_CMP_EQ.write_to(writer),
+            Self::BinOp(ExprBinOp::AnyCmpLe) => OP_ANY_CMP_LE.write_to(writer),
+            Self::BinOp(ExprBinOp::AnyCmpLt) => OP_ANY_CMP_LT.write_to(writer),
+            Self::BinOp(ExprBinOp::AnyCmpGe) => OP_ANY_CMP_GE.write_to(writer),
+            Self::BinOp(ExprBinOp::AnyCmpGt) => OP_ANY_CMP_GT.write_to(writer),
+            Self::BinOp(ExprBinOp::AnyCmpNe) => OP_ANY_CMP_NE.write_to(writer),
+            Self::BinOp(ExprBinOp::BoolBitAnd) => {
                 OP_BOOL_BIT_AND.write_to(writer)
             }
-            ObjExprOp::BinOp(ExprBinOp::BoolBitOr) => {
+            Self::BinOp(ExprBinOp::BoolBitOr) => {
                 OP_BOOL_BIT_OR.write_to(writer)
             }
-            ObjExprOp::BinOp(ExprBinOp::BoolBitXor) => {
+            Self::BinOp(ExprBinOp::BoolBitXor) => {
                 OP_BOOL_BIT_XOR.write_to(writer)
             }
-            ObjExprOp::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntBitAnd) => {
+            Self::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(writer),
+            Self::BinOp(ExprBinOp::IntBitAnd) => {
                 OP_INT_BIT_AND.write_to(writer)
             }
-            ObjExprOp::BinOp(ExprBinOp::IntBitOr) => {
-                OP_INT_BIT_OR.write_to(writer)
-            }
-            ObjExprOp::BinOp(ExprBinOp::IntBitXor) => {
+            Self::BinOp(ExprBinOp::IntBitOr) => OP_INT_BIT_OR.write_to(writer),
+            Self::BinOp(ExprBinOp::IntBitXor) => {
                 OP_INT_BIT_XOR.write_to(writer)
             }
-            ObjExprOp::BinOp(ExprBinOp::IntDiv) => OP_INT_DIV.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntMod) => OP_INT_MOD.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntMul) => OP_INT_MUL.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntPow) => OP_INT_POW.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntShl) => OP_INT_SHL.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntShr) => OP_INT_SHR.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::IntSub) => OP_INT_SUB.write_to(writer),
-            ObjExprOp::BinOp(ExprBinOp::LabelAddInt) => {
+            Self::BinOp(ExprBinOp::IntDiv) => OP_INT_DIV.write_to(writer),
+            Self::BinOp(ExprBinOp::IntMod) => OP_INT_MOD.write_to(writer),
+            Self::BinOp(ExprBinOp::IntMul) => OP_INT_MUL.write_to(writer),
+            Self::BinOp(ExprBinOp::IntPow) => OP_INT_POW.write_to(writer),
+            Self::BinOp(ExprBinOp::IntShl) => OP_INT_SHL.write_to(writer),
+            Self::BinOp(ExprBinOp::IntShr) => OP_INT_SHR.write_to(writer),
+            Self::BinOp(ExprBinOp::IntSub) => OP_INT_SUB.write_to(writer),
+            Self::BinOp(ExprBinOp::LabelAddInt) => {
                 OP_LABEL_ADD_INT.write_to(writer)
             }
-            ObjExprOp::BinOp(ExprBinOp::LabelSub) => {
-                OP_LABEL_SUB.write_to(writer)
-            }
-            ObjExprOp::GetValue(index) => {
+            Self::BinOp(ExprBinOp::LabelSub) => OP_LABEL_SUB.write_to(writer),
+            Self::GetValue(index) => {
                 OP_GET_VALUE.write_to(writer)?;
                 index.write_to(writer)
             }
-            ObjExprOp::LabelAddr => OP_LABEL_ADDR.write_to(writer),
-            ObjExprOp::ListIndex => OP_LIST_INDEX.write_to(writer),
-            ObjExprOp::MakeList(num_items) => {
+            Self::LabelAddr => OP_LABEL_ADDR.write_to(writer),
+            Self::ListIndex => OP_LIST_INDEX.write_to(writer),
+            Self::MakeList(num_items) => {
                 OP_MAKE_LIST.write_to(writer)?;
                 num_items.write_to(writer)
             }
-            ObjExprOp::MakeTuple(num_items) => {
+            Self::MakeTuple(num_items) => {
                 OP_MAKE_TUPLE.write_to(writer)?;
                 num_items.write_to(writer)
             }
-            ObjExprOp::Push(value) => {
+            Self::Push(value) => {
                 OP_PUSH.write_to(writer)?;
                 value.write_to(writer)
             }
-            ObjExprOp::TupleItem(index) => {
+            Self::TupleItem(index) => {
                 OP_TUPLE_ITEM.write_to(writer)?;
                 index.write_to(writer)
             }
@@ -267,28 +254,32 @@ impl BinaryIo for ObjExprOp {
 }
 
 impl ExprOp for ObjExprOp {
+    fn apply_function() -> Self {
+        Self::Apply
+    }
+
     fn binary_operation(binop: ExprBinOp) -> Self {
-        ObjExprOp::BinOp(binop)
+        Self::BinOp(binop)
     }
 
     fn list_index() -> Self {
-        ObjExprOp::ListIndex
+        Self::ListIndex
     }
 
     fn literal(value: ExprValue) -> Self {
-        ObjExprOp::Push(value)
+        Self::Push(value)
     }
 
     fn make_list(num_items: usize) -> Self {
-        ObjExprOp::MakeList(num_items)
+        Self::MakeList(num_items)
     }
 
     fn make_tuple(num_items: usize) -> Self {
-        ObjExprOp::MakeTuple(num_items)
+        Self::MakeTuple(num_items)
     }
 
     fn tuple_item(index: usize) -> Self {
-        ObjExprOp::TupleItem(index)
+        Self::TupleItem(index)
     }
 
     fn unary_operation(_unop: ExprUnOp) -> Self {

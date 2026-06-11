@@ -5,7 +5,7 @@ use crate::error::SrcSpan;
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst,
     AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst, ExprAstNode, IdentifierAst,
-    Token, TokenValue,
+    IdentifierKind, Token, TokenValue,
 };
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -1314,7 +1314,7 @@ impl BuiltinBuilder {
             }
             AddrMode::SuperFxLink => super_fx_link(&self.placeholder_imm),
         };
-        let definition = AsmDefMacroAst { id: builtin_id(name), params, body };
+        let definition = AsmDefMacroAst { id: macro_id(name), params, body };
         let reserved = self.arch_tree.reserved_names(arch);
         self.macros.define(arch, reserved, definition).unwrap();
     }
@@ -1593,11 +1593,11 @@ impl BuiltinBuilder {
 
 //===========================================================================//
 
-fn builtin_id(name: &str) -> IdentifierAst {
+fn macro_id(name: &str) -> IdentifierAst {
     IdentifierAst {
         span: SrcSpan::BUILTIN,
         name: Rc::from(name),
-        is_placeholder: false,
+        kind: IdentifierKind::Standard,
     }
 }
 

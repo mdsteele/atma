@@ -1,5 +1,6 @@
 use super::binop::{ExprBinOp, ExprBinOpEvalError};
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
+use super::func::ExprFuncEvalError;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::SrcSpan;
@@ -26,6 +27,9 @@ pub(crate) trait ExprEnv {
 
 /// A type that represents a single operation for an expression stack machine.
 pub(crate) trait ExprOp {
+    /// Returns an operation to apply a function to a value.
+    fn apply_function() -> Self;
+
     /// Returns an operation to combine the top two stack values with the
     /// specified binary operation.
     fn binary_operation(binop: ExprBinOp) -> Self;
@@ -80,6 +84,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         while let Some(subexpr) = stack.pop() {
             subexprs.push(subexpr);
             match &subexpr.node {
+                ExprAstNode::Apply(func, arg) => {
+                    stack.push(func);
+                    stack.push(arg);
+                }
                 ExprAstNode::BinOp(_, lhs, rhs) => {
                     stack.push(lhs);
                     stack.push(rhs);
@@ -113,6 +121,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
 
     fn typecheck_subexpr(&mut self, subexpr: &ExprAst) {
         match &subexpr.node {
+            ExprAstNode::Apply(func_ast, arg_ast) => {
+                self.typecheck_apply(func_ast, arg_ast);
+            }
             ExprAstNode::BinOp(binop_ast, lhs_ast, rhs_ast) => {
                 self.typecheck_binop_node(*binop_ast, lhs_ast, rhs_ast);
             }
@@ -153,6 +164,63 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             ExprAstNode::UnOp(unop_ast, sub_ast) => {
                 self.typecheck_unop_node(*unop_ast, sub_ast);
             }
+        }
+    }
+
+    fn typecheck_apply(&mut self, func_ast: &ExprAst, arg_ast: &ExprAst) {
+        debug_assert!(self.types.len() >= 2);
+        let func_span = func_ast.span;
+        let arg_span = arg_ast.span;
+        let (arg_type, arg_static) = self.types.pop().unwrap();
+        let (func_type, func_static) = self.types.pop().unwrap();
+        let param_and_ret = match func_type {
+            ExprType::Bottom => {
+                self.types.push((ExprType::Bottom, None));
+                return;
+            }
+            ExprType::Function(ref param_and_ret) => param_and_ret,
+            other_type => {
+                self.errors.push(ExprTypeError::CannotCallType {
+                    func_span,
+                    func_type: other_type,
+                });
+                self.types.push((ExprType::Bottom, None));
+                return;
+            }
+        };
+        let ret_type = param_and_ret.1.clone();
+        if arg_type != param_and_ret.0 {
+            let param_type = param_and_ret.1.clone();
+            self.errors.push(ExprTypeError::CannotCallFuncWithType {
+                func_span,
+                func_type,
+                arg_span,
+                arg_type,
+                param_type,
+            });
+            self.types.push((ExprType::Bottom, None));
+            return;
+        }
+        if let Some(func_value) = func_static
+            && let Some(arg_value) = arg_static
+        {
+            debug_assert!(self.ops.len() >= 2);
+            self.ops.pop();
+            self.ops.pop();
+            let func = func_value.unwrap_func();
+            let result_value = match func.call(arg_value) {
+                Ok(ret) => ret,
+                Err(error) => {
+                    self.func_eval_error(error, arg_span);
+                    self.types.push((ExprType::Bottom, None));
+                    return;
+                }
+            };
+            self.ops.push(E::Op::literal(result_value.clone()));
+            self.types.push((ret_type, Some(result_value)));
+        } else {
+            self.ops.push(E::Op::apply_function());
+            self.types.push((ret_type, None));
         }
     }
 
@@ -475,6 +543,23 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 rhs_space,
             },
             ExprBinOpEvalError::UnresolvedLabel => unreachable!(),
+        };
+        self.errors
+            .push(ExprTypeError::StaticEvalError { error: expr_eval_error });
+    }
+
+    fn func_eval_error(
+        &mut self,
+        error: ExprFuncEvalError,
+        arg_span: SrcSpan,
+    ) {
+        let expr_eval_error = match error {
+            ExprFuncEvalError::InvalidArgumentType(_arg_value) => {
+                ExprEvalError::InvalidType { span: arg_span }
+            }
+            ExprFuncEvalError::SquareRootOfNegative(arg_value) => {
+                ExprEvalError::SquareRootOfNegative { arg_span, arg_value }
+            }
         };
         self.errors
             .push(ExprTypeError::StaticEvalError { error: expr_eval_error });

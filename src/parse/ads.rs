@@ -213,9 +213,9 @@ fn step_statement<'a>()
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsModuleAst, AdsStmtAst, DeclareAst, IdentifierAst};
+    use super::{AdsModuleAst, AdsStmtAst, DeclareAst};
     use crate::error::SrcSpan;
-    use crate::parse::{ExprAst, ExprAstNode};
+    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, IdentifierKind};
     use num_bigint::BigInt;
     use std::rc::Rc;
 
@@ -259,7 +259,7 @@ mod tests {
                 IdentifierAst {
                     span: SrcSpan::from_byte_range(4..7),
                     name: Rc::from("foo"),
-                    is_placeholder: false,
+                    kind: IdentifierKind::Standard,
                 },
                 ExprAst {
                     span: SrcSpan::from_byte_range(10..12),

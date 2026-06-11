@@ -81,6 +81,16 @@ impl<W: Write> AdsEnvironment<W> {
     /// Executes the next instruction in the program.
     pub fn step(&mut self) -> Result<bool, AdsRuntimeError> {
         match &self.program.instructions[self.pc] {
+            AdsInstruction::Apply => {
+                debug_assert!(self.value_stack.len() >= 2);
+                let rhs = self.value_stack.pop().unwrap();
+                let lhs = self.value_stack.pop().unwrap();
+                match lhs.unwrap_func().call(rhs) {
+                    Ok(result) => self.value_stack.push(result),
+                    // TODO: include error details
+                    Err(_) => return Err(AdsRuntimeError {}),
+                }
+            }
             AdsInstruction::BinOp(binop) => {
                 debug_assert!(self.value_stack.len() >= 2);
                 let rhs = self.value_stack.pop().unwrap();

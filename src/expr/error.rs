@@ -43,6 +43,30 @@ pub enum ExprTypeError {
         /// The expression type of the argument to the unary operator.
         arg_type: ExprType,
     },
+    /// Tried to call a function with an argument of the wrong type.
+    CannotCallFuncWithType {
+        /// The source code span for the function expression that we tried to
+        /// call.
+        func_span: SrcSpan,
+        /// The expression type of the function expression that we tried to
+        /// call.
+        func_type: ExprType,
+        /// The source code span for the argument to the function.
+        arg_span: SrcSpan,
+        /// The actual expression type of the argument to the function.
+        arg_type: ExprType,
+        /// The required expression type for the function parameter.
+        param_type: ExprType,
+    },
+    /// Tried to call a non-function as though it were a function.
+    CannotCallType {
+        /// The source code span for the non-function expression that we tried
+        /// to call.
+        func_span: SrcSpan,
+        /// The expression type of the non-function expression that we tried to
+        /// call.
+        func_type: ExprType,
+    },
     /// Found an expression of invalid type being indexed into, as though it
     /// were a list or tuple.
     CannotIndexIntoType {
@@ -134,7 +158,7 @@ pub enum ExprTypeError {
 impl ToSourceError for ExprTypeError {
     fn to_source_error(self) -> SourceError {
         match self {
-            ExprTypeError::CannotApplyBinaryOpToTypes {
+            Self::CannotApplyBinaryOpToTypes {
                 op_span,
                 op,
                 lhs_span,
@@ -154,7 +178,7 @@ impl ToSourceError for ExprTypeError {
                     .with_label(lhs_span, lhs_label)
                     .with_label(rhs_span, rhs_label)
             }
-            ExprTypeError::CannotApplyUnaryOpToType {
+            Self::CannotApplyUnaryOpToType {
                 op_span,
                 op,
                 arg_span,
@@ -165,7 +189,31 @@ impl ToSourceError for ExprTypeError {
                 let label = format!("this expression has type {arg_type}");
                 SourceError::new(op_span, message).with_label(arg_span, label)
             }
-            ExprTypeError::CannotIndexIntoType {
+            Self::CannotCallFuncWithType {
+                func_span,
+                func_type,
+                arg_span,
+                arg_type,
+                param_type,
+            } => {
+                let message = format!(
+                    "expected {param_type} argument, but found {arg_type}"
+                );
+                let func_label =
+                    format!("this expression has type {func_type}");
+                let arg_label = format!("this expression has type {arg_type}");
+                SourceError::new(arg_span, message)
+                    .with_label(func_span, func_label)
+                    .with_label(arg_span, arg_label)
+            }
+            Self::CannotCallType { func_span, func_type } => {
+                let message =
+                    format!("cannot call non-function type {func_type}");
+                let label = format!("this expression has type {func_type}");
+                SourceError::new(func_span, message)
+                    .with_label(func_span, label)
+            }
+            Self::CannotIndexIntoType {
                 bracket_span,
                 indexed_span,
                 indexed_type,
@@ -176,13 +224,13 @@ impl ToSourceError for ExprTypeError {
                 SourceError::new(bracket_span, message)
                     .with_label(indexed_span, label)
             }
-            ExprTypeError::CannotUseTypeAsIndex { index_span, index_type } => {
+            Self::CannotUseTypeAsIndex { index_span, index_type } => {
                 let message = format!("cannot use {index_type} as an index");
                 let label = format!("this expression has type {index_type}");
                 SourceError::new(index_span, message)
                     .with_label(index_span, label)
             }
-            ExprTypeError::ListIndexStaticallyOutOfRange {
+            Self::ListIndexStaticallyOutOfRange {
                 list_span,
                 list_length,
                 index_span,
@@ -197,7 +245,7 @@ impl ToSourceError for ExprTypeError {
                     .with_label(list_span, list_label)
                     .with_label(index_span, index_label)
             }
-            ExprTypeError::ListItemsMustAllBeSameType {
+            Self::ListItemsMustAllBeSameType {
                 first_item_span,
                 first_item_type,
                 other_item_span,
@@ -211,32 +259,30 @@ impl ToSourceError for ExprTypeError {
                     .with_label(first_item_span, label1)
                     .with_label(other_item_span, label2)
             }
-            ExprTypeError::RelativeLabelInDebuggerScript { span } => {
+            Self::RelativeLabelInDebuggerScript { span } => {
                 let message =
                     "Cannot use relative labels in a debugger script"
                         .to_string();
                 SourceError::new(span, message)
             }
-            ExprTypeError::RelativeLabelInLinkerConfig { span } => {
+            Self::RelativeLabelInLinkerConfig { span } => {
                 let message = "Cannot use relative labels in a linker config"
                     .to_string();
                 SourceError::new(span, message)
             }
-            ExprTypeError::RelativeLabelOutsideOfAnySection { span } => {
+            Self::RelativeLabelOutsideOfAnySection { span } => {
                 let message =
                     "Relative labels must be within a .SECTION".to_string();
                 SourceError::new(span, message)
             }
-            ExprTypeError::StaticEvalError { error } => {
-                error.to_source_error()
-            }
-            ExprTypeError::TupleIndexNotStatic { index_span } => {
+            Self::StaticEvalError { error } => error.to_source_error(),
+            Self::TupleIndexNotStatic { index_span } => {
                 let message = "tuple index must be static".to_string();
                 let label = "this expression isn't static".to_string();
                 SourceError::new(index_span, message)
                     .with_label(index_span, label)
             }
-            ExprTypeError::TupleIndexOutOfRange {
+            Self::TupleIndexOutOfRange {
                 tuple_span,
                 item_types,
                 index_span,
@@ -253,7 +299,7 @@ impl ToSourceError for ExprTypeError {
                     .with_label(tuple_span, label1)
                     .with_label(index_span, label2)
             }
-            ExprTypeError::UnknownIdentifier { span, name } => {
+            Self::UnknownIdentifier { span, name } => {
                 let message = format!("unknown identifier: `{name}`");
                 let label = "this identifier was never declared".to_string();
                 SourceError::new(span, message).with_label(span, label)
@@ -291,6 +337,15 @@ pub enum ExprEvalError {
         /// operation.
         rhs_span: SrcSpan,
     },
+    /// Found a value of the wrong type.
+    ///
+    /// This shouldn't normally happen unless an object file has been
+    /// corrupted, since ATMA normally performs static typechecking before
+    /// evaluation.
+    InvalidType {
+        /// The source code span for the value expression.
+        span: SrcSpan,
+    },
     /// Tried to modulo an integer, but the modulus was zero.
     ModByZero {
         /// The source code span for the right-hand side of the modulo
@@ -305,6 +360,13 @@ pub enum ExprEvalError {
         rhs_span: SrcSpan,
         /// The value of the right-hand side of the bit shift operation.
         rhs_value: BigInt,
+    },
+    /// Tried to calculate the square root of a negative number.
+    SquareRootOfNegative {
+        /// The source code span for the argument of the square root.
+        arg_span: SrcSpan,
+        /// The value of the argument of the square root.
+        arg_value: BigInt,
     },
     /// Tried to subtract one label from another, but the labels were in the
     /// given two different address spaces.
@@ -335,36 +397,47 @@ pub enum ExprEvalError {
 impl ToSourceError for ExprEvalError {
     fn to_source_error(self) -> SourceError {
         match self {
-            ExprEvalError::BitShiftByNegative { rhs_span, rhs_value } => {
+            Self::BitShiftByNegative { rhs_span, rhs_value } => {
                 let message =
                     "cannot shift by a negative number of bits".to_string();
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(rhs_span, message).with_label(rhs_span, label)
             }
-            ExprEvalError::BitShiftOutOfRange { rhs_span, rhs_value } => {
+            Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
                 let message = "shift by too many bits".to_string();
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(rhs_span, message).with_label(rhs_span, label)
             }
-            ExprEvalError::DivideByZero { rhs_span } => {
+            Self::DivideByZero { rhs_span } => {
                 let message = "cannot divide by zero".to_string();
                 let label = "the value of this expression is 0".to_string();
                 SourceError::new(rhs_span, message).with_label(rhs_span, label)
             }
-            ExprEvalError::ModByZero { rhs_span } => {
+            Self::ModByZero { rhs_span } => {
                 let message = "cannot modulo by zero".to_string();
                 let label = "the value of this expression is 0".to_string();
                 SourceError::new(rhs_span, message).with_label(rhs_span, label)
             }
-            ExprEvalError::PowNegativeExponent { rhs_span, rhs_value } => {
+            Self::InvalidType { span } => {
+                SourceError::new(span, "invalid type".to_string())
+            }
+            Self::PowNegativeExponent { rhs_span, rhs_value } => {
                 let message = "exponent must be non-negative".to_string();
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(rhs_span, message).with_label(rhs_span, label)
             }
-            ExprEvalError::SubtractLabelsInDifferentAddrspaces {
+            Self::SquareRootOfNegative { arg_span, arg_value } => {
+                let message = "cannot take square root of a negative \
+                               number"
+                    .to_string();
+                let label =
+                    format!("the value of this expression is {arg_value}");
+                SourceError::new(arg_span, message).with_label(arg_span, label)
+            }
+            Self::SubtractLabelsInDifferentAddrspaces {
                 op_span,
                 lhs_span,
                 lhs_space,
@@ -382,7 +455,7 @@ impl ToSourceError for ExprEvalError {
                     .with_label(lhs_span, lhs_label)
                     .with_label(rhs_span, rhs_label)
             }
-            ExprEvalError::UnresolvedLabel { label_span } => {
+            Self::UnresolvedLabel { label_span } => {
                 let message = "could not resolve label".to_string();
                 SourceError::new(label_span, message)
             }

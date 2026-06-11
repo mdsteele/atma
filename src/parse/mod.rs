@@ -16,7 +16,9 @@ pub use asm::{
     AsmSectionAst, AsmStmtAst, AsmUtf8DataAst,
 };
 pub use error::{ParseError, ParseResult};
-pub use expr::{BinOpAst, ExprAst, ExprAstNode, IdentifierAst, UnOpAst};
+pub use expr::{
+    BinOpAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, UnOpAst,
+};
 pub use lex::{LexerError, Token, TokenLexer, TokenValue};
 pub use link::{LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
 pub use lvalue::{LValueAst, LValueAstNode};

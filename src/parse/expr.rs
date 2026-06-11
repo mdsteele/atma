@@ -125,6 +125,19 @@ impl BinOpAst {
 
 //===========================================================================//
 
+/// Kinds of identifiers that can appear in an abstract syntax tree.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IdentifierKind {
+    /// A standard identifier (e.g. "foo").
+    Standard,
+    /// A built-in name (e.g. "%foo").
+    Builtin,
+    /// A macro placeholder (e.g. "%FOO").
+    Placeholder,
+}
+
+//===========================================================================//
+
 /// An identifier in an expression or lvalue.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IdentifierAst {
@@ -133,8 +146,8 @@ pub struct IdentifierAst {
     pub span: SrcSpan,
     /// The name of the identifier.
     pub name: Rc<str>,
-    /// True if this identifier is a macro placeholder.
-    pub is_placeholder: bool,
+    /// What kind of identifier this is.
+    pub kind: IdentifierKind,
 }
 
 impl IdentifierAst {
@@ -151,27 +164,40 @@ impl IdentifierAst {
                     Ok(IdentifierAst {
                         name,
                         span: token.span,
-                        is_placeholder: false,
+                        kind: IdentifierKind::Standard,
                     })
                 } else {
                     Err(chumsky::error::Rich::custom(span, ""))
                 }
             })
             .labelled("identifier");
+        let builtin_token = chumsky::prelude::any()
+            .try_map(|token: Token, span| {
+                if let TokenValue::Builtin(name) = token.value {
+                    Ok(IdentifierAst {
+                        name,
+                        span: token.span,
+                        kind: IdentifierKind::Builtin,
+                    })
+                } else {
+                    Err(chumsky::error::Rich::custom(span, ""))
+                }
+            })
+            .labelled("builtin");
         let placeholder_token = chumsky::prelude::any()
             .try_map(|token: Token, span| {
                 if let TokenValue::Placeholder(name) = token.value {
                     Ok(IdentifierAst {
                         name,
                         span: token.span,
-                        is_placeholder: true,
+                        kind: IdentifierKind::Placeholder,
                     })
                 } else {
                     Err(chumsky::error::Rich::custom(span, ""))
                 }
             })
             .labelled("placeholder");
-        identifier_token.or(placeholder_token
+        identifier_token.or(builtin_token).or(placeholder_token
             .contextual()
             .configure(|_, ctx: &Context| ctx.allow_placeholder_as_identifier))
     }
@@ -235,15 +261,18 @@ impl ExprAst {
             });
             let identifier = IdentifierAst::parser().map(|id| ExprAst {
                 span: id.span,
-                node: if id.is_placeholder {
-                    ExprAstNode::Placeholder(id.name)
-                } else {
-                    ExprAstNode::Identifier(id.name)
+                node: match id.kind {
+                    IdentifierKind::Standard | IdentifierKind::Builtin => {
+                        ExprAstNode::Identifier(id.name)
+                    }
+                    IdentifierKind::Placeholder => {
+                        ExprAstNode::Placeholder(id.name)
+                    }
                 },
             });
 
             let expr_atom = chumsky::prelude::choice((
-                parenthesized_expr,
+                parenthesized_expr.clone(),
                 here_label,
                 identifier,
                 list_literal,
@@ -253,32 +282,43 @@ impl ExprAst {
             ))
             .labelled("subexpression");
 
-            let indexed = expr_atom
-                .then(
-                    chumsky::prelude::group((
-                        symbol(TokenValue::BracketOpen),
-                        expr,
-                        symbol(TokenValue::BracketClose),
-                    ))
-                    .or_not(),
-                )
-                .map(|(base, opt_subscript)| {
-                    if let Some((open, index, close)) = opt_subscript {
-                        let index_span = open.span.merged_with(close.span);
-                        ExprAst {
+            enum ExprAtomSuffix {
+                Call(ExprAst),
+                Index(SrcSpan, ExprAst),
+            }
+            let call_suffix = parenthesized_expr.map(ExprAtomSuffix::Call);
+            let index_suffix = chumsky::prelude::group((
+                symbol(TokenValue::BracketOpen),
+                expr,
+                symbol(TokenValue::BracketClose),
+            ))
+            .map(|(open, index, close)| {
+                ExprAtomSuffix::Index(open.span.merged_with(close.span), index)
+            });
+            let any_suffix =
+                chumsky::prelude::choice((call_suffix, index_suffix));
+            let suffixed_expr =
+                expr_atom.foldl(any_suffix.repeated(), |base, suffix| {
+                    match suffix {
+                        ExprAtomSuffix::Call(arg) => ExprAst {
+                            span: base.span.merged_with(arg.span),
+                            node: ExprAstNode::Apply(
+                                Box::new(base),
+                                Box::new(arg),
+                            ),
+                        },
+                        ExprAtomSuffix::Index(index_span, index) => ExprAst {
                             span: base.span.merged_with(index_span),
                             node: ExprAstNode::Index(
                                 index_span,
                                 Box::new(base),
                                 Box::new(index),
                             ),
-                        }
-                    } else {
-                        base
+                        },
                     }
                 });
 
-            indexed
+            suffixed_expr
                 .pratt((
                     pratt::infix(
                         pratt::left(BIND_EXPONENTIATE),
@@ -424,6 +464,8 @@ impl ExprAst {
 /// One node in the abstract syntax tree for an expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExprAstNode {
+    /// A function application.
+    Apply(Box<ExprAst>, Box<ExprAst>),
     /// A binary operation between two subexpressions.
     BinOp((SrcSpan, BinOpAst), Box<ExprAst>, Box<ExprAst>),
     /// An boolean literal.

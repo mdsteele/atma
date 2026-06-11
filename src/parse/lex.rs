@@ -174,6 +174,8 @@ enum TokenKind {
     BracketClose,
     #[token("[")]
     BracketOpen,
+    #[regex(r"%[a-z][_a-z0-9]*")]
+    Builtin,
     #[token("^")]
     Caret,
     #[token(":")]
@@ -264,6 +266,7 @@ impl TokenKind {
             TokenKind::BraceOpen => TokenValue::BraceOpen,
             TokenKind::BracketClose => TokenValue::BracketClose,
             TokenKind::BracketOpen => TokenValue::BracketOpen,
+            TokenKind::Builtin => TokenValue::Builtin(Rc::from(lexer.slice())),
             TokenKind::Caret => TokenValue::Caret,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::Comma => TokenValue::Comma,
@@ -337,6 +340,8 @@ pub enum TokenValue {
     BracketClose,
     /// A "`[`" symbol.
     BracketOpen,
+    /// A built-in constant.
+    Builtin(Rc<str>),
     /// A "`^`" symbol.
     Caret,
     /// A "`:`" symbol.
@@ -420,6 +425,7 @@ impl TokenValue {
             TokenValue::BraceOpen => "`{`",
             TokenValue::BracketClose => "`]`",
             TokenValue::BracketOpen => "`[`",
+            TokenValue::Builtin(_) => "builtin",
             TokenValue::Caret => "`^`",
             TokenValue::Colon => "`:`",
             TokenValue::Comma => "`,`",
@@ -562,6 +568,14 @@ mod tests {
         assert_eq!(
             read_all("%true"),
             vec![token(0..5, TokenValue::BoolLiteral(true))]
+        );
+    }
+
+    #[test]
+    fn builtin() {
+        assert_eq!(
+            read_all("%foo"),
+            vec![token(0..4, TokenValue::Builtin(Rc::from("%foo")))]
         );
     }
 

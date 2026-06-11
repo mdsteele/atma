@@ -5,6 +5,10 @@ use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum AdsInstruction {
+    /// Pops the top two values from the value stack, calls the
+    /// second-from-the-top value with the topmost value as an argument, then
+    /// pushes the result onto the value stack.
+    Apply,
     /// Pops the top two values from the value stack, evaluates the specified
     /// binary operation using the second-from-the-top value as the left-hand
     /// side and the topmost value as the right-hand side, then pushes the
@@ -91,6 +95,10 @@ pub enum AdsInstruction {
 }
 
 impl ExprOp for AdsInstruction {
+    fn apply_function() -> Self {
+        AdsInstruction::Apply
+    }
+
     fn binary_operation(binop: ExprBinOp) -> Self {
         AdsInstruction::BinOp(binop)
     }
