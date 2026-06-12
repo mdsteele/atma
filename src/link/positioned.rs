@@ -149,8 +149,8 @@ impl PositionedRegion {
         let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut positioned_sections =
             Vec::<PositionedSection>::with_capacity(region.sections.len());
-        // TODO: Sometimes make this None, depending on region config
-        let region_binary_offset = Some(*cumulative_offset);
+        let region_binary_offset =
+            if region.is_bss { None } else { Some(*cumulative_offset) };
         let mut arranged_sections = region.sections;
         arranged_sections.sort_by(section_ordering);
         for section in arranged_sections {

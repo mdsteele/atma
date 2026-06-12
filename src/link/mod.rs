@@ -11,7 +11,7 @@ mod place;
 mod positioned;
 mod types;
 
-pub use config::{AddrspaceConfig, LinkConfig, MemoryConfig, SectionConfig};
+pub use config::{AddrspaceConfig, LinkConfig, RegionConfig, SectionConfig};
 pub use error::LinkError;
 pub use fragment::LinkFragment;
 

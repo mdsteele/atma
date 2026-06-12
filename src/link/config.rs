@@ -29,7 +29,8 @@ type PrevAttrs = HashMap<Rc<str>, SrcSpan>;
 struct ConfigBuilder {
     env: LinkTypeEnv,
     addrspaces: Vec<AddrspaceConfig>,
-    memory: Vec<MemoryConfig>,
+    bss: Vec<RegionConfig>,
+    memory: Vec<RegionConfig>,
     sections: Vec<SectionConfig>,
     exports: Vec<ExportConfig>,
 }
@@ -39,6 +40,7 @@ impl ConfigBuilder {
         ConfigBuilder {
             env: LinkTypeEnv::new(),
             addrspaces: Vec::new(),
+            bss: Vec::new(),
             memory: Vec::new(),
             sections: Vec::new(),
             exports: Vec::new(),
@@ -56,6 +58,7 @@ impl ConfigBuilder {
         errors.result()?;
         Ok(LinkConfig {
             addrspaces: self.addrspaces,
+            bss: self.bss,
             memory: self.memory,
             sections: self.sections,
             exports: self.exports,
@@ -70,6 +73,7 @@ impl ConfigBuilder {
             LinkDirectiveAst::Addrspaces(entries) => {
                 self.visit_addrspaces_dir(entries)
             }
+            LinkDirectiveAst::Bss(entries) => self.visit_bss_dir(entries),
             LinkDirectiveAst::Exports(entries) => {
                 self.visit_exports_dir(entries)
             }
@@ -255,18 +259,34 @@ impl ConfigBuilder {
         errs.result()
     }
 
+    fn visit_bss_dir(
+        &mut self,
+        entries: Vec<LinkEntryAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        for entry in entries {
+            let region = errs.with(self.visit_region_entry(entry));
+            self.bss.push(region);
+        }
+        errs.result()
+    }
+
     fn visit_memory_dir(
         &mut self,
         entries: Vec<LinkEntryAst>,
     ) -> SourceResult<()> {
         let mut errs = Errs::<SourceError>::new();
         for entry in entries {
-            errs.also(self.visit_memory_entry(entry));
+            let region = errs.with(self.visit_region_entry(entry));
+            self.memory.push(region);
         }
         errs.result()
     }
 
-    fn visit_memory_entry(&mut self, entry: LinkEntryAst) -> SourceResult<()> {
+    fn visit_region_entry(
+        &mut self,
+        entry: LinkEntryAst,
+    ) -> (RegionConfig, Errs<SourceError>) {
         let mut errs = Errs::<SourceError>::new();
         errs.also(self.declare_entry(ENTITY_MEMORY, &entry.id));
         let mut space: Option<Rc<str>> = None;
@@ -330,13 +350,13 @@ impl ConfigBuilder {
             (None, Some(size)) => Addr::MIN.range_with_size(size).unwrap(),
             (None, None) => Range::FULL,
         };
-        self.memory.push(MemoryConfig {
+        let region = RegionConfig {
             name: entry.id.name,
             space: space.unwrap_or_default(),
             range,
             fill,
-        });
-        errs.result()
+        };
+        (region, errs)
     }
 
     fn memory_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
@@ -399,7 +419,7 @@ impl ConfigBuilder {
     ) -> SourceResult<()> {
         let mut errs = Errs::<SourceError>::new();
         errs.also(self.declare_entry(ENTITY_SECTION, &entry.id));
-        let mut load: Option<Rc<str>> = None;
+        let mut region: Option<Rc<str>> = None;
         let mut start: Option<Addr> = None;
         let mut size: Option<Size> = None;
         let mut align: Option<Align> = None;
@@ -423,9 +443,9 @@ impl ConfigBuilder {
                         errs.ok_or_default(self.section_fill_attr(expr_ast)),
                     )
                 }
-                "load" => {
-                    load = Some(
-                        errs.ok_or_default(self.section_load_attr(expr_ast)),
+                "region" => {
+                    region = Some(
+                        errs.ok_or_default(self.section_region_attr(expr_ast)),
                     )
                 }
                 "size" => {
@@ -451,12 +471,12 @@ impl ConfigBuilder {
                 }
             }
         }
-        if load.is_none() {
-            errs.push(self.missing_attr_error("load", &entry.id));
+        if region.is_none() {
+            errs.push(self.missing_attr_error("region", &entry.id));
         }
         self.sections.push(SectionConfig {
             name: entry.id.name,
-            load: load.unwrap_or_default(),
+            region: region.unwrap_or_default(),
             start,
             size,
             align: align.unwrap_or_default(),
@@ -477,13 +497,13 @@ impl ConfigBuilder {
         self.static_fill_attr(ENTITY_SECTION, expr_ast)
     }
 
-    fn section_load_attr(
+    fn section_region_attr(
         &mut self,
         expr_ast: ExprAst,
     ) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_SECTION,
-            "load",
+            "region",
             expr_ast,
             ENTITY_MEMORY,
         )
@@ -746,9 +766,12 @@ impl ConfigBuilder {
 pub struct LinkConfig {
     /// Configurations for the address spaces that memory regions exist in.
     pub addrspaces: Vec<AddrspaceConfig>,
-    /// Configurations for the memory regions that sections will be placed
-    /// within.
-    pub memory: Vec<MemoryConfig>,
+    /// Configurations for memory regions that padding-only sections can be
+    /// placed within, and that will not be included in the final binary.
+    pub bss: Vec<RegionConfig>,
+    /// Configurations for memory regions that data sections can be placed
+    /// within, and that will be included in the final binary.
+    pub memory: Vec<RegionConfig>,
     /// Configurations for the data sections to be linked together.
     pub sections: Vec<SectionConfig>,
     /// Symbols defined and exported by the linker config.
@@ -798,7 +821,7 @@ pub struct AddrspaceConfig {
 
 /// A linker configuration for a single memory region.
 #[derive(Debug)]
-pub struct MemoryConfig {
+pub struct RegionConfig {
     /// The name of this memory region.
     pub name: Rc<str>,
     /// The name of the address space that this memory region exists in.
@@ -818,8 +841,8 @@ pub struct MemoryConfig {
 pub struct SectionConfig {
     /// The name of this section.
     pub name: Rc<str>,
-    /// The name of the memory region that this section should be loaded into.
-    pub load: Rc<str>,
+    /// The name of the memory region that this section should be placed in.
+    pub region: Rc<str>,
     /// If set, then the section must start at exactly this address.
     pub start: Option<Addr>,
     /// If set, then the section will have exactly this size.

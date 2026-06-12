@@ -1,4 +1,4 @@
-use super::config::{AddrspaceConfig, LinkConfig};
+use super::config::{AddrspaceConfig, LinkConfig, RegionConfig};
 use super::error::LinkError;
 use super::loose::{LooseChunk, LooseSection};
 use super::place::try_place;
@@ -46,8 +46,8 @@ impl ArrangedChunk {
 pub(super) struct ArrangedSection {
     /// The name of this section.
     pub name: Rc<str>,
-    /// The name of the memory region that this section should be loaded into.
-    pub load: Rc<str>,
+    /// The name of the memory region that this section should be placed in.
+    pub region: Rc<str>,
     /// If set, then the section must start at exactly this address.
     pub start: Option<Addr>,
     /// The required alignment for this section, within its address space,
@@ -166,7 +166,7 @@ impl ArrangedSection {
             .max(section.size.unwrap_or(Size::ZERO));
         let arranged_section = ArrangedSection {
             name: section.name,
-            load: section.load,
+            region: section.region,
             start: section.start,
             align: section.align,
             within: section.within,
@@ -193,6 +193,8 @@ pub(super) struct ArrangedRegion {
     /// Any padded portions of this memory region will be filled with this byte
     /// value.
     pub fill: u8,
+    /// If true, this is a BSS region; otherwise, this is a data region.
+    pub is_bss: bool,
 }
 
 impl ArrangedRegion {
@@ -205,25 +207,33 @@ impl ArrangedRegion {
             addrspaces.insert(addrspace.name.clone(), addrspace);
         }
 
-        let mut arranged_regions =
-            Vec::<ArrangedRegion>::with_capacity(config.memory.len());
+        let mut arranged_regions = Vec::<ArrangedRegion>::with_capacity(
+            config.bss.len() + config.memory.len(),
+        );
         let mut region_name_to_index = HashMap::<Rc<str>, usize>::new();
-        for memory_region in &config.memory {
+        let mut add_region = |region: &RegionConfig, is_bss: bool| {
             region_name_to_index
-                .insert(memory_region.name.clone(), arranged_regions.len());
-            let addrspace = addrspaces[&memory_region.space];
+                .insert(region.name.clone(), arranged_regions.len());
+            let addrspace = addrspaces[&region.space];
             arranged_regions.push(ArrangedRegion {
-                name: memory_region.name.clone(),
-                space: memory_region.space.clone(),
-                range: memory_region.range,
+                name: region.name.clone(),
+                space: region.space.clone(),
+                range: region.range,
                 sections: Vec::new(),
-                fill: memory_region.fill.unwrap_or(addrspace.fill),
+                fill: region.fill.unwrap_or(addrspace.fill),
+                is_bss,
             });
+        };
+        for region in &config.bss {
+            add_region(region, true);
+        }
+        for region in &config.memory {
+            add_region(region, false);
         }
 
         let (sections, errs) = ArrangedSection::arrange(config, object_files);
         for section in sections {
-            let region_index = region_name_to_index[&section.load];
+            let region_index = region_name_to_index[&section.region];
             arranged_regions[region_index].sections.push(section);
         }
         (arranged_regions, errs)

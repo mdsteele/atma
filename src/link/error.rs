@@ -45,6 +45,14 @@ pub enum LinkError {
         /// should belong.
         section_name: Rc<str>,
     },
+    /// A chunk in a BSS memory region contained non-padding data.
+    DataInBssChunk,
+    /// A chunk in a BSS memory region had an explicit fill byte set.
+    FillByteOnBssChunk,
+    /// A BSS memory region had an explicit fill byte set.
+    FillByteOnBssRegion,
+    /// A section in a BSS memory region had an explicit fill byte set.
+    FillByteOnBssSection,
     /// A patch's expression was malformed in some way (e.g. stack
     /// underflow). This shouldn't happen for valid object files (as the
     /// assembler should have generated a valid expression).

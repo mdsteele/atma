@@ -42,6 +42,8 @@ impl LinkConfigAst {
 pub enum LinkDirectiveAst {
     /// An `.ADDRSPACES` directive block.
     Addrspaces(Vec<LinkEntryAst>),
+    /// A `.BSS` directive block.
+    Bss(Vec<LinkEntryAst>),
     /// An `.EXPORTS` directive block.
     Exports(Vec<LinkEntryAst>),
     /// A `.LET` directive.
@@ -63,6 +65,9 @@ impl LinkDirectiveAst {
         let addrspaces_dir = directive(".ADDRSPACES")
             .ignore_then(entries_block.clone())
             .map(LinkDirectiveAst::Addrspaces);
+        let bss_dir = directive(".BSS")
+            .ignore_then(entries_block.clone())
+            .map(LinkDirectiveAst::Bss);
         let exports_dir = directive(".EXPORTS")
             .ignore_then(entries_block.clone())
             .map(LinkDirectiveAst::Exports);
@@ -80,6 +85,7 @@ impl LinkDirectiveAst {
             .map(LinkDirectiveAst::Sections);
         chumsky::prelude::choice((
             addrspaces_dir,
+            bss_dir,
             exports_dir,
             let_dir,
             memory_dir,
