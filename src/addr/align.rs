@@ -100,6 +100,36 @@ impl fmt::UpperHex for Align {
     }
 }
 
+impl TryFrom<i32> for Align {
+    type Error = AlignTryFromError;
+
+    fn try_from(value: i32) -> Result<Align, AlignTryFromError> {
+        Align::try_from(
+            u64::try_from(value)
+                .map_err(|_| AlignTryFromError::NotAPowerOfTwo)?,
+        )
+    }
+}
+
+impl TryFrom<u32> for Align {
+    type Error = AlignTryFromError;
+
+    fn try_from(value: u32) -> Result<Align, AlignTryFromError> {
+        Align::try_from(u64::from(value))
+    }
+}
+
+impl TryFrom<i64> for Align {
+    type Error = AlignTryFromError;
+
+    fn try_from(value: i64) -> Result<Align, AlignTryFromError> {
+        Align::try_from(
+            u64::try_from(value)
+                .map_err(|_| AlignTryFromError::NotAPowerOfTwo)?,
+        )
+    }
+}
+
 impl TryFrom<u64> for Align {
     type Error = AlignTryFromError;
 
@@ -194,7 +224,7 @@ pub enum AlignTryFromError {
 
 #[cfg(test)]
 mod tests {
-    use super::{Addr, Align};
+    use crate::addr::{Addr, Align, AlignTryFromError};
     use std::mem::size_of;
 
     #[test]
@@ -219,6 +249,60 @@ mod tests {
         assert_eq!(Align::MAX.mask(), Addr::MIN);
         let align = Align::try_from(64u64).unwrap();
         assert_eq!(align.mask(), !Addr::from(63u16));
+    }
+
+    #[test]
+    fn align_try_from_i32() {
+        assert_eq!(Align::try_from(1i32), Ok(Align::MIN));
+        assert_eq!(
+            Align::try_from(-1i32),
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        );
+        assert_eq!(
+            Align::try_from(15i32),
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        );
+    }
+
+    #[test]
+    fn align_try_from_u32() {
+        assert_eq!(Align::try_from(1u32), Ok(Align::MIN));
+        assert_eq!(
+            Align::try_from(15u32),
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        );
+    }
+
+    #[test]
+    fn align_try_from_i64() {
+        assert_eq!(Align::try_from(1i64), Ok(Align::MIN));
+        assert_eq!(
+            Align::try_from(-1i64),
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        );
+        assert_eq!(Align::try_from(1i64 << 32), Ok(Align::MAX));
+        assert_eq!(
+            Align::try_from(15i64),
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        );
+        assert_eq!(
+            Align::try_from(1i64 << 33),
+            Err(AlignTryFromError::TooLargePowerOfTwo)
+        );
+    }
+
+    #[test]
+    fn align_try_from_u64() {
+        assert_eq!(Align::try_from(1u64), Ok(Align::MIN));
+        assert_eq!(Align::try_from(1u64 << 32), Ok(Align::MAX));
+        assert_eq!(
+            Align::try_from(15u64),
+            Err(AlignTryFromError::NotAPowerOfTwo)
+        );
+        assert_eq!(
+            Align::try_from(1u64 << 33),
+            Err(AlignTryFromError::TooLargePowerOfTwo)
+        );
     }
 }
 

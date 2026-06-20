@@ -322,7 +322,9 @@ impl rangemap::StepLite for Addr {
 
 #[cfg(test)]
 mod tests {
-    use super::{Addr, Align, Offset};
+    use crate::addr::{Addr, Align, Offset, Range};
+    use num_bigint::{BigInt, BigUint};
+    use static_assertions::{const_assert, const_assert_eq};
 
     #[test]
     fn addr_add() {
@@ -339,7 +341,21 @@ mod tests {
     fn addr_as_u8() {
         assert_eq!(Addr::MIN.as_u8(), 0x00u8);
         assert_eq!(Addr::MAX.as_u8(), 0xffu8);
-        assert_eq!(Addr::from(0x1234u16).as_u8(), 0x34u8);
+        assert_eq!(Addr::from(0x12345678u32).as_u8(), 0x78u8);
+    }
+
+    #[test]
+    fn addr_as_u16() {
+        assert_eq!(Addr::MIN.as_u16(), 0x0000u16);
+        assert_eq!(Addr::MAX.as_u16(), 0xffffu16);
+        assert_eq!(Addr::from(0x12345678u32).as_u16(), 0x5678u16);
+    }
+
+    #[test]
+    fn addr_as_u32() {
+        assert_eq!(Addr::MIN.as_u32(), 0x00000000u32);
+        assert_eq!(Addr::MAX.as_u32(), 0xffffffffu32);
+        assert_eq!(Addr::from(0x12345678u32).as_u32(), 0x12345678u32);
     }
 
     #[test]
@@ -357,6 +373,73 @@ mod tests {
     }
 
     #[test]
+    fn addr_next_aligned_to() {
+        assert_eq!(Addr::MIN.next_aligned_to(Align::MAX), Some(Addr::MIN));
+        assert_eq!(Addr::MAX.next_aligned_to(Align::MIN), Some(Addr::MAX));
+        assert_eq!(
+            Addr::MAX.next_aligned_to(Align::try_from(2).unwrap()),
+            None
+        );
+        assert_eq!(
+            Addr::from(0x200u32)
+                .next_aligned_to(Align::try_from(0x100).unwrap()),
+            Some(Addr::from(0x200u32))
+        );
+        assert_eq!(
+            Addr::from(0x201u32)
+                .next_aligned_to(Align::try_from(0x100).unwrap()),
+            Some(Addr::from(0x300u32))
+        );
+        assert_eq!(Addr::from(0x1u32).next_aligned_to(Align::MAX), None);
+    }
+
+    #[test]
+    fn addr_not() {
+        assert_eq!(!Addr::MIN, Addr::MAX);
+        assert_eq!(!Addr::MAX, Addr::MIN);
+
+        const_assert_eq!(Addr::BITS, 32);
+        assert_eq!(!Addr::from(0x12345678u32), Addr::from(0xedcba987u32));
+    }
+
+    #[test]
+    fn addr_range_within() {
+        assert_eq!(
+            Addr::from(0x200u32).range_within(Align::try_from(0x100).unwrap()),
+            Range::with_bounds(Addr::from(0x200u32), Addr::from(0x2ffu32))
+        );
+        assert_eq!(
+            Addr::from(0x237u32).range_within(Align::try_from(0x40).unwrap()),
+            Range::with_bounds(Addr::from(0x237u32), Addr::from(0x23fu32))
+        );
+        assert_eq!(
+            Addr::from(Addr::MAX)
+                .range_within(Align::try_from(0x10000).unwrap()),
+            Range::with_bounds(Addr::MAX, Addr::MAX)
+        );
+        assert_eq!(
+            Addr::from(Addr::MIN).range_within(Align::MAX),
+            Range::FULL
+        );
+    }
+
+    #[test]
+    fn addr_shl() {
+        assert_eq!(Addr::from(0x1234u32) << 4, Addr::from(0x12340u32));
+        let mut addr = Addr::from(1u32);
+        addr <<= 5;
+        assert_eq!(addr, Addr::from(32u32));
+    }
+
+    #[test]
+    fn addr_shr() {
+        assert_eq!(Addr::from(0x1234u32) >> 4, Addr::from(0x123u32));
+        let mut addr = Addr::from(33u32);
+        addr >>= 3;
+        assert_eq!(addr, Addr::from(4u32));
+    }
+
+    #[test]
     fn addr_sub() {
         assert_eq!(Addr::MIN - Addr::MIN, Offset::ZERO);
         assert_eq!(Addr::MAX - Addr::MAX, Offset::ZERO);
@@ -365,6 +448,36 @@ mod tests {
             Addr::from(123u32) - Addr::from(23u32),
             Offset::from(100u32)
         );
+    }
+
+    #[test]
+    fn addr_try_from_bigint() {
+        assert_eq!(Addr::try_from(&BigInt::ZERO), Ok(Addr::MIN));
+        assert_eq!(
+            Addr::try_from(&BigInt::from(1234)),
+            Ok(Addr::from(1234u32))
+        );
+        assert_eq!(Addr::try_from(&BigInt::from(2).pow(200)), Err(()));
+        assert_eq!(Addr::try_from(&BigInt::from(-1)), Err(()));
+    }
+
+    #[test]
+    fn addr_try_from_biguint() {
+        assert_eq!(Addr::try_from(&BigUint::ZERO), Ok(Addr::MIN));
+        assert_eq!(
+            Addr::try_from(&BigUint::from(1234u32)),
+            Ok(Addr::from(1234u32))
+        );
+        assert_eq!(Addr::try_from(&BigUint::from(2u32).pow(200)), Err(()));
+    }
+
+    #[test]
+    fn addr_try_from_u64() {
+        assert_eq!(Addr::try_from(0u64), Ok(Addr::MIN));
+        assert_eq!(Addr::try_from(1234u64), Ok(Addr::from(1234u32)));
+
+        const_assert!(Addr::BITS < u64::BITS);
+        assert_eq!(Addr::try_from(u64::MAX), Err(()));
     }
 }
 

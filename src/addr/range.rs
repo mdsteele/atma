@@ -171,6 +171,26 @@ mod tests {
     }
 
     #[test]
+    fn range_first_aligned_to() {
+        assert_eq!(Range::FULL.first_aligned_to(Align::MAX), Some(Addr::MIN));
+        let range =
+            Range::with_bounds(Addr::from(0x1001u16), Addr::from(0x1fffu16));
+        assert_eq!(range.first_aligned_to(Align::MIN), Some(range.start()));
+        assert_eq!(
+            range.first_aligned_to(Align::try_from(2).unwrap()),
+            Some(Addr::from(0x1002u16))
+        );
+        assert_eq!(
+            range.first_aligned_to(Align::try_from(0x200).unwrap()),
+            Some(Addr::from(0x1200u16))
+        );
+        assert_eq!(
+            range.first_aligned_to(Align::try_from(0x1000).unwrap()),
+            None
+        );
+    }
+
+    #[test]
     fn range_size() {
         assert_eq!(Range::FULL.size(), Size::MAX);
 
@@ -181,6 +201,17 @@ mod tests {
         let size = Size::from(0x2345u16);
         let range = Addr::from(0x1234u16).range_with_size(size).unwrap();
         assert_eq!(range.size(), size);
+    }
+
+    #[test]
+    fn range_start_end() {
+        assert_eq!(Range::FULL.start(), Addr::MIN);
+        assert_eq!(Range::FULL.end(), Addr::MAX);
+
+        let range =
+            Range::with_bounds(Addr::from(0x1000u16), Addr::from(0x1fffu16));
+        assert_eq!(range.start(), Addr::from(0x1000u16));
+        assert_eq!(range.end(), Addr::from(0x1fffu16));
     }
 }
 
