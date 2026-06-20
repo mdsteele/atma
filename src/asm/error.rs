@@ -140,7 +140,7 @@ pub enum AsmError {
         /// The source code span for the attribute name.
         attr_span: SrcSpan,
     },
-    /// A unicode scalar value expression had an invalid valid.
+    /// A unicode scalar value expression had an invalid value.
     InvalidUnicodeScalarValue {
         /// The source code span for the expression that evaluated to an
         /// invalid unicode scalar value.
