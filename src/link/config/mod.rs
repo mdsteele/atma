@@ -1,6 +1,8 @@
+mod checksum;
+mod env;
+
+use super::binary::LinkedBinary;
 use super::error::LinkResult;
-use super::expr::LinkTypeEnv;
-use super::fragment::LinkFragment;
 use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
 use crate::addr::{Addr, Align, AlignTryFromError, Range, Size};
@@ -10,6 +12,8 @@ use crate::obj::{ObjExpr, ObjFile};
 use crate::parse::{
     ExprAst, IdentifierAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
 };
+pub use checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
+use env::LinkTypeEnv;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
@@ -18,6 +22,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 const ENTITY_ADDRSPACE: &str = "address space";
+const ENTITY_CHECKSUM: &str = "checksum";
 const ENTITY_EXPORT: &str = "exported symbol";
 const ENTITY_MEMORY: &str = "memory region";
 const ENTITY_SECTION: &str = "section";
@@ -33,6 +38,7 @@ struct ConfigBuilder {
     memory: Vec<RegionConfig>,
     sections: Vec<SectionConfig>,
     exports: Vec<ExportConfig>,
+    checksums: Vec<ChecksumConfig>,
 }
 
 impl ConfigBuilder {
@@ -44,6 +50,7 @@ impl ConfigBuilder {
             memory: Vec::new(),
             sections: Vec::new(),
             exports: Vec::new(),
+            checksums: Vec::new(),
         }
     }
 
@@ -62,6 +69,7 @@ impl ConfigBuilder {
             memory: self.memory,
             sections: self.sections,
             exports: self.exports,
+            checksums: self.checksums,
         })
     }
 
@@ -74,6 +82,9 @@ impl ConfigBuilder {
                 self.visit_addrspaces_dir(entries)
             }
             LinkDirectiveAst::Bss(entries) => self.visit_bss_dir(entries),
+            LinkDirectiveAst::Checksums(entries) => {
+                self.visit_checksums_dir(entries)
+            }
             LinkDirectiveAst::Exports(entries) => {
                 self.visit_exports_dir(entries)
             }
@@ -156,6 +167,124 @@ impl ConfigBuilder {
 
     fn addrspace_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_ADDRSPACE, expr_ast)
+    }
+
+    fn visit_checksums_dir(
+        &mut self,
+        entries: Vec<LinkEntryAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        for entry in entries {
+            errs.also(self.visit_checksums_entry(entry));
+        }
+        errs.result()
+    }
+
+    fn visit_checksums_entry(
+        &mut self,
+        entry: LinkEntryAst,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        let mut sum: Option<ChecksumFormat> = None;
+        let mut unit: Option<ChecksumFormat> = None;
+        let mut start: Option<u64> = None;
+        let mut end: Option<u64> = None;
+        let mut size: Option<u64> = None;
+        let mut prev_attrs = PrevAttrs::new();
+        for (id_ast, expr_ast) in entry.attrs {
+            errs.also(self.declare_attr(
+                &entry.id.name,
+                &mut prev_attrs,
+                &id_ast,
+            ));
+            match &*id_ast.name {
+                "sum" => {
+                    sum = Some(errs.ok_or(
+                        self.checksum_sum_attr(expr_ast),
+                        ChecksumFormat::U8,
+                    ))
+                }
+                "unit" => {
+                    unit = Some(errs.ok_or(
+                        self.checksum_unit_attr(expr_ast),
+                        ChecksumFormat::U8,
+                    ))
+                }
+                "start" => {
+                    start = Some(
+                        errs.ok_or_default(self.checksum_start_attr(expr_ast)),
+                    )
+                }
+                "end" => {
+                    end = Some(
+                        errs.ok_or_default(self.checksum_end_attr(expr_ast)),
+                    )
+                }
+                "size" => {
+                    size = Some(
+                        errs.ok_or_default(self.checksum_size_attr(expr_ast)),
+                    )
+                }
+                _ => errs.push(self.invalid_attr_error(ENTITY_EXPORT, id_ast)),
+            }
+        }
+        if sum.is_none() {
+            errs.push(self.missing_attr_error("sum", &entry.id));
+        }
+        let start = start.unwrap_or(0);
+        let range = match (end, size) {
+            (None, None) => ChecksumRange::From { start },
+            (Some(end), None) => ChecksumRange::FromTo { start, end },
+            (None, Some(size)) => ChecksumRange::FromSize { start, size },
+            (Some(_end), Some(_size)) => {
+                let message =
+                    "a checksum cannot specify both `size` and `end`"
+                        .to_string();
+                let end_label = "`end` specified here".to_string();
+                let size_label = "`size` specified here".to_string();
+                let end_span = *prev_attrs.get("end").unwrap();
+                let size_span = *prev_attrs.get("size").unwrap();
+                errs.push(
+                    SourceError::new(entry.id.span, message)
+                        .with_label(size_span, size_label)
+                        .with_label(end_span, end_label),
+                );
+                ChecksumRange::default()
+            }
+        };
+        self.checksums.push(ChecksumConfig {
+            name: entry.id.name,
+            sum_format: sum.unwrap_or(ChecksumFormat::U8),
+            unit_format: unit.unwrap_or(ChecksumFormat::U8),
+            range,
+        });
+        errs.result()
+    }
+
+    fn checksum_sum_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ChecksumFormat> {
+        self.static_checksum_format_attr(ENTITY_CHECKSUM, "sum", expr_ast)
+    }
+
+    fn checksum_unit_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ChecksumFormat> {
+        self.static_checksum_format_attr(ENTITY_CHECKSUM, "unit", expr_ast)
+    }
+
+    fn checksum_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u64> {
+        self.static_u64_attr(ENTITY_CHECKSUM, "start", expr_ast)
+    }
+
+    fn checksum_end_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u64> {
+        self.static_u64_attr(ENTITY_CHECKSUM, "end", expr_ast)
+    }
+
+    fn checksum_size_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u64> {
+        self.static_u64_attr(ENTITY_CHECKSUM, "size", expr_ast)
     }
 
     fn visit_exports_dir(
@@ -591,8 +720,7 @@ impl ConfigBuilder {
             }
             (_, expr_type, _) => {
                 let message = format!(
-                    "{entry_kind} `{attr_name}` must have \
-                                       type {entity_kind}"
+                    "{entry_kind} `{attr_name}` must have type {entity_kind}"
                 );
                 let label = format!("this expression has type {expr_type}");
                 Err(Errs::one(
@@ -601,6 +729,26 @@ impl ConfigBuilder {
                 ))
             }
         }
+    }
+
+    fn static_checksum_format_attr(
+        &mut self,
+        entry_kind: &str,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ChecksumFormat> {
+        let expr_span = expr_ast.span;
+        let string = self.static_str_attr(entry_kind, attr_name, expr_ast)?;
+        string.parse::<ChecksumFormat>().map_err(|()| {
+            let message = format!(
+                "{entry_kind} `{attr_name}` must be a valid checksum format"
+            );
+            let label = format!("this value of this expression is {string}");
+            Errs::one(
+                SourceError::new(expr_span, message)
+                    .with_label(expr_span, label),
+            )
+        })
     }
 
     fn static_fill_attr(
@@ -613,6 +761,21 @@ impl ConfigBuilder {
         u8::try_from(&bigint).map_err(|_| {
             Errs::one(self.out_of_range_attr_error(
                 entry_kind, "fill", expr_span, &bigint,
+            ))
+        })
+    }
+
+    fn static_u64_attr(
+        &mut self,
+        entry_kind: &str,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> SourceResult<u64> {
+        let expr_span = expr_ast.span;
+        let bigint = self.static_int_attr(entry_kind, attr_name, expr_ast)?;
+        bigint.to_u64().ok_or_else(|| {
+            Errs::one(self.out_of_range_attr_error(
+                entry_kind, attr_name, expr_span, &bigint,
             ))
         })
     }
@@ -632,6 +795,30 @@ impl ConfigBuilder {
             (_, expr_type, _) => {
                 let message =
                     format!("{entry_kind} `{attr_name}` must be an integer");
+                let label = format!("this expression has type {expr_type}");
+                Err(Errs::one(
+                    SourceError::new(expr_span, message)
+                        .with_label(expr_span, label),
+                ))
+            }
+        }
+    }
+
+    fn static_str_attr(
+        &mut self,
+        entry_kind: &str,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> SourceResult<Rc<str>> {
+        let expr_span = expr_ast.span;
+        match self.typecheck_expression(expr_ast)? {
+            (_, ExprType::String, Some(value)) => Ok(value.unwrap_str()),
+            (_, ExprType::String, None) => Err(Errs::one(
+                self.non_static_attr_error(entry_kind, attr_name, expr_span),
+            )),
+            (_, expr_type, _) => {
+                let message =
+                    format!("{entry_kind} `{attr_name}` must be a string");
                 let label = format!("this expression has type {expr_type}");
                 Err(Errs::one(
                     SourceError::new(expr_span, message)
@@ -776,6 +963,9 @@ pub struct LinkConfig {
     pub sections: Vec<SectionConfig>,
     /// Symbols defined and exported by the linker config.
     pub exports: Vec<ExportConfig>,
+    /// Configurations for checksums to be calculated and written into the
+    /// binary after the rest of the binary has been linked.
+    pub checksums: Vec<ChecksumConfig>,
 }
 
 impl LinkConfig {
@@ -791,7 +981,7 @@ impl LinkConfig {
     pub fn link_objects(
         &self,
         object_files: Vec<ObjFile>,
-    ) -> LinkResult<Vec<LinkFragment>> {
+    ) -> LinkResult<LinkedBinary> {
         let positioned_binary =
             PositionedBinary::position(self, &object_files)?;
         let patched_files = PatchedFile::patch_all(
@@ -799,7 +989,14 @@ impl LinkConfig {
             &positioned_binary.file_chunk_metadata,
             &positioned_binary.exported_symbols,
         )?;
-        Ok(LinkFragment::from_patched_files(patched_files, &positioned_binary))
+        let mut binary = LinkedBinary::from_patched_files(
+            patched_files,
+            &positioned_binary,
+        );
+        for checksum in &self.checksums {
+            checksum.calculate_and_write(&mut binary)?;
+        }
+        Ok(binary)
     }
 }
 

@@ -1,18 +1,20 @@
 //! Facilities for linking objects files together into a binary.
 
 mod arranged;
+mod binary;
 mod config;
 mod error;
-mod expr;
-mod fragment;
 mod loose;
 mod patch;
 mod place;
 mod positioned;
 mod types;
 
-pub use config::{AddrspaceConfig, LinkConfig, RegionConfig, SectionConfig};
-pub use error::LinkError;
-pub use fragment::LinkFragment;
+pub use binary::LinkedBinary;
+pub use config::{
+    AddrspaceConfig, ChecksumConfig, ChecksumFormat, ExportConfig, LinkConfig,
+    RegionConfig, SectionConfig,
+};
+pub use error::{LinkError, LinkResult};
 
 //===========================================================================//

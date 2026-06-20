@@ -1,6 +1,6 @@
 use super::error::{LinkError, LinkResult};
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::Addr;
+use crate::addr::{Addr, Offset};
 use crate::error::Errs;
 use crate::expr::{ExprLabel, ExprValue};
 use crate::obj::{
@@ -99,6 +99,9 @@ impl PatchedFile {
 pub struct PatchedChunk {
     /// The patched chunk data.
     pub data: Box<[u8]>,
+    /// The offset from the start of the chunk, in bytes, for each symbol
+    /// exported by the chunk.
+    pub exported_symbols: HashMap<Rc<str>, Offset>,
 }
 
 impl PatchedChunk {
@@ -171,7 +174,13 @@ impl<'a> FilePatcher<'a> {
             errs.also(self.apply_patch(chunk_index, patch, &mut data));
         }
         errs.result()?;
-        Ok(PatchedChunk { data })
+        let exported_symbols = chunk
+            .symbols
+            .into_iter()
+            .filter(|symbol| symbol.exported)
+            .map(|symbol| (symbol.name, symbol.offset))
+            .collect::<HashMap<Rc<str>, Offset>>();
+        Ok(PatchedChunk { data, exported_symbols })
     }
 
     fn apply_patch(

@@ -53,6 +53,17 @@ pub enum LinkError {
     FillByteOnBssRegion,
     /// A section in a BSS memory region had an explicit fill byte set.
     FillByteOnBssSection,
+    /// A checksum range went beyond the size of the binary.
+    InvalidChecksumRange {
+        /// The symbol name where the checksum is to be stored.
+        checksum_symbol: Rc<str>,
+        /// The size of the binary, in bytes.
+        binary_size: u64,
+        /// The byte offset for the start of the checksum range.
+        start: u64,
+        /// The byte offset for the end of the checksum range.
+        end: u64,
+    },
     /// A patch's expression was malformed in some way (e.g. stack
     /// underflow). This shouldn't happen for valid object files (as the
     /// assembler should have generated a valid expression).
