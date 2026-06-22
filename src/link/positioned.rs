@@ -253,16 +253,6 @@ impl PositionedBinary {
             PositionedBinary::make_chunk_metadata(&positioned_regions);
 
         let mut exported_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
-        for export in &config.exports {
-            exported_symbols.insert(
-                export.name.clone(),
-                AbsoluteLabel {
-                    space: export.space.clone(),
-                    address: export.address,
-                },
-            );
-        }
-
         let mut errs = Errs::<LinkError>::new();
         for (object_index, object_file) in object_files.iter().enumerate() {
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {

@@ -1,13 +1,14 @@
 use super::error::{LinkError, LinkResult};
+use super::eval::{LinkEvalEnv, LinkSymbolContext};
+use super::positioned::PositionedBinary;
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::{Addr, Offset};
+use crate::addr::Offset;
 use crate::error::Errs;
-use crate::expr::{ExprLabel, ExprValue};
+use crate::expr::ExprValue;
 use crate::obj::{
-    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
+    ObjAssert, ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjPatchData,
     ObjPatchIntType,
 };
-use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -22,19 +23,21 @@ pub struct PatchedFile {
 impl PatchedFile {
     pub(super) fn patch_all(
         object_files: Vec<ObjFile>,
-        file_chunk_metadata: &[Vec<ChunkMetadata>],
-        exported_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
+        positioned_binary: &PositionedBinary,
     ) -> LinkResult<Vec<PatchedFile>> {
-        debug_assert_eq!(object_files.len(), file_chunk_metadata.len());
+        debug_assert_eq!(
+            object_files.len(),
+            positioned_binary.file_chunk_metadata.len()
+        );
         let mut errs = Errs::<LinkError>::new();
         let patched_files = object_files
             .into_iter()
-            .zip(file_chunk_metadata)
+            .zip(&positioned_binary.file_chunk_metadata)
             .filter_map(|(file, chunk_metadata)| {
                 errs.ok(PatchedFile::patch(
                     file,
                     chunk_metadata,
-                    exported_symbols,
+                    &positioned_binary.exported_symbols,
                 ))
             })
             .collect::<Vec<PatchedFile>>();
@@ -113,12 +116,8 @@ impl PatchedChunk {
 //===========================================================================//
 
 struct FilePatcher<'a> {
-    /// Metadata for each chunk in this object file.
-    chunk_metadata: &'a [ChunkMetadata],
-    /// For each symbol declared in the object file, local or imported, this
-    /// stores the address space and run address of the symbol, or `None` if
-    /// the symbol couldn't be resolved.
-    symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
+    context: LinkSymbolContext<'a>,
+    env: LinkEvalEnv,
 }
 
 impl<'a> FilePatcher<'a> {
@@ -126,7 +125,10 @@ impl<'a> FilePatcher<'a> {
         chunk_metadata: &'a [ChunkMetadata],
         symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
     ) -> FilePatcher<'a> {
-        FilePatcher { chunk_metadata, symbol_addrs }
+        FilePatcher {
+            context: LinkSymbolContext { chunk_metadata, symbol_addrs },
+            env: LinkEvalEnv::new(),
+        }
     }
 
     pub fn check_assertions(&self, asserts: Vec<ObjAssert>) -> LinkResult<()> {
@@ -195,7 +197,7 @@ impl<'a> FilePatcher<'a> {
         {
             match patch.data {
                 ObjPatchData::Fill(size) => {
-                    let metadata = &self.chunk_metadata[chunk_index];
+                    let metadata = &self.context.chunk_metadata[chunk_index];
                     write_fill_patch(start, size, metadata.fill, data);
                     Ok(())
                 }
@@ -228,123 +230,7 @@ impl<'a> FilePatcher<'a> {
 
     /// Evaluates an expression and returns the result value.
     fn eval_patch_expr(&self, expr: ObjExpr) -> LinkResult<ExprValue> {
-        let mut value_stack = Vec::<ExprValue>::new();
-        for op in expr.ops {
-            match op {
-                ObjExprOp::BinOp(binop) => {
-                    let opt_rhs = value_stack.pop();
-                    let opt_lhs = value_stack.pop();
-                    match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            match binop.evaluate(lhs, rhs) {
-                                Ok(result) => value_stack.push(result),
-                                Err(_) => {
-                                    // TODO: add error details
-                                    return Err(Errs::one(
-                                        LinkError::PatchEvaluationFailed,
-                                    ));
-                                }
-                            }
-                        }
-                        _ => {
-                            // Stack underflow.  That shouldn't happen if
-                            // unless the object file was corrupted.
-                            return Err(Errs::one(
-                                LinkError::MalformedPatchExpression,
-                            ));
-                        }
-                    }
-                }
-                ObjExprOp::LabelAddr => {
-                    match value_stack.pop() {
-                        Some(ExprValue::Label(label)) => {
-                            let resolved = self.resolve_label(label)?;
-                            let address = BigInt::from(resolved.address);
-                            value_stack.push(ExprValue::Integer(address));
-                        }
-                        _ => {
-                            // The expression has a type error.  That shouldn't
-                            // happen if unless the object file was corrupted.
-                            return Err(Errs::one(
-                                LinkError::MalformedPatchExpression,
-                            ));
-                        }
-                    }
-                }
-                ObjExprOp::Push(ExprValue::Label(label)) => {
-                    let resolved = self.resolve_label(label)?;
-                    value_stack.push(ExprValue::Label(
-                        ExprLabel::AddrAbsolute {
-                            space: resolved.space,
-                            address: BigInt::from(resolved.address),
-                        },
-                    ));
-                }
-                ObjExprOp::Push(value) => value_stack.push(value),
-                other => todo!("{other:?}"),
-            }
-        }
-        if let Some(value) = value_stack.pop()
-            && value_stack.is_empty()
-        {
-            Ok(value)
-        } else {
-            Err(Errs::one(LinkError::MalformedPatchExpression))
-        }
-    }
-
-    fn resolve_label(&self, label: ExprLabel) -> LinkResult<AbsoluteLabel> {
-        match label {
-            ExprLabel::AddrAbsolute { space, address } => Ok(AbsoluteLabel {
-                space,
-                address: Addr::wrap_bigint(&address),
-            }),
-            ExprLabel::ChunkAbsolute { chunk_index, address } => {
-                if chunk_index >= self.chunk_metadata.len() {
-                    // Reference to a chunk that doesn't exist in this object
-                    // file.
-                    return Err(Errs::one(
-                        LinkError::MalformedPatchExpression,
-                    ));
-                }
-                let metadata = &self.chunk_metadata[chunk_index];
-                let space = metadata.start.space.clone();
-                Ok(AbsoluteLabel {
-                    space,
-                    address: Addr::wrap_bigint(&address),
-                })
-            }
-            ExprLabel::ChunkRelative { chunk_index, offset } => {
-                if chunk_index >= self.chunk_metadata.len() {
-                    // Reference to a chunk that doesn't exist in this object
-                    // file.
-                    return Err(Errs::one(
-                        LinkError::MalformedPatchExpression,
-                    ));
-                }
-                let metadata = &self.chunk_metadata[chunk_index];
-                let chunk_start = metadata.start.clone();
-                Ok(chunk_start.plus_offset(&offset))
-            }
-            ExprLabel::SymbolRelative { name, offset } => {
-                match self.symbol_addrs.get(&name) {
-                    None => {
-                        // Reference to a symbol not declared in this object
-                        // file.
-                        Err(Errs::one(LinkError::MalformedPatchExpression))
-                    }
-                    Some(None) => {
-                        // Imported symbol that was never exported; an error
-                        // was already reported for this.
-                        //
-                        // TODO: Is there a better way to handle this than
-                        // returning an empty error list?
-                        Err(Errs::new())
-                    }
-                    Some(Some(symbol)) => Ok(symbol.plus_offset(&offset)),
-                }
-            }
-        }
+        self.env.evaluate_expression(&expr, &self.context)
     }
 }
 

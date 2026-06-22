@@ -336,6 +336,12 @@ impl From<bool> for ExprValue {
     }
 }
 
+impl From<BigInt> for ExprValue {
+    fn from(value: BigInt) -> ExprValue {
+        ExprValue::Integer(value)
+    }
+}
+
 impl fmt::Display for ExprValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

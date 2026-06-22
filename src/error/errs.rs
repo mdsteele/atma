@@ -62,6 +62,17 @@ impl<E> Errs<E> {
         self.ok(result).unwrap_or_default()
     }
 
+    /// If the passed in result is `Ok`, returns the value, otherwise merges
+    /// the errors into `self` and calls the function to produce a fallback
+    /// value.
+    pub fn ok_or_else<T, F: FnOnce() -> T>(
+        &mut self,
+        result: Result<T, Errs<E>>,
+        func: F,
+    ) -> T {
+        self.ok(result).unwrap_or_else(func)
+    }
+
     /// If the passed in result is `Err`, merges the errors into `self`.
     pub fn also(&mut self, result: Result<(), Errs<E>>) {
         if let Err(errs) = result {

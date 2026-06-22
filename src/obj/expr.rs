@@ -1,5 +1,6 @@
 use super::binary::BinaryIo;
 use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
+use num_bigint::BigInt;
 use std::io;
 
 //===========================================================================//
@@ -102,6 +103,12 @@ impl From<ExprValue> for ObjExpr {
 
 impl From<bool> for ObjExpr {
     fn from(value: bool) -> ObjExpr {
+        ObjExpr::from(ExprValue::from(value))
+    }
+}
+
+impl From<BigInt> for ObjExpr {
+    fn from(value: BigInt) -> ObjExpr {
         ObjExpr::from(ExprValue::from(value))
     }
 }

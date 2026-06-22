@@ -9,16 +9,16 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-pub(crate) struct LinkDecl {
+pub(super) struct LinkDecl {
     pub id_span: SrcSpan,
+    pub op: ObjExprOp,
     pub var_type: ExprType,
     pub static_value: Option<ExprValue>,
-    pub stack_index: usize,
 }
 
 //===========================================================================//
 
-pub(crate) struct LinkTypeEnv {
+pub(super) struct LinkTypeEnv {
     variables: HashMap<Rc<str>, LinkDecl>,
 }
 
@@ -34,12 +34,15 @@ impl LinkTypeEnv {
     pub fn add_declaration(
         &mut self,
         id: IdentifierAst,
+        op: ObjExprOp,
         var_type: ExprType,
-        static_value: Option<ExprValue>,
     ) {
         let id_span = id.span;
-        let stack_index = self.variables.len();
-        let decl = LinkDecl { id_span, var_type, static_value, stack_index };
+        let static_value = match &op {
+            ObjExprOp::Push(value) => Some(value.clone()),
+            _ => None,
+        };
+        let decl = LinkDecl { id_span, op, var_type, static_value };
         self.variables.insert(id.name, decl);
     }
 
@@ -74,9 +77,9 @@ impl ExprEnv for LinkTypeEnv {
     ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
         match self.variables.get(name) {
             Some(decl) => {
+                let op = decl.op.clone();
                 let var_type = decl.var_type.clone();
                 let static_value = decl.static_value.clone();
-                let op = ObjExprOp::GetValue(decl.stack_index);
                 Ok((op, var_type, static_value))
             }
             None => Err(vec![ExprTypeError::UnknownIdentifier {

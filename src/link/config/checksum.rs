@@ -121,17 +121,26 @@ impl std::str::FromStr for ChecksumFormat {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChecksumRange {
     /// From the given byte offset (inclusive) to the end of the binary.
-    From { start: u64 },
+    From {
+        /// The byte offset for the start of the range.
+        start: u64,
+    },
     /// From the `start` byte offset (inclusive) to the `end` byte offset
     /// (exclusive).
-    ///
-    /// If `start >= end`, then this represents an empty range.
-    FromTo { start: u64, end: u64 },
+    FromTo {
+        /// The byte offset for the start of the range.
+        start: u64,
+        /// The byte offset for the (exclusive) endpoint of the range.
+        end: u64,
+    },
     /// From the `start` byte offset (inclusive) to a byte offset of `(start +
     /// size)` (exclusive).
-    ///
-    /// If `size` is zero, then this represents an empty range.
-    FromSize { start: u64, size: u64 },
+    FromSize {
+        /// The byte offset for the start of the range.
+        start: u64,
+        /// The number of bytes in the range.
+        size: u64,
+    },
 }
 
 impl Default for ChecksumRange {
