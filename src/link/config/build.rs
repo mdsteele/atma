@@ -1,12 +1,13 @@
 use super::checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
 use super::env::LinkTypeEnv;
 use super::{
-    AddrspaceConfig, ExportConfig, LinkConfig, RegionConfig, SectionConfig,
+    AddrspaceConfig, ConfigVariableOr, ExportConfig, LinkConfig, RegionConfig,
+    SectionConfig,
 };
 use crate::addr::{Addr, Align, AlignTryFromError, Range, Size};
 use crate::error::{Errs, SourceError, SourceResult, SrcSpan};
-use crate::expr::{ExprType, ExprValue};
-use crate::obj::{ObjExpr, ObjExprOp};
+use crate::expr::{ExprLabel, ExprType, ExprValue};
+use crate::obj::ObjExpr;
 use crate::parse::{
     ExprAst, IdentifierAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
 };
@@ -29,26 +30,23 @@ type PrevAttrs = HashMap<Rc<str>, SrcSpan>;
 
 pub(super) struct ConfigBuilder {
     env: LinkTypeEnv,
-    addrspaces: Vec<AddrspaceConfig>,
-    bss: Vec<RegionConfig>,
-    memory: Vec<RegionConfig>,
-    sections: Vec<SectionConfig>,
-    variables: Vec<ObjExpr>,
-    exports: Vec<ExportConfig>,
-    checksums: Vec<ChecksumConfig>,
+    config: LinkConfig,
 }
 
 impl ConfigBuilder {
     pub(super) fn new() -> ConfigBuilder {
         ConfigBuilder {
             env: LinkTypeEnv::new(),
-            addrspaces: Vec::new(),
-            bss: Vec::new(),
-            memory: Vec::new(),
-            sections: Vec::new(),
-            variables: Vec::new(),
-            exports: Vec::new(),
-            checksums: Vec::new(),
+            config: LinkConfig {
+                addrspaces: Vec::new(),
+                bss: Vec::new(),
+                memory: Vec::new(),
+                sections: Vec::new(),
+                imports: Vec::new(),
+                variables: Vec::new(),
+                exports: Vec::new(),
+                checksums: Vec::new(),
+            },
         }
     }
 
@@ -61,15 +59,7 @@ impl ConfigBuilder {
             errors.also(self.visit_directive(dir_ast));
         }
         errors.result()?;
-        Ok(LinkConfig {
-            addrspaces: self.addrspaces,
-            bss: self.bss,
-            memory: self.memory,
-            sections: self.sections,
-            variables: self.variables,
-            exports: self.exports,
-            checksums: self.checksums,
-        })
+        Ok(self.config)
     }
 
     fn visit_directive(
@@ -87,6 +77,7 @@ impl ConfigBuilder {
             LinkDirectiveAst::Exports(entries) => {
                 self.visit_exports_dir(entries)
             }
+            LinkDirectiveAst::Import(ids) => self.visit_import_dir(ids),
             LinkDirectiveAst::Let(id, expr) => self.visit_let_dir(id, expr),
             LinkDirectiveAst::Memory(entries) => {
                 self.visit_memory_dir(entries)
@@ -141,7 +132,7 @@ impl ConfigBuilder {
         if bits.is_none() {
             errs.push(self.missing_attr_error("bits", &entry.id));
         }
-        self.addrspaces.push(AddrspaceConfig {
+        self.config.addrspaces.push(AddrspaceConfig {
             name: entry.id.name,
             bits: bits.unwrap_or(u32::BITS),
             fill: fill.unwrap_or_default(),
@@ -184,11 +175,14 @@ impl ConfigBuilder {
         entry: LinkEntryAst,
     ) -> SourceResult<()> {
         let mut errs = Errs::<SourceError>::new();
+        if !self.symbol_is_exported(&entry.id.name) {
+            errs.also(self.import_symbol(entry.id.clone()));
+        }
         let mut sum: Option<ChecksumFormat> = None;
         let mut unit: Option<ChecksumFormat> = None;
-        let mut start: Option<u64> = None;
-        let mut end: Option<u64> = None;
-        let mut size: Option<u64> = None;
+        let mut start: Option<ConfigVariableOr<u64>> = None;
+        let mut end: Option<ConfigVariableOr<u64>> = None;
+        let mut size: Option<ConfigVariableOr<u64>> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             errs.also(self.declare_attr(
@@ -230,7 +224,7 @@ impl ConfigBuilder {
         if sum.is_none() {
             errs.push(self.missing_attr_error("sum", &entry.id));
         }
-        let start = start.unwrap_or(0);
+        let start = start.unwrap_or_default();
         let range = match (end, size) {
             (None, None) => ChecksumRange::From { start },
             (Some(end), None) => ChecksumRange::FromTo { start, end },
@@ -251,7 +245,7 @@ impl ConfigBuilder {
                 ChecksumRange::default()
             }
         };
-        self.checksums.push(ChecksumConfig {
+        self.config.checksums.push(ChecksumConfig {
             name: entry.id.name,
             sum_format: sum.unwrap_or(ChecksumFormat::U8),
             unit_format: unit.unwrap_or(ChecksumFormat::U8),
@@ -274,16 +268,25 @@ impl ConfigBuilder {
         self.static_checksum_format_attr(ENTITY_CHECKSUM, "unit", expr_ast)
     }
 
-    fn checksum_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u64> {
-        self.static_u64_attr(ENTITY_CHECKSUM, "start", expr_ast)
+    fn checksum_start_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ConfigVariableOr<u64>> {
+        self.variable_u64_attr(ENTITY_CHECKSUM, "start", expr_ast)
     }
 
-    fn checksum_end_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u64> {
-        self.static_u64_attr(ENTITY_CHECKSUM, "end", expr_ast)
+    fn checksum_end_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ConfigVariableOr<u64>> {
+        self.variable_u64_attr(ENTITY_CHECKSUM, "end", expr_ast)
     }
 
-    fn checksum_size_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u64> {
-        self.static_u64_attr(ENTITY_CHECKSUM, "size", expr_ast)
+    fn checksum_size_attr(
+        &mut self,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ConfigVariableOr<u64>> {
+        self.variable_u64_attr(ENTITY_CHECKSUM, "size", expr_ast)
     }
 
     fn visit_exports_dir(
@@ -302,9 +305,19 @@ impl ConfigBuilder {
         entry: LinkEntryAst,
     ) -> SourceResult<()> {
         let mut errs = Errs::<SourceError>::new();
-        // TODO: error if this name is already exported
+        if self.symbol_is_imported(&entry.id.name) {
+            let message =
+                "cannot import and export the same symbol".to_string();
+            // TODO: indicate where the symbol was previously imported
+            errs.push(SourceError::new(entry.id.span, message));
+        }
+        if self.symbol_is_exported(&entry.id.name) {
+            let message = "cannot export the same symbol twice".to_string();
+            // TODO: indicate where the symbol was previously exported
+            errs.push(SourceError::new(entry.id.span, message));
+        }
         let mut space: Option<Rc<str>> = None;
-        let mut addr: Option<ObjExpr> = None;
+        let mut addr: Option<ConfigVariableOr<Addr>> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             errs.also(self.declare_attr(
@@ -314,11 +327,9 @@ impl ConfigBuilder {
             ));
             match &*id_ast.name {
                 "addr" => {
-                    addr =
-                        Some(errs.ok_or_else(
-                            self.export_addr_attr(expr_ast),
-                            || ObjExpr::from(BigInt::ZERO),
-                        ))
+                    addr = Some(
+                        errs.ok_or_default(self.export_addr_attr(expr_ast)),
+                    )
                 }
                 "space" => {
                     space = Some(
@@ -334,21 +345,46 @@ impl ConfigBuilder {
         if addr.is_none() {
             errs.push(self.missing_attr_error("addr", &entry.id));
         }
-        self.exports.push(ExportConfig {
-            name: entry.id.name,
-            space: space.unwrap_or_default(),
-            address: addr.unwrap_or_else(|| ObjExpr::from(BigInt::ZERO)),
+        let space = space.unwrap_or_default();
+        let address = addr.unwrap_or_default();
+        self.config.exports.push(ExportConfig {
+            name: entry.id.name.clone(),
+            space: space.clone(),
+            address,
         });
+        let address_value = address.map(|addr| {
+            ExprValue::Label(ExprLabel::AddrAbsolute {
+                space,
+                address: BigInt::from(addr),
+            })
+        });
+        self.env.add_declaration(entry.id, ExprType::Label, address_value);
         errs.result()
     }
 
     fn export_addr_attr(
         &mut self,
         expr_ast: ExprAst,
-    ) -> SourceResult<ObjExpr> {
+    ) -> SourceResult<ConfigVariableOr<Addr>> {
         let expr_span = expr_ast.span;
         match self.typecheck_expression(expr_ast)? {
-            (expr, ExprType::Integer, _) => Ok(expr),
+            (_, ExprType::Integer, Some(static_value)) => {
+                let bigint = static_value.unwrap_int_ref();
+                let addr = Addr::try_from(bigint).map_err(|()| {
+                    Errs::one(self.out_of_range_attr_error(
+                        ENTITY_EXPORT,
+                        "addr",
+                        expr_span,
+                        bigint,
+                    ))
+                })?;
+                Ok(ConfigVariableOr::Static(addr))
+            }
+            (expr, ExprType::Integer, None) => {
+                let index = self.config.variables.len();
+                self.config.variables.push(expr);
+                Ok(ConfigVariableOr::Variable(index))
+            }
             (_, expr_type, _) => Err(Errs::one(self.int_attr_type_error(
                 ENTITY_EXPORT,
                 "addr",
@@ -370,29 +406,68 @@ impl ConfigBuilder {
         )
     }
 
+    fn visit_import_dir(
+        &mut self,
+        id_asts: Vec<IdentifierAst>,
+    ) -> SourceResult<()> {
+        let mut errs = Errs::<SourceError>::new();
+        for id_ast in id_asts {
+            errs.also(self.import_symbol(id_ast));
+        }
+        errs.result()
+    }
+
+    fn import_symbol(&mut self, id_ast: IdentifierAst) -> SourceResult<()> {
+        if self.symbol_is_exported(&id_ast.name) {
+            let message =
+                "cannot import and export the same symbol".to_string();
+            // TODO: indicate where the symbol was previously exported
+            return Err(Errs::one(SourceError::new(id_ast.span, message)));
+        }
+        if !self.symbol_is_imported(&id_ast.name) {
+            self.config.imports.push(id_ast.name.clone());
+        }
+        let label = ExprLabel::SymbolRelative {
+            name: id_ast.name.clone(),
+            offset: BigInt::ZERO,
+        };
+        let value = ConfigVariableOr::Static(ExprValue::Label(label));
+        self.env.add_declaration(id_ast, ExprType::Label, value);
+        Ok(())
+    }
+
+    fn symbol_is_imported(&self, name: &str) -> bool {
+        self.config.imports.iter().any(|import| name == &**import)
+    }
+
+    fn symbol_is_exported(&self, name: &str) -> bool {
+        self.config.exports.iter().any(|export| name == &*export.name)
+    }
+
     fn visit_let_dir(
         &mut self,
         id_ast: IdentifierAst,
         expr_ast: ExprAst,
     ) -> SourceResult<()> {
         let mut errs = Errs::<SourceError>::new();
-        let (op, var_type) = match self.typecheck_expression(expr_ast) {
+        let (var_type, value) = match self.typecheck_expression(expr_ast) {
             Ok((_expr, var_type, Some(static_value))) => {
-                let op = ObjExprOp::Push(static_value);
-                (op, var_type)
+                (var_type, ConfigVariableOr::Static(static_value))
             }
             Ok((expr, var_type, None)) => {
-                let op = ObjExprOp::GetValue(self.variables.len());
-                self.variables.push(expr);
-                (op, var_type)
+                let index = self.config.variables.len();
+                self.config.variables.push(expr);
+                (var_type, ConfigVariableOr::Variable(index))
             }
             Err(errors) => {
                 errs.append(errors);
-                let op = ObjExprOp::Push(ExprValue::Boolean(false));
-                (op, ExprType::Bottom)
+                (
+                    ExprType::Bottom,
+                    ConfigVariableOr::Static(ExprValue::Boolean(false)),
+                )
             }
         };
-        self.env.add_declaration(id_ast, op, var_type);
+        self.env.add_declaration(id_ast, var_type, value);
         errs.result()
     }
 
@@ -403,7 +478,7 @@ impl ConfigBuilder {
         let mut errs = Errs::<SourceError>::new();
         for entry in entries {
             let region = errs.with(self.visit_region_entry(entry));
-            self.bss.push(region);
+            self.config.bss.push(region);
         }
         errs.result()
     }
@@ -415,7 +490,7 @@ impl ConfigBuilder {
         let mut errs = Errs::<SourceError>::new();
         for entry in entries {
             let region = errs.with(self.visit_region_entry(entry));
-            self.memory.push(region);
+            self.config.memory.push(region);
         }
         errs.result()
     }
@@ -528,6 +603,7 @@ impl ConfigBuilder {
 
     fn memory_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
         let expr_span = expr_ast.span;
+        // TODO: allow this to be a static exported label
         let bigint = self.static_int_attr(ENTITY_MEMORY, "start", expr_ast)?;
         Addr::try_from(&bigint).map_err(|()| {
             Errs::one(self.out_of_range_attr_error(
@@ -611,7 +687,7 @@ impl ConfigBuilder {
         if region.is_none() {
             errs.push(self.missing_attr_error("region", &entry.id));
         }
-        self.sections.push(SectionConfig {
+        self.config.sections.push(SectionConfig {
             name: entry.id.name,
             region: region.unwrap_or_default(),
             start,
@@ -648,6 +724,7 @@ impl ConfigBuilder {
 
     fn section_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
         let expr_span = expr_ast.span;
+        // TODO: allow this to be a static exported label
         let bigint =
             self.static_int_attr(ENTITY_SECTION, "start", expr_ast)?;
         Addr::try_from(&bigint).map_err(|()| {
@@ -773,19 +850,39 @@ impl ConfigBuilder {
         })
     }
 
-    fn static_u64_attr(
+    fn variable_u64_attr(
         &mut self,
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
-    ) -> SourceResult<u64> {
+    ) -> SourceResult<ConfigVariableOr<u64>> {
         let expr_span = expr_ast.span;
-        let bigint = self.static_int_attr(entry_kind, attr_name, expr_ast)?;
-        bigint.to_u64().ok_or_else(|| {
-            Errs::one(self.out_of_range_attr_error(
-                entry_kind, attr_name, expr_span, &bigint,
-            ))
-        })
+        match self.typecheck_expression(expr_ast)? {
+            (_, ExprType::Integer, Some(static_value)) => {
+                let bigint = static_value.unwrap_int_ref();
+                let uint64 = bigint.to_u64().ok_or_else(|| {
+                    Errs::one(self.out_of_range_attr_error(
+                        entry_kind, attr_name, expr_span, bigint,
+                    ))
+                })?;
+                Ok(ConfigVariableOr::Static(uint64))
+            }
+            (_, ExprType::Label, Some(static_value)) => {
+                let index = self.config.variables.len();
+                self.config.variables.push(ObjExpr::from(static_value));
+                Ok(ConfigVariableOr::Variable(index))
+            }
+            (expr, ExprType::Integer | ExprType::Label, None) => {
+                let index = self.config.variables.len();
+                self.config.variables.push(expr);
+                Ok(ConfigVariableOr::Variable(index))
+            }
+            // TODO: int_attr_type_error is wrong, since this can also be a
+            // label
+            (_, expr_type, _) => Err(Errs::one(self.int_attr_type_error(
+                entry_kind, attr_name, expr_span, &expr_type,
+            ))),
+        }
     }
 
     fn static_int_attr(
@@ -845,10 +942,11 @@ impl ConfigBuilder {
         if let Some(decl) = self.env.get_declaration(&entry_id.name) {
             Err(Errs::one(self.duplicate_id_error(entry_id, decl.id_span)))
         } else {
+            let value = ExprValue::Entity(entry_id.name.clone());
             self.env.add_declaration(
                 entry_id.clone(),
-                ObjExprOp::Push(ExprValue::Entity(entry_id.name.clone())),
                 ExprType::Entity(Rc::from(entry_kind)),
+                ConfigVariableOr::Static(value),
             );
             Ok(())
         }

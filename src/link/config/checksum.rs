@@ -1,5 +1,10 @@
+use super::super::eval::LinkEvalEnv;
+use super::ConfigVariableOr;
 use crate::error::Errs;
+use crate::expr::{ExprLabel, ExprValue};
 use crate::link::{LinkError, LinkResult, LinkedBinary};
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 use std::fmt;
 use std::rc::Rc;
 
@@ -13,17 +18,18 @@ pub struct ChecksumConfig {
     /// checksum.
     pub name: Rc<str>,
     /// The format to use for storing the computed sum.
-    pub sum_format: ChecksumFormat,
+    pub sum_format: ChecksumFormat, // TODO: use ConfigVariableOr
     /// The format to use for reading units of data to be summed.
-    pub unit_format: ChecksumFormat,
+    pub unit_format: ChecksumFormat, // TODO: use ConfigVariableOr
     /// The range of bytes in the binary over which to compute the checksum.
-    pub range: ChecksumRange,
+    pub range: ChecksumRange<ConfigVariableOr<u64>>,
 }
 
 impl ChecksumConfig {
     pub(super) fn calculate_and_write(
         &self,
         binary: &mut LinkedBinary,
+        eval_env: &LinkEvalEnv,
     ) -> LinkResult<()> {
         let Some(offset) = binary.get_symbol_offset(&self.name) else {
             return Err(Errs::one(LinkError::Misc)); // TODO: error details
@@ -33,9 +39,22 @@ impl ChecksumConfig {
             return Err(Errs::one(LinkError::Misc)); // TODO: error details
         }
         let (start, end) = match self.range {
-            ChecksumRange::From { start } => (start, binary_size),
-            ChecksumRange::FromTo { start, end } => (start, end),
-            ChecksumRange::FromSize { start, size } => (start, start + size),
+            ChecksumRange::From { start } => {
+                let start = resolve(start, binary, eval_env)?;
+                (start, binary_size)
+            }
+            ChecksumRange::FromTo { start, end } => {
+                // TODO: allow parallel errors
+                let start = resolve(start, binary, eval_env)?;
+                let end = resolve(end, binary, eval_env)?;
+                (start, end)
+            }
+            ChecksumRange::FromSize { start, size } => {
+                // TODO: allow parallel errors
+                let start = resolve(start, binary, eval_env)?;
+                let size = resolve(size, binary, eval_env)?;
+                (start, start + size) // TODO: check for overflow
+            }
         };
         if start > end || end > binary_size {
             return Err(Errs::one(LinkError::InvalidChecksumRange {
@@ -49,6 +68,33 @@ impl ChecksumConfig {
         binary.store_checksum(checksum, self.sum_format, offset);
         Ok(())
     }
+}
+
+fn resolve(
+    variable: ConfigVariableOr<u64>,
+    binary: &LinkedBinary,
+    eval_env: &LinkEvalEnv,
+) -> LinkResult<u64> {
+    eval_env.resolve(variable, |value| match value {
+        ExprValue::Integer(bigint) => {
+            // TODO: error details
+            bigint.to_u64().ok_or_else(|| Errs::one(LinkError::Misc))
+        }
+        ExprValue::Label(ExprLabel::SymbolRelative { name, offset }) => {
+            let binary_offset =
+                binary.get_symbol_offset(name).ok_or_else(|| {
+                    Errs::one(LinkError::Misc) // TODO: error details
+                })?;
+            let binary_offset = BigInt::from(binary_offset) + offset;
+            binary_offset.to_u64().ok_or_else(|| Errs::one(LinkError::Misc))
+        }
+        ExprValue::Label(_label) => {
+            // TODO: error details: checksum expressions can only use imported
+            // symbols, not exported symbols.
+            Err(Errs::one(LinkError::Misc))
+        }
+        _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+    })
 }
 
 //===========================================================================//
@@ -119,33 +165,33 @@ impl std::str::FromStr for ChecksumFormat {
 
 /// A range of bytes in a linked binary over which to compute a checksum.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ChecksumRange {
+pub enum ChecksumRange<T> {
     /// From the given byte offset (inclusive) to the end of the binary.
     From {
         /// The byte offset for the start of the range.
-        start: u64,
+        start: T,
     },
     /// From the `start` byte offset (inclusive) to the `end` byte offset
     /// (exclusive).
     FromTo {
         /// The byte offset for the start of the range.
-        start: u64,
+        start: T,
         /// The byte offset for the (exclusive) endpoint of the range.
-        end: u64,
+        end: T,
     },
     /// From the `start` byte offset (inclusive) to a byte offset of `(start +
     /// size)` (exclusive).
     FromSize {
         /// The byte offset for the start of the range.
-        start: u64,
+        start: T,
         /// The number of bytes in the range.
-        size: u64,
+        size: T,
     },
 }
 
-impl Default for ChecksumRange {
+impl<T: Default> Default for ChecksumRange<T> {
     fn default() -> Self {
-        Self::From { start: 0 }
+        Self::From { start: T::default() }
     }
 }
 

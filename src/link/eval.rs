@@ -1,3 +1,4 @@
+use super::config::ConfigVariableOr;
 use super::error::{LinkError, LinkResult};
 use super::types::{AbsoluteLabel, ChunkMetadata};
 use crate::addr::Addr;
@@ -26,7 +27,10 @@ pub(super) struct LinkSymbolContext<'a> {
 }
 
 impl<'a> LinkSymbolContext<'a> {
-    fn resolve_label(&self, label: &ExprLabel) -> LinkResult<AbsoluteLabel> {
+    pub fn resolve_label(
+        &self,
+        label: &ExprLabel,
+    ) -> LinkResult<AbsoluteLabel> {
         match label {
             ExprLabel::AddrAbsolute { space, address } => Ok(AbsoluteLabel {
                 space: space.clone(),
@@ -97,6 +101,39 @@ impl LinkEvalEnv {
         self.variables.push(variable);
     }
 
+    /// Gets the value of the variable at the given index, or `None` if no such
+    /// variable exists.
+    pub fn get_variable(&self, index: usize) -> Option<&ExprValue> {
+        if index < self.variables.len() {
+            Some(&self.variables[index])
+        } else {
+            None
+        }
+    }
+
+    pub fn resolve<T, F>(
+        &self,
+        variable: ConfigVariableOr<T>,
+        func: F,
+    ) -> LinkResult<T>
+    where
+        F: FnOnce(&ExprValue) -> LinkResult<T>,
+    {
+        match variable {
+            ConfigVariableOr::Variable(index) => {
+                match self.get_variable(index) {
+                    Some(expr_value) => func(expr_value),
+                    None => {
+                        // Invalid variable index.  That shouldn't happen if
+                        // unless the object file was corrupted.
+                        Err(Errs::one(LinkError::MalformedPatchExpression))
+                    }
+                }
+            }
+            ConfigVariableOr::Static(value) => Ok(value),
+        }
+    }
+
     /// Evaluates an expression and returns the result value.
     pub fn evaluate_expression(
         &self,
@@ -131,8 +168,8 @@ impl LinkEvalEnv {
                     }
                 }
                 &ObjExprOp::GetValue(index) => {
-                    if index < self.variables.len() {
-                        expr_stack.push(self.variables[index].clone());
+                    if let Some(value) = self.get_variable(index) {
+                        expr_stack.push(value.clone());
                     } else {
                         // Invalid variable index.  That shouldn't happen if
                         // unless the object file was corrupted.

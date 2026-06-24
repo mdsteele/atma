@@ -48,6 +48,8 @@ pub enum LinkDirectiveAst {
     Checksums(Vec<LinkEntryAst>),
     /// An `.EXPORTS` directive block.
     Exports(Vec<LinkEntryAst>),
+    /// An `.IMPORT` directive.
+    Import(Vec<IdentifierAst>),
     /// A `.LET` directive.
     Let(IdentifierAst, ExprAst),
     /// A `.MEMORY` directive block.
@@ -76,6 +78,15 @@ impl LinkDirectiveAst {
         let exports_dir = directive(".EXPORTS")
             .ignore_then(entries_block.clone())
             .map(LinkDirectiveAst::Exports);
+        let import_dir = directive(".IMPORT")
+            .ignore_then(
+                IdentifierAst::parser()
+                    .separated_by(symbol(TokenValue::Comma))
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(linebreak())
+            .map(LinkDirectiveAst::Import);
         let let_dir = directive(".LET")
             .ignore_then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::Equals))
@@ -93,6 +104,7 @@ impl LinkDirectiveAst {
             bss_dir,
             checksums_dir,
             exports_dir,
+            import_dir,
             let_dir,
             memory_dir,
             sections_dir,
