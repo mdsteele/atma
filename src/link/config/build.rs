@@ -140,7 +140,7 @@ impl ConfigBuilder {
         errs.result()
     }
 
-    fn addrspace_bits_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u32> {
+    fn addrspace_bits_attr(&self, expr_ast: ExprAst) -> SourceResult<u32> {
         let expr_span = expr_ast.span;
         let bigint =
             self.static_int_attr(ENTITY_ADDRSPACE, "bits", expr_ast)?;
@@ -155,7 +155,7 @@ impl ConfigBuilder {
         }
     }
 
-    fn addrspace_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
+    fn addrspace_fill_attr(&self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_ADDRSPACE, expr_ast)
     }
 
@@ -178,8 +178,8 @@ impl ConfigBuilder {
         if !self.symbol_is_exported(&entry.id.name) {
             errs.also(self.import_symbol(entry.id.clone()));
         }
-        let mut sum: Option<ChecksumFormat> = None;
-        let mut unit: Option<ChecksumFormat> = None;
+        let mut sum: Option<ConfigVariableOr<Rc<[ChecksumFormat]>>> = None;
+        let mut unit: Option<ConfigVariableOr<ChecksumFormat>> = None;
         let mut start: Option<ConfigVariableOr<u64>> = None;
         let mut end: Option<ConfigVariableOr<u64>> = None;
         let mut size: Option<ConfigVariableOr<u64>> = None;
@@ -192,15 +192,16 @@ impl ConfigBuilder {
             ));
             match &*id_ast.name {
                 "sum" => {
-                    sum = Some(errs.ok_or(
-                        self.checksum_sum_attr(expr_ast),
-                        ChecksumFormat::U8,
-                    ))
+                    sum =
+                        Some(errs.ok_or_else(
+                            self.checksum_sum_attr(expr_ast),
+                            || ConfigVariableOr::Static(Rc::from([])),
+                        ))
                 }
                 "unit" => {
                     unit = Some(errs.ok_or(
                         self.checksum_unit_attr(expr_ast),
-                        ChecksumFormat::U8,
+                        ConfigVariableOr::Static(ChecksumFormat::U8),
                     ))
                 }
                 "start" => {
@@ -245,10 +246,15 @@ impl ConfigBuilder {
                 ChecksumRange::default()
             }
         };
+        if sum.is_none() {
+            errs.push(self.missing_attr_error("sum", &entry.id));
+        }
         self.config.checksums.push(ChecksumConfig {
             name: entry.id.name,
-            sum_format: sum.unwrap_or(ChecksumFormat::U8),
-            unit_format: unit.unwrap_or(ChecksumFormat::U8),
+            sum_formats: sum
+                .unwrap_or_else(|| ConfigVariableOr::Static(Rc::from([]))),
+            unit_format: unit
+                .unwrap_or(ConfigVariableOr::Static(ChecksumFormat::U8)),
             range,
         });
         errs.result()
@@ -257,15 +263,15 @@ impl ConfigBuilder {
     fn checksum_sum_attr(
         &mut self,
         expr_ast: ExprAst,
-    ) -> SourceResult<ChecksumFormat> {
-        self.static_checksum_format_attr(ENTITY_CHECKSUM, "sum", expr_ast)
+    ) -> SourceResult<ConfigVariableOr<Rc<[ChecksumFormat]>>> {
+        self.variable_checksum_formats_attr(ENTITY_CHECKSUM, "sum", expr_ast)
     }
 
     fn checksum_unit_attr(
         &mut self,
         expr_ast: ExprAst,
-    ) -> SourceResult<ChecksumFormat> {
-        self.static_checksum_format_attr(ENTITY_CHECKSUM, "unit", expr_ast)
+    ) -> SourceResult<ConfigVariableOr<ChecksumFormat>> {
+        self.variable_checksum_format_attr(ENTITY_CHECKSUM, "unit", expr_ast)
     }
 
     fn checksum_start_attr(
@@ -352,7 +358,7 @@ impl ConfigBuilder {
             space: space.clone(),
             address,
         });
-        let address_value = address.map(|addr| {
+        let address_value = address.map_static(|addr| {
             ExprValue::Label(ExprLabel::AddrAbsolute {
                 space,
                 address: BigInt::from(addr),
@@ -380,11 +386,7 @@ impl ConfigBuilder {
                 })?;
                 Ok(ConfigVariableOr::Static(addr))
             }
-            (expr, ExprType::Integer, None) => {
-                let index = self.config.variables.len();
-                self.config.variables.push(expr);
-                Ok(ConfigVariableOr::Variable(index))
-            }
+            (expr, ExprType::Integer, None) => Ok(self.add_variable(expr)),
             (_, expr_type, _) => Err(Errs::one(self.int_attr_type_error(
                 ENTITY_EXPORT,
                 "addr",
@@ -394,10 +396,7 @@ impl ConfigBuilder {
         }
     }
 
-    fn export_space_attr(
-        &mut self,
-        expr_ast: ExprAst,
-    ) -> SourceResult<Rc<str>> {
+    fn export_space_attr(&self, expr_ast: ExprAst) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_EXPORT,
             "space",
@@ -454,11 +453,7 @@ impl ConfigBuilder {
             Ok((_expr, var_type, Some(static_value))) => {
                 (var_type, ConfigVariableOr::Static(static_value))
             }
-            Ok((expr, var_type, None)) => {
-                let index = self.config.variables.len();
-                self.config.variables.push(expr);
-                (var_type, ConfigVariableOr::Variable(index))
-            }
+            Ok((expr, var_type, None)) => (var_type, self.add_variable(expr)),
             Err(errors) => {
                 errs.append(errors);
                 (
@@ -469,6 +464,12 @@ impl ConfigBuilder {
         };
         self.env.add_declaration(id_ast, var_type, value);
         errs.result()
+    }
+
+    fn add_variable<T>(&mut self, expr: ObjExpr) -> ConfigVariableOr<T> {
+        let index = self.config.variables.len();
+        self.config.variables.push(expr);
+        ConfigVariableOr::Variable(index)
     }
 
     fn visit_bss_dir(
@@ -571,11 +572,11 @@ impl ConfigBuilder {
         (region, errs)
     }
 
-    fn memory_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
+    fn memory_fill_attr(&self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_MEMORY, expr_ast)
     }
 
-    fn memory_size_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Size> {
+    fn memory_size_attr(&self, expr_ast: ExprAst) -> SourceResult<Size> {
         let expr_span = expr_ast.span;
         let bigint = self.static_int_attr(ENTITY_MEMORY, "size", expr_ast)?;
         match Size::try_from(&bigint) {
@@ -589,10 +590,7 @@ impl ConfigBuilder {
         }
     }
 
-    fn memory_space_attr(
-        &mut self,
-        expr_ast: ExprAst,
-    ) -> SourceResult<Rc<str>> {
+    fn memory_space_attr(&self, expr_ast: ExprAst) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_MEMORY,
             "space",
@@ -601,7 +599,7 @@ impl ConfigBuilder {
         )
     }
 
-    fn memory_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
+    fn memory_start_attr(&self, expr_ast: ExprAst) -> SourceResult<Addr> {
         let expr_span = expr_ast.span;
         // TODO: allow this to be a static exported label
         let bigint = self.static_int_attr(ENTITY_MEMORY, "start", expr_ast)?;
@@ -699,21 +697,15 @@ impl ConfigBuilder {
         errs.result()
     }
 
-    fn section_align_attr(
-        &mut self,
-        expr_ast: ExprAst,
-    ) -> SourceResult<Align> {
+    fn section_align_attr(&self, expr_ast: ExprAst) -> SourceResult<Align> {
         self.static_align_attr(ENTITY_SECTION, "align", expr_ast)
     }
 
-    fn section_fill_attr(&mut self, expr_ast: ExprAst) -> SourceResult<u8> {
+    fn section_fill_attr(&self, expr_ast: ExprAst) -> SourceResult<u8> {
         self.static_fill_attr(ENTITY_SECTION, expr_ast)
     }
 
-    fn section_region_attr(
-        &mut self,
-        expr_ast: ExprAst,
-    ) -> SourceResult<Rc<str>> {
+    fn section_region_attr(&self, expr_ast: ExprAst) -> SourceResult<Rc<str>> {
         self.static_entity_attr(
             ENTITY_SECTION,
             "region",
@@ -722,7 +714,7 @@ impl ConfigBuilder {
         )
     }
 
-    fn section_start_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Addr> {
+    fn section_start_attr(&self, expr_ast: ExprAst) -> SourceResult<Addr> {
         let expr_span = expr_ast.span;
         // TODO: allow this to be a static exported label
         let bigint =
@@ -737,7 +729,7 @@ impl ConfigBuilder {
         })
     }
 
-    fn section_size_attr(&mut self, expr_ast: ExprAst) -> SourceResult<Size> {
+    fn section_size_attr(&self, expr_ast: ExprAst) -> SourceResult<Size> {
         let expr_span = expr_ast.span;
         let bigint = self.static_int_attr(ENTITY_SECTION, "size", expr_ast)?;
         match Size::try_from(&bigint) {
@@ -751,15 +743,12 @@ impl ConfigBuilder {
         }
     }
 
-    fn section_within_attr(
-        &mut self,
-        expr_ast: ExprAst,
-    ) -> SourceResult<Align> {
+    fn section_within_attr(&self, expr_ast: ExprAst) -> SourceResult<Align> {
         self.static_align_attr(ENTITY_SECTION, "within", expr_ast)
     }
 
     fn static_align_attr(
-        &mut self,
+        &self,
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
@@ -784,7 +773,7 @@ impl ConfigBuilder {
     }
 
     fn static_entity_attr(
-        &mut self,
+        &self,
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
@@ -816,17 +805,91 @@ impl ConfigBuilder {
         }
     }
 
-    fn static_checksum_format_attr(
+    fn variable_checksum_formats_attr(
         &mut self,
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
-    ) -> SourceResult<ChecksumFormat> {
+    ) -> SourceResult<ConfigVariableOr<Rc<[ChecksumFormat]>>> {
         let expr_span = expr_ast.span;
-        let string = self.static_str_attr(entry_kind, attr_name, expr_ast)?;
+        match self.typecheck_expression(expr_ast)? {
+            (_, ExprType::String, Some(static_value)) => {
+                let format = self.parse_format(
+                    static_value.unwrap_str_ref(),
+                    entry_kind,
+                    attr_name,
+                    expr_span,
+                )?;
+                Ok(ConfigVariableOr::Static(Rc::from([format])))
+            }
+            (_, ExprType::List(inner), Some(static_value))
+                if *inner == ExprType::String =>
+            {
+                let mut errs = Errs::<SourceError>::new();
+                let items = static_value.unwrap_list();
+                let mut formats =
+                    Vec::<ChecksumFormat>::with_capacity(items.len());
+                for item in items.iter() {
+                    if let Some(format) = errs.ok(self.parse_format(
+                        item.unwrap_str_ref(),
+                        entry_kind,
+                        attr_name,
+                        expr_span,
+                    )) {
+                        formats.push(format);
+                    }
+                }
+                errs.result()?;
+                debug_assert_eq!(formats.len(), formats.capacity());
+                Ok(ConfigVariableOr::Static(Rc::from(
+                    formats.into_boxed_slice(),
+                )))
+            }
+            (expr, ExprType::String, None) => Ok(self.add_variable(expr)),
+            (expr, ExprType::List(inner), None)
+                if *inner == ExprType::String =>
+            {
+                Ok(self.add_variable(expr))
+            }
+            (_, expr_type, _) => {
+                let message = format!(
+                    "{entry_kind} `{attr_name}` must be a string or list of \
+                     strings"
+                );
+                let label = format!("this expression has type {expr_type}");
+                Err(Errs::one(
+                    SourceError::new(expr_span, message)
+                        .with_label(expr_span, label),
+                ))
+            }
+        }
+    }
+
+    fn variable_checksum_format_attr(
+        &mut self,
+        entry_kind: &str,
+        attr_name: &str,
+        expr_ast: ExprAst,
+    ) -> SourceResult<ConfigVariableOr<ChecksumFormat>> {
+        let expr_span = expr_ast.span;
+        let variable =
+            self.variable_str_attr(entry_kind, attr_name, expr_ast)?;
+        variable.try_map_static(|string| {
+            self.parse_format(&string, entry_kind, attr_name, expr_span)
+        })
+    }
+
+    fn parse_format(
+        &mut self,
+        string: &str,
+        entry_kind: &str,
+        attr_name: &str,
+        expr_span: SrcSpan,
+    ) -> SourceResult<ChecksumFormat> {
         string.parse::<ChecksumFormat>().map_err(|()| {
             let message = format!(
-                "{entry_kind} `{attr_name}` must be a valid checksum format"
+                "{entry_kind} `{attr_name}` must use a valid checksum \
+                 format"
             );
             let label = format!("this value of this expression is {string}");
             Errs::one(
@@ -837,7 +900,7 @@ impl ConfigBuilder {
     }
 
     fn static_fill_attr(
-        &mut self,
+        &self,
         entry_kind: &str,
         expr_ast: ExprAst,
     ) -> SourceResult<u8> {
@@ -868,14 +931,10 @@ impl ConfigBuilder {
                 Ok(ConfigVariableOr::Static(uint64))
             }
             (_, ExprType::Label, Some(static_value)) => {
-                let index = self.config.variables.len();
-                self.config.variables.push(ObjExpr::from(static_value));
-                Ok(ConfigVariableOr::Variable(index))
+                Ok(self.add_variable(ObjExpr::from(static_value)))
             }
             (expr, ExprType::Integer | ExprType::Label, None) => {
-                let index = self.config.variables.len();
-                self.config.variables.push(expr);
-                Ok(ConfigVariableOr::Variable(index))
+                Ok(self.add_variable(expr))
             }
             // TODO: int_attr_type_error is wrong, since this can also be a
             // label
@@ -886,7 +945,7 @@ impl ConfigBuilder {
     }
 
     fn static_int_attr(
-        &mut self,
+        &self,
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
@@ -903,18 +962,18 @@ impl ConfigBuilder {
         }
     }
 
-    fn static_str_attr(
+    fn variable_str_attr(
         &mut self,
         entry_kind: &str,
         attr_name: &str,
         expr_ast: ExprAst,
-    ) -> SourceResult<Rc<str>> {
+    ) -> SourceResult<ConfigVariableOr<Rc<str>>> {
         let expr_span = expr_ast.span;
         match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::String, Some(value)) => Ok(value.unwrap_str()),
-            (_, ExprType::String, None) => Err(Errs::one(
-                self.non_static_attr_error(entry_kind, attr_name, expr_span),
-            )),
+            (_, ExprType::String, Some(static_value)) => {
+                Ok(ConfigVariableOr::Static(static_value.unwrap_str()))
+            }
+            (expr, ExprType::String, None) => Ok(self.add_variable(expr)),
             (_, expr_type, _) => {
                 let message =
                     format!("{entry_kind} `{attr_name}` must be a string");
@@ -928,7 +987,7 @@ impl ConfigBuilder {
     }
 
     fn typecheck_expression(
-        &mut self,
+        &self,
         expr_ast: ExprAst,
     ) -> SourceResult<(ObjExpr, ExprType, Option<ExprValue>)> {
         self.env.typecheck_expression(&expr_ast)
@@ -1012,7 +1071,7 @@ impl ConfigBuilder {
     }
 
     fn memory_range_overflow_error(
-        &mut self,
+        &self,
         entry_id: &IdentifierAst,
         start: Addr,
         size: Size,

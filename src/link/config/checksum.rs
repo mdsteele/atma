@@ -17,10 +17,10 @@ pub struct ChecksumConfig {
     /// The name of the destination symbol at which to store the computed
     /// checksum.
     pub name: Rc<str>,
-    /// The format to use for storing the computed sum.
-    pub sum_format: ChecksumFormat, // TODO: use ConfigVariableOr
+    /// The formats to use for storing the computed sum.
+    pub sum_formats: ConfigVariableOr<Rc<[ChecksumFormat]>>,
     /// The format to use for reading units of data to be summed.
-    pub unit_format: ChecksumFormat, // TODO: use ConfigVariableOr
+    pub unit_format: ConfigVariableOr<ChecksumFormat>,
     /// The range of bytes in the binary over which to compute the checksum.
     pub range: ChecksumRange<ConfigVariableOr<u64>>,
 }
@@ -31,28 +31,32 @@ impl ChecksumConfig {
         binary: &mut LinkedBinary,
         eval_env: &LinkEvalEnv,
     ) -> LinkResult<()> {
+        let sum_formats = resolve_formats(self.sum_formats.clone(), eval_env)?;
+        let sums_size: u64 =
+            sum_formats.iter().map(|format| u64::from(format.size())).sum();
+        let unit_format = resolve_format(self.unit_format, eval_env)?;
         let Some(offset) = binary.get_symbol_offset(&self.name) else {
             return Err(Errs::one(LinkError::Misc)); // TODO: error details
         };
         let binary_size = binary.size();
-        if offset + u64::from(self.sum_format.size()) > binary_size {
+        if offset + sums_size > binary_size {
             return Err(Errs::one(LinkError::Misc)); // TODO: error details
         }
         let (start, end) = match self.range {
             ChecksumRange::From { start } => {
-                let start = resolve(start, binary, eval_env)?;
+                let start = resolve_range(start, binary, eval_env)?;
                 (start, binary_size)
             }
             ChecksumRange::FromTo { start, end } => {
                 // TODO: allow parallel errors
-                let start = resolve(start, binary, eval_env)?;
-                let end = resolve(end, binary, eval_env)?;
+                let start = resolve_range(start, binary, eval_env)?;
+                let end = resolve_range(end, binary, eval_env)?;
                 (start, end)
             }
             ChecksumRange::FromSize { start, size } => {
                 // TODO: allow parallel errors
-                let start = resolve(start, binary, eval_env)?;
-                let size = resolve(size, binary, eval_env)?;
+                let start = resolve_range(start, binary, eval_env)?;
+                let size = resolve_range(size, binary, eval_env)?;
                 (start, start + size) // TODO: check for overflow
             }
         };
@@ -64,13 +68,62 @@ impl ChecksumConfig {
                 end,
             }));
         }
-        let checksum = binary.calculate_checksum(start, end, self.unit_format);
-        binary.store_checksum(checksum, self.sum_format, offset);
+        let checksum = binary.calculate_checksum(start, end, unit_format);
+        let mut offset = offset;
+        for &sum_format in sum_formats.iter() {
+            binary.store_checksum(checksum, sum_format, offset);
+            offset += u64::from(sum_format.size());
+        }
         Ok(())
     }
 }
 
-fn resolve(
+fn resolve_format(
+    variable: ConfigVariableOr<ChecksumFormat>,
+    eval_env: &LinkEvalEnv,
+) -> LinkResult<ChecksumFormat> {
+    eval_env.resolve(variable, |value| match value {
+        ExprValue::String(string) => parse_format(string),
+        _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+    })
+}
+
+fn resolve_formats(
+    variable: ConfigVariableOr<Rc<[ChecksumFormat]>>,
+    eval_env: &LinkEvalEnv,
+) -> LinkResult<Rc<[ChecksumFormat]>> {
+    eval_env.resolve(variable, |value| match value {
+        ExprValue::String(string) => Ok(Rc::from([parse_format(string)?])),
+        ExprValue::List(items) => {
+            let mut errs = Errs::<LinkError>::new();
+            let mut formats =
+                Vec::<ChecksumFormat>::with_capacity(items.len());
+            for item in items.iter() {
+                match item {
+                    ExprValue::String(string) => {
+                        if let Some(format) = errs.ok(parse_format(string)) {
+                            formats.push(format);
+                        }
+                    }
+                    _ => {
+                        errs.push(LinkError::MalformedPatchExpression);
+                    }
+                }
+            }
+            errs.result()?;
+            debug_assert_eq!(formats.len(), formats.capacity());
+            Ok(Rc::from(formats.into_boxed_slice()))
+        }
+        _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+    })
+}
+
+fn parse_format(string: &str) -> LinkResult<ChecksumFormat> {
+    // TODO: error details
+    string.parse::<ChecksumFormat>().map_err(|()| Errs::one(LinkError::Misc))
+}
+
+fn resolve_range(
     variable: ConfigVariableOr<u64>,
     binary: &LinkedBinary,
     eval_env: &LinkEvalEnv,

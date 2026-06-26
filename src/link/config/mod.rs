@@ -230,13 +230,23 @@ pub enum ConfigVariableOr<T> {
 }
 
 impl<T> ConfigVariableOr<T> {
-    pub(crate) fn map<U, F: FnOnce(T) -> U>(
+    pub(crate) fn map_static<U, F: FnOnce(T) -> U>(
         self,
         func: F,
     ) -> ConfigVariableOr<U> {
         match self {
             Self::Variable(index) => ConfigVariableOr::Variable(index),
             Self::Static(value) => ConfigVariableOr::Static(func(value)),
+        }
+    }
+
+    pub(crate) fn try_map_static<U, E, F: FnOnce(T) -> Result<U, E>>(
+        self,
+        func: F,
+    ) -> Result<ConfigVariableOr<U>, E> {
+        match self {
+            Self::Variable(index) => Ok(ConfigVariableOr::Variable(index)),
+            Self::Static(value) => Ok(ConfigVariableOr::Static(func(value)?)),
         }
     }
 }
