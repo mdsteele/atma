@@ -1,13 +1,19 @@
 use atma;
+use std::rc::Rc;
 
 //===========================================================================//
 
 fn assert_asm(source: &str, binary: &[u8]) {
     let arch = "SPC700";
-    let obj_source =
-        format!(".SECTION \"TEST\", arch=\"{arch}\"\n{source}\n.END\n");
-    let obj_file = atma::asm::assemble_source(&obj_source)
-        .expect(&format!("Failed to assemble {source:?} for {arch}"));
+    let asm_path = Rc::<str>::from("input");
+    let asm_source = Rc::<str>::from(format!(
+        ".SECTION \"TEST\", arch=\"{arch}\"\n{source}\n.END\n"
+    ));
+    let mut cache = atma::error::StrSrcCache::new();
+    cache.add_source(asm_path.clone(), asm_source.clone());
+    let obj_file =
+        atma::asm::assemble_source(&mut cache, asm_path, &asm_source)
+            .expect(&format!("Failed to assemble {source:?} for {arch}"));
     assert_eq!(obj_file.chunks.len(), 1);
     let obj_chunk = &obj_file.chunks[0];
     assert!(obj_chunk.patches.is_empty());

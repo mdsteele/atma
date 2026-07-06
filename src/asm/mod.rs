@@ -7,14 +7,14 @@ mod expr;
 mod macros;
 
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
-use crate::error::SrcSpan;
+use crate::error::{SrcCache, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
     ObjPatchIntType, ObjSymbol,
 };
 use crate::parse::{
-    AsmAssertAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
+    AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
     AsmIntTypeAst, AsmInvokeAst, AsmModuleAst, AsmReserveAst, AsmSectionAst,
     AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
@@ -25,23 +25,36 @@ use macros::MacroTable;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::range::RangeInclusive;
 use std::rc::Rc;
 
 //===========================================================================//
 
 /// Assembles an object file from source code.
-pub fn assemble_source(source: &str) -> AsmResult<ObjFile> {
-    assemble_ast(AsmModuleAst::parse_source(source).map_err(|errors| {
-        errors
-            .into_iter()
-            .map(|error| AsmError::ParseError { error })
-            .collect::<Vec<_>>()
-    })?)
+pub fn assemble_source(
+    cache: &mut dyn SrcCache,
+    src_path: Rc<str>,
+    source_code: &str,
+) -> AsmResult<ObjFile> {
+    assemble_ast(
+        cache,
+        src_path,
+        AsmModuleAst::parse_source(source_code).map_err(|errors| {
+            errors
+                .into_iter()
+                .map(|error| AsmError::ParseError { error })
+                .collect::<Vec<_>>()
+        })?,
+    )
 }
 
-fn assemble_ast(module: AsmModuleAst) -> AsmResult<ObjFile> {
-    let mut assembler = Assembler::new();
+fn assemble_ast(
+    cache: &mut dyn SrcCache,
+    src_path: Rc<str>,
+    module: AsmModuleAst,
+) -> AsmResult<ObjFile> {
+    let mut assembler = Assembler::new(cache, src_path);
     assembler.predeclare_module(&module);
     assembler.expand_module(module);
     assembler.finish()
@@ -49,7 +62,9 @@ fn assemble_ast(module: AsmModuleAst) -> AsmResult<ObjFile> {
 
 //===========================================================================//
 
-struct Assembler {
+struct Assembler<'a> {
+    cache: &'a mut dyn SrcCache,
+    src_path: Rc<str>,
     arch_tree: ArchTree,
     macros: MacroTable,
     next_anonymous_scope_number: u32,
@@ -61,10 +76,12 @@ struct Assembler {
     errors: Vec<AsmError>,
 }
 
-impl Assembler {
-    fn new() -> Assembler {
+impl<'a> Assembler<'a> {
+    fn new(cache: &'a mut dyn SrcCache, src_path: Rc<str>) -> Assembler<'a> {
         let (arch_tree, macros) = builtins::make_builtins();
         Assembler {
+            cache,
+            src_path,
             arch_tree,
             macros,
             next_anonymous_scope_number: 0,
@@ -97,6 +114,7 @@ impl Assembler {
         match statement {
             AsmStmtAst::AnonymousScope(_) => {}
             AsmStmtAst::Assert(_) => {}
+            AsmStmtAst::Binary(_) => {}
             AsmStmtAst::DefMacro(_) => {}
             AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::IntData(_) => {}
@@ -159,6 +177,7 @@ impl Assembler {
                 self.expand_anonymous_scope(body)
             }
             AsmStmtAst::Assert(assert) => self.expand_assert(assert),
+            AsmStmtAst::Binary(data) => self.expand_binary_data(data),
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::IntData(data) => self.expand_int_data(data),
@@ -384,6 +403,67 @@ impl Assembler {
             };
             debug_assert!(!self.chunks.contains_key(&chunk_index));
             self.chunks.insert(chunk_index, chunk);
+        }
+    }
+
+    fn expand_binary_data(&mut self, data_ast: AsmBinaryAst) {
+        if self.env.current_chunk().is_none() {
+            self.errors.push(AsmError::DirectiveNotInSection {
+                directive: ".BINARY",
+                span: data_ast.directive_span,
+            });
+        }
+        match self.typecheck_expression(&data_ast.path_expr) {
+            Some((expr, ExprType::String)) => {
+                let Some(path_value) = expr.static_value() else {
+                    self.errors.push(AsmError::DirectiveExprNotStatic {
+                        directive: ".BINARY",
+                        component: "path",
+                        expr_span: data_ast.path_expr.span,
+                    });
+                    return;
+                };
+                let path = self.joined_path(path_value.unwrap_str_ref());
+                let Some(chunk_env) = self.env.current_chunk() else {
+                    return;
+                };
+                let chunk_data = chunk_env.data_mut();
+                match self.cache.fetch_and_write_data(&path, chunk_data) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        self.errors.push(AsmError::SrcCacheError {
+                            path,
+                            path_span: data_ast.path_expr.span,
+                            error,
+                        });
+                    }
+                }
+            }
+            Some((_, expr_type)) => {
+                self.errors.push(AsmError::DirectiveExprTypeError {
+                    directive: ".BINARY",
+                    component: "path",
+                    expr_span: data_ast.path_expr.span,
+                    expr_type,
+                    valid_types: vec![ExprType::String],
+                });
+            }
+            None => {}
+        }
+    }
+
+    /// Given a relative path appearing in this assembly source file (e.g. in a
+    /// `.BINARY` directive), join that path to this source file's parent
+    /// directory.
+    fn joined_path(&self, relative_path: &Rc<str>) -> Rc<str> {
+        match AsRef::<Path>::as_ref(&*self.src_path).parent() {
+            None => relative_path.clone(),
+            Some(base_path) => {
+                let joined = base_path.join(&**relative_path);
+                // We can safely `unwrap()` the `to_str()` here because
+                // `joined` was made from `Path`s that came from `str`s.
+                Rc::<str>::from(joined.to_str().unwrap())
+            }
         }
     }
 

@@ -42,6 +42,8 @@ pub enum AsmStmtAst {
     AnonymousScope(Vec<AsmStmtAst>),
     /// An `.ASSERT` directive.
     Assert(AsmAssertAst),
+    /// A `.BINARY` directive.
+    Binary(AsmBinaryAst),
     /// A `.DEFMACRO` directive.
     DefMacro(AsmDefMacroAst),
     /// An `.IMPORT` directive.
@@ -123,6 +125,7 @@ impl AsmStmtAst {
                 anonymous_scope,
                 label_or_named_scope,
                 AsmAssertAst::parser().map(AsmStmtAst::Assert),
+                AsmBinaryAst::parser().map(AsmStmtAst::Binary),
                 def_macro_dir,
                 import_dir,
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
@@ -159,6 +162,30 @@ impl AsmAssertAst {
             )
             .then_ignore(linebreak())
             .map(|(condition, message)| AsmAssertAst { condition, message })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a binary data directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmBinaryAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The expression for the path of the file to insert.
+    pub path_expr: ExprAst,
+}
+
+impl AsmBinaryAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmBinaryAst, Extra<'a>> + Clone {
+        directive(".BINARY")
+            .then(ExprAst::parser())
+            .then_ignore(linebreak())
+            .map(|(directive_span, path_expr)| AsmBinaryAst {
+                directive_span,
+                path_expr,
+            })
     }
 }
 

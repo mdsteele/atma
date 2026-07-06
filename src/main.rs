@@ -3,16 +3,19 @@ use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
-use atma::error::{Errs, SourceError};
+use atma::error::{Errs, SourceError, SrcCache, SrcCacheError};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
 use atma::proc::SimBreak;
 use clap::{Parser, Subcommand};
-use std::collections::HashSet;
+use std::collections::hash_map;
+use std::collections::{HashMap, HashSet};
+use std::fmt::{Debug, Display};
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -61,7 +64,7 @@ enum Command {
 
 enum CliError {
     Io(io::Error),
-    Source(String, Errs<SourceError>),
+    Source(FileSrcCache, Rc<str>, Errs<SourceError>),
     Link(Errs<LinkError>),
     AdsRuntimeError(AdsRuntimeError),
 }
@@ -108,8 +111,8 @@ fn run_cli() -> Result<(), ExitCode> {
             report_io_error(io_error);
             Err(ExitCode::FAILURE)
         }
-        Err(CliError::Source(source, source_errors)) => {
-            report_source_errors(&source, source_errors);
+        Err(CliError::Source(cache, path, source_errors)) => {
+            report_source_errors(cache, path, source_errors);
             Err(ExitCode::FAILURE)
         }
         Err(CliError::Link(link_errors)) => {
@@ -129,12 +132,16 @@ fn command_asm(
     source_path: PathBuf,
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
-    let source = io::read_to_string(fs::File::open(&source_path)?)?;
-    let obj = match assemble_source(&source) {
+    let mut cache = FileSrcCache::new();
+    let source_code = io::read_to_string(fs::File::open(&source_path)?)?;
+    let src_path = Rc::<str>::from(source_path.to_string_lossy());
+    let obj = match assemble_source(&mut cache, src_path.clone(), &source_code)
+    {
         Ok(obj) => obj,
         Err(asm_errors) => {
             return Err(CliError::Source(
-                source,
+                cache,
+                src_path,
                 SourceError::from_errors(asm_errors),
             ));
         }
@@ -164,12 +171,15 @@ fn command_db(
     print!("{}", sim_env.description());
     if let Some(ads_path) = opt_ads_path {
         let mut ads_env = {
+            let cache = FileSrcCache::new();
             let file = fs::File::open(&ads_path)?;
             let source = io::read_to_string(file)?;
             match AdsEnvironment::create(&source, sim_env, io::stdout()) {
                 Ok(ads_env) => ads_env,
                 Err(source_errors) => {
-                    return Err(CliError::Source(source, source_errors));
+                    // TODO: require paths to be UTF-8
+                    let path = Rc::<str>::from(ads_path.to_string_lossy());
+                    return Err(CliError::Source(cache, path, source_errors));
                 }
             }
         };
@@ -219,10 +229,14 @@ fn command_ld(
     objfile_paths: Vec<PathBuf>,
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
+    let cache = FileSrcCache::new();
     let config = {
         let source = io::read_to_string(fs::File::open(&config_path)?)?;
-        LinkConfig::from_source(&source)
-            .map_err(|source_errors| CliError::Source(source, source_errors))?
+        LinkConfig::from_source(&source).map_err(|source_errors| {
+            // TODO: require paths to be UTF-8
+            let path = Rc::<str>::from(config_path.to_string_lossy());
+            CliError::Source(cache, path, source_errors)
+        })?
     };
     let object_files = {
         let mut objfiles = Vec::<ObjFile>::with_capacity(objfile_paths.len());
@@ -303,6 +317,104 @@ fn format_registers(sim_env: &SimEnv) -> String {
 
 //===========================================================================//
 
+enum CacheEntry {
+    Utf8(String),
+    Source(ariadne::Source),
+}
+
+impl CacheEntry {
+    fn as_str(&self) -> &str {
+        match self {
+            Self::Utf8(string) => string.as_str(),
+            Self::Source(source) => source.text(),
+        }
+    }
+
+    fn as_source(&mut self) -> &ariadne::Source {
+        match self {
+            Self::Utf8(string) => {
+                let source = ariadne::Source::from(std::mem::take(string));
+                *self = Self::Source(source);
+                let Self::Source(source) = self else {
+                    unreachable!();
+                };
+                source
+            }
+            Self::Source(source) => source,
+        }
+    }
+}
+
+struct FileSrcCache {
+    cache: HashMap<Rc<str>, CacheEntry>,
+}
+
+impl FileSrcCache {
+    pub fn new() -> Self {
+        Self { cache: HashMap::new() }
+    }
+
+    fn ensure_cached(
+        &mut self,
+        path: Rc<str>,
+    ) -> Result<&mut CacheEntry, SrcCacheError> {
+        match self.cache.entry(path) {
+            hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),
+            hash_map::Entry::Vacant(entry) => {
+                let mut file = fs::File::open(&**entry.key())
+                    .map_err(SrcCacheError::Io)?;
+                let mut data = Vec::new();
+                file.read_to_end(&mut data).map_err(SrcCacheError::Io)?;
+                match String::from_utf8(data) {
+                    Ok(string) => Ok(entry.insert(CacheEntry::Utf8(string))),
+                    Err(error) => Err(SrcCacheError::Utf8(error.utf8_error())),
+                }
+            }
+        }
+    }
+}
+
+impl SrcCache for FileSrcCache {
+    fn fetch_and_write_data(
+        &mut self,
+        path: &Rc<str>,
+        out: &mut Vec<u8>,
+    ) -> Result<(), SrcCacheError> {
+        if let Some(entry) = self.cache.get(path) {
+            out.extend_from_slice(entry.as_str().as_bytes());
+        } else {
+            let mut file =
+                fs::File::open(&**path).map_err(SrcCacheError::Io)?;
+            file.read_to_end(out).map_err(SrcCacheError::Io)?;
+        }
+        Ok(())
+    }
+
+    fn fetch_or_get_cached_utf8<'a>(
+        &'a mut self,
+        path: &Rc<str>,
+    ) -> Result<&'a str, SrcCacheError> {
+        Ok(self.ensure_cached(path.clone())?.as_str())
+    }
+}
+
+impl ariadne::Cache<Rc<str>> for FileSrcCache {
+    type Storage = String;
+
+    fn fetch(
+        &mut self,
+        path: &Rc<str>,
+    ) -> Result<&ariadne::Source<String>, impl Debug> {
+        Ok::<_, SrcCacheError>(self.ensure_cached(path.clone())?.as_source())
+    }
+
+    fn display<'a>(&self, path: &'a Rc<str>) -> Option<impl Display + 'a> {
+        Some(Rc::as_ref(path))
+    }
+}
+
+//===========================================================================//
+
 fn report_link_errors(errors: Errs<LinkError>) {
     for error in errors {
         report_link_error(error);
@@ -313,35 +425,42 @@ fn report_link_error(error: LinkError) {
     eprintln!("Link error: {error:?}");
 }
 
-fn report_source_errors(source: &str, errors: Errs<SourceError>) {
+fn report_source_errors(
+    mut cache: FileSrcCache,
+    path: Rc<str>,
+    errors: Errs<SourceError>,
+) {
     for error in errors {
-        report_source_error(source, error);
+        report_source_error(&mut cache, &path, error);
     }
 }
 
-fn report_source_error(source: &str, error: SourceError) {
-    let id = "input";
+fn report_source_error(
+    cache: &mut impl ariadne::Cache<Rc<str>>,
+    path: &Rc<str>,
+    error: SourceError,
+) {
     let mut colors = ariadne::ColorGenerator::new();
     let mut builder = ariadne::Report::build(
         ReportKind::Error,
-        (id, error.span.byte_range()),
+        (path.clone(), error.span.byte_range()),
     )
     .with_config(make_report_config())
     .with_message(&error.message);
     if error.labels.is_empty() {
         builder = builder.with_label(
-            Label::new((id, error.span.byte_range()))
+            Label::new((path.clone(), error.span.byte_range()))
                 .with_color(colors.next()),
         );
     }
     for label in error.labels {
         builder = builder.with_label(
-            Label::new((id, label.span.byte_range()))
+            Label::new((path.clone(), label.span.byte_range()))
                 .with_message(label.message)
                 .with_color(colors.next()),
         );
     }
-    builder.finish().print((id, Source::from(source))).unwrap()
+    builder.finish().print(cache).unwrap()
 }
 
 fn report_io_error(error: io::Error) {

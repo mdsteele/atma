@@ -4,11 +4,16 @@ use atma::asm::AsmError;
 use atma::expr::ExprType;
 use num_bigint::BigInt;
 use std::assert_matches;
+use std::rc::Rc;
 
 //===========================================================================//
 
 fn asm_errors(source: &str) -> Vec<AsmError> {
-    match atma::asm::assemble_source(source) {
+    let asm_path = Rc::<str>::from("input");
+    let asm_source = Rc::<str>::from(source);
+    let mut cache = atma::error::StrSrcCache::new();
+    cache.add_source(asm_path.clone(), asm_source.clone());
+    match atma::asm::assemble_source(&mut cache, asm_path, &asm_source) {
         Ok(_) => vec![],
         Err(errs) => errs.into_iter().collect::<Vec<_>>(),
     }

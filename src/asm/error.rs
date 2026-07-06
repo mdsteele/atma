@@ -1,5 +1,5 @@
 use crate::addr::{Align, AlignTryFromError};
-use crate::error::{SourceError, SrcSpan, ToSourceError};
+use crate::error::{SourceError, SrcCacheError, SrcSpan, ToSourceError};
 use crate::expr::{ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
@@ -159,6 +159,16 @@ pub enum AsmError {
     ParseError {
         /// The parse error.
         error: ParseError,
+    },
+    /// Encountered an error while trying to fetch data from a file.
+    SrcCacheError {
+        /// The joined path for the source file that couldn't be fetched.
+        path: Rc<str>,
+        /// The source code span for the expression that determined the file to
+        /// be fetched.
+        path_span: SrcSpan,
+        /// The error from the source cache.
+        error: SrcCacheError,
     },
     /// Tried to declare a symbol that had already been declared.
     SymbolAlreadyDeclared {
@@ -346,6 +356,10 @@ impl ToSourceError for AsmError {
                 SourceError::new(span, message)
             }
             AsmError::ParseError { error } => error.to_source_error(),
+            AsmError::SrcCacheError { path, path_span, error } => {
+                let message = format!("error loading {path:?}: {error}");
+                SourceError::new(path_span, message)
+            }
             AsmError::SymbolAlreadyDeclared {
                 full_name,
                 name_span,

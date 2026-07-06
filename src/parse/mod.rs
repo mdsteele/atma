@@ -11,7 +11,7 @@ mod lvalue;
 
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst};
 pub use asm::{
-    AsmAssertAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
+    AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
     AsmIntTypeAst, AsmInvokeAst, AsmMacroArgAst, AsmModuleAst, AsmReserveAst,
     AsmSectionAst, AsmStmtAst, AsmUtf8DataAst,
 };

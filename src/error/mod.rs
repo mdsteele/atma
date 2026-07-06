@@ -1,8 +1,10 @@
 //! Types for error reporting.
 
+mod cache;
 mod errs;
 mod span;
 
+pub use cache::{SrcCache, SrcCacheError, StrSrcCache};
 pub use errs::{Errs, ErrsIntoIter};
 pub use span::SrcSpan;
 
