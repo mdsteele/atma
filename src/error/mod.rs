@@ -39,7 +39,11 @@ impl SourceError {
     }
 
     /// Converts a list of errors into a list of `SourceError`s.
-    pub fn from_errors<E: ToSourceError>(errors: Vec<E>) -> Errs<SourceError> {
+    pub fn from_errors<I, E>(errors: I) -> Errs<SourceError>
+    where
+        I: IntoIterator<Item = E>,
+        E: ToSourceError,
+    {
         errors.into_iter().map(E::to_source_error).collect()
     }
 }

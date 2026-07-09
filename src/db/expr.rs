@@ -1,6 +1,7 @@
 use super::env::SimEnv;
+use super::error::{AdsError, AdsResult};
 use super::inst::{AdsFrameRef, AdsInstruction};
-use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::error::SrcSpan;
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
@@ -195,10 +196,14 @@ impl<'a> AdsTypeEnv<'a> {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> SourceResult<(Vec<AdsInstruction>, ExprType)> {
-        let (ops, expr_type, _static_value) = ExprCompiler::new(self)
-            .typecheck(&expr)
-            .map_err(SourceError::from_errors)?;
+    ) -> AdsResult<(Vec<AdsInstruction>, ExprType)> {
+        let (ops, expr_type, _static_value) =
+            ExprCompiler::new(self).typecheck(&expr).map_err(|errors| {
+                errors
+                    .into_iter()
+                    .map(|error| AdsError::ExprTypeError { error })
+                    .collect()
+            })?;
         Ok((ops, expr_type))
     }
 }
@@ -286,11 +291,11 @@ mod tests {
             ExprType::Boolean,
         );
         assert_eq!(
-            env.typecheck_expression(id_ast("foo", 10..13)),
-            Ok((
+            env.typecheck_expression(id_ast("foo", 10..13)).unwrap(),
+            (
                 vec![AdsInstruction::GetValue(AdsFrameRef::Global, 0)],
                 ExprType::Boolean
-            ))
+            )
         );
     }
 
@@ -299,11 +304,11 @@ mod tests {
         let sim_env = SimEnv::with_nop_cpu();
         let env = AdsTypeEnv::new(&sim_env);
         assert_eq!(
-            env.typecheck_expression(int_ast(42, 0..2)),
-            Ok((
+            env.typecheck_expression(int_ast(42, 0..2)).unwrap(),
+            (
                 vec![AdsInstruction::PushValue(int_value(42))],
                 ExprType::Integer,
-            ))
+            )
         );
     }
 }

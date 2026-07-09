@@ -139,11 +139,8 @@ fn command_asm(
     {
         Ok(obj) => obj,
         Err(asm_errors) => {
-            return Err(CliError::Source(
-                cache,
-                src_path,
-                SourceError::from_errors(asm_errors),
-            ));
+            let source_errors = SourceError::from_errors(asm_errors);
+            return Err(CliError::Source(cache, src_path, source_errors));
         }
     };
     if let Some(output_path) = opt_output_path {
@@ -176,9 +173,10 @@ fn command_db(
             let source = io::read_to_string(file)?;
             match AdsEnvironment::create(&source, sim_env, io::stdout()) {
                 Ok(ads_env) => ads_env,
-                Err(source_errors) => {
+                Err(ads_errors) => {
                     // TODO: require paths to be UTF-8
                     let path = Rc::<str>::from(ads_path.to_string_lossy());
+                    let source_errors = SourceError::from_errors(ads_errors);
                     return Err(CliError::Source(cache, path, source_errors));
                 }
             }

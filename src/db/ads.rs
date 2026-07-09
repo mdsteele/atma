@@ -1,9 +1,9 @@
+use super::error::AdsResult;
 use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use crate::addr::Addr;
 use crate::bus::WatchId;
 use crate::db::SimEnv;
-use crate::error::SourceResult;
 use crate::expr::ExprValue;
 use crate::proc::SimBreak;
 use num_bigint::BigInt;
@@ -64,7 +64,7 @@ impl<W: Write> AdsEnvironment<W> {
         source: &str,
         sim: SimEnv,
         output: W,
-    ) -> SourceResult<AdsEnvironment<W>> {
+    ) -> AdsResult<AdsEnvironment<W>> {
         let program = AdsProgram::compile_source(source, &sim)?;
         Ok(AdsEnvironment {
             sim,

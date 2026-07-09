@@ -11,9 +11,9 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 //===========================================================================//
 
 macro_rules! invalid_data {
-    ($e:expr) => {
+    ($fmt:expr) => {
         return Err(::std::io::Error::new(::std::io::ErrorKind::InvalidData,
-                                         $e))
+                                         format!($fmt)))
     };
     ($fmt:expr, $($arg:tt)+) => {
         return Err(::std::io::Error::new(::std::io::ErrorKind::InvalidData,
