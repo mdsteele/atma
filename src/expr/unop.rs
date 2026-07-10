@@ -1,5 +1,5 @@
 use super::error::{ExprTypeError, ExprTypeResult};
-use crate::error::SrcSpan;
+use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::parse::UnOpAst;
 
@@ -29,12 +29,12 @@ impl ExprUnOp {
                 Ok((ExprUnOp::IntBitNot, ExprType::Integer))
             }
             (op, arg_type) => {
-                Err(vec![ExprTypeError::CannotApplyUnaryOpToType {
+                Err(Errs::one(ExprTypeError::CannotApplyUnaryOpToType {
                     op_span,
                     op,
                     arg_span,
                     arg_type,
-                }])
+                }))
             }
         }
     }

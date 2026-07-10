@@ -1,5 +1,5 @@
 use super::error::{ExprTypeError, ExprTypeResult};
-use crate::error::SrcSpan;
+use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprLabel, ExprType, ExprValue};
 use crate::parse::BinOpAst;
 use num_bigint::{BigInt, BigUint};
@@ -137,14 +137,14 @@ impl ExprBinOp {
                 Ok((ExprBinOp::LabelSub, ExprType::Integer))
             }
             (op, lhs_type, rhs_type) => {
-                Err(vec![ExprTypeError::CannotApplyBinaryOpToTypes {
+                Err(Errs::one(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,
                     op,
                     lhs_span,
                     lhs_type,
                     rhs_span,
                     rhs_type,
-                }])
+                }))
             }
         }
     }

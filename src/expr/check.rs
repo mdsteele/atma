@@ -3,13 +3,14 @@ use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use super::func::ExprFuncEvalError;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
-use crate::error::SrcSpan;
+use crate::error::{Errs, SrcSpan};
 use crate::parse::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
 //===========================================================================//
 
+/// A type environment in which expressions can be typechecked.
 pub(crate) trait ExprEnv {
     type Op: ExprOp;
 
@@ -62,7 +63,7 @@ pub(crate) struct ExprCompiler<'a, E: ExprEnv> {
     env: &'a E,
     types: Vec<(ExprType, Option<ExprValue>)>,
     ops: Vec<E::Op>,
-    errors: Vec<ExprTypeError>,
+    errors: Errs<ExprTypeError>,
 }
 
 impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
@@ -71,7 +72,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             env,
             types: Vec::new(),
             ops: Vec::new(),
-            errors: Vec::new(),
+            errors: Errs::new(),
         }
     }
 
@@ -274,8 +275,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.types.push((result_type, None));
                 }
             }
-            Err(mut errors) => {
-                self.errors.append(&mut errors);
+            Err(errors) => {
+                self.errors.append(errors);
                 self.types.push((ExprType::Bottom, None));
             }
         }
@@ -287,8 +288,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.ops.push(op);
                 self.types.push((ExprType::Label, static_label));
             }
-            Err(mut errors) => {
-                self.errors.append(&mut errors);
+            Err(errors) => {
+                self.errors.append(errors);
                 self.types.push((ExprType::Bottom, None));
             }
         }
@@ -300,8 +301,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.ops.push(op);
                 self.types.push((id_type, id_static));
             }
-            Err(mut errors) => {
-                self.errors.append(&mut errors);
+            Err(errors) => {
+                self.errors.append(errors);
                 self.types.push((ExprType::Bottom, None));
             }
         }
@@ -492,8 +493,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.types.push((result_type, None));
                 }
             }
-            Err(mut errors) => {
-                self.errors.append(&mut errors);
+            Err(errors) => {
+                self.errors.append(errors);
                 self.types.push((ExprType::Bottom, None));
             }
         }

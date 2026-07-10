@@ -1,5 +1,5 @@
 use super::value::ExprType;
-use crate::error::{SourceError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
 use crate::parse::{BinOpAst, UnOpAst};
 use num_bigint::{BigInt, BigUint};
 use std::rc::Rc;
@@ -7,7 +7,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// A specialized `Result` type for expression typechecking.
-pub type ExprTypeResult<T> = Result<T, Vec<ExprTypeError>>;
+pub type ExprTypeResult<T> = Result<T, Errs<ExprTypeError>>;
 
 //===========================================================================//
 

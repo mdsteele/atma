@@ -141,4 +141,10 @@ impl<E> Iterator for ErrsIntoIter<E> {
     }
 }
 
+impl<E> ExactSizeIterator for ErrsIntoIter<E> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
 //===========================================================================//

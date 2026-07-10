@@ -1,11 +1,11 @@
 use super::lex::LexerError;
-use crate::error::{SourceError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
 use std::rc::Rc;
 
 //===========================================================================//
 
 /// A specialized `Result` type for parsing operations.
-pub type ParseResult<T> = Result<T, Vec<ParseError>>;
+pub type ParseResult<T> = Result<T, Errs<ParseError>>;
 
 //===========================================================================//
 

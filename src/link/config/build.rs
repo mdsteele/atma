@@ -54,11 +54,11 @@ impl ConfigBuilder {
         mut self,
         ast: LinkConfigAst,
     ) -> SourceResult<LinkConfig> {
-        let mut errors = Errs::<SourceError>::new();
+        let mut errs = Errs::<SourceError>::new();
         for dir_ast in ast.directives {
-            errors.also(self.visit_directive(dir_ast));
+            errs.also(self.visit_directive(dir_ast));
         }
-        errors.result()?;
+        errs.result()?;
         Ok(self.config)
     }
 
@@ -449,20 +449,17 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> SourceResult<()> {
         let mut errs = Errs::<SourceError>::new();
-        let (var_type, value) = match self.typecheck_expression(expr_ast) {
-            Ok((_expr, var_type, Some(static_value))) => {
-                (var_type, ConfigVariableOr::Static(static_value))
+        let (ty, value) = match errs.ok(self.typecheck_expression(expr_ast)) {
+            Some((_expr, ty, Some(static_value))) => {
+                (ty, ConfigVariableOr::Static(static_value))
             }
-            Ok((expr, var_type, None)) => (var_type, self.add_variable(expr)),
-            Err(errors) => {
-                errs.append(errors);
-                (
-                    ExprType::Bottom,
-                    ConfigVariableOr::Static(ExprValue::Boolean(false)),
-                )
-            }
+            Some((expr, ty, None)) => (ty, self.add_variable(expr)),
+            None => (
+                ExprType::Bottom,
+                ConfigVariableOr::Static(ExprValue::Boolean(false)),
+            ),
         };
-        self.env.add_declaration(id_ast, var_type, value);
+        self.env.add_declaration(id_ast, ty, value);
         errs.result()
     }
 

@@ -1,7 +1,7 @@
 use super::env::SimEnv;
 use super::error::{AdsError, AdsResult};
 use super::inst::{AdsFrameRef, AdsInstruction};
-use crate::error::SrcSpan;
+use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
@@ -215,7 +215,7 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         &self,
         span: SrcSpan,
     ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
-        Err(vec![ExprTypeError::RelativeLabelInDebuggerScript { span }])
+        Err(Errs::one(ExprTypeError::RelativeLabelInDebuggerScript { span }))
     }
 
     fn typecheck_identifier(
@@ -238,10 +238,10 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         if name.eq_ignore_ascii_case("PC") {
             return Ok((AdsInstruction::GetPc, ExprType::Integer, None));
         }
-        Err(vec![ExprTypeError::UnknownIdentifier {
+        Err(Errs::one(ExprTypeError::UnknownIdentifier {
             span,
             name: name.clone(),
-        }])
+        }))
     }
 }
 

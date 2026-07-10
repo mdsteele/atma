@@ -1,7 +1,7 @@
 use super::arch::ArchTree;
 use super::error::{AsmError, AsmResult};
 use crate::addr::Offset;
-use crate::error::SrcSpan;
+use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprFunc, ExprLabel, ExprType, ExprTypeError,
     ExprTypeResult, ExprValue,
@@ -50,10 +50,10 @@ impl AsmTypeEnv {
         match id_ast.kind {
             IdentifierKind::Standard => {}
             IdentifierKind::Builtin => {
-                return Err(vec![AsmError::DeclNameIsBuiltin {
+                return Err(Errs::one(AsmError::DeclNameIsBuiltin {
                     span: id_ast.span,
                     name: id_ast.name.clone(),
-                }]);
+                }));
             }
             IdentifierKind::Placeholder => unreachable!(),
         }
@@ -63,11 +63,11 @@ impl AsmTypeEnv {
             id_ast.name.clone()
         };
         if let Some(&prev_span) = self.labels.get(&full_name) {
-            Err(vec![AsmError::SymbolAlreadyDeclared {
+            Err(Errs::one(AsmError::SymbolAlreadyDeclared {
                 full_name,
                 name_span: id_ast.span,
                 prev_span,
-            }])
+            }))
         } else {
             self.labels.insert(full_name, id_ast.span);
             Ok(())
@@ -168,7 +168,9 @@ impl ExprEnv for AsmTypeEnv {
             let op = ObjExprOp::Push(value.clone());
             Ok((op, Some(value)))
         } else {
-            Err(vec![ExprTypeError::RelativeLabelOutsideOfAnySection { span }])
+            Err(Errs::one(ExprTypeError::RelativeLabelOutsideOfAnySection {
+                span,
+            }))
         }
     }
 
@@ -189,10 +191,10 @@ impl ExprEnv for AsmTypeEnv {
             let op = ObjExprOp::Push(value.clone());
             return Ok((op, expr_type.clone(), Some(value.clone())));
         }
-        Err(vec![ExprTypeError::UnknownIdentifier {
+        Err(Errs::one(ExprTypeError::UnknownIdentifier {
             span,
             name: name.clone(),
-        }])
+        }))
     }
 }
 

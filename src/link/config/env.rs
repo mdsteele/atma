@@ -1,5 +1,5 @@
 use super::ConfigVariableOr;
-use crate::error::{SourceError, SourceResult, SrcSpan};
+use crate::error::{Errs, SourceError, SourceResult, SrcSpan};
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
@@ -63,7 +63,7 @@ impl ExprEnv for LinkTypeEnv {
         &self,
         span: SrcSpan,
     ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
-        Err(vec![ExprTypeError::RelativeLabelInLinkerConfig { span }])
+        Err(Errs::one(ExprTypeError::RelativeLabelInLinkerConfig { span }))
     }
 
     fn typecheck_identifier(
@@ -83,10 +83,10 @@ impl ExprEnv for LinkTypeEnv {
                 };
                 Ok((op, decl.var_type.clone(), static_value))
             }
-            None => Err(vec![ExprTypeError::UnknownIdentifier {
+            None => Err(Errs::one(ExprTypeError::UnknownIdentifier {
                 span,
                 name: name.clone(),
-            }]),
+            })),
         }
     }
 }

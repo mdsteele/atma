@@ -1,5 +1,5 @@
 use crate::addr::{Align, AlignTryFromError};
-use crate::error::{SourceError, SrcCacheError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcCacheError, SrcSpan, ToSourceError};
 use crate::expr::{ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
@@ -9,7 +9,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// A specialized `Result` type for compiling assembly code.
-pub type AsmResult<T> = Result<T, Vec<AsmError>>;
+pub type AsmResult<T> = Result<T, Errs<AsmError>>;
 
 //===========================================================================//
 
