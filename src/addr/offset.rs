@@ -50,6 +50,17 @@ impl TryFrom<u64> for Offset {
     }
 }
 
+impl TryFrom<u128> for Offset {
+    type Error = ();
+
+    fn try_from(value: u128) -> Result<Offset, ()> {
+        match u32::try_from(value) {
+            Ok(int) => Ok(Offset(int)),
+            Err(_) => Err(()),
+        }
+    }
+}
+
 impl TryFrom<usize> for Offset {
     type Error = ();
 
@@ -86,6 +97,12 @@ impl TryFrom<&BigInt> for Offset {
 impl From<Offset> for u64 {
     fn from(value: Offset) -> u64 {
         u64::from(value.0)
+    }
+}
+
+impl From<Offset> for u128 {
+    fn from(value: Offset) -> u128 {
+        u128::from(value.0)
     }
 }
 

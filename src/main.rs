@@ -230,9 +230,10 @@ fn command_ld(
     let cache = FileSrcCache::new();
     let config = {
         let source = io::read_to_string(fs::File::open(&config_path)?)?;
-        LinkConfig::from_source(&source).map_err(|source_errors| {
+        LinkConfig::from_source(&source).map_err(|config_errors| {
             // TODO: require paths to be UTF-8
             let path = Rc::<str>::from(config_path.to_string_lossy());
+            let source_errors = SourceError::from_errors(config_errors);
             CliError::Source(cache, path, source_errors)
         })?
     };

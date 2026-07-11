@@ -1,6 +1,7 @@
 mod build;
 mod checksum;
 mod env;
+mod error;
 
 use super::binary::LinkedBinary;
 use super::error::{LinkError, LinkResult};
@@ -10,12 +11,12 @@ use super::positioned::PositionedBinary;
 use super::types::AbsoluteLabel;
 use crate::addr::{Addr, Align, Range, Size};
 use crate::error::Errs;
-use crate::error::{SourceError, SourceResult};
 use crate::expr::ExprValue;
 use crate::obj::{ObjExpr, ObjFile};
 use crate::parse::LinkConfigAst;
 use build::ConfigBuilder;
 pub use checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
+pub use error::{ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -52,9 +53,12 @@ pub struct LinkConfig {
 
 impl LinkConfig {
     /// Sources source code into a linker configuration.
-    pub fn from_source(source: &str) -> SourceResult<LinkConfig> {
-        let ast = LinkConfigAst::parse_source(source)
-            .map_err(SourceError::from_errors)?;
+    pub fn from_source(source: &str) -> ConfigResult<LinkConfig> {
+        let ast = LinkConfigAst::parse_source(source).map_err(|errs| {
+            errs.into_iter()
+                .map(|error| ConfigError::ParseError { error })
+                .collect::<Errs<_>>()
+        })?;
         ConfigBuilder::new().build(ast)
     }
 

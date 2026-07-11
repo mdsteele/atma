@@ -14,7 +14,8 @@ mod types;
 pub use binary::LinkedBinary;
 pub use config::{
     AddrspaceConfig, ChecksumConfig, ChecksumFormat, ChecksumRange,
-    ConfigVariableOr, ExportConfig, LinkConfig, RegionConfig, SectionConfig,
+    ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult, ConfigVariableOr,
+    ExportConfig, LinkConfig, RegionConfig, SectionConfig,
 };
 pub use error::{LinkError, LinkResult};
 

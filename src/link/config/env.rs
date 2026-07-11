@@ -1,10 +1,14 @@
 use super::ConfigVariableOr;
-use crate::error::{Errs, SourceError, SourceResult, SrcSpan};
+use super::error::{ConfigError, ConfigResult};
+use crate::addr::Addr;
+use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
+    ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
+    ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp};
 use crate::parse::{ExprAst, IdentifierAst};
+use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -19,16 +23,22 @@ pub(super) struct LinkDecl {
 //===========================================================================//
 
 pub(super) struct LinkTypeEnv {
+    exports: HashMap<Rc<str>, SrcSpan>,
+    imports: HashMap<Rc<str>, SrcSpan>,
     variables: HashMap<Rc<str>, LinkDecl>,
 }
 
 impl LinkTypeEnv {
     pub fn new() -> LinkTypeEnv {
-        LinkTypeEnv { variables: HashMap::new() }
+        LinkTypeEnv {
+            exports: HashMap::new(),
+            imports: HashMap::new(),
+            variables: HashMap::new(),
+        }
     }
 
-    pub fn get_declaration(&self, id: &str) -> Option<&LinkDecl> {
-        self.variables.get(id)
+    pub fn get_declaration(&self, name: &str) -> Option<&LinkDecl> {
+        self.variables.get(name)
     }
 
     pub fn add_declaration(
@@ -42,16 +52,53 @@ impl LinkTypeEnv {
         self.variables.insert(id.name, decl);
     }
 
+    pub fn get_export(&self, name: &str) -> Option<SrcSpan> {
+        self.exports.get(name).copied()
+    }
+
+    pub fn add_export(
+        &mut self,
+        id: IdentifierAst,
+        space: Rc<str>,
+        address: ConfigVariableOr<Addr>,
+    ) {
+        self.exports.insert(id.name.clone(), id.span);
+        let address_value = address.map_static(|addr| {
+            ExprValue::Label(ExprLabel::AddrAbsolute {
+                space,
+                address: BigInt::from(addr),
+            })
+        });
+        self.add_declaration(id, ExprType::Label, address_value);
+    }
+
+    pub fn get_import(&self, name: &str) -> Option<SrcSpan> {
+        self.imports.get(name).copied()
+    }
+
+    pub fn add_import(&mut self, id: IdentifierAst) {
+        self.imports.insert(id.name.clone(), id.span);
+        let label = ExprLabel::SymbolRelative {
+            name: id.name.clone(),
+            offset: BigInt::ZERO,
+        };
+        let value = ConfigVariableOr::Static(ExprValue::Label(label));
+        self.add_declaration(id, ExprType::Label, value);
+    }
+
     pub fn typecheck_expression(
         &self,
         expr: &ExprAst,
-    ) -> SourceResult<(ObjExpr, ExprType, Option<ExprValue>)> {
+    ) -> ConfigResult<(ObjExpr, ExprType, Option<ExprValue>)> {
         match ExprCompiler::new(self).typecheck(expr) {
             Ok((ops, expr_type, static_value)) => {
                 debug_assert!(!ops.is_empty());
                 Ok((ObjExpr { ops }, expr_type, static_value))
             }
-            Err(errors) => Err(SourceError::from_errors(errors)),
+            Err(errs) => Err(errs
+                .into_iter()
+                .map(|error| ConfigError::ExprTypeError { error })
+                .collect::<Errs<_>>()),
         }
     }
 }

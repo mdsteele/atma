@@ -208,14 +208,14 @@ pub enum AsmError {
 impl ToSourceError for AsmError {
     fn to_source_error(self) -> SourceError {
         match self {
-            AsmError::ArchHasNoEndianness { directive, span, arch } => {
+            Self::ArchHasNoEndianness { directive, span, arch } => {
                 let message = format!(
                     "Cannot use {directive} under architecture {arch:?}, \
                      which has no defined endianness"
                 );
                 SourceError::new(span, message)
             }
-            AsmError::AssertionStaticallyFailed {
+            Self::AssertionStaticallyFailed {
                 condition_span,
                 additional_message,
             } => {
@@ -226,13 +226,14 @@ impl ToSourceError for AsmError {
                 };
                 SourceError::new(condition_span, message)
             }
-            AsmError::DeclNameIsBuiltin { span, name } => {
+            Self::DeclNameIsBuiltin { span, name } => {
                 let message = format!(
-                    "cannot declare `{name}`; identifiers starting with `%` are reserved"
+                    "cannot declare `{name}`; identifiers starting with `%` \
+                     are reserved"
                 );
                 SourceError::new(span, message)
             }
-            AsmError::DirectiveExprNotStatic {
+            Self::DirectiveExprNotStatic {
                 directive,
                 component,
                 expr_span,
@@ -243,7 +244,7 @@ impl ToSourceError for AsmError {
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
-            AsmError::DirectiveExprOutOfRange {
+            Self::DirectiveExprOutOfRange {
                 directive,
                 component,
                 expr_span,
@@ -259,7 +260,7 @@ impl ToSourceError for AsmError {
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
-            AsmError::DirectiveExprTypeError {
+            Self::DirectiveExprTypeError {
                 directive,
                 component,
                 expr_span,
@@ -278,11 +279,11 @@ impl ToSourceError for AsmError {
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
-            AsmError::DirectiveNotInSection { directive, span } => {
+            Self::DirectiveNotInSection { directive, span } => {
                 let message = format!("{directive} must be within a .SECTION");
                 SourceError::new(span, message)
             }
-            AsmError::DuplicateAttrName {
+            Self::DuplicateAttrName {
                 directive,
                 attr_name,
                 attr_span,
@@ -297,7 +298,7 @@ impl ToSourceError for AsmError {
                     .with_label(prev_span, label1)
                     .with_label(attr_span, label2)
             }
-            AsmError::DuplicateMacroPlaceholder {
+            Self::DuplicateMacroPlaceholder {
                 placeholder_name,
                 placeholder_span,
                 prev_span,
@@ -311,8 +312,8 @@ impl ToSourceError for AsmError {
                     .with_label(prev_span, label1)
                     .with_label(placeholder_span, label2)
             }
-            AsmError::ExprTypeError { error } => error.to_source_error(),
-            AsmError::InvalidAlignmentValue {
+            Self::ExprTypeError { error } => error.to_source_error(),
+            Self::InvalidAlignmentValue {
                 directive,
                 attr_name,
                 error,
@@ -339,28 +340,28 @@ impl ToSourceError for AsmError {
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
-            AsmError::InvalidAttrName { directive, attr_name, attr_span } => {
+            Self::InvalidAttrName { directive, attr_name, attr_span } => {
                 let message =
                     format!("Invalid {directive} attribute: `{attr_name}`");
                 SourceError::new(attr_span, message)
             }
-            AsmError::InvalidUnicodeScalarValue { expr_span, expr_value } => {
+            Self::InvalidUnicodeScalarValue { expr_span, expr_value } => {
                 let message = "invalid unicode scalar value".to_string();
                 let label =
                     format!("the value of this expression is {expr_value}");
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
-            AsmError::MultipleMacroPlaceholders { span } => {
+            Self::MultipleMacroPlaceholders { span } => {
                 let message = "multiple placeholders".to_string();
                 SourceError::new(span, message)
             }
-            AsmError::ParseError { error } => error.to_source_error(),
-            AsmError::SrcCacheError { path, path_span, error } => {
+            Self::ParseError { error } => error.to_source_error(),
+            Self::SrcCacheError { path, path_span, error } => {
                 let message = format!("error loading {path:?}: {error}");
                 SourceError::new(path_span, message)
             }
-            AsmError::SymbolAlreadyDeclared {
+            Self::SymbolAlreadyDeclared {
                 full_name,
                 name_span,
                 prev_span,
@@ -373,18 +374,18 @@ impl ToSourceError for AsmError {
                     .with_label(prev_span, label1)
                     .with_label(name_span, label2)
             }
-            AsmError::UnknownArch { arch, span } => {
+            Self::UnknownArch { arch, span } => {
                 let message =
                     format!("the `{arch}` architecture was never defined");
                 let label =
                     format!("The value of this expression is {arch:?}");
                 SourceError::new(span, message).with_label(span, label)
             }
-            AsmError::UnknownMacroPlaceholder { name, span } => {
+            Self::UnknownMacroPlaceholder { name, span } => {
                 let message = format!("Undeclared placeholder: `{name}`");
                 SourceError::new(span, message)
             }
-            AsmError::UnmatchedMacroInvocation {
+            Self::UnmatchedMacroInvocation {
                 macro_name,
                 arch,
                 invocation_span,

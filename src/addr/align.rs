@@ -48,7 +48,7 @@ impl Align {
         } else {
             Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("invalid Align byte: {:#02x}", byte),
+                format!("invalid Align byte: 0x{:02x}", byte),
             ))
         }
     }
@@ -190,6 +190,13 @@ impl TryFrom<Align> for usize {
 
     fn try_from(value: Align) -> Result<usize, ()> {
         1usize.checked_shl(value.log2()).ok_or(())
+    }
+}
+
+impl From<Align> for u128 {
+    fn from(value: Align) -> u128 {
+        const_assert!(Addr::BITS < 128);
+        1u128 << value.log2()
     }
 }
 

@@ -127,6 +127,17 @@ impl TryFrom<u64> for Addr {
     }
 }
 
+impl TryFrom<u128> for Addr {
+    type Error = ();
+
+    fn try_from(value: u128) -> Result<Addr, ()> {
+        match u32::try_from(value) {
+            Ok(int) => Ok(Addr(int)),
+            Err(_) => Err(()),
+        }
+    }
+}
+
 impl TryFrom<usize> for Addr {
     type Error = ();
 
@@ -163,6 +174,12 @@ impl TryFrom<&BigInt> for Addr {
 impl From<Addr> for u64 {
     fn from(value: Addr) -> u64 {
         u64::from(value.0)
+    }
+}
+
+impl From<Addr> for u128 {
+    fn from(value: Addr) -> u128 {
+        u128::from(value.0)
     }
 }
 
@@ -478,6 +495,15 @@ mod tests {
 
         const_assert!(Addr::BITS < u64::BITS);
         assert_eq!(Addr::try_from(u64::MAX), Err(()));
+    }
+
+    #[test]
+    fn addr_try_from_u128() {
+        assert_eq!(Addr::try_from(0u128), Ok(Addr::MIN));
+        assert_eq!(Addr::try_from(1234u128), Ok(Addr::from(1234u32)));
+
+        const_assert!(Addr::BITS < u128::BITS);
+        assert_eq!(Addr::try_from(u128::MAX), Err(()));
     }
 }
 

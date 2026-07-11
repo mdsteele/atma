@@ -72,6 +72,18 @@ impl TryFrom<u64> for Size {
     }
 }
 
+impl TryFrom<u128> for Size {
+    type Error = ();
+
+    fn try_from(value: u128) -> Result<Size, ()> {
+        if value <= u128::from(Size::MAX_INTERNAL) {
+            Ok(Size(value as u64))
+        } else {
+            Err(())
+        }
+    }
+}
+
 impl TryFrom<usize> for Size {
     type Error = ();
 
@@ -99,6 +111,12 @@ impl TryFrom<&BigInt> for Size {
             Some(int) => Size::try_from(int),
             None => Err(()),
         }
+    }
+}
+
+impl From<Size> for u128 {
+    fn from(value: Size) -> u128 {
+        u128::from(value.0)
     }
 }
 
