@@ -1,3 +1,4 @@
+use super::checksum::ChecksumFormat;
 use crate::addr::{Addr, Align, AlignTryFromError, Size};
 use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
 use crate::expr::{ExprType, ExprTypeError};
@@ -197,24 +198,24 @@ impl ToSourceError for ConfigError {
                 let message = format!(
                     "Duplicate `{attr_name}` attribute for `{entry_name}`"
                 );
-                let label1 = "Previously declared here".to_string();
-                let label2 = "Duplicated here".to_string();
+                let label1 = "Previously declared here";
+                let label2 = "Duplicated here";
                 SourceError::new(attr_span, message)
                     .with_label(prev_span, label1)
                     .with_label(attr_span, label2)
             }
             Self::DuplicateEntryName { entry_name, entry_span, prev_span } => {
                 let message = format!("`{entry_name}` was already declared");
-                let label1 = "Previously declared here".to_string();
-                let label2 = "Declared again here".to_string();
+                let label1 = "Previously declared here";
+                let label2 = "Declared again here";
                 SourceError::new(entry_span, message)
                     .with_label(prev_span, label1)
                     .with_label(entry_span, label2)
             }
             Self::DuplicateExport { symbol_name, export_span, prev_span } => {
                 let message = format!("`{symbol_name}` was already exported");
-                let label1 = "Previously exported here".to_string();
-                let label2 = "Exported again here".to_string();
+                let label1 = "Previously exported here";
+                let label2 = "Exported again here";
                 SourceError::new(export_span, message)
                     .with_label(prev_span, label1)
                     .with_label(export_span, label2)
@@ -226,8 +227,8 @@ impl ToSourceError for ConfigError {
             } => {
                 let message =
                     format!("`{symbol_name}` is both imported and exported");
-                let label1 = "Imported here".to_string();
-                let label2 = "Exported here".to_string();
+                let label1 = "Imported here";
+                let label2 = "Exported here";
                 SourceError::new(export_span, message)
                     .with_label(import_span, label1)
                     .with_label(export_span, label2)
@@ -264,8 +265,16 @@ impl ToSourceError for ConfigError {
             Self::InvalidAttrName { entry_kind, attr_name, attr_span } => {
                 let message =
                     format!("Invalid {entry_kind} attribute: `{attr_name}`");
-                // TODO: add hint listing valid attribute names for entry_kind
-                SourceError::new(attr_span, message)
+                let note = format!(
+                    "Valid {entry_kind} attributes are:\n{}",
+                    entry_kind
+                        .attributes()
+                        .iter()
+                        .map(|attr| format!("`{}`", attr.attr_name()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                SourceError::new(attr_span, message).with_note(note)
             }
             Self::InvalidChecksumFormatAttr {
                 attribute,
@@ -278,17 +287,24 @@ impl ToSourceError for ConfigError {
                     attribute.attr_name()
                 );
                 let label =
-                    format!("this value of this expression is {expr_value}");
-                // TODO: add hint listing valid checksum format strings
+                    format!("this value of this expression is {expr_value:?}");
+                let note = format!(
+                    "Valid checksum format strings are:\n{}",
+                    ChecksumFormat::ALL
+                        .iter()
+                        .map(|fmt| format!("\"{fmt}\""))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
+                    .with_note(note)
             }
             Self::MissingAttr { entry_name, entry_span, attribute } => {
                 let message = format!(
                     "Missing required `{}` attribute for `{entry_name}`",
                     attribute.attr_name()
                 );
-                // TODO: add hint explaining what the missing attr is for
                 SourceError::new(entry_span, message)
             }
             Self::MutuallyExclusiveAttrs {
@@ -304,13 +320,9 @@ impl ToSourceError for ConfigError {
                     attribute_1.attr_name(),
                     attribute_2.attr_name()
                 );
-                let label1 =
-                    format!("`{}` specified here", attribute_1.attr_name());
-                let label2 =
-                    format!("`{}` specified here", attribute_2.attr_name());
                 SourceError::new(entry_span, message)
-                    .with_label(attr_span_1, label1)
-                    .with_label(attr_span_2, label2)
+                    .with_label(attr_span_1, "")
+                    .with_label(attr_span_2, "")
             }
             Self::NonStaticAttr { attribute, expr_span } => {
                 let message = format!(
@@ -318,7 +330,7 @@ impl ToSourceError for ConfigError {
                     attribute.entry_kind(),
                     attribute.attr_name()
                 );
-                let label = "this expression isn't static".to_string();
+                let label = "this expression isn't static";
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
@@ -378,6 +390,37 @@ impl ConfigEntryKind {
             Self::Export => "exported symbol",
             Self::Region => "memory region",
             Self::Section => "section",
+        }
+    }
+
+    /// Returns a list of all attributes for this entry kind.
+    pub fn attributes(self) -> &'static [ConfigAttr] {
+        match self {
+            Self::Addrspace => {
+                &[ConfigAttr::AddrspaceBits, ConfigAttr::AddrspaceFill]
+            }
+            Self::Checksum => &[
+                ConfigAttr::ChecksumEnd,
+                ConfigAttr::ChecksumSize,
+                ConfigAttr::ChecksumStart,
+                ConfigAttr::ChecksumSum,
+                ConfigAttr::ChecksumUnit,
+            ],
+            Self::Export => &[ConfigAttr::ExportAddr, ConfigAttr::ExportSpace],
+            Self::Region => &[
+                ConfigAttr::RegionFill,
+                ConfigAttr::RegionSize,
+                ConfigAttr::RegionSpace,
+                ConfigAttr::RegionStart,
+            ],
+            Self::Section => &[
+                ConfigAttr::SectionAlign,
+                ConfigAttr::SectionFill,
+                ConfigAttr::SectionRegion,
+                ConfigAttr::SectionSize,
+                ConfigAttr::SectionStart,
+                ConfigAttr::SectionWithin,
+            ],
         }
     }
 }

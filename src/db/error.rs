@@ -101,7 +101,7 @@ impl ToSourceError for AdsError {
             }
             Self::UnknownVariable { name, span } => {
                 let message = format!("no such variable: `{name}`");
-                let label = "this was never declared".to_string();
+                let label = "this was never declared";
                 SourceError::new(span, message).with_label(span, label)
             }
             Self::VariableTypeError {

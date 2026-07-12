@@ -447,17 +447,21 @@ fn report_source_error(
     .with_config(make_report_config())
     .with_message(&error.message);
     if error.labels.is_empty() {
-        builder = builder.with_label(
+        builder.add_label(
             Label::new((path.clone(), error.span.byte_range()))
                 .with_color(colors.next()),
         );
     }
-    for label in error.labels {
-        builder = builder.with_label(
-            Label::new((path.clone(), label.span.byte_range()))
-                .with_message(label.message)
-                .with_color(colors.next()),
-        );
+    for error_label in error.labels {
+        let mut report_label =
+            Label::new((path.clone(), error_label.span.byte_range()));
+        if !error_label.message.is_empty() {
+            report_label = report_label.with_message(error_label.message);
+        }
+        builder.add_label(report_label.with_color(colors.next()));
+    }
+    for note in error.notes {
+        builder.add_note(note);
     }
     builder.finish().print(cache).unwrap()
 }

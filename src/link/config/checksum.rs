@@ -171,6 +171,16 @@ pub enum ChecksumFormat {
 }
 
 impl ChecksumFormat {
+    /// A list of all `ChecksumFormat` values.
+    pub const ALL: &[ChecksumFormat] = &[
+        ChecksumFormat::U8,
+        ChecksumFormat::U8Cpl,
+        ChecksumFormat::U16be,
+        ChecksumFormat::U16beCpl,
+        ChecksumFormat::U16le,
+        ChecksumFormat::U16leCpl,
+    ];
+
     /// Returns the size, in bytes, of a checksum or unit of checksum data with
     /// this format.
     pub fn size(self) -> u32 {
@@ -256,15 +266,7 @@ mod tests {
 
     #[test]
     fn checksum_format_string_round_trip() {
-        let formats = [
-            ChecksumFormat::U8,
-            ChecksumFormat::U8Cpl,
-            ChecksumFormat::U16be,
-            ChecksumFormat::U16beCpl,
-            ChecksumFormat::U16le,
-            ChecksumFormat::U16leCpl,
-        ];
-        for format in formats {
+        for format in ChecksumFormat::ALL {
             assert_eq!(format.to_string().parse(), Ok(format));
         }
     }

@@ -240,7 +240,7 @@ impl ToSourceError for AsmError {
             } => {
                 let message =
                     format!("{directive} {component} must be static");
-                let label = "this expression isn't static".to_string();
+                let label = "this expression isn't static";
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
@@ -292,8 +292,8 @@ impl ToSourceError for AsmError {
                 let message = format!(
                     "Duplicate `{attr_name}` attribute for {directive}"
                 );
-                let label1 = "Previously declared here".to_string();
-                let label2 = "Duplicated here".to_string();
+                let label1 = "Previously declared here";
+                let label2 = "Duplicated here";
                 SourceError::new(attr_span, message)
                     .with_label(prev_span, label1)
                     .with_label(attr_span, label2)
@@ -306,8 +306,8 @@ impl ToSourceError for AsmError {
                 let message = format!(
                     "Duplicate `{placeholder_name}` macro placeholder"
                 );
-                let label1 = "Previously declared here".to_string();
-                let label2 = "Duplicated here".to_string();
+                let label1 = "Previously declared here";
+                let label2 = "Duplicated here";
                 SourceError::new(placeholder_span, message)
                     .with_label(prev_span, label1)
                     .with_label(placeholder_span, label2)
@@ -346,14 +346,14 @@ impl ToSourceError for AsmError {
                 SourceError::new(attr_span, message)
             }
             Self::InvalidUnicodeScalarValue { expr_span, expr_value } => {
-                let message = "invalid unicode scalar value".to_string();
+                let message = "invalid unicode scalar value";
                 let label =
                     format!("the value of this expression is {expr_value}");
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
             Self::MultipleMacroPlaceholders { span } => {
-                let message = "multiple placeholders".to_string();
+                let message = "multiple placeholders";
                 SourceError::new(span, message)
             }
             Self::ParseError { error } => error.to_source_error(),
@@ -368,8 +368,8 @@ impl ToSourceError for AsmError {
             } => {
                 let message =
                     format!("symbol was already declared: {}", full_name);
-                let label1 = "previously declared here".to_string();
-                let label2 = "redeclared here".to_string();
+                let label1 = "previously declared here";
+                let label2 = "redeclared here";
                 SourceError::new(name_span, message)
                     .with_label(prev_span, label1)
                     .with_label(name_span, label2)

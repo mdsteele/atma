@@ -19,22 +19,37 @@ pub struct SourceError {
     pub message: String,
     /// Any additional label annotations for this error.
     pub labels: Vec<SourceErrorLabel>,
+    /// Any additional note messages that may help the user to understand how
+    /// to fix the error.
+    pub notes: Vec<String>,
 }
 
 impl SourceError {
     /// Constructs a parse error with the given span and message, and other
     /// fields initially empty.
-    pub fn new(span: SrcSpan, message: String) -> SourceError {
-        SourceError { span, message, labels: Vec::new() }
+    pub fn new(span: SrcSpan, message: impl ToString) -> SourceError {
+        SourceError {
+            span,
+            message: message.to_string(),
+            labels: Vec::new(),
+            notes: Vec::new(),
+        }
     }
 
     /// Adds an additional label to the error.
     pub fn with_label(
         mut self,
         span: SrcSpan,
-        message: String,
+        message: impl ToString,
     ) -> SourceError {
-        self.labels.push(SourceErrorLabel { span, message });
+        self.labels
+            .push(SourceErrorLabel { span, message: message.to_string() });
+        self
+    }
+
+    /// Adds an additional note to the error.
+    pub fn with_note(mut self, message: impl ToString) -> SourceError {
+        self.notes.push(message.to_string());
         self
     }
 
