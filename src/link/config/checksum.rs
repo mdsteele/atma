@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn checksum_format_string_round_trip() {
         for format in ChecksumFormat::ALL {
-            assert_eq!(format.to_string().parse(), Ok(format));
+            assert_eq!(format.to_string().parse(), Ok(*format));
         }
     }
 
