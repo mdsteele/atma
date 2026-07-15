@@ -61,6 +61,8 @@ pub enum AdsStmtAst {
     Set(LValueAst, ExprAst),
     /// Steps the simulated processor forward by one instruction.
     Step,
+    /// Loads another ADS source file.
+    Use(ExprAst),
     /// Sets up a breakpoint handler.
     When(BreakpointAst, Vec<AdsStmtAst>),
 }
@@ -95,6 +97,7 @@ impl AdsStmtAst {
                 run_until_statement(),
                 set_statement(),
                 step_statement(),
+                use_statement(),
                 when_statement,
             ))
         })
@@ -207,6 +210,14 @@ fn set_statement<'a>()
 fn step_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("step").ignore_then(linebreak()).to(AdsStmtAst::Step)
+}
+
+fn use_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+    keyword("use")
+        .ignore_then(ExprAst::parser())
+        .then_ignore(linebreak())
+        .map(AdsStmtAst::Use)
 }
 
 //===========================================================================//

@@ -3,12 +3,13 @@ use super::error::{AdsError, AdsResult};
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::bus::WatchKind;
-use crate::error::{Errs, SrcSpan};
+use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::parse::{
     AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
     IdentifierAst, LValueAst, LValueAstNode,
 };
+use std::path::Path;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -21,25 +22,25 @@ pub struct AdsProgram {
 impl AdsProgram {
     /// Reads an Atma Debugger Script program from a file.
     pub fn compile_source(
-        source: &str,
+        cache: &mut dyn SrcCache,
+        src_path: Rc<str>,
+        source_code: &str,
         sim_env: &SimEnv,
     ) -> AdsResult<AdsProgram> {
-        let ast = AdsModuleAst::parse_source(source).map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|error| AdsError::ParseError { error })
-                .collect::<Errs<_>>()
-        })?;
-        AdsProgram::compile_ast(ast, sim_env)
+        let ast =
+            AdsModuleAst::parse_source(source_code).map_err(Errs::coerce)?;
+        AdsProgram::compile_ast(cache, src_path, ast, sim_env)
     }
 
     /// Distills the abstract syntax tree for an Atma Debugger Script module
     /// into a program that can be executed.
     fn compile_ast(
+        cache: &mut dyn SrcCache,
+        src_path: Rc<str>,
         module: AdsModuleAst,
         sim_env: &SimEnv,
     ) -> AdsResult<AdsProgram> {
-        let mut compiler = AdsCompiler::new(sim_env);
+        let mut compiler = AdsCompiler::new(cache, src_path, sim_env);
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions)?;
         if !matches!(instructions.last(), Some(AdsInstruction::Exit)) {
@@ -52,12 +53,18 @@ impl AdsProgram {
 //===========================================================================//
 
 struct AdsCompiler<'a> {
+    cache: &'a mut dyn SrcCache,
+    src_path: Rc<str>,
     env: AdsTypeEnv<'a>,
 }
 
 impl<'a> AdsCompiler<'a> {
-    fn new(sim_env: &'a SimEnv) -> AdsCompiler<'a> {
-        AdsCompiler { env: AdsTypeEnv::new(sim_env) }
+    fn new(
+        cache: &'a mut dyn SrcCache,
+        src_path: Rc<str>,
+        sim_env: &'a SimEnv,
+    ) -> AdsCompiler<'a> {
+        AdsCompiler { cache, src_path, env: AdsTypeEnv::new(sim_env) }
     }
 
     fn typecheck_statements(
@@ -70,16 +77,6 @@ impl<'a> AdsCompiler<'a> {
             errs.also(self.typecheck_statement(statement, instructions_out));
         }
         errs.result()
-    }
-
-    fn try_get_static(
-        &self,
-        instructions: &[AdsInstruction],
-    ) -> Option<ExprValue> {
-        match instructions {
-            [AdsInstruction::PushValue(value)] => Some(value.clone()),
-            _ => None,
-        }
     }
 
     fn typecheck_statement(
@@ -112,6 +109,9 @@ impl<'a> AdsCompiler<'a> {
                 out.push(AdsInstruction::Step);
                 Ok(())
             }
+            AdsStmtAst::Use(expr_ast) => {
+                self.typecheck_use_statement(expr_ast, out)
+            }
             AdsStmtAst::When(breakpoint_ast, do_ast) => {
                 self.typecheck_when_statement(breakpoint_ast, do_ast, out)
             }
@@ -126,15 +126,8 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        let (expr_type, static_value) = if let Some((mut ops, ty)) =
-            errs.ok(self.typecheck_expr(expr_ast))
-        {
-            let static_value = self.try_get_static(&ops);
-            out.append(&mut ops);
-            (ty, static_value)
-        } else {
-            (ExprType::Bottom, None)
-        };
+        let (expr_type, static_value) =
+            errs.with(self.typecheck_expr(expr_ast, out));
         let kind = match kind {
             DeclareAst::Let => AdsDeclKind::Constant(static_value),
             DeclareAst::Var => AdsDeclKind::Variable,
@@ -151,19 +144,21 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        let pred_span = pred_ast.span;
-        if let Some((mut ops, expr_type)) =
-            errs.ok(self.typecheck_expr(pred_ast))
-        {
+        let _static_pred = {
+            let pred_span = pred_ast.span;
+            let (expr_type, static_value) =
+                errs.with(self.typecheck_expr(pred_ast, out));
             if let ExprType::Boolean = expr_type {
-                out.append(&mut ops);
+                static_value.as_ref().map(ExprValue::unwrap_bool)
             } else {
                 errs.push(AdsError::PredicateTypeError {
                     expr_span: pred_span,
                     expr_type,
                 });
+                None
             }
-        }
+        };
+        // TODO: use static_pred to elide predicate and dead branch
         self.env.push_scope();
         let mut then_stmts = Vec::<AdsInstruction>::new();
         errs.also(self.typecheck_statements(then_ast, &mut then_stmts));
@@ -186,8 +181,8 @@ impl<'a> AdsCompiler<'a> {
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
-        let (mut ops, _) = self.typecheck_expr(expr_ast)?;
-        out.append(&mut ops);
+        let (_, errs) = self.typecheck_expr(expr_ast, out);
+        errs.result()?;
         out.push(AdsInstruction::Print);
         Ok(())
     }
@@ -197,8 +192,9 @@ impl<'a> AdsCompiler<'a> {
         breakpoint_ast: BreakpointAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
-        let (mut breakpoint_ops, breakpoint_kind) =
-            self.typecheck_breakpoint(breakpoint_ast)?;
+        let mut breakpoint_ops = Vec::<AdsInstruction>::new();
+        let breakpoint_kind =
+            self.typecheck_breakpoint(breakpoint_ast, &mut breakpoint_ops)?;
         let (outer_ref, inner_ref) = if self.env.in_global_frame() {
             (AdsFrameRef::Global, AdsFrameRef::Global)
         } else {
@@ -229,10 +225,7 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let lvalue_span = lvalue_ast.span;
         let expr_span = expr_ast.span;
-        let (mut expr_ops, expr_type) = self
-            .typecheck_expr(expr_ast)
-            .unwrap_or((vec![], ExprType::Bottom));
-        out.append(&mut expr_ops);
+        let (expr_type, _) = errs.with(self.typecheck_expr(expr_ast, out));
         let lvalue_type = errs.with(self.typecheck_lvalue(lvalue_ast, out));
         if !(expr_type == ExprType::Bottom
             || lvalue_type == ExprType::Bottom
@@ -248,6 +241,47 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
+    fn typecheck_use_statement(
+        &mut self,
+        expr_ast: ExprAst,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        let expr_span = expr_ast.span;
+        match errs.ok(self.env.typecheck_expression(expr_ast)) {
+            Some((_, ExprType::String, Some(path_value))) => {
+                let path = self.joined_path(path_value.unwrap_str_ref());
+                match self.cache.fetch_or_get_cached_utf8(&path) {
+                    Ok(source_code) => {
+                        if let Some(ast) = errs
+                            .ok(AdsModuleAst::parse_source(source_code)
+                                .map_err(Errs::coerce))
+                        {
+                            errs.also(
+                                self.typecheck_statements(ast.statements, out),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        errs.push(AdsError::SrcCacheError {
+                            path,
+                            path_span: expr_span,
+                            error,
+                        });
+                    }
+                }
+            }
+            Some((_, ExprType::String, None)) => {
+                errs.push(AdsError::PathNotStatic { expr_span });
+            }
+            Some((_, expr_type, _)) => {
+                errs.push(AdsError::PathTypeError { expr_span, expr_type });
+            }
+            None => {}
+        }
+        errs.result()
+    }
+
     fn typecheck_when_statement(
         &mut self,
         breakpoint_ast: BreakpointAst,
@@ -255,10 +289,9 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        if let Some((mut ops, kind)) =
-            errs.ok(self.typecheck_breakpoint(breakpoint_ast))
+        if let Some(kind) =
+            errs.ok(self.typecheck_breakpoint(breakpoint_ast, out))
         {
-            out.append(&mut ops);
             out.push(AdsInstruction::PushHandler(kind, 1));
         }
         self.env.push_frame();
@@ -275,46 +308,54 @@ impl<'a> AdsCompiler<'a> {
     fn typecheck_expr(
         &mut self,
         ast: ExprAst,
-    ) -> AdsResult<(Vec<AdsInstruction>, ExprType)> {
-        self.env.typecheck_expression(ast)
+        out: &mut Vec<AdsInstruction>,
+    ) -> ((ExprType, Option<ExprValue>), Errs<AdsError>) {
+        let mut errs = Errs::<AdsError>::new();
+        match errs.ok(self.env.typecheck_expression(ast)) {
+            Some((mut ops, expr_type, static_value)) => {
+                out.append(&mut ops);
+                ((expr_type, static_value), errs)
+            }
+            None => ((ExprType::Bottom, None), errs),
+        }
     }
 
     fn typecheck_breakpoint(
         &mut self,
         ast: BreakpointAst,
-    ) -> AdsResult<(Vec<AdsInstruction>, WatchKind)> {
-        match ast {
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<WatchKind> {
+        let kind = match ast {
             BreakpointAst::Pc(expr_ast) => {
-                let expr_span = expr_ast.span;
-                let (ops, expr_type) = self.typecheck_expr(expr_ast)?;
-                self.typecheck_breakpoint_addr(expr_span, expr_type)?;
-                Ok((ops, WatchKind::Pc))
+                self.typecheck_breakpoint_addr(expr_ast, out)?;
+                WatchKind::Pc
             }
             BreakpointAst::Read(expr_ast) => {
-                let expr_span = expr_ast.span;
-                let (ops, expr_type) = self.typecheck_expr(expr_ast)?;
-                self.typecheck_breakpoint_addr(expr_span, expr_type)?;
-                Ok((ops, WatchKind::Read))
+                self.typecheck_breakpoint_addr(expr_ast, out)?;
+                WatchKind::Read
             }
             BreakpointAst::Write(expr_ast) => {
-                let expr_span = expr_ast.span;
-                let (ops, expr_type) = self.typecheck_expr(expr_ast)?;
-                self.typecheck_breakpoint_addr(expr_span, expr_type)?;
-                Ok((ops, WatchKind::Write))
+                self.typecheck_breakpoint_addr(expr_ast, out)?;
+                WatchKind::Write
             }
-        }
+        };
+        Ok(kind)
     }
 
     fn typecheck_breakpoint_addr(
         &mut self,
-        expr_span: SrcSpan,
-        expr_type: ExprType,
+        expr_ast: ExprAst,
+        out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
-        // TODO: Allow `ExprType::Label` as well.
-        if let ExprType::Integer = expr_type {
-            return Ok(());
+        let mut errs = Errs::<AdsError>::new();
+        let expr_span = expr_ast.span;
+        match errs.with(self.typecheck_expr(expr_ast, out)) {
+            (ExprType::Integer, _) => {}
+            // TODO: Allow `ExprType::Label` as well.
+            (expr_type, _) => errs
+                .push(AdsError::MemoryAddrTypeError { expr_span, expr_type }),
         }
-        Err(Errs::one(AdsError::MemoryAddrTypeError { expr_span, expr_type }))
+        errs.result()
     }
 
     fn typecheck_lvalue(
@@ -342,10 +383,7 @@ impl<'a> AdsCompiler<'a> {
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
-        let (mut expr_ops, expr_type) = self
-            .typecheck_expr(expr_ast)
-            .unwrap_or((vec![], ExprType::Bottom));
-        out.append(&mut expr_ops);
+        let (expr_type, _) = errs.with(self.typecheck_expr(expr_ast, out));
         out.push(AdsInstruction::SetMemory);
         // TODO: Allow `ExprType::Label` as well.
         if expr_type != ExprType::Integer {
@@ -414,6 +452,21 @@ impl<'a> AdsCompiler<'a> {
             }
         }
     }
+
+    /// Given a relative path appearing in this assembly source file (e.g. in a
+    /// `.BINARY` directive), join that path to this source file's parent
+    /// directory.
+    fn joined_path(&self, relative_path: &Rc<str>) -> Rc<str> {
+        match AsRef::<Path>::as_ref(&*self.src_path).parent() {
+            None => relative_path.clone(),
+            Some(base_path) => {
+                let joined = base_path.join(&**relative_path);
+                // We can safely `unwrap()` the `to_str()` here because
+                // `joined` was made from `Path`s that came from `str`s.
+                Rc::<str>::from(joined.to_str().unwrap())
+            }
+        }
+    }
 }
 
 //===========================================================================//
@@ -422,14 +475,20 @@ impl<'a> AdsCompiler<'a> {
 mod tests {
     use super::{AdsFrameRef, AdsInstruction, AdsProgram, ExprValue, SimEnv};
     use crate::bus::{WatchKind, new_open_bus};
+    use crate::error::StrSrcCache;
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
+    use std::rc::Rc;
 
     fn compile(source: &str) -> Vec<AdsInstruction> {
+        let mut cache = StrSrcCache::new();
+        let path = Rc::<str>::from("input");
         let bus = new_open_bus(16);
         let cpu = Mos6502::new();
         let sim = SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))]);
-        AdsProgram::compile_source(source, &sim).unwrap().instructions
+        AdsProgram::compile_source(&mut cache, path, source, &sim)
+            .unwrap()
+            .instructions
     }
 
     fn int_value(value: i32) -> ExprValue {

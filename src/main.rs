@@ -168,16 +168,26 @@ fn command_db(
     print!("{}", sim_env.description());
     if let Some(ads_path) = opt_ads_path {
         let mut ads_env = {
-            let cache = FileSrcCache::new();
+            let mut cache = FileSrcCache::new();
+            let src_path = Rc::<str>::from(ads_path.to_string_lossy());
             let file = fs::File::open(&ads_path)?;
             let source = io::read_to_string(file)?;
-            match AdsEnvironment::create(&source, sim_env, io::stdout()) {
+            match AdsEnvironment::create(
+                &mut cache,
+                src_path.clone(),
+                &source,
+                sim_env,
+                io::stdout(),
+            ) {
                 Ok(ads_env) => ads_env,
                 Err(ads_errors) => {
                     // TODO: require paths to be UTF-8
-                    let path = Rc::<str>::from(ads_path.to_string_lossy());
                     let source_errors = SourceError::from_errors(ads_errors);
-                    return Err(CliError::Source(cache, path, source_errors));
+                    return Err(CliError::Source(
+                        cache,
+                        src_path,
+                        source_errors,
+                    ));
                 }
             }
         };

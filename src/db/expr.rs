@@ -1,5 +1,5 @@
 use super::env::SimEnv;
-use super::error::{AdsError, AdsResult};
+use super::error::AdsResult;
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
@@ -196,15 +196,8 @@ impl<'a> AdsTypeEnv<'a> {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> AdsResult<(Vec<AdsInstruction>, ExprType)> {
-        let (ops, expr_type, _static_value) =
-            ExprCompiler::new(self).typecheck(&expr).map_err(|errors| {
-                errors
-                    .into_iter()
-                    .map(|error| AdsError::ExprTypeError { error })
-                    .collect()
-            })?;
-        Ok((ops, expr_type))
+    ) -> AdsResult<(Vec<AdsInstruction>, ExprType, Option<ExprValue>)> {
+        ExprCompiler::new(self).typecheck(&expr).map_err(Errs::coerce)
     }
 }
 
@@ -294,7 +287,8 @@ mod tests {
             env.typecheck_expression(id_ast("foo", 10..13)).unwrap(),
             (
                 vec![AdsInstruction::GetValue(AdsFrameRef::Global, 0)],
-                ExprType::Boolean
+                ExprType::Boolean,
+                None
             )
         );
     }
@@ -308,6 +302,7 @@ mod tests {
             (
                 vec![AdsInstruction::PushValue(int_value(42))],
                 ExprType::Integer,
+                Some(int_value(42))
             )
         );
     }

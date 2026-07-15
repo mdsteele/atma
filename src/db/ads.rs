@@ -4,6 +4,7 @@ use super::prog::AdsProgram;
 use crate::addr::Addr;
 use crate::bus::WatchId;
 use crate::db::SimEnv;
+use crate::error::SrcCache;
 use crate::expr::ExprValue;
 use crate::proc::SimBreak;
 use num_bigint::BigInt;
@@ -61,11 +62,14 @@ pub struct AdsEnvironment<W> {
 impl<W: Write> AdsEnvironment<W> {
     /// Creates a new execution of the given program.
     pub fn create(
+        cache: &mut dyn SrcCache,
+        src_path: Rc<str>,
         source: &str,
         sim: SimEnv,
         output: W,
     ) -> AdsResult<AdsEnvironment<W>> {
-        let program = AdsProgram::compile_source(source, &sim)?;
+        let program =
+            AdsProgram::compile_source(cache, src_path, source, &sim)?;
         Ok(AdsEnvironment {
             sim,
             program,
@@ -308,14 +312,18 @@ impl<W: Write> AdsEnvironment<W> {
 #[cfg(test)]
 mod tests {
     use super::{AdsEnvironment, SimEnv};
+    use crate::error::StrSrcCache;
     use std::io::Write;
+    use std::rc::Rc;
 
     fn make_env<'a>(
         source: &str,
         output: &'a mut Vec<u8>,
     ) -> AdsEnvironment<&'a mut Vec<u8>> {
+        let mut cache = StrSrcCache::new();
+        let path = Rc::<str>::from("input");
         let sim = SimEnv::with_nop_cpu();
-        AdsEnvironment::create(source, sim, output).unwrap()
+        AdsEnvironment::create(&mut cache, path, source, sim, output).unwrap()
     }
 
     fn run_to_completion<W: Write>(env: &mut AdsEnvironment<W>) {

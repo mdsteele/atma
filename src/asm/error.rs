@@ -205,6 +205,18 @@ pub enum AsmError {
     },
 }
 
+impl From<ExprTypeError> for AsmError {
+    fn from(error: ExprTypeError) -> Self {
+        Self::ExprTypeError { error }
+    }
+}
+
+impl From<ParseError> for AsmError {
+    fn from(error: ParseError) -> Self {
+        Self::ParseError { error }
+    }
+}
+
 impl ToSourceError for AsmError {
     fn to_source_error(self) -> SourceError {
         match self {

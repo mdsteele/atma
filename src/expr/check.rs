@@ -76,6 +76,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
+    // TODO: Instead of returning `Option<ExprValue>` for static value, return
+    // a `Result<ExprValue, ...>`, with the `Err` type indicating (one reason)
+    // why the expression isn't static (e.g. "because of this particular
+    // subexpression span, which isn't static because it operates on two
+    // imported labels").  This will allow for better error messages.
     pub(crate) fn typecheck(
         mut self,
         expr: &ExprAst,

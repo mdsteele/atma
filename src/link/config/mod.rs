@@ -54,11 +54,7 @@ pub struct LinkConfig {
 impl LinkConfig {
     /// Sources source code into a linker configuration.
     pub fn from_source(source: &str) -> ConfigResult<LinkConfig> {
-        let ast = LinkConfigAst::parse_source(source).map_err(|errs| {
-            errs.into_iter()
-                .map(|error| ConfigError::ParseError { error })
-                .collect::<Errs<_>>()
-        })?;
+        let ast = LinkConfigAst::parse_source(source).map_err(Errs::coerce)?;
         ConfigBuilder::new().build(ast)
     }
 

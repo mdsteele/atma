@@ -138,16 +138,10 @@ impl AsmTypeEnv {
         &self,
         expr: &ExprAst,
     ) -> AsmResult<(ObjExpr, ExprType)> {
-        match ExprCompiler::new(self).typecheck(expr) {
-            Ok((ops, expr_type, _static_value)) => {
-                debug_assert!(!ops.is_empty());
-                Ok((ObjExpr { ops }, expr_type))
-            }
-            Err(errors) => Err(errors
-                .into_iter()
-                .map(|error| AsmError::ExprTypeError { error })
-                .collect()),
-        }
+        let (ops, expr_type, _static_value) =
+            ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;
+        debug_assert!(!ops.is_empty());
+        Ok((ObjExpr { ops }, expr_type))
     }
 }
 

@@ -90,6 +90,12 @@ impl<E> Errs<E> {
     pub fn result(self) -> Result<(), Errs<E>> {
         if self.errors.is_empty() { Ok(()) } else { Err(self) }
     }
+
+    /// Transforms a list of one type of error into a list of another type of
+    /// error, using the `From` trait.
+    pub fn coerce<F: From<E>>(self) -> Errs<F> {
+        self.into_iter().map(F::from).collect()
+    }
 }
 
 impl<E: fmt::Debug> fmt::Debug for Errs<E> {

@@ -1,5 +1,5 @@
 use super::ConfigVariableOr;
-use super::error::{ConfigError, ConfigResult};
+use super::error::ConfigResult;
 use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
@@ -90,16 +90,10 @@ impl LinkTypeEnv {
         &self,
         expr: &ExprAst,
     ) -> ConfigResult<(ObjExpr, ExprType, Option<ExprValue>)> {
-        match ExprCompiler::new(self).typecheck(expr) {
-            Ok((ops, expr_type, static_value)) => {
-                debug_assert!(!ops.is_empty());
-                Ok((ObjExpr { ops }, expr_type, static_value))
-            }
-            Err(errs) => Err(errs
-                .into_iter()
-                .map(|error| ConfigError::ExprTypeError { error })
-                .collect::<Errs<_>>()),
-        }
+        let (ops, expr_type, static_value) =
+            ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;
+        debug_assert!(!ops.is_empty());
+        Ok((ObjExpr { ops }, expr_type, static_value))
     }
 }
 

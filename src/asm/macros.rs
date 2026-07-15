@@ -439,21 +439,11 @@ impl MacroSubstitution {
     ) -> AsmResult<MacroSubstitution> {
         match kind {
             PlaceholderKind::Expression => {
-                let expr = ExprAst::parse(tokens).map_err(|errors| {
-                    errors
-                        .into_iter()
-                        .map(|error| AsmError::ParseError { error })
-                        .collect::<Errs<_>>()
-                })?;
+                let expr = ExprAst::parse(tokens).map_err(Errs::coerce)?;
                 Ok(MacroSubstitution::Expression(expr))
             }
             PlaceholderKind::Identifier => {
-                let id = IdentifierAst::parse(tokens).map_err(|errors| {
-                    errors
-                        .into_iter()
-                        .map(|error| AsmError::ParseError { error })
-                        .collect::<Errs<_>>()
-                })?;
+                let id = IdentifierAst::parse(tokens).map_err(Errs::coerce)?;
                 Ok(MacroSubstitution::Identifier(id))
             }
         }

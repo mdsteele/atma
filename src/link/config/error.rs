@@ -166,6 +166,18 @@ pub enum ConfigError {
     },
 }
 
+impl From<ExprTypeError> for ConfigError {
+    fn from(error: ExprTypeError) -> Self {
+        Self::ExprTypeError { error }
+    }
+}
+
+impl From<ParseError> for ConfigError {
+    fn from(error: ParseError) -> Self {
+        Self::ParseError { error }
+    }
+}
+
 impl ToSourceError for ConfigError {
     fn to_source_error(self) -> SourceError {
         match self {

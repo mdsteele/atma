@@ -40,12 +40,7 @@ pub fn assemble_source(
     assemble_ast(
         cache,
         src_path,
-        AsmModuleAst::parse_source(source_code).map_err(|errors| {
-            errors
-                .into_iter()
-                .map(|error| AsmError::ParseError { error })
-                .collect::<Errs<_>>()
-        })?,
+        AsmModuleAst::parse_source(source_code).map_err(Errs::coerce)?,
     )
 }
 

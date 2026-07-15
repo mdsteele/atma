@@ -1,4 +1,4 @@
-use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcCacheError, SrcSpan, ToSourceError};
 use crate::expr::{ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use std::rc::Rc;
@@ -40,12 +40,34 @@ pub enum AdsError {
         /// The parse error.
         error: ParseError,
     },
+    /// Tried to use a file path expression that wasn't static.
+    PathNotStatic {
+        /// The source code span for the non-static expression.
+        expr_span: SrcSpan,
+    },
+    /// A source code path was specified using a non-string expression.
+    PathTypeError {
+        /// The source code span for the non-static expression.
+        expr_span: SrcSpan,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
     /// A control flow predicate was specified using a non-boolean expression.
     PredicateTypeError {
         /// The source code span for the predicate expression.
         expr_span: SrcSpan,
         /// The type of the expression.
         expr_type: ExprType,
+    },
+    /// Encountered an error while trying to fetch data from a file.
+    SrcCacheError {
+        /// The joined path for the source file that couldn't be fetched.
+        path: Rc<str>,
+        /// The source code span for the expression that determined the file to
+        /// be fetched.
+        path_span: SrcSpan,
+        /// The error from the source cache.
+        error: SrcCacheError,
     },
     /// Tried to modify a variable that was never declared.
     UnknownVariable {
@@ -68,6 +90,18 @@ pub enum AdsError {
     },
 }
 
+impl From<ExprTypeError> for AdsError {
+    fn from(error: ExprTypeError) -> Self {
+        Self::ExprTypeError { error }
+    }
+}
+
+impl From<ParseError> for AdsError {
+    fn from(error: ParseError) -> Self {
+        Self::ParseError { error }
+    }
+}
+
 impl ToSourceError for AdsError {
     fn to_source_error(self) -> SourceError {
         match self {
@@ -85,19 +119,41 @@ impl ToSourceError for AdsError {
             Self::MemoryAddrTypeError { expr_span, expr_type } => {
                 // TODO: Allow `ExprType::Label` as well.
                 let message = format!(
-                    "memory address must be of type int, not {expr_type}"
+                    "memory address must be of type {}, not {expr_type}",
+                    ExprType::Integer
                 );
                 let label = format!("this expression has type {expr_type}");
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
             }
             Self::ParseError { error } => error.to_source_error(),
-            Self::PredicateTypeError { expr_span, expr_type } => {
-                let message =
-                    format!("predicate must be of type bool, not {expr_type}");
+            Self::PathNotStatic { expr_span } => {
+                let message = "source code path must be static";
+                let label = "this expression isn't static";
+                SourceError::new(expr_span, message)
+                    .with_label(expr_span, label)
+            }
+            Self::PathTypeError { expr_span, expr_type } => {
+                let message = format!(
+                    "source code path must be of type {}, not {expr_type}",
+                    ExprType::String
+                );
                 let label = format!("this expression has type {expr_type}");
                 SourceError::new(expr_span, message)
                     .with_label(expr_span, label)
+            }
+            Self::PredicateTypeError { expr_span, expr_type } => {
+                let message = format!(
+                    "predicate must be of type {}, not {expr_type}",
+                    ExprType::Boolean
+                );
+                let label = format!("this expression has type {expr_type}");
+                SourceError::new(expr_span, message)
+                    .with_label(expr_span, label)
+            }
+            Self::SrcCacheError { path, path_span, error } => {
+                let message = format!("error loading {path:?}: {error}");
+                SourceError::new(path_span, message)
             }
             Self::UnknownVariable { name, span } => {
                 let message = format!("no such variable: `{name}`");
