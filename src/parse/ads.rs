@@ -65,6 +65,8 @@ pub enum AdsStmtAst {
     Use(ExprAst),
     /// Sets up a breakpoint handler.
     When(BreakpointAst, Vec<AdsStmtAst>),
+    /// Loops until the expression is false.
+    While(ExprAst, Vec<AdsStmtAst>),
 }
 
 impl AdsStmtAst {
@@ -85,9 +87,14 @@ impl AdsStmtAst {
                 });
             let when_statement = keyword("when")
                 .ignore_then(BreakpointAst::parser())
-                .then(stmt_block)
+                .then(stmt_block.clone())
                 .then_ignore(linebreak())
                 .map(|(cond, block)| AdsStmtAst::When(cond, block));
+            let while_statement = keyword("while")
+                .ignore_then(ExprAst::parser())
+                .then(stmt_block)
+                .then_ignore(linebreak())
+                .map(|(pred, block)| AdsStmtAst::While(pred, block));
             chumsky::prelude::choice((
                 declare_statement(),
                 exit_statement(),
@@ -99,6 +106,7 @@ impl AdsStmtAst {
                 step_statement(),
                 use_statement(),
                 when_statement,
+                while_statement,
             ))
         })
     }

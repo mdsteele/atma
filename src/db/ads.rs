@@ -105,6 +105,11 @@ impl<W: Write> AdsEnvironment<W> {
                     Err(_) => return Err(AdsRuntimeError {}),
                 }
             }
+            AdsInstruction::BranchIf(offset) => {
+                if self.value_stack.pop().unwrap().unwrap_bool() {
+                    return self.jump(*offset);
+                }
+            }
             AdsInstruction::BranchUnless(offset) => {
                 if !self.value_stack.pop().unwrap().unwrap_bool() {
                     return self.jump(*offset);

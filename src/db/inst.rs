@@ -15,6 +15,9 @@ pub enum AdsInstruction {
     /// result onto the value stack.
     BinOp(ExprBinOp),
     /// Pops the top value from the value stack (which must be a boolean).  If
+    /// the value is true, adds the given offset to the ADS program counter.
+    BranchIf(isize),
+    /// Pops the top value from the value stack (which must be a boolean).  If
     /// the value is false, adds the given offset to the ADS program counter.
     BranchUnless(isize),
     /// Exits the program.

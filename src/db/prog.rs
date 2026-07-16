@@ -115,6 +115,9 @@ impl<'a> AdsCompiler<'a> {
             AdsStmtAst::When(breakpoint_ast, do_ast) => {
                 self.typecheck_when_statement(breakpoint_ast, do_ast, out)
             }
+            AdsStmtAst::While(pred_ast, do_ast) => {
+                self.typecheck_while_statement(pred_ast, do_ast, out)
+            }
         }
     }
 
@@ -144,20 +147,7 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        let _static_pred = {
-            let pred_span = pred_ast.span;
-            let (expr_type, static_value) =
-                errs.with(self.typecheck_expr(pred_ast, out));
-            if let ExprType::Boolean = expr_type {
-                static_value.as_ref().map(ExprValue::unwrap_bool)
-            } else {
-                errs.push(AdsError::PredicateTypeError {
-                    expr_span: pred_span,
-                    expr_type,
-                });
-                None
-            }
-        };
+        let _static_pred = errs.with(self.typecheck_predicate(pred_ast, out));
         // TODO: use static_pred to elide predicate and dead branch
         self.env.push_scope();
         let mut then_stmts = Vec::<AdsInstruction>::new();
@@ -305,8 +295,42 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_expr(
+    fn typecheck_while_statement(
         &mut self,
+        pred_ast: ExprAst,
+        do_ast: Vec<AdsStmtAst>,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        let mut pred_insts = Vec::<AdsInstruction>::new();
+        let static_pred =
+            errs.with(self.typecheck_predicate(pred_ast, &mut pred_insts));
+        self.env.push_scope();
+        let mut do_stmts = Vec::<AdsInstruction>::new();
+        errs.also(self.typecheck_statements(do_ast, &mut do_stmts));
+        self.env.pop_scope(&mut do_stmts);
+        let do_stmts_len = do_stmts.len() as isize;
+        match static_pred {
+            Some(false) => {}
+            Some(true) => {
+                out.append(&mut do_stmts);
+                out.push(AdsInstruction::Jump(-1 - do_stmts_len));
+            }
+            None => {
+                let pred_insts_len = pred_insts.len() as isize;
+                out.push(AdsInstruction::Jump(do_stmts_len));
+                out.append(&mut do_stmts);
+                out.append(&mut pred_insts);
+                out.push(AdsInstruction::BranchIf(
+                    -1 - do_stmts_len - pred_insts_len,
+                ));
+            }
+        }
+        errs.result()
+    }
+
+    fn typecheck_expr(
+        &self,
         ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> ((ExprType, Option<ExprValue>), Errs<AdsError>) {
@@ -320,8 +344,26 @@ impl<'a> AdsCompiler<'a> {
         }
     }
 
+    fn typecheck_predicate(
+        &self,
+        expr_ast: ExprAst,
+        out: &mut Vec<AdsInstruction>,
+    ) -> (Option<bool>, Errs<AdsError>) {
+        let mut errs = Errs::<AdsError>::new();
+        let expr_span = expr_ast.span;
+        let (expr_type, static_value) =
+            errs.with(self.typecheck_expr(expr_ast, out));
+        let static_pred = if let ExprType::Boolean = expr_type {
+            static_value.as_ref().map(ExprValue::unwrap_bool)
+        } else {
+            errs.push(AdsError::PredicateTypeError { expr_span, expr_type });
+            None
+        };
+        (static_pred, errs)
+    }
+
     fn typecheck_breakpoint(
-        &mut self,
+        &self,
         ast: BreakpointAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<WatchKind> {
@@ -343,7 +385,7 @@ impl<'a> AdsCompiler<'a> {
     }
 
     fn typecheck_breakpoint_addr(
-        &mut self,
+        &self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
@@ -359,7 +401,7 @@ impl<'a> AdsCompiler<'a> {
     }
 
     fn typecheck_lvalue(
-        &mut self,
+        &self,
         lvalue_ast: LValueAst,
         out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
@@ -377,7 +419,7 @@ impl<'a> AdsCompiler<'a> {
     }
 
     fn typecheck_memory_lvalue(
-        &mut self,
+        &self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
@@ -393,7 +435,7 @@ impl<'a> AdsCompiler<'a> {
     }
 
     fn typecheck_tuple_lvalue(
-        &mut self,
+        &self,
         lvalue_asts: Vec<LValueAst>,
         out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
@@ -408,7 +450,7 @@ impl<'a> AdsCompiler<'a> {
     }
 
     fn typecheck_variable_lvalue(
-        &mut self,
+        &self,
         id_span: SrcSpan,
         id_name: Rc<str>,
         out: &mut Vec<AdsInstruction>,
@@ -476,6 +518,7 @@ mod tests {
     use super::{AdsFrameRef, AdsInstruction, AdsProgram, ExprValue, SimEnv};
     use crate::bus::{WatchKind, new_open_bus};
     use crate::error::StrSrcCache;
+    use crate::expr::ExprBinOp;
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
     use std::rc::Rc;
@@ -501,12 +544,12 @@ mod tests {
     }
 
     #[test]
-    fn exit_instruction_only() {
+    fn exit_statement_only() {
         assert_eq!(compile("exit\n"), vec![AdsInstruction::Exit]);
     }
 
     #[test]
-    fn if_instruction() {
+    fn if_statement() {
         assert_eq!(
             compile("if %false {\nstep\n}\n"),
             vec![
@@ -519,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn if_else_instruction() {
+    fn if_else_statement() {
         assert_eq!(
             compile("if %false {\nprint 1\n} else {\nprint 2\n}\n"),
             vec![
@@ -536,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    fn let_instruction() {
+    fn let_statement() {
         assert_eq!(
             compile("let x = 5\n"),
             vec![
@@ -547,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn let_instruction_with_pc() {
+    fn let_statement_with_pc() {
         assert_eq!(
             compile("let x = pc\n"),
             vec![AdsInstruction::GetPc, AdsInstruction::Exit]
@@ -555,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn print_instruction() {
+    fn print_statement() {
         assert_eq!(
             compile("print 42\n"),
             vec![
@@ -567,12 +610,12 @@ mod tests {
     }
 
     #[test]
-    fn relax_instruction() {
+    fn relax_statement() {
         assert_eq!(compile("relax\n"), vec![AdsInstruction::Exit]);
     }
 
     #[test]
-    fn set_instruction() {
+    fn set_statement() {
         assert_eq!(
             compile("var x = 1\nset x = 2\n"),
             vec![
@@ -585,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn step_instruction() {
+    fn step_statement() {
         assert_eq!(
             compile("step\n"),
             vec![AdsInstruction::Step, AdsInstruction::Exit]
@@ -593,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn when_instruction() {
+    fn when_statement() {
         assert_eq!(
             compile("when at $ff {\nprint 1\n}\nstep\n"),
             vec![
@@ -604,6 +647,42 @@ mod tests {
                 AdsInstruction::Print,
                 AdsInstruction::Return,
                 AdsInstruction::Step,
+                AdsInstruction::Exit,
+            ]
+        );
+    }
+
+    #[test]
+    fn while_false_statement() {
+        assert_eq!(
+            compile("while %false {\nstep\n}\n"),
+            vec![AdsInstruction::Exit]
+        );
+    }
+
+    #[test]
+    fn while_true_statement() {
+        assert_eq!(
+            compile("while %true {\nstep\n}\n"),
+            vec![
+                AdsInstruction::Step,
+                AdsInstruction::Jump(-2),
+                AdsInstruction::Exit,
+            ]
+        );
+    }
+
+    #[test]
+    fn while_statement() {
+        assert_eq!(
+            compile("while pc < 5 {\nstep\n}\n"),
+            vec![
+                AdsInstruction::Jump(1),
+                AdsInstruction::Step,
+                AdsInstruction::GetPc,
+                AdsInstruction::PushValue(int_value(5)),
+                AdsInstruction::BinOp(ExprBinOp::AnyCmpLt),
+                AdsInstruction::BranchIf(-5),
                 AdsInstruction::Exit,
             ]
         );
