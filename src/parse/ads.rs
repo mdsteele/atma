@@ -55,6 +55,8 @@ pub enum AdsStmtAst {
     Print(ExprAst),
     /// A no-op statement.
     Relax,
+    /// Runs the simulated processor indefinitely.
+    Run,
     /// Runs the simulated processor until the specified breakpoint is reached.
     RunUntil(BreakpointAst),
     /// Updates a variable.
@@ -101,6 +103,7 @@ impl AdsStmtAst {
                 if_statement,
                 print_statement(),
                 relax_statement(),
+                run_statement(),
                 run_until_statement(),
                 set_statement(),
                 step_statement(),
@@ -194,6 +197,11 @@ fn print_statement<'a>()
 fn relax_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
     keyword("relax").ignore_then(linebreak()).to(AdsStmtAst::Relax)
+}
+
+fn run_statement<'a>()
+-> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+    keyword("run").ignore_then(linebreak()).to(AdsStmtAst::Run)
 }
 
 fn run_until_statement<'a>()

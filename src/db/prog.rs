@@ -43,9 +43,7 @@ impl AdsProgram {
         let mut compiler = AdsCompiler::new(cache, src_path, sim_env);
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions)?;
-        if !matches!(instructions.last(), Some(AdsInstruction::Exit)) {
-            instructions.push(AdsInstruction::Exit);
-        }
+        instructions.push(AdsInstruction::Exit);
         Ok(AdsProgram { instructions })
     }
 }
@@ -99,6 +97,11 @@ impl<'a> AdsCompiler<'a> {
                 self.typecheck_print_statement(expr_ast, out)
             }
             AdsStmtAst::Relax => Ok(()),
+            AdsStmtAst::Run => {
+                out.push(AdsInstruction::Step);
+                out.push(AdsInstruction::Jump(-2));
+                Ok(())
+            }
             AdsStmtAst::RunUntil(breakpoint_ast) => {
                 self.typecheck_run_until_statement(breakpoint_ast, out)
             }
@@ -544,18 +547,15 @@ mod tests {
     }
 
     #[test]
-    fn exit_statement_only() {
-        assert_eq!(compile("exit\n"), vec![AdsInstruction::Exit]);
-    }
-
-    #[test]
     fn if_statement() {
         assert_eq!(
-            compile("if %false {\nstep\n}\n"),
+            compile("if pc == 1 {\nexit\n}\n"),
             vec![
-                AdsInstruction::PushValue(ExprValue::Boolean(false)),
+                AdsInstruction::GetPc,
+                AdsInstruction::PushValue(int_value(1)),
+                AdsInstruction::BinOp(ExprBinOp::AnyCmpEq),
                 AdsInstruction::BranchUnless(1),
-                AdsInstruction::Step,
+                AdsInstruction::Exit,
                 AdsInstruction::Exit,
             ]
         );
@@ -612,6 +612,18 @@ mod tests {
     #[test]
     fn relax_statement() {
         assert_eq!(compile("relax\n"), vec![AdsInstruction::Exit]);
+    }
+
+    #[test]
+    fn run_statement() {
+        assert_eq!(
+            compile("run\n"),
+            vec![
+                AdsInstruction::Step,
+                AdsInstruction::Jump(-2),
+                AdsInstruction::Exit,
+            ]
+        );
     }
 
     #[test]
