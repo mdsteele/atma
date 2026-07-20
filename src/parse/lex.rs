@@ -1,4 +1,4 @@
-use crate::error::{SourceError, SrcSpan, ToSourceError};
+use crate::error::{SourceError, SrcLoc, SrcSpan};
 use logos::{self, Logos};
 use num_bigint::{BigInt, Sign};
 use std::rc::Rc;
@@ -19,29 +19,35 @@ pub enum LexerError {
     UnrecognizedToken(SrcSpan, Rc<str>),
 }
 
-impl ToSourceError for LexerError {
-    fn to_source_error(self) -> SourceError {
+impl LexerError {
+    /// Converts the error into a `SourceError`, using the given path for the
+    /// source file being lexed.
+    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             LexerError::BackslashBeforeBackslash(first_span, _second_span) => {
                 let message =
                     "unexpected backslash before backslash".to_string();
-                SourceError::new(first_span, message)
+                SourceError::new(SrcLoc::new(path, first_span), message)
+                    .with_primary_label("")
             }
             LexerError::BackslashBeforeEof(backslash_span) => {
                 let message = "unexpected backslash before EOF".to_string();
-                SourceError::new(backslash_span, message)
+                SourceError::new(SrcLoc::new(path, backslash_span), message)
+                    .with_primary_label("")
             }
             LexerError::BackslashBeforeToken(backslash_span, token) => {
                 let message = format!(
                     "unexpected backslash before {}",
                     token.value.name()
                 );
-                SourceError::new(backslash_span, message)
+                SourceError::new(SrcLoc::new(path, backslash_span), message)
+                    .with_primary_label("")
             }
             LexerError::UnrecognizedToken(span, text) => {
                 let message =
                     format!("unrecognized token: '{}'", text.escape_debug());
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("")
             }
         }
     }

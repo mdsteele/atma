@@ -1,10 +1,11 @@
 use super::env::SimEnv;
-use super::error::AdsResult;
+use super::error::{AdsError, AdsResult, AdsSrcContext};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
+use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, IdentifierAst};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -99,12 +100,42 @@ impl AdsScope {
 
 pub struct AdsTypeEnv<'a> {
     sim_env: &'a SimEnv,
+    context_stack: Vec<Rc<AdsSrcContext>>,
     frames: Vec<Vec<AdsScope>>,
 }
 
 impl<'a> AdsTypeEnv<'a> {
-    pub fn new(sim_env: &'a SimEnv) -> AdsTypeEnv<'a> {
-        AdsTypeEnv { sim_env, frames: vec![vec![AdsScope::with_start(0)]] }
+    pub fn new(sim_env: &'a SimEnv, root_path: Rc<str>) -> AdsTypeEnv<'a> {
+        let root_context = Rc::new(AdsSrcContext::root(root_path));
+        AdsTypeEnv {
+            sim_env,
+            context_stack: vec![root_context],
+            frames: vec![vec![AdsScope::with_start(0)]],
+        }
+    }
+
+    pub fn current_src_context(&self) -> Rc<AdsSrcContext> {
+        debug_assert!(!self.context_stack.is_empty());
+        self.context_stack.last().unwrap().clone()
+    }
+
+    pub fn push_src_context(&mut self, context: Rc<AdsSrcContext>) {
+        self.context_stack.push(context);
+    }
+
+    pub fn pop_src_context(&mut self) {
+        debug_assert!(self.context_stack.len() >= 2);
+        self.context_stack.pop();
+    }
+
+    pub fn parse_source(&self, source_code: &str) -> AdsResult<AdsModuleAst> {
+        AdsModuleAst::parse_source(source_code).map_err(|errs| {
+            let context = self.current_src_context();
+            errs.map(|error| AdsError::ParseError {
+                context: context.clone(),
+                error,
+            })
+        })
     }
 
     pub fn in_global_frame(&self) -> bool {
@@ -197,7 +228,13 @@ impl<'a> AdsTypeEnv<'a> {
         &self,
         expr: ExprAst,
     ) -> AdsResult<(Vec<AdsInstruction>, ExprType, Option<ExprValue>)> {
-        ExprCompiler::new(self).typecheck(&expr).map_err(Errs::coerce)
+        let context = self.current_src_context();
+        ExprCompiler::new(self).typecheck(&expr).map_err(|errs| {
+            errs.map(|error| AdsError::ExprTypeError {
+                context: context.clone(),
+                error,
+            })
+        })
     }
 }
 
@@ -273,7 +310,7 @@ mod tests {
     #[test]
     fn typecheck_identifier_expr() {
         let sim_env = SimEnv::with_nop_cpu();
-        let mut env = AdsTypeEnv::new(&sim_env);
+        let mut env = AdsTypeEnv::new(&sim_env, Rc::from("input"));
         env.add_declaration(
             AdsDeclKind::Constant(None),
             IdentifierAst {
@@ -296,7 +333,7 @@ mod tests {
     #[test]
     fn typecheck_int_literal_expr() {
         let sim_env = SimEnv::with_nop_cpu();
-        let env = AdsTypeEnv::new(&sim_env);
+        let env = AdsTypeEnv::new(&sim_env, Rc::from("input"));
         assert_eq!(
             env.typecheck_expression(int_ast(42, 0..2)).unwrap(),
             (

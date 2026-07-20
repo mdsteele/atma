@@ -1,5 +1,5 @@
 use crate::addr::{Align, AlignTryFromError};
-use crate::error::{Errs, SourceError, SrcCacheError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcCacheError, SrcLoc, SrcSpan};
 use crate::expr::{ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
@@ -217,15 +217,17 @@ impl From<ParseError> for AsmError {
     }
 }
 
-impl ToSourceError for AsmError {
-    fn to_source_error(self) -> SourceError {
+impl AsmError {
+    /// Converts the error into a `SourceError`, using the given path for the
+    /// source file being assembled.
+    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::ArchHasNoEndianness { directive, span, arch } => {
                 let message = format!(
                     "Cannot use {directive} under architecture {arch:?}, \
                      which has no defined endianness"
                 );
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
             }
             Self::AssertionStaticallyFailed {
                 condition_span,
@@ -236,14 +238,14 @@ impl ToSourceError for AsmError {
                 } else {
                     "Assertion failed".to_string()
                 };
-                SourceError::new(condition_span, message)
+                SourceError::new(SrcLoc::new(path, condition_span), message)
             }
             Self::DeclNameIsBuiltin { span, name } => {
                 let message = format!(
                     "cannot declare `{name}`; identifiers starting with `%` \
                      are reserved"
                 );
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
             }
             Self::DirectiveExprNotStatic {
                 directive,
@@ -253,8 +255,8 @@ impl ToSourceError for AsmError {
                 let message =
                     format!("{directive} {component} must be static");
                 let label = "this expression isn't static";
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::DirectiveExprOutOfRange {
                 directive,
@@ -269,8 +271,8 @@ impl ToSourceError for AsmError {
                 );
                 let label =
                     format!("the value of this expression is {expr_value}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::DirectiveExprTypeError {
                 directive,
@@ -288,12 +290,12 @@ impl ToSourceError for AsmError {
                         .join(" or "),
                 );
                 let label = format!("this expression has type {expr_type}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::DirectiveNotInSection { directive, span } => {
                 let message = format!("{directive} must be within a .SECTION");
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
             }
             Self::DuplicateAttrName {
                 directive,
@@ -306,9 +308,9 @@ impl ToSourceError for AsmError {
                 );
                 let label1 = "Previously declared here";
                 let label2 = "Duplicated here";
-                SourceError::new(attr_span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(attr_span, label2)
+                SourceError::new(SrcLoc::new(path, attr_span), message)
+                    .with_label(SrcLoc::new(path, prev_span), label1)
+                    .with_primary_label(label2)
             }
             Self::DuplicateMacroPlaceholder {
                 placeholder_name,
@@ -320,11 +322,11 @@ impl ToSourceError for AsmError {
                 );
                 let label1 = "Previously declared here";
                 let label2 = "Duplicated here";
-                SourceError::new(placeholder_span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(placeholder_span, label2)
+                SourceError::new(SrcLoc::new(path, placeholder_span), message)
+                    .with_label(SrcLoc::new(path, prev_span), label1)
+                    .with_primary_label(label2)
             }
-            Self::ExprTypeError { error } => error.to_source_error(),
+            Self::ExprTypeError { error } => error.to_source_error(path),
             Self::InvalidAlignmentValue {
                 directive,
                 attr_name,
@@ -349,29 +351,29 @@ impl ToSourceError for AsmError {
                 };
                 let label =
                     format!("the value of this expression is ${expr_value:x}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::InvalidAttrName { directive, attr_name, attr_span } => {
                 let message =
                     format!("Invalid {directive} attribute: `{attr_name}`");
-                SourceError::new(attr_span, message)
+                SourceError::new(SrcLoc::new(path, attr_span), message)
             }
             Self::InvalidUnicodeScalarValue { expr_span, expr_value } => {
                 let message = "invalid unicode scalar value";
                 let label =
                     format!("the value of this expression is {expr_value}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::MultipleMacroPlaceholders { span } => {
                 let message = "multiple placeholders";
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
             }
-            Self::ParseError { error } => error.to_source_error(),
-            Self::SrcCacheError { path, path_span, error } => {
-                let message = format!("error loading {path:?}: {error}");
-                SourceError::new(path_span, message)
+            Self::ParseError { error } => error.to_source_error(path),
+            Self::SrcCacheError { path: other, path_span, error } => {
+                let message = format!("error loading {other:?}: {error}");
+                SourceError::new(SrcLoc::new(path, path_span), message)
             }
             Self::SymbolAlreadyDeclared {
                 full_name,
@@ -382,20 +384,21 @@ impl ToSourceError for AsmError {
                     format!("symbol was already declared: {}", full_name);
                 let label1 = "previously declared here";
                 let label2 = "redeclared here";
-                SourceError::new(name_span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(name_span, label2)
+                SourceError::new(SrcLoc::new(path, name_span), message)
+                    .with_label(SrcLoc::new(path, prev_span), label1)
+                    .with_primary_label(label2)
             }
             Self::UnknownArch { arch, span } => {
                 let message =
                     format!("the `{arch}` architecture was never defined");
                 let label =
                     format!("The value of this expression is {arch:?}");
-                SourceError::new(span, message).with_label(span, label)
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label(label)
             }
             Self::UnknownMacroPlaceholder { name, span } => {
                 let message = format!("Undeclared placeholder: `{name}`");
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
             }
             Self::UnmatchedMacroInvocation {
                 macro_name,
@@ -405,7 +408,7 @@ impl ToSourceError for AsmError {
                 let message = format!(
                     "no match for `{macro_name}` in architecture `{arch}`"
                 );
-                SourceError::new(invocation_span, message)
+                SourceError::new(SrcLoc::new(path, invocation_span), message)
             }
         }
     }

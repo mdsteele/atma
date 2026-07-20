@@ -1,5 +1,5 @@
 use super::lex::LexerError;
-use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -18,12 +18,15 @@ pub enum ParseError {
     ExpectedToken(SrcSpan, Rc<str>),
 }
 
-impl ToSourceError for ParseError {
-    fn to_source_error(self) -> SourceError {
+impl ParseError {
+    /// Converts the error into a `SourceError`, using the given path for the
+    /// source file being parsed.
+    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
-            ParseError::Lex(error) => error.to_source_error(),
+            ParseError::Lex(error) => error.to_source_error(path),
             ParseError::ExpectedToken(span, expectation) => {
-                SourceError::new(span, expectation.to_string())
+                SourceError::new(SrcLoc::new(path, span), &expectation)
+                    .with_primary_label("")
             }
         }
     }

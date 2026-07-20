@@ -1,13 +1,15 @@
 use super::env::SimEnv;
-use super::error::{AdsError, AdsResult};
+use super::error::{
+    AdsError, AdsResult, AdsSrcContext, AdsSrcLoc, AdsSrcParent,
+};
 use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::parse::{
-    AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst, ExprAst,
-    IdentifierAst, LValueAst, LValueAstNode,
+    AdsStmtAst, BreakpointAst, DeclareAst, ExprAst, IdentifierAst, LValueAst,
+    LValueAstNode,
 };
 use std::path::Path;
 use std::rc::Rc;
@@ -27,20 +29,8 @@ impl AdsProgram {
         source_code: &str,
         sim_env: &SimEnv,
     ) -> AdsResult<AdsProgram> {
-        let ast =
-            AdsModuleAst::parse_source(source_code).map_err(Errs::coerce)?;
-        AdsProgram::compile_ast(cache, src_path, ast, sim_env)
-    }
-
-    /// Distills the abstract syntax tree for an Atma Debugger Script module
-    /// into a program that can be executed.
-    fn compile_ast(
-        cache: &mut dyn SrcCache,
-        src_path: Rc<str>,
-        module: AdsModuleAst,
-        sim_env: &SimEnv,
-    ) -> AdsResult<AdsProgram> {
         let mut compiler = AdsCompiler::new(cache, src_path, sim_env);
+        let module = compiler.env.parse_source(source_code)?;
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions)?;
         instructions.push(AdsInstruction::Exit);
@@ -52,17 +42,16 @@ impl AdsProgram {
 
 struct AdsCompiler<'a> {
     cache: &'a mut dyn SrcCache,
-    src_path: Rc<str>,
     env: AdsTypeEnv<'a>,
 }
 
 impl<'a> AdsCompiler<'a> {
     fn new(
         cache: &'a mut dyn SrcCache,
-        src_path: Rc<str>,
+        root_path: Rc<str>,
         sim_env: &'a SimEnv,
     ) -> AdsCompiler<'a> {
-        AdsCompiler { cache, src_path, env: AdsTypeEnv::new(sim_env) }
+        AdsCompiler { cache, env: AdsTypeEnv::new(sim_env, root_path) }
     }
 
     fn typecheck_statements(
@@ -225,9 +214,9 @@ impl<'a> AdsCompiler<'a> {
             || expr_type == lvalue_type)
         {
             errs.push(AdsError::VariableTypeError {
-                expr_span,
+                expr_loc: self.make_loc(expr_span),
                 expr_type,
-                lvalue_span,
+                lvalue_loc: self.make_loc(lvalue_span),
                 lvalue_type,
             });
         }
@@ -246,29 +235,45 @@ impl<'a> AdsCompiler<'a> {
                 let path = self.joined_path(path_value.unwrap_str_ref());
                 match self.cache.fetch_or_get_cached_utf8(&path) {
                     Ok(source_code) => {
-                        if let Some(ast) = errs
-                            .ok(AdsModuleAst::parse_source(source_code)
-                                .map_err(Errs::coerce))
+                        let context = Rc::new(AdsSrcContext {
+                            path,
+                            parent: AdsSrcParent::Use(AdsSrcLoc {
+                                span: expr_span,
+                                context: self.env.current_src_context(),
+                            }),
+                        });
+                        self.env.push_src_context(context);
+                        if let Some(module) =
+                            errs.ok(self.env.parse_source(source_code))
                         {
                             errs.also(
-                                self.typecheck_statements(ast.statements, out),
-                            );
+                                self.typecheck_statements(
+                                    module.statements,
+                                    out,
+                                ),
+                            )
                         }
+                        self.env.pop_src_context();
                     }
                     Err(error) => {
                         errs.push(AdsError::SrcCacheError {
                             path,
-                            path_span: expr_span,
+                            path_loc: self.make_loc(expr_span),
                             error,
                         });
                     }
                 }
             }
             Some((_, ExprType::String, None)) => {
-                errs.push(AdsError::PathNotStatic { expr_span });
+                errs.push(AdsError::PathNotStatic {
+                    expr_loc: self.make_loc(expr_span),
+                });
             }
             Some((_, expr_type, _)) => {
-                errs.push(AdsError::PathTypeError { expr_span, expr_type });
+                errs.push(AdsError::PathTypeError {
+                    expr_loc: self.make_loc(expr_span),
+                    expr_type,
+                });
             }
             None => {}
         }
@@ -359,7 +364,10 @@ impl<'a> AdsCompiler<'a> {
         let static_pred = if let ExprType::Boolean = expr_type {
             static_value.as_ref().map(ExprValue::unwrap_bool)
         } else {
-            errs.push(AdsError::PredicateTypeError { expr_span, expr_type });
+            errs.push(AdsError::PredicateTypeError {
+                expr_loc: self.make_loc(expr_span),
+                expr_type,
+            });
             None
         };
         (static_pred, errs)
@@ -397,8 +405,10 @@ impl<'a> AdsCompiler<'a> {
         match errs.with(self.typecheck_expr(expr_ast, out)) {
             (ExprType::Integer, _) => {}
             // TODO: Allow `ExprType::Label` as well.
-            (expr_type, _) => errs
-                .push(AdsError::MemoryAddrTypeError { expr_span, expr_type }),
+            (expr_type, _) => errs.push(AdsError::MemoryAddrTypeError {
+                expr_loc: self.make_loc(expr_span),
+                expr_type,
+            }),
         }
         errs.result()
     }
@@ -432,7 +442,10 @@ impl<'a> AdsCompiler<'a> {
         out.push(AdsInstruction::SetMemory);
         // TODO: Allow `ExprType::Label` as well.
         if expr_type != ExprType::Integer {
-            errs.push(AdsError::MemoryAddrTypeError { expr_span, expr_type });
+            errs.push(AdsError::MemoryAddrTypeError {
+                expr_loc: self.make_loc(expr_span),
+                expr_type,
+            });
         }
         (ExprType::Integer, errs)
     }
@@ -475,8 +488,8 @@ impl<'a> AdsCompiler<'a> {
             )) => {
                 let error = AdsError::CannotModifyConstant {
                     name: id_name,
-                    lvalue_span: id_span,
-                    decl_span: decl.id_span,
+                    lvalue_loc: self.make_loc(id_span),
+                    decl_loc: self.make_loc(decl.id_span),
                 };
                 (decl.var_type.clone(), Errs::one(error))
             }
@@ -491,18 +504,25 @@ impl<'a> AdsCompiler<'a> {
                     out.push(AdsInstruction::SetPc);
                     return (ExprType::Integer, Errs::new());
                 }
-                let error =
-                    AdsError::UnknownVariable { name: id_name, span: id_span };
+                let error = AdsError::UnknownVariable {
+                    name: id_name,
+                    loc: self.make_loc(id_span),
+                };
                 (ExprType::Bottom, Errs::one(error))
             }
         }
     }
 
-    /// Given a relative path appearing in this assembly source file (e.g. in a
-    /// `.BINARY` directive), join that path to this source file's parent
+    fn make_loc(&self, span: SrcSpan) -> AdsSrcLoc {
+        AdsSrcLoc { span, context: self.env.current_src_context() }
+    }
+
+    /// Given a relative path appearing in the current source context (e.g. in
+    /// a `use` statement), join that path to the current source file's parent
     /// directory.
     fn joined_path(&self, relative_path: &Rc<str>) -> Rc<str> {
-        match AsRef::<Path>::as_ref(&*self.src_path).parent() {
+        let context = self.env.current_src_context();
+        match AsRef::<Path>::as_ref(&*context.path).parent() {
             None => relative_path.clone(),
             Some(base_path) => {
                 let joined = base_path.join(&**relative_path);

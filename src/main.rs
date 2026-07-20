@@ -64,7 +64,7 @@ enum Command {
 
 enum CliError {
     Io(io::Error),
-    Source(FileSrcCache, Rc<str>, Errs<SourceError>),
+    Source(FileSrcCache, Errs<SourceError>),
     Link(Errs<LinkError>),
     AdsRuntimeError(AdsRuntimeError),
 }
@@ -111,8 +111,8 @@ fn run_cli() -> Result<(), ExitCode> {
             report_io_error(io_error);
             Err(ExitCode::FAILURE)
         }
-        Err(CliError::Source(cache, path, source_errors)) => {
-            report_source_errors(cache, path, source_errors);
+        Err(CliError::Source(cache, source_errors)) => {
+            report_source_errors(cache, source_errors);
             Err(ExitCode::FAILURE)
         }
         Err(CliError::Link(link_errors)) => {
@@ -134,13 +134,13 @@ fn command_asm(
 ) -> Result<(), CliError> {
     let mut cache = FileSrcCache::new();
     let source_code = io::read_to_string(fs::File::open(&source_path)?)?;
-    let src_path = Rc::<str>::from(source_path.to_string_lossy());
-    let obj = match assemble_source(&mut cache, src_path.clone(), &source_code)
-    {
+    let path = Rc::<str>::from(source_path.to_string_lossy());
+    let obj = match assemble_source(&mut cache, path.clone(), &source_code) {
         Ok(obj) => obj,
         Err(asm_errors) => {
-            let source_errors = SourceError::from_errors(asm_errors);
-            return Err(CliError::Source(cache, src_path, source_errors));
+            let source_errors =
+                asm_errors.map(|error| error.to_source_error(&path));
+            return Err(CliError::Source(cache, source_errors));
         }
     };
     if let Some(output_path) = opt_output_path {
@@ -174,20 +174,16 @@ fn command_db(
             let source = io::read_to_string(file)?;
             match AdsEnvironment::create(
                 &mut cache,
-                src_path.clone(),
+                src_path,
                 &source,
                 sim_env,
                 io::stdout(),
             ) {
                 Ok(ads_env) => ads_env,
                 Err(ads_errors) => {
-                    // TODO: require paths to be UTF-8
-                    let source_errors = SourceError::from_errors(ads_errors);
-                    return Err(CliError::Source(
-                        cache,
-                        src_path,
-                        source_errors,
-                    ));
+                    let source_errors =
+                        ads_errors.map(|error| error.to_source_error());
+                    return Err(CliError::Source(cache, source_errors));
                 }
             }
         };
@@ -241,10 +237,10 @@ fn command_ld(
     let config = {
         let source = io::read_to_string(fs::File::open(&config_path)?)?;
         LinkConfig::from_source(&source).map_err(|config_errors| {
-            // TODO: require paths to be UTF-8
             let path = Rc::<str>::from(config_path.to_string_lossy());
-            let source_errors = SourceError::from_errors(config_errors);
-            CliError::Source(cache, path, source_errors)
+            let source_errors =
+                config_errors.map(|error| error.to_source_error(&path));
+            CliError::Source(cache, source_errors)
         })?
     };
     let object_files = {
@@ -434,39 +430,28 @@ fn report_link_error(error: LinkError) {
     eprintln!("Link error: {error:?}");
 }
 
-fn report_source_errors(
-    mut cache: FileSrcCache,
-    path: Rc<str>,
-    errors: Errs<SourceError>,
-) {
+fn report_source_errors(mut cache: FileSrcCache, errors: Errs<SourceError>) {
     for error in errors {
-        report_source_error(&mut cache, &path, error);
+        report_source_error(&mut cache, error);
     }
 }
 
 fn report_source_error(
     cache: &mut impl ariadne::Cache<Rc<str>>,
-    path: &Rc<str>,
     error: SourceError,
 ) {
     let mut colors = ariadne::ColorGenerator::new();
     let mut builder = ariadne::Report::build(
         ReportKind::Error,
-        (path.clone(), error.span.byte_range()),
+        (error.loc.path.clone(), error.loc.span.byte_range()),
     )
     .with_config(make_report_config())
     .with_message(&error.message);
-    if error.labels.is_empty() {
-        builder.add_label(
-            Label::new((path.clone(), error.span.byte_range()))
-                .with_color(colors.next()),
-        );
-    }
-    for error_label in error.labels {
+    for label in error.labels {
         let mut report_label =
-            Label::new((path.clone(), error_label.span.byte_range()));
-        if !error_label.message.is_empty() {
-            report_label = report_label.with_message(error_label.message);
+            Label::new((label.loc.path, label.loc.span.byte_range()));
+        if !label.message.is_empty() {
+            report_label = report_label.with_message(label.message);
         }
         builder.add_label(report_label.with_color(colors.next()));
     }

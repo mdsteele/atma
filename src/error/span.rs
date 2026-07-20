@@ -1,8 +1,27 @@
 use std::ops::Range;
+use std::rc::Rc;
 
 //===========================================================================//
 
-/// A span of byte offsets within a source code file.
+/// A span of byte offsets within a particular source code file.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SrcLoc {
+    /// The path for the source code file.
+    pub path: Rc<str>,
+    /// The span of byte offsets within the file.
+    pub span: SrcSpan,
+}
+
+impl SrcLoc {
+    /// Constructs a source location within the specified source code file.
+    pub fn new(path: &Rc<str>, span: SrcSpan) -> SrcLoc {
+        SrcLoc { path: path.clone(), span }
+    }
+}
+
+//===========================================================================//
+
+/// A span of byte offsets within source code text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SrcSpan {
     start: usize,

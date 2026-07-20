@@ -1,5 +1,5 @@
 use super::value::ExprType;
-use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
 use crate::parse::{BinOpAst, UnOpAst};
 use num_bigint::{BigInt, BigUint};
 use std::rc::Rc;
@@ -155,8 +155,10 @@ pub enum ExprTypeError {
     },
 }
 
-impl ToSourceError for ExprTypeError {
-    fn to_source_error(self) -> SourceError {
+impl ExprTypeError {
+    /// Converts the error into a `SourceError`, using the given path for the
+    /// source file containing the expression.
+    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::CannotApplyBinaryOpToTypes {
                 op_span,
@@ -174,9 +176,9 @@ impl ToSourceError for ExprTypeError {
                 };
                 let lhs_label = format!("this expression has type {lhs_type}");
                 let rhs_label = format!("this expression has type {rhs_type}");
-                SourceError::new(op_span, message)
-                    .with_label(lhs_span, lhs_label)
-                    .with_label(rhs_span, rhs_label)
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, lhs_span), lhs_label)
+                    .with_label(SrcLoc::new(path, rhs_span), rhs_label)
             }
             Self::CannotApplyUnaryOpToType {
                 op_span,
@@ -187,7 +189,8 @@ impl ToSourceError for ExprTypeError {
                 let verb = op.verb();
                 let message = format!("Cannot {verb} {arg_type}");
                 let label = format!("this expression has type {arg_type}");
-                SourceError::new(op_span, message).with_label(arg_span, label)
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, arg_span), label)
             }
             Self::CannotCallFuncWithType {
                 func_span,
@@ -202,16 +205,16 @@ impl ToSourceError for ExprTypeError {
                 let func_label =
                     format!("this expression has type {func_type}");
                 let arg_label = format!("this expression has type {arg_type}");
-                SourceError::new(arg_span, message)
-                    .with_label(func_span, func_label)
-                    .with_label(arg_span, arg_label)
+                SourceError::new(SrcLoc::new(path, arg_span), message)
+                    .with_label(SrcLoc::new(path, func_span), func_label)
+                    .with_primary_label(arg_label)
             }
             Self::CannotCallType { func_span, func_type } => {
                 let message =
                     format!("cannot call non-function type {func_type}");
                 let label = format!("this expression has type {func_type}");
-                SourceError::new(func_span, message)
-                    .with_label(func_span, label)
+                SourceError::new(SrcLoc::new(path, func_span), message)
+                    .with_primary_label(label)
             }
             Self::CannotIndexIntoType {
                 bracket_span,
@@ -221,14 +224,14 @@ impl ToSourceError for ExprTypeError {
                 let message =
                     format!("cannot index into value of type {indexed_type}");
                 let label = format!("this expression has type {indexed_type}");
-                SourceError::new(bracket_span, message)
-                    .with_label(indexed_span, label)
+                SourceError::new(SrcLoc::new(path, bracket_span), message)
+                    .with_label(SrcLoc::new(path, indexed_span), label)
             }
             Self::CannotUseTypeAsIndex { index_span, index_type } => {
                 let message = format!("cannot use {index_type} as an index");
                 let label = format!("this expression has type {index_type}");
-                SourceError::new(index_span, message)
-                    .with_label(index_span, label)
+                SourceError::new(SrcLoc::new(path, index_span), message)
+                    .with_primary_label(label)
             }
             Self::ListIndexStaticallyOutOfRange {
                 list_span,
@@ -241,9 +244,9 @@ impl ToSourceError for ExprTypeError {
                 let list_label = format!("this list has length {list_length}");
                 let index_label =
                     format!("the value of this expression is {index_value}");
-                SourceError::new(index_span, message)
-                    .with_label(list_span, list_label)
-                    .with_label(index_span, index_label)
+                SourceError::new(SrcLoc::new(path, index_span), message)
+                    .with_label(SrcLoc::new(path, list_span), list_label)
+                    .with_primary_label(index_label)
             }
             Self::ListItemsMustAllBeSameType {
                 first_item_span,
@@ -255,32 +258,35 @@ impl ToSourceError for ExprTypeError {
                     "all items in a list must have the same type".to_string();
                 let label1 = format!("this item has type {first_item_type}");
                 let label2 = format!("this item has type {other_item_type}");
-                SourceError::new(other_item_span, message)
-                    .with_label(first_item_span, label1)
-                    .with_label(other_item_span, label2)
+                SourceError::new(SrcLoc::new(path, other_item_span), message)
+                    .with_label(SrcLoc::new(path, first_item_span), label1)
+                    .with_primary_label(label2)
             }
             Self::RelativeLabelInDebuggerScript { span } => {
                 let message =
                     "Cannot use relative labels in a debugger script"
                         .to_string();
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("")
             }
             Self::RelativeLabelInLinkerConfig { span } => {
                 let message = "Cannot use relative labels in a linker config"
                     .to_string();
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("")
             }
             Self::RelativeLabelOutsideOfAnySection { span } => {
                 let message =
                     "Relative labels must be within a .SECTION".to_string();
-                SourceError::new(span, message)
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("")
             }
-            Self::StaticEvalError { error } => error.to_source_error(),
+            Self::StaticEvalError { error } => error.to_source_error(path),
             Self::TupleIndexNotStatic { index_span } => {
                 let message = "tuple index must be static".to_string();
                 let label = "this expression isn't static".to_string();
-                SourceError::new(index_span, message)
-                    .with_label(index_span, label)
+                SourceError::new(SrcLoc::new(path, index_span), message)
+                    .with_primary_label(label)
             }
             Self::TupleIndexOutOfRange {
                 tuple_span,
@@ -295,14 +301,15 @@ impl ToSourceError for ExprTypeError {
                 );
                 let label2 =
                     format!("the value of this expression is {index_value}");
-                SourceError::new(index_span, message)
-                    .with_label(tuple_span, label1)
-                    .with_label(index_span, label2)
+                SourceError::new(SrcLoc::new(path, index_span), message)
+                    .with_label(SrcLoc::new(path, tuple_span), label1)
+                    .with_primary_label(label2)
             }
             Self::UnknownIdentifier { span, name } => {
                 let message = format!("unknown identifier: `{name}`");
                 let label = "this identifier was never declared".to_string();
-                SourceError::new(span, message).with_label(span, label)
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label(label)
             }
         }
     }
@@ -394,40 +401,48 @@ pub enum ExprEvalError {
     },
 }
 
-impl ToSourceError for ExprEvalError {
-    fn to_source_error(self) -> SourceError {
+impl ExprEvalError {
+    /// Converts the error into a `SourceError`, using the given path for the
+    /// source file containing the expression.
+    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
                 let message =
                     "cannot shift by a negative number of bits".to_string();
                 let label =
                     format!("the value of this expression is {rhs_value}");
-                SourceError::new(rhs_span, message).with_label(rhs_span, label)
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
             }
             Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
                 let message = "shift by too many bits".to_string();
                 let label =
                     format!("the value of this expression is {rhs_value}");
-                SourceError::new(rhs_span, message).with_label(rhs_span, label)
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
             }
             Self::DivideByZero { rhs_span } => {
                 let message = "cannot divide by zero".to_string();
                 let label = "the value of this expression is 0".to_string();
-                SourceError::new(rhs_span, message).with_label(rhs_span, label)
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
             }
             Self::ModByZero { rhs_span } => {
                 let message = "cannot modulo by zero".to_string();
                 let label = "the value of this expression is 0".to_string();
-                SourceError::new(rhs_span, message).with_label(rhs_span, label)
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
             }
             Self::InvalidType { span } => {
-                SourceError::new(span, "invalid type".to_string())
+                SourceError::new(SrcLoc::new(path, span), "invalid type")
+                    .with_primary_label("")
             }
             Self::PowNegativeExponent { rhs_span, rhs_value } => {
                 let message = "exponent must be non-negative".to_string();
                 let label =
                     format!("the value of this expression is {rhs_value}");
-                SourceError::new(rhs_span, message).with_label(rhs_span, label)
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
             }
             Self::SquareRootOfNegative { arg_span, arg_value } => {
                 let message = "cannot take square root of a negative \
@@ -435,7 +450,8 @@ impl ToSourceError for ExprEvalError {
                     .to_string();
                 let label =
                     format!("the value of this expression is {arg_value}");
-                SourceError::new(arg_span, message).with_label(arg_span, label)
+                SourceError::new(SrcLoc::new(path, arg_span), message)
+                    .with_primary_label(label)
             }
             Self::SubtractLabelsInDifferentAddrspaces {
                 op_span,
@@ -451,13 +467,14 @@ impl ToSourceError for ExprEvalError {
                     format!("this label is in address space {lhs_space}");
                 let rhs_label =
                     format!("this label is in address space {rhs_space}");
-                SourceError::new(op_span, message)
-                    .with_label(lhs_span, lhs_label)
-                    .with_label(rhs_span, rhs_label)
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, lhs_span), lhs_label)
+                    .with_label(SrcLoc::new(path, rhs_span), rhs_label)
             }
             Self::UnresolvedLabel { label_span } => {
                 let message = "could not resolve label".to_string();
-                SourceError::new(label_span, message)
+                SourceError::new(SrcLoc::new(path, label_span), message)
+                    .with_primary_label("")
             }
         }
     }

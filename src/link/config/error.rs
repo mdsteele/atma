@@ -1,6 +1,6 @@
 use super::checksum::ChecksumFormat;
 use crate::addr::{Addr, Align, AlignTryFromError, Size};
-use crate::error::{Errs, SourceError, SrcSpan, ToSourceError};
+use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
 use crate::expr::{ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
@@ -178,8 +178,10 @@ impl From<ParseError> for ConfigError {
     }
 }
 
-impl ToSourceError for ConfigError {
-    fn to_source_error(self) -> SourceError {
+impl ConfigError {
+    /// Converts the error into a `SourceError`, using the given path for the
+    /// source file being parsed.
+    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::AttrTypeError {
                 attribute,
@@ -198,8 +200,8 @@ impl ToSourceError for ConfigError {
                         .join(" or "),
                 );
                 let label = format!("this expression has type {expr_type}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::DuplicateAttrName {
                 entry_name,
@@ -212,25 +214,25 @@ impl ToSourceError for ConfigError {
                 );
                 let label1 = "Previously declared here";
                 let label2 = "Duplicated here";
-                SourceError::new(attr_span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(attr_span, label2)
+                SourceError::new(SrcLoc::new(path, attr_span), message)
+                    .with_label(SrcLoc::new(path, prev_span), label1)
+                    .with_primary_label(label2)
             }
             Self::DuplicateEntryName { entry_name, entry_span, prev_span } => {
                 let message = format!("`{entry_name}` was already declared");
                 let label1 = "Previously declared here";
                 let label2 = "Declared again here";
-                SourceError::new(entry_span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(entry_span, label2)
+                SourceError::new(SrcLoc::new(path, entry_span), message)
+                    .with_label(SrcLoc::new(path, prev_span), label1)
+                    .with_primary_label(label2)
             }
             Self::DuplicateExport { symbol_name, export_span, prev_span } => {
                 let message = format!("`{symbol_name}` was already exported");
                 let label1 = "Previously exported here";
                 let label2 = "Exported again here";
-                SourceError::new(export_span, message)
-                    .with_label(prev_span, label1)
-                    .with_label(export_span, label2)
+                SourceError::new(SrcLoc::new(path, export_span), message)
+                    .with_label(SrcLoc::new(path, prev_span), label1)
+                    .with_primary_label(label2)
             }
             Self::ExportImportedSymbol {
                 symbol_name,
@@ -241,11 +243,11 @@ impl ToSourceError for ConfigError {
                     format!("`{symbol_name}` is both imported and exported");
                 let label1 = "Imported here";
                 let label2 = "Exported here";
-                SourceError::new(export_span, message)
-                    .with_label(import_span, label1)
-                    .with_label(export_span, label2)
+                SourceError::new(SrcLoc::new(path, export_span), message)
+                    .with_label(SrcLoc::new(path, import_span), label1)
+                    .with_primary_label(label2)
             }
-            Self::ExprTypeError { error } => error.to_source_error(),
+            Self::ExprTypeError { error } => error.to_source_error(path),
             Self::InvalidAlignmentAttr {
                 attribute,
                 error,
@@ -271,8 +273,8 @@ impl ToSourceError for ConfigError {
                 };
                 let label =
                     format!("the value of this expression is ${expr_value:x}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::InvalidAttrName { entry_kind, attr_name, attr_span } => {
                 let message =
@@ -286,7 +288,9 @@ impl ToSourceError for ConfigError {
                         .collect::<Vec<_>>()
                         .join(", "),
                 );
-                SourceError::new(attr_span, message).with_note(note)
+                SourceError::new(SrcLoc::new(path, attr_span), message)
+                    .with_primary_label("")
+                    .with_note(note)
             }
             Self::InvalidChecksumFormatAttr {
                 attribute,
@@ -308,8 +312,8 @@ impl ToSourceError for ConfigError {
                         .collect::<Vec<_>>()
                         .join(", "),
                 );
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
                     .with_note(note)
             }
             Self::MissingAttr { entry_name, entry_span, attribute } => {
@@ -317,7 +321,8 @@ impl ToSourceError for ConfigError {
                     "Missing required `{}` attribute for `{entry_name}`",
                     attribute.attr_name()
                 );
-                SourceError::new(entry_span, message)
+                SourceError::new(SrcLoc::new(path, entry_span), message)
+                    .with_primary_label("")
             }
             Self::MutuallyExclusiveAttrs {
                 attribute_1,
@@ -332,9 +337,9 @@ impl ToSourceError for ConfigError {
                     attribute_1.attr_name(),
                     attribute_2.attr_name()
                 );
-                SourceError::new(entry_span, message)
-                    .with_label(attr_span_1, "")
-                    .with_label(attr_span_2, "")
+                SourceError::new(SrcLoc::new(path, entry_span), message)
+                    .with_label(SrcLoc::new(path, attr_span_1), "")
+                    .with_label(SrcLoc::new(path, attr_span_2), "")
             }
             Self::NonStaticAttr { attribute, expr_span } => {
                 let message = format!(
@@ -343,8 +348,8 @@ impl ToSourceError for ConfigError {
                     attribute.attr_name()
                 );
                 let label = "this expression isn't static";
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::OutOfRangeAttr { attribute, expr_span, value } => {
                 // TODO: provide the valid range of values
@@ -354,10 +359,10 @@ impl ToSourceError for ConfigError {
                     attribute.attr_name()
                 );
                 let label = format!("the value of this expression is {value}");
-                SourceError::new(expr_span, message)
-                    .with_label(expr_span, label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
-            Self::ParseError { error } => error.to_source_error(),
+            Self::ParseError { error } => error.to_source_error(path),
             Self::RegionRangeOverflow {
                 entry_name,
                 entry_span,
@@ -369,7 +374,8 @@ impl ToSourceError for ConfigError {
                     "`{entry_name}` memory range overflows {bits}-bit address \
                      size (start=${start:x}, size=${size:x})"
                 );
-                SourceError::new(entry_span, message)
+                SourceError::new(SrcLoc::new(path, entry_span), message)
+                    .with_primary_label("")
             }
         }
     }
