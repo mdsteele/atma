@@ -3,7 +3,8 @@ use super::error::{AdsError, AdsResult, AdsSrcContext};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprCompiler, ExprEnv, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprType, ExprTypeError,
+    ExprTypeResult, ExprValue,
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, IdentifierAst};
@@ -100,15 +101,26 @@ impl AdsScope {
 
 pub struct AdsTypeEnv<'a> {
     sim_env: &'a SimEnv,
+    builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     context_stack: Vec<Rc<AdsSrcContext>>,
     frames: Vec<Vec<AdsScope>>,
 }
 
 impl<'a> AdsTypeEnv<'a> {
     pub fn new(sim_env: &'a SimEnv, root_path: Rc<str>) -> AdsTypeEnv<'a> {
+        let mut builtins = HashMap::<Rc<str>, (ExprValue, ExprType)>::new();
+        let expr_type = ExprType::Function(Rc::new((
+            ExprType::Integer,
+            ExprType::Integer,
+        )));
+        for func in [ExprFunc::Cbrtz, ExprFunc::Sqrtz] {
+            let value = ExprValue::Function(func);
+            builtins.insert(Rc::from(func.name()), (value, expr_type.clone()));
+        }
         let root_context = Rc::new(AdsSrcContext::root(root_path));
         AdsTypeEnv {
             sim_env,
+            builtins,
             context_stack: vec![root_context],
             frames: vec![vec![AdsScope::with_start(0)]],
         }
@@ -268,10 +280,46 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         if name.eq_ignore_ascii_case("PC") {
             return Ok((AdsInstruction::GetPc, ExprType::Integer, None));
         }
+        if let Some((value, expr_type)) = self.builtins.get(name) {
+            let op = AdsInstruction::PushValue(value.clone());
+            return Ok((op, expr_type.clone(), Some(value.clone())));
+        }
         Err(Errs::one(ExprTypeError::UnknownIdentifier {
             span,
             name: name.clone(),
         }))
+    }
+
+    fn apply_function_op(&self, arg_span: SrcSpan) -> Self::Op {
+        AdsInstruction::Apply { context: self.current_src_context(), arg_span }
+    }
+
+    fn binary_operation_op(
+        &self,
+        binop: ExprBinOp,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
+    ) -> Self::Op {
+        AdsInstruction::BinOp {
+            context: self.current_src_context(),
+            binop,
+            op_span,
+            lhs_span,
+            rhs_span,
+        }
+    }
+
+    fn list_index_op(
+        &self,
+        list_span: SrcSpan,
+        index_span: SrcSpan,
+    ) -> Self::Op {
+        AdsInstruction::ListIndex {
+            context: self.current_src_context(),
+            list_span,
+            index_span,
+        }
     }
 }
 
@@ -286,6 +334,7 @@ mod tests {
     use crate::error::SrcSpan;
     use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, IdentifierKind};
     use num_bigint::BigInt;
+    use std::assert_matches;
     use std::ops::Range;
     use std::rc::Rc;
 
@@ -320,13 +369,13 @@ mod tests {
             },
             ExprType::Boolean,
         );
-        assert_eq!(
-            env.typecheck_expression(id_ast("foo", 10..13)).unwrap(),
-            (
-                vec![AdsInstruction::GetValue(AdsFrameRef::Global, 0)],
-                ExprType::Boolean,
-                None
-            )
+        let (instructions, expr_type, static_value) =
+            env.typecheck_expression(id_ast("foo", 10..13)).unwrap();
+        assert_eq!(expr_type, ExprType::Boolean);
+        assert_eq!(static_value, None);
+        assert_matches!(
+            instructions.as_slice(),
+            [AdsInstruction::GetValue(AdsFrameRef::Global, 0)]
         );
     }
 
@@ -334,14 +383,13 @@ mod tests {
     fn typecheck_int_literal_expr() {
         let sim_env = SimEnv::with_nop_cpu();
         let env = AdsTypeEnv::new(&sim_env, Rc::from("input"));
-        assert_eq!(
-            env.typecheck_expression(int_ast(42, 0..2)).unwrap(),
-            (
-                vec![AdsInstruction::PushValue(int_value(42))],
-                ExprType::Integer,
-                Some(int_value(42))
-            )
-        );
+        let (instructions, expr_type, static_value) =
+            env.typecheck_expression(int_ast(42, 0..2)).unwrap();
+        assert_eq!(expr_type, ExprType::Integer);
+        assert_eq!(static_value, Some(int_value(42)));
+        assert_matches!(instructions.as_slice(), [
+            AdsInstruction::PushValue(value)
+        ] if *value == int_value(42));
     }
 }
 

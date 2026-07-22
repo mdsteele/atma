@@ -1,19 +1,42 @@
+use super::error::{AdsSrcContext, AdsSrcLoc};
 use crate::bus::WatchKind;
+use crate::error::SrcSpan;
 use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
+use std::rc::Rc;
 
 //===========================================================================//
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum AdsInstruction {
     /// Pops the top two values from the value stack, calls the
     /// second-from-the-top value with the topmost value as an argument, then
     /// pushes the result onto the value stack.
-    Apply,
+    Apply {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The span of byte offsets within the context where the function
+        /// argument(s) appeared.
+        arg_span: SrcSpan,
+    },
     /// Pops the top two values from the value stack, evaluates the specified
     /// binary operation using the second-from-the-top value as the left-hand
     /// side and the topmost value as the right-hand side, then pushes the
     /// result onto the value stack.
-    BinOp(ExprBinOp),
+    BinOp {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The binary operator.
+        binop: ExprBinOp,
+        /// The span of byte offsets within the context where the operator
+        /// appeared.
+        op_span: SrcSpan,
+        /// The span of byte offsets within the context where the
+        /// left-hand-side subexpression appeared.
+        lhs_span: SrcSpan,
+        /// The span of byte offsets within the context where the
+        /// right-hand-side subexpression appeared.
+        rhs_span: SrcSpan,
+    },
     /// Pops the top value from the value stack (which must be a boolean).  If
     /// the value is true, adds the given offset to the ADS program counter.
     BranchIf(isize),
@@ -41,7 +64,16 @@ pub enum AdsInstruction {
     /// second-from-the-top value (which must be a list), then pushes that list
     /// element back onto the stack. If the index value is out of range, an ADS
     /// runtime error will occur.
-    ListIndex,
+    ListIndex {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The span of byte offsets within the context where the list
+        /// subexpression appeared.
+        list_span: SrcSpan,
+        /// The span of byte offsets within the context where the index
+        /// subexpression appeared.
+        index_span: SrcSpan,
+    },
     /// Adds the given offset to the ADS program counter.
     Jump(isize),
     /// Pops the specified number of values from the value stack (which must
@@ -59,7 +91,10 @@ pub enum AdsInstruction {
     /// Pops a value from the value stack and discards it.
     PopValue,
     /// Pops the top value from the value stack and prints it to stdout.
-    Print,
+    Print {
+        /// The source code location for the print operation.
+        loc: AdsSrcLoc,
+    },
     /// Pops the top value from the value stack and uses it as the argument for
     /// the specified breakpoint kind to set a breakpoint for the simulated
     /// processor, and pushes a new handler onto the handler stack for that
@@ -98,18 +133,6 @@ pub enum AdsInstruction {
 }
 
 impl ExprOp for AdsInstruction {
-    fn apply_function() -> Self {
-        AdsInstruction::Apply
-    }
-
-    fn binary_operation(binop: ExprBinOp) -> Self {
-        AdsInstruction::BinOp(binop)
-    }
-
-    fn list_index() -> Self {
-        AdsInstruction::ListIndex
-    }
-
     fn literal(value: ExprValue) -> Self {
         AdsInstruction::PushValue(value)
     }

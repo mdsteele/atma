@@ -1,4 +1,6 @@
+use super::error::ExprEvalError;
 use super::value::ExprValue;
+use crate::error::SrcSpan;
 use crate::obj::BinaryIo;
 use num_bigint::BigInt;
 use std::fmt;
@@ -87,6 +89,20 @@ pub enum ExprFuncEvalError {
     InvalidArgumentType(ExprValue),
     /// Tried to calculate the square root of a negative number.
     SquareRootOfNegative(BigInt),
+}
+
+impl ExprFuncEvalError {
+    /// Converts `self` into an [`ExprEvalError`].
+    pub fn into_expr_eval_error(self, arg_span: SrcSpan) -> ExprEvalError {
+        match self {
+            Self::InvalidArgumentType(_arg_value) => {
+                ExprEvalError::InvalidType { span: arg_span }
+            }
+            Self::SquareRootOfNegative(arg_value) => {
+                ExprEvalError::SquareRootOfNegative { arg_span, arg_value }
+            }
+        }
+    }
 }
 
 //===========================================================================/

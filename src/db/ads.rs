@@ -1,22 +1,16 @@
-use super::error::AdsResult;
+use super::error::{AdsResult, AdsRuntimeError};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use crate::addr::Addr;
 use crate::bus::WatchId;
 use crate::db::SimEnv;
 use crate::error::SrcCache;
-use crate::expr::ExprValue;
+use crate::expr::{ExprEvalError, ExprValue};
 use crate::proc::SimBreak;
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
-
-//===========================================================================//
-
-/// An error that can occur while executing an Atma Debugger Script program.
-#[derive(Debug)]
-pub struct AdsRuntimeError {}
 
 //===========================================================================//
 
@@ -83,26 +77,45 @@ impl<W: Write> AdsEnvironment<W> {
     }
 
     /// Executes the next instruction in the program.
+    ///
+    /// Returns `Ok(true)` if execution is finished, or `Ok(false)` if
+    /// execution should continue, or `Err(...)` if an error occurs.
     pub fn step(&mut self) -> Result<bool, AdsRuntimeError> {
         match &self.program.instructions[self.pc] {
-            AdsInstruction::Apply => {
+            AdsInstruction::Apply { context, arg_span } => {
                 debug_assert!(self.value_stack.len() >= 2);
                 let rhs = self.value_stack.pop().unwrap();
                 let lhs = self.value_stack.pop().unwrap();
                 match lhs.unwrap_func().call(rhs) {
                     Ok(result) => self.value_stack.push(result),
-                    // TODO: include error details
-                    Err(_) => return Err(AdsRuntimeError {}),
+                    Err(error) => {
+                        return Err(AdsRuntimeError::ExprEvalError {
+                            context: context.clone(),
+                            error: error.into_expr_eval_error(*arg_span),
+                        });
+                    }
                 }
             }
-            AdsInstruction::BinOp(binop) => {
+            AdsInstruction::BinOp {
+                context,
+                binop,
+                op_span,
+                lhs_span,
+                rhs_span,
+            } => {
                 debug_assert!(self.value_stack.len() >= 2);
                 let rhs = self.value_stack.pop().unwrap();
                 let lhs = self.value_stack.pop().unwrap();
                 match binop.evaluate(lhs, rhs) {
                     Ok(result) => self.value_stack.push(result),
-                    // TODO: include error details
-                    Err(_) => return Err(AdsRuntimeError {}),
+                    Err(error) => {
+                        return Err(AdsRuntimeError::ExprEvalError {
+                            context: context.clone(),
+                            error: error.into_expr_eval_error(
+                                *op_span, *lhs_span, *rhs_span,
+                            ),
+                        });
+                    }
                 }
             }
             AdsInstruction::BranchIf(offset) => {
@@ -136,15 +149,20 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
             }
-            AdsInstruction::ListIndex => {
+            AdsInstruction::ListIndex { context, list_span, index_span } => {
                 debug_assert!(self.value_stack.len() >= 2);
                 let rhs = self.value_stack.pop().unwrap().unwrap_int();
                 let lhs = self.value_stack.pop().unwrap().unwrap_list();
-                if rhs < BigInt::ZERO {
-                    return Err(AdsRuntimeError {}); // TODO message
-                }
-                if rhs >= BigInt::from(lhs.len()) {
-                    return Err(AdsRuntimeError {}); // TODO message
+                if rhs < BigInt::ZERO || rhs >= BigInt::from(lhs.len()) {
+                    return Err(AdsRuntimeError::ExprEvalError {
+                        context: context.clone(),
+                        error: ExprEvalError::ListIndexOutOfBounds {
+                            list_span: *list_span,
+                            list_length: lhs.len(),
+                            index_span: *index_span,
+                            index_value: rhs,
+                        },
+                    });
                 }
                 let item = lhs[usize::try_from(rhs).unwrap()].clone();
                 self.value_stack.push(item);
@@ -177,11 +195,11 @@ impl<W: Write> AdsEnvironment<W> {
                 debug_assert!(!self.value_stack.is_empty());
                 self.value_stack.pop();
             }
-            AdsInstruction::Print => {
+            AdsInstruction::Print { loc } => {
                 let value = self.value_stack.pop().unwrap();
-                // TODO: Report IO error via AdsRuntimeError.
-                writeln!(self.output, "{}", value)
-                    .map_err(|_| AdsRuntimeError {})?;
+                writeln!(self.output, "{}", value).map_err(|error| {
+                    AdsRuntimeError::IoError { loc: loc.clone(), error }
+                })?;
             }
             &AdsInstruction::PushHandler(kind, offset) => {
                 let parent_index = if self.call_stack.is_empty() {

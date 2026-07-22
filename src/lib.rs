@@ -1,6 +1,7 @@
 //! Assembler Toolchain for Multiple (retro) Architectures.
 
 #![warn(missing_docs)]
+#![warn(unnameable_types)]
 #![deny(unused_must_use)]
 
 pub mod addr;

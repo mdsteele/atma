@@ -24,20 +24,30 @@ pub(crate) trait ExprEnv {
         span: SrcSpan,
         name: &Rc<str>,
     ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)>;
+
+    /// Returns an operation to apply a function to a value.
+    fn apply_function_op(&self, arg_span: SrcSpan) -> Self::Op;
+
+    /// Returns an operation to combine the top two stack values with the
+    /// specified binary operation.
+    fn binary_operation_op(
+        &self,
+        binop: ExprBinOp,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
+    ) -> Self::Op;
+
+    /// Returns an operation to index into a list.
+    fn list_index_op(
+        &self,
+        list_span: SrcSpan,
+        index_span: SrcSpan,
+    ) -> Self::Op;
 }
 
 /// A type that represents a single operation for an expression stack machine.
 pub(crate) trait ExprOp {
-    /// Returns an operation to apply a function to a value.
-    fn apply_function() -> Self;
-
-    /// Returns an operation to combine the top two stack values with the
-    /// specified binary operation.
-    fn binary_operation(binop: ExprBinOp) -> Self;
-
-    /// Returns an operation to index into a list.
-    fn list_index() -> Self;
-
     /// Returns an operation to push a single literal value onto the stack.
     fn literal(value: ExprValue) -> Self;
 
@@ -225,7 +235,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             self.ops.push(E::Op::literal(result_value.clone()));
             self.types.push((ret_type, Some(result_value)));
         } else {
-            self.ops.push(E::Op::apply_function());
+            self.ops.push(self.env.apply_function_op(arg_span));
             self.types.push((ret_type, None));
         }
     }
@@ -243,6 +253,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             self.types.push((ExprType::Bottom, None));
             return;
         }
+        let op_span = binop_ast.0;
         let lhs_span = lhs_ast.span;
         let rhs_span = rhs_ast.span;
         match ExprBinOp::typecheck(
@@ -262,21 +273,22 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                             self.types.push((result_type, Some(result_value)));
                         }
                         Err(ExprBinOpEvalError::UnresolvedLabel) => {
-                            self.ops.push(E::Op::binary_operation(binop));
+                            self.ops.push(self.env.binary_operation_op(
+                                binop, op_span, lhs_span, rhs_span,
+                            ));
                             self.types.push((result_type, None));
                         }
                         Err(error) => {
                             self.binop_eval_error(
-                                error,
-                                binop_ast.0,
-                                lhs_span,
-                                rhs_span,
+                                error, op_span, lhs_span, rhs_span,
                             );
                             self.types.push((result_type, None));
                         }
                     }
                 } else {
-                    self.ops.push(E::Op::binary_operation(binop));
+                    self.ops.push(self.env.binary_operation_op(
+                        binop, op_span, lhs_span, rhs_span,
+                    ));
                     self.types.push((result_type, None));
                 }
             }
@@ -339,14 +351,14 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     if index < BigInt::ZERO
                         || index >= BigInt::from(item_values.len())
                     {
-                        self.errors.push(
-                            ExprTypeError::ListIndexStaticallyOutOfRange {
+                        self.errors.push(ExprTypeError::StaticEvalError {
+                            error: ExprEvalError::ListIndexOutOfBounds {
                                 list_span: lhs_ast.span,
                                 list_length: item_values.len(),
                                 index_span: rhs_ast.span,
                                 index_value: index,
                             },
-                        );
+                        });
                         self.types.push((ExprType::Bottom, None));
                     } else {
                         let result_value = item_values
@@ -356,7 +368,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.types.push((item_type, Some(result_value)));
                     }
                 } else {
-                    self.ops.push(E::Op::list_index());
+                    self.ops.push(
+                        self.env.list_index_op(lhs_ast.span, rhs_ast.span),
+                    );
                     self.types.push((item_type, None));
                 }
             }
@@ -522,34 +536,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         lhs_span: SrcSpan,
         rhs_span: SrcSpan,
     ) {
-        let expr_eval_error = match error {
-            ExprBinOpEvalError::BitShiftByNegative(rhs_value) => {
-                ExprEvalError::BitShiftByNegative { rhs_span, rhs_value }
-            }
-            ExprBinOpEvalError::BitShiftOutOfRange(rhs_value) => {
-                ExprEvalError::BitShiftOutOfRange { rhs_span, rhs_value }
-            }
-            ExprBinOpEvalError::DivideByZero => {
-                ExprEvalError::DivideByZero { rhs_span }
-            }
-            ExprBinOpEvalError::ModByZero => {
-                ExprEvalError::ModByZero { rhs_span }
-            }
-            ExprBinOpEvalError::PowNegativeExponent(rhs_value) => {
-                ExprEvalError::PowNegativeExponent { rhs_span, rhs_value }
-            }
-            ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(
-                lhs_space,
-                rhs_space,
-            ) => ExprEvalError::SubtractLabelsInDifferentAddrspaces {
-                op_span,
-                lhs_span,
-                lhs_space,
-                rhs_span,
-                rhs_space,
-            },
-            ExprBinOpEvalError::UnresolvedLabel => unreachable!(),
-        };
+        let expr_eval_error =
+            error.into_expr_eval_error(op_span, lhs_span, rhs_span);
         self.errors
             .push(ExprTypeError::StaticEvalError { error: expr_eval_error });
     }
@@ -559,14 +547,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         error: ExprFuncEvalError,
         arg_span: SrcSpan,
     ) {
-        let expr_eval_error = match error {
-            ExprFuncEvalError::InvalidArgumentType(_arg_value) => {
-                ExprEvalError::InvalidType { span: arg_span }
-            }
-            ExprFuncEvalError::SquareRootOfNegative(arg_value) => {
-                ExprEvalError::SquareRootOfNegative { arg_span, arg_value }
-            }
-        };
+        let expr_eval_error = error.into_expr_eval_error(arg_span);
         self.errors
             .push(ExprTypeError::StaticEvalError { error: expr_eval_error });
     }

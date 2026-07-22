@@ -85,18 +85,6 @@ pub enum ExprTypeError {
         /// The expression type of the index expression.
         index_type: ExprType,
     },
-    /// Found a list indexing expression with an index value that is statically
-    /// known to be out of range.
-    ListIndexStaticallyOutOfRange {
-        /// The source code span for the list expression.
-        list_span: SrcSpan,
-        /// The statically-known length of the list.
-        list_length: usize,
-        /// The source code span for the index expression.
-        index_span: SrcSpan,
-        /// The statically-known value of the index.
-        index_value: BigInt,
-    },
     /// Found a list literal expression whose items don't all have the same
     /// expression type.
     ListItemsMustAllBeSameType {
@@ -233,29 +221,13 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_primary_label(label)
             }
-            Self::ListIndexStaticallyOutOfRange {
-                list_span,
-                list_length,
-                index_span,
-                index_value,
-            } => {
-                let message =
-                    "list index is statically out of range".to_string();
-                let list_label = format!("this list has length {list_length}");
-                let index_label =
-                    format!("the value of this expression is {index_value}");
-                SourceError::new(SrcLoc::new(path, index_span), message)
-                    .with_label(SrcLoc::new(path, list_span), list_label)
-                    .with_primary_label(index_label)
-            }
             Self::ListItemsMustAllBeSameType {
                 first_item_span,
                 first_item_type,
                 other_item_span,
                 other_item_type,
             } => {
-                let message =
-                    "all items in a list must have the same type".to_string();
+                let message = "all items in a list must have the same type";
                 let label1 = format!("this item has type {first_item_type}");
                 let label2 = format!("this item has type {other_item_type}");
                 SourceError::new(SrcLoc::new(path, other_item_span), message)
@@ -264,27 +236,24 @@ impl ExprTypeError {
             }
             Self::RelativeLabelInDebuggerScript { span } => {
                 let message =
-                    "Cannot use relative labels in a debugger script"
-                        .to_string();
+                    "Cannot use relative labels in a debugger script";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }
             Self::RelativeLabelInLinkerConfig { span } => {
-                let message = "Cannot use relative labels in a linker config"
-                    .to_string();
+                let message = "Cannot use relative labels in a linker config";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }
             Self::RelativeLabelOutsideOfAnySection { span } => {
-                let message =
-                    "Relative labels must be within a .SECTION".to_string();
+                let message = "Relative labels must be within a .SECTION";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }
             Self::StaticEvalError { error } => error.to_source_error(path),
             Self::TupleIndexNotStatic { index_span } => {
-                let message = "tuple index must be static".to_string();
-                let label = "this expression isn't static".to_string();
+                let message = "tuple index must be static";
+                let label = "this expression isn't static";
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_primary_label(label)
             }
@@ -294,7 +263,7 @@ impl ExprTypeError {
                 index_span,
                 index_value,
             } => {
-                let message = "tuple index out of bounds".to_string();
+                let message = "tuple index out of bounds";
                 let label1 = format!(
                     "this expression has type {}",
                     ExprType::Tuple(item_types)
@@ -307,7 +276,7 @@ impl ExprTypeError {
             }
             Self::UnknownIdentifier { span, name } => {
                 let message = format!("unknown identifier: `{name}`");
-                let label = "this identifier was never declared".to_string();
+                let label = "this identifier was never declared";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label(label)
             }
@@ -352,6 +321,17 @@ pub enum ExprEvalError {
     InvalidType {
         /// The source code span for the value expression.
         span: SrcSpan,
+    },
+    /// Tried to index into a list, but the index was out of bounds.
+    ListIndexOutOfBounds {
+        /// The source code span for the list expression.
+        list_span: SrcSpan,
+        /// The length of the list.
+        list_length: usize,
+        /// The source code span for the index expression.
+        index_span: SrcSpan,
+        /// The value of the index.
+        index_value: BigInt,
     },
     /// Tried to modulo an integer, but the modulus was zero.
     ModByZero {
@@ -407,29 +387,28 @@ impl ExprEvalError {
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
-                let message =
-                    "cannot shift by a negative number of bits".to_string();
+                let message = "cannot shift by a negative number of bits";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
-                let message = "shift by too many bits".to_string();
+                let message = "shift by too many bits";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::DivideByZero { rhs_span } => {
-                let message = "cannot divide by zero".to_string();
-                let label = "the value of this expression is 0".to_string();
+                let message = "cannot divide by zero";
+                let label = "the value of this expression is 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::ModByZero { rhs_span } => {
-                let message = "cannot modulo by zero".to_string();
-                let label = "the value of this expression is 0".to_string();
+                let message = "cannot modulo by zero";
+                let label = "the value of this expression is 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
@@ -437,17 +416,29 @@ impl ExprEvalError {
                 SourceError::new(SrcLoc::new(path, span), "invalid type")
                     .with_primary_label("")
             }
+            Self::ListIndexOutOfBounds {
+                list_span,
+                list_length,
+                index_span,
+                index_value,
+            } => {
+                let message = "list index is out of range";
+                let list_label = format!("this list has length {list_length}");
+                let index_label =
+                    format!("the value of this expression is {index_value}");
+                SourceError::new(SrcLoc::new(path, index_span), message)
+                    .with_label(SrcLoc::new(path, list_span), list_label)
+                    .with_primary_label(index_label)
+            }
             Self::PowNegativeExponent { rhs_span, rhs_value } => {
-                let message = "exponent must be non-negative".to_string();
+                let message = "exponent must be non-negative";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::SquareRootOfNegative { arg_span, arg_value } => {
-                let message = "cannot take square root of a negative \
-                               number"
-                    .to_string();
+                let message = "cannot take square root of a negative number";
                 let label =
                     format!("the value of this expression is {arg_value}");
                 SourceError::new(SrcLoc::new(path, arg_span), message)
@@ -461,8 +452,7 @@ impl ExprEvalError {
                 rhs_space,
             } => {
                 let message =
-                    "cannot subtract labels in different address spaces"
-                        .to_string();
+                    "cannot subtract labels in different address spaces";
                 let lhs_label =
                     format!("this label is in address space {lhs_space}");
                 let rhs_label =
@@ -472,7 +462,7 @@ impl ExprEvalError {
                     .with_label(SrcLoc::new(path, rhs_span), rhs_label)
             }
             Self::UnresolvedLabel { label_span } => {
-                let message = "could not resolve label".to_string();
+                let message = "could not resolve label";
                 SourceError::new(SrcLoc::new(path, label_span), message)
                     .with_primary_label("")
             }

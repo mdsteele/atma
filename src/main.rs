@@ -2,7 +2,7 @@ use ariadne::{self, Label, ReportKind, Source};
 use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
-use atma::db::{AdsEnvironment, AdsRuntimeError, SimEnv};
+use atma::db::{AdsEnvironment, SimEnv};
 use atma::error::{Errs, SourceError, SrcCache, SrcCacheError};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
@@ -66,7 +66,6 @@ enum CliError {
     Io(io::Error),
     Source(FileSrcCache, Errs<SourceError>),
     Link(Errs<LinkError>),
-    AdsRuntimeError(AdsRuntimeError),
 }
 
 impl From<io::Error> for CliError {
@@ -78,12 +77,6 @@ impl From<io::Error> for CliError {
 impl From<Errs<LinkError>> for CliError {
     fn from(errors: Errs<LinkError>) -> CliError {
         CliError::Link(errors)
-    }
-}
-
-impl From<AdsRuntimeError> for CliError {
-    fn from(error: AdsRuntimeError) -> CliError {
-        CliError::AdsRuntimeError(error)
     }
 }
 
@@ -117,10 +110,6 @@ fn run_cli() -> Result<(), ExitCode> {
         }
         Err(CliError::Link(link_errors)) => {
             report_link_errors(link_errors);
-            Err(ExitCode::FAILURE)
-        }
-        Err(CliError::AdsRuntimeError(_)) => {
-            // TODO: Report error details
             Err(ExitCode::FAILURE)
         }
     }
@@ -167,8 +156,8 @@ fn command_db(
     };
     print!("{}", sim_env.description());
     if let Some(ads_path) = opt_ads_path {
+        let mut cache = FileSrcCache::new();
         let mut ads_env = {
-            let mut cache = FileSrcCache::new();
             let src_path = Rc::<str>::from(ads_path.to_string_lossy());
             let file = fs::File::open(&ads_path)?;
             let source = io::read_to_string(file)?;
@@ -188,9 +177,13 @@ fn command_db(
             }
         };
         loop {
-            let finished = ads_env.step()?;
-            if finished {
-                return Ok(());
+            match ads_env.step() {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(error) => {
+                    let errs = Errs::one(error.to_source_error());
+                    return Err(CliError::Source(cache, errs));
+                }
             }
         }
     } else {

@@ -3,8 +3,8 @@ use super::error::ConfigResult;
 use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError, ExprTypeResult,
-    ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError,
+    ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp};
 use crate::parse::{ExprAst, IdentifierAst};
@@ -129,6 +129,28 @@ impl ExprEnv for LinkTypeEnv {
                 name: name.clone(),
             })),
         }
+    }
+
+    fn apply_function_op(&self, _arg_span: SrcSpan) -> Self::Op {
+        ObjExprOp::Apply
+    }
+
+    fn binary_operation_op(
+        &self,
+        binop: ExprBinOp,
+        _op_span: SrcSpan,
+        _lhs_span: SrcSpan,
+        _rhs_span: SrcSpan,
+    ) -> Self::Op {
+        ObjExprOp::BinOp(binop)
+    }
+
+    fn list_index_op(
+        &self,
+        _list_span: SrcSpan,
+        _index_span: SrcSpan,
+    ) -> Self::Op {
+        ObjExprOp::ListIndex
     }
 }
 

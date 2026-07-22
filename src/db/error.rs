@@ -1,14 +1,15 @@
 use crate::error::{
     Errs, SourceContext, SourceError, SrcCacheError, SrcLoc, SrcSpan,
 };
-use crate::expr::{ExprType, ExprTypeError};
+use crate::expr::{ExprEvalError, ExprType, ExprTypeError};
 use crate::parse::ParseError;
+use std::io;
 use std::rc::Rc;
 
 //===========================================================================//
 
 /// A span of byte offsets within a particular ADS source code context.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AdsSrcLoc {
     /// The span of byte offsets within the context.
     pub span: SrcSpan,
@@ -178,10 +179,10 @@ impl AdsError {
                 let label2 = format!("cannot set value of `{name}` here");
                 SourceError::new(lvalue_loc.primary(), message)
                     .with_label(decl_loc.primary(), label1)
-                    .with_label(lvalue_loc.primary(), label2)
+                    .with_primary_label(label2)
                     .with_context(&*lvalue_loc.context)
             }
-            Self::ExprTypeError { error, context } => {
+            Self::ExprTypeError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
             }
             Self::MemoryAddrTypeError { expr_loc, expr_type } => {
@@ -192,17 +193,17 @@ impl AdsError {
                 );
                 let label = format!("this expression has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
-                    .with_label(expr_loc.primary(), label)
+                    .with_primary_label(label)
                     .with_context(&*expr_loc.context)
             }
-            Self::ParseError { error, context } => {
+            Self::ParseError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
             }
             Self::PathNotStatic { expr_loc } => {
                 let message = "source code path must be static";
                 let label = "this expression isn't static";
                 SourceError::new(expr_loc.primary(), message)
-                    .with_label(expr_loc.primary(), label)
+                    .with_primary_label(label)
                     .with_context(&*expr_loc.context)
             }
             Self::PathTypeError { expr_loc, expr_type } => {
@@ -212,7 +213,7 @@ impl AdsError {
                 );
                 let label = format!("this expression has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
-                    .with_label(expr_loc.primary(), label)
+                    .with_primary_label(label)
                     .with_context(&*expr_loc.context)
             }
             Self::PredicateTypeError { expr_loc, expr_type } => {
@@ -222,21 +223,21 @@ impl AdsError {
                 );
                 let label = format!("this expression has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
-                    .with_label(expr_loc.primary(), label)
+                    .with_primary_label(label)
                     .with_context(&*expr_loc.context)
             }
             Self::SrcCacheError { path, path_loc, error } => {
                 let message = format!("error loading {path:?}: {error}");
                 let label = format!("Tried to load {path:?} here");
                 SourceError::new(path_loc.primary(), message)
-                    .with_label(path_loc.primary(), label)
+                    .with_primary_label(label)
                     .with_context(&*path_loc.context)
             }
             Self::UnknownVariable { name, loc } => {
                 let message = format!("no such variable: `{name}`");
                 let label = "this was never declared";
                 SourceError::new(loc.primary(), message)
-                    .with_label(loc.primary(), label)
+                    .with_primary_label(label)
                     .with_context(&*loc.context)
             }
             Self::VariableTypeError {
@@ -253,9 +254,47 @@ impl AdsError {
                 let label2 =
                     format!("this destination has type {lvalue_type}");
                 SourceError::new(expr_loc.primary(), message)
-                    .with_label(expr_loc.primary(), label1)
+                    .with_primary_label(label1)
                     .with_label(lvalue_loc.primary(), label2)
                     .with_context(&*lvalue_loc.context)
+            }
+        }
+    }
+}
+
+//===========================================================================//
+
+/// An error that can occur while executing an Atma Debugger Script program.
+#[derive(Debug)]
+pub enum AdsRuntimeError {
+    /// An error occurred while evaluating an expression at runtime.
+    ExprEvalError {
+        /// The context in which the evaluation error occurred.
+        context: Rc<AdsSrcContext>,
+        /// The evaluation error.
+        error: ExprEvalError,
+    },
+    /// An external I/O error occurred during script execution.
+    IoError {
+        /// The source code location where the I/O operation was attempted.
+        loc: AdsSrcLoc,
+        /// The I/O error.
+        error: io::Error,
+    },
+}
+
+impl AdsRuntimeError {
+    /// Converts the error into a `SourceError`.
+    pub fn to_source_error(self) -> SourceError {
+        match self {
+            Self::ExprEvalError { context, error } => {
+                error.to_source_error(&context.path).with_context(&*context)
+            }
+            Self::IoError { loc, error } => {
+                let message = format!("I/O error: {error}");
+                SourceError::new(loc.primary(), message)
+                    .with_primary_label("")
+                    .with_context(&*loc.context)
             }
         }
     }

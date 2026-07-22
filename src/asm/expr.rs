@@ -3,8 +3,8 @@ use super::error::{AsmError, AsmResult};
 use crate::addr::Offset;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprCompiler, ExprEnv, ExprFunc, ExprLabel, ExprType, ExprTypeError,
-    ExprTypeResult, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprLabel, ExprType,
+    ExprTypeError, ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
 use crate::parse::{ExprAst, IdentifierAst, IdentifierKind};
@@ -189,6 +189,28 @@ impl ExprEnv for AsmTypeEnv {
             span,
             name: name.clone(),
         }))
+    }
+
+    fn apply_function_op(&self, _arg_span: SrcSpan) -> Self::Op {
+        ObjExprOp::Apply
+    }
+
+    fn binary_operation_op(
+        &self,
+        binop: ExprBinOp,
+        _op_span: SrcSpan,
+        _lhs_span: SrcSpan,
+        _rhs_span: SrcSpan,
+    ) -> Self::Op {
+        ObjExprOp::BinOp(binop)
+    }
+
+    fn list_index_op(
+        &self,
+        _list_span: SrcSpan,
+        _index_span: SrcSpan,
+    ) -> Self::Op {
+        ObjExprOp::ListIndex
     }
 }
 

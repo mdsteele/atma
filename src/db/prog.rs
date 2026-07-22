@@ -163,9 +163,15 @@ impl<'a> AdsCompiler<'a> {
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
+        let expr_span = expr_ast.span;
         let (_, errs) = self.typecheck_expr(expr_ast, out);
         errs.result()?;
-        out.push(AdsInstruction::Print);
+        out.push(AdsInstruction::Print {
+            loc: AdsSrcLoc {
+                span: expr_span,
+                context: self.env.current_src_context(),
+            },
+        });
         Ok(())
     }
 
@@ -544,6 +550,7 @@ mod tests {
     use crate::expr::ExprBinOp;
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
+    use std::assert_matches;
     use std::rc::Rc;
 
     fn compile(source: &str) -> Vec<AdsInstruction> {
@@ -563,82 +570,72 @@ mod tests {
 
     #[test]
     fn empty_program() {
-        assert_eq!(compile(""), vec![AdsInstruction::Exit]);
+        assert_matches!(compile("").as_slice(), [AdsInstruction::Exit]);
     }
 
     #[test]
     fn if_statement() {
-        assert_eq!(
-            compile("if pc == 1 {\nexit\n}\n"),
-            vec![
-                AdsInstruction::GetPc,
-                AdsInstruction::PushValue(int_value(1)),
-                AdsInstruction::BinOp(ExprBinOp::AnyCmpEq),
-                AdsInstruction::BranchUnless(1),
-                AdsInstruction::Exit,
-                AdsInstruction::Exit,
-            ]
-        );
+        assert_matches!(compile("if pc == 1 {\nexit\n}\n").as_slice(), [
+            AdsInstruction::GetPc,
+            AdsInstruction::PushValue(int_value_1),
+            AdsInstruction::BinOp { binop: ExprBinOp::AnyCmpEq, .. },
+            AdsInstruction::BranchUnless(1),
+            AdsInstruction::Exit,
+            AdsInstruction::Exit,
+        ] if *int_value_1 == int_value(1));
     }
 
     #[test]
     fn if_else_statement() {
-        assert_eq!(
-            compile("if %false {\nprint 1\n} else {\nprint 2\n}\n"),
-            vec![
-                AdsInstruction::PushValue(ExprValue::Boolean(false)),
-                AdsInstruction::BranchUnless(3),
-                AdsInstruction::PushValue(int_value(1)),
-                AdsInstruction::Print,
-                AdsInstruction::Jump(2),
-                AdsInstruction::PushValue(int_value(2)),
-                AdsInstruction::Print,
-                AdsInstruction::Exit,
-            ]
-        );
+        let instructions =
+            compile("if %false {\nprint 1\n} else {\nprint 2\n}\n");
+        assert_matches!(instructions.as_slice(), [
+            AdsInstruction::PushValue(ExprValue::Boolean(false)),
+            AdsInstruction::BranchUnless(3),
+            AdsInstruction::PushValue(int_value_1),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Jump(2),
+            AdsInstruction::PushValue(int_value_2),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Exit,
+        ] if *int_value_1 == int_value(1) && *int_value_2 == int_value(2));
     }
 
     #[test]
     fn let_statement() {
-        assert_eq!(
-            compile("let x = 5\n"),
-            vec![
-                AdsInstruction::PushValue(int_value(5)),
-                AdsInstruction::Exit,
-            ]
-        );
+        assert_matches!(compile("let x = 5\n").as_slice(), [
+            AdsInstruction::PushValue(int_value_5),
+            AdsInstruction::Exit,
+        ] if *int_value_5 == int_value(5));
     }
 
     #[test]
     fn let_statement_with_pc() {
-        assert_eq!(
-            compile("let x = pc\n"),
-            vec![AdsInstruction::GetPc, AdsInstruction::Exit]
+        assert_matches!(
+            compile("let x = pc\n").as_slice(),
+            [AdsInstruction::GetPc, AdsInstruction::Exit]
         );
     }
 
     #[test]
     fn print_statement() {
-        assert_eq!(
-            compile("print 42\n"),
-            vec![
-                AdsInstruction::PushValue(int_value(42)),
-                AdsInstruction::Print,
-                AdsInstruction::Exit,
-            ]
-        );
+        assert_matches!(compile("print 42\n").as_slice(), [
+            AdsInstruction::PushValue(int_value_42),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Exit,
+        ] if *int_value_42 == int_value(42));
     }
 
     #[test]
     fn relax_statement() {
-        assert_eq!(compile("relax\n"), vec![AdsInstruction::Exit]);
+        assert_matches!(compile("relax\n").as_slice(), [AdsInstruction::Exit]);
     }
 
     #[test]
     fn run_statement() {
-        assert_eq!(
-            compile("run\n"),
-            vec![
+        assert_matches!(
+            compile("run\n").as_slice(),
+            [
                 AdsInstruction::Step,
                 AdsInstruction::Jump(-2),
                 AdsInstruction::Exit,
@@ -648,55 +645,50 @@ mod tests {
 
     #[test]
     fn set_statement() {
-        assert_eq!(
-            compile("var x = 1\nset x = 2\n"),
-            vec![
-                AdsInstruction::PushValue(int_value(1)),
-                AdsInstruction::PushValue(int_value(2)),
-                AdsInstruction::SetValue(AdsFrameRef::Global, 0),
-                AdsInstruction::Exit,
-            ]
-        );
+        assert_matches!(compile("var x = 1\nset x = 2\n").as_slice(), [
+            AdsInstruction::PushValue(int_value_1),
+            AdsInstruction::PushValue(int_value_2),
+            AdsInstruction::SetValue(AdsFrameRef::Global, 0),
+            AdsInstruction::Exit,
+        ] if *int_value_1 == int_value(1) && *int_value_2 == int_value(2));
     }
 
     #[test]
     fn step_statement() {
-        assert_eq!(
-            compile("step\n"),
-            vec![AdsInstruction::Step, AdsInstruction::Exit]
+        assert_matches!(
+            compile("step\n").as_slice(),
+            [AdsInstruction::Step, AdsInstruction::Exit]
         );
     }
 
     #[test]
     fn when_statement() {
-        assert_eq!(
-            compile("when at $ff {\nprint 1\n}\nstep\n"),
-            vec![
-                AdsInstruction::PushValue(int_value(255)),
-                AdsInstruction::PushHandler(WatchKind::Pc, 1),
-                AdsInstruction::Jump(3),
-                AdsInstruction::PushValue(int_value(1)),
-                AdsInstruction::Print,
-                AdsInstruction::Return,
-                AdsInstruction::Step,
-                AdsInstruction::Exit,
-            ]
-        );
+        let instructions = compile("when at $ff {\nprint 1\n}\nstep\n");
+        assert_matches!(instructions.as_slice(), [
+            AdsInstruction::PushValue(int_value_255),
+            AdsInstruction::PushHandler(WatchKind::Pc, 1),
+            AdsInstruction::Jump(3),
+            AdsInstruction::PushValue(int_value_1),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Return,
+            AdsInstruction::Step,
+            AdsInstruction::Exit,
+        ] if *int_value_1 == int_value(1) && *int_value_255 == int_value(255));
     }
 
     #[test]
     fn while_false_statement() {
-        assert_eq!(
-            compile("while %false {\nstep\n}\n"),
-            vec![AdsInstruction::Exit]
+        assert_matches!(
+            compile("while %false {\nstep\n}\n").as_slice(),
+            [AdsInstruction::Exit]
         );
     }
 
     #[test]
     fn while_true_statement() {
-        assert_eq!(
-            compile("while %true {\nstep\n}\n"),
-            vec![
+        assert_matches!(
+            compile("while %true {\nstep\n}\n").as_slice(),
+            [
                 AdsInstruction::Step,
                 AdsInstruction::Jump(-2),
                 AdsInstruction::Exit,
@@ -706,18 +698,15 @@ mod tests {
 
     #[test]
     fn while_statement() {
-        assert_eq!(
-            compile("while pc < 5 {\nstep\n}\n"),
-            vec![
-                AdsInstruction::Jump(1),
-                AdsInstruction::Step,
-                AdsInstruction::GetPc,
-                AdsInstruction::PushValue(int_value(5)),
-                AdsInstruction::BinOp(ExprBinOp::AnyCmpLt),
-                AdsInstruction::BranchIf(-5),
-                AdsInstruction::Exit,
-            ]
-        );
+        assert_matches!(compile("while pc < 5 {\nstep\n}\n").as_slice(), [
+            AdsInstruction::Jump(1),
+            AdsInstruction::Step,
+            AdsInstruction::GetPc,
+            AdsInstruction::PushValue(int_value_5),
+            AdsInstruction::BinOp { binop: ExprBinOp::AnyCmpLt, .. },
+            AdsInstruction::BranchIf(-5),
+            AdsInstruction::Exit,
+        ] if *int_value_5 == int_value(5));
     }
 }
 

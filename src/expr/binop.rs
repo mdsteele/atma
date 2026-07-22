@@ -1,4 +1,4 @@
-use super::error::{ExprTypeError, ExprTypeResult};
+use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprLabel, ExprType, ExprValue};
 use crate::parse::BinOpAst;
@@ -31,6 +31,41 @@ pub(crate) enum ExprBinOpEvalError {
     /// Could not compute the result due to an insufficiently-resolved label
     /// value.
     UnresolvedLabel,
+}
+
+impl ExprBinOpEvalError {
+    /// Converts `self` into an [`ExprEvalError`].
+    pub fn into_expr_eval_error(
+        self,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
+    ) -> ExprEvalError {
+        match self {
+            Self::BitShiftByNegative(rhs_value) => {
+                ExprEvalError::BitShiftByNegative { rhs_span, rhs_value }
+            }
+            Self::BitShiftOutOfRange(rhs_value) => {
+                ExprEvalError::BitShiftOutOfRange { rhs_span, rhs_value }
+            }
+            Self::DivideByZero => ExprEvalError::DivideByZero { rhs_span },
+            Self::ModByZero => ExprEvalError::ModByZero { rhs_span },
+            Self::PowNegativeExponent(rhs_value) => {
+                ExprEvalError::PowNegativeExponent { rhs_span, rhs_value }
+            }
+            Self::SubtractLabelsInDifferentAddrspaces(
+                lhs_space,
+                rhs_space,
+            ) => ExprEvalError::SubtractLabelsInDifferentAddrspaces {
+                op_span,
+                lhs_span,
+                lhs_space,
+                rhs_span,
+                rhs_space,
+            },
+            Self::UnresolvedLabel => unreachable!(),
+        }
+    }
 }
 
 //===========================================================================//

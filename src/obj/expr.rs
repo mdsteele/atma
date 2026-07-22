@@ -261,18 +261,6 @@ impl BinaryIo for ObjExprOp {
 }
 
 impl ExprOp for ObjExprOp {
-    fn apply_function() -> Self {
-        Self::Apply
-    }
-
-    fn binary_operation(binop: ExprBinOp) -> Self {
-        Self::BinOp(binop)
-    }
-
-    fn list_index() -> Self {
-        Self::ListIndex
-    }
-
     fn literal(value: ExprValue) -> Self {
         Self::Push(value)
     }

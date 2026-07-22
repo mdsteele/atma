@@ -11,7 +11,7 @@ mod value;
 pub(crate) use binop::ExprBinOp;
 pub(crate) use check::{ExprCompiler, ExprEnv, ExprOp};
 pub use error::{ExprEvalError, ExprTypeError, ExprTypeResult};
-pub use func::ExprFunc;
+pub use func::{ExprFunc, ExprFuncEvalError};
 pub use label::ExprLabel;
 pub(crate) use unop::ExprUnOp;
 pub use value::{ExprType, ExprValue};
