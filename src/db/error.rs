@@ -129,13 +129,6 @@ pub enum AdsError {
         /// The type of the expression.
         expr_type: ExprType,
     },
-    /// A control flow predicate was specified using a non-boolean expression.
-    PredicateTypeError {
-        /// The source code location for the predicate expression.
-        expr_loc: AdsSrcLoc,
-        /// The type of the expression.
-        expr_type: ExprType,
-    },
     /// Encountered an error while trying to fetch data from a file.
     SrcCacheError {
         /// The joined path for the source file that couldn't be fetched.
@@ -210,16 +203,6 @@ impl AdsError {
                 let message = format!(
                     "source code path must be of type {}, not {expr_type}",
                     ExprType::String
-                );
-                let label = format!("this expression has type {expr_type}");
-                SourceError::new(expr_loc.primary(), message)
-                    .with_primary_label(label)
-                    .with_context(&*expr_loc.context)
-            }
-            Self::PredicateTypeError { expr_loc, expr_type } => {
-                let message = format!(
-                    "predicate must be of type {}, not {expr_type}",
-                    ExprType::Boolean
                 );
                 let label = format!("this expression has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)

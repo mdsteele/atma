@@ -178,6 +178,11 @@ impl<'a> MacroBuilder<'a> {
                 errs.also(self.scan_expression(lhs));
                 errs.also(self.scan_expression(rhs));
             }
+            ExprAstNode::Conditional(pred, lhs, rhs) => {
+                errs.also(self.scan_expression(pred));
+                errs.also(self.scan_expression(lhs));
+                errs.also(self.scan_expression(rhs));
+            }
             ExprAstNode::ListLiteral(items)
             | ExprAstNode::TupleLiteral(items) => {
                 for item in items {
@@ -564,6 +569,14 @@ impl MacroExpansion {
             | ExprAstNode::Identifier(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => expression.clone(),
+            ExprAstNode::Conditional(pred, lhs, rhs) => ExprAst {
+                span: expression.span,
+                node: ExprAstNode::Conditional(
+                    Box::from(self.expand_expression(pred)),
+                    Box::from(self.expand_expression(lhs)),
+                    Box::from(self.expand_expression(rhs)),
+                ),
+            },
             ExprAstNode::Index(index_span, lhs, rhs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::Index(

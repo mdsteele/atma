@@ -46,6 +46,8 @@ pub(crate) trait ExprEnv {
     ) -> Self::Op;
 }
 
+//===========================================================================//
+
 /// A type that represents a single operation for an expression stack machine.
 pub(crate) trait ExprOp {
     /// Returns an operation to push a single literal value onto the stack.
@@ -59,6 +61,14 @@ pub(crate) trait ExprOp {
     /// tuple value.
     fn make_tuple(num_items: usize) -> Self;
 
+    /// Returns an operation to unconditionally skip over the specified number
+    /// of operations.
+    fn skip(offset: usize) -> Self;
+
+    /// Returns an operation to pop a boolean from the stack, and skip over the
+    /// specified number of operations if that boolean is false.
+    fn skip_unless(offset: usize) -> Self;
+
     /// Returns an operation to index into a tuple.
     fn tuple_item(index: usize) -> Self;
 
@@ -69,10 +79,29 @@ pub(crate) trait ExprOp {
 
 //===========================================================================//
 
+enum Task {
+    Apply(SrcSpan, SrcSpan),
+    BinOp((SrcSpan, BinOpAst), SrcSpan, SrcSpan),
+    CondBranch(SrcSpan, ExprAst, ExprAst),
+    CondElse(usize, SrcSpan, ExprAst),
+    CondJoin(usize),
+    CondUnify(Option<bool>, SrcSpan, SrcSpan),
+    Expr(ExprAst),
+    Index(SrcSpan, SrcSpan, SrcSpan),
+    ListLiteral(Vec<SrcSpan>),
+    PhantomExpr(ExprAst),
+    PhantomDone(usize),
+    TupleLiteral(usize),
+    UnOp((SrcSpan, UnOpAst), SrcSpan),
+}
+
+//===========================================================================//
+
 pub(crate) struct ExprCompiler<'a, E: ExprEnv> {
     env: &'a E,
     types: Vec<(ExprType, Option<ExprValue>)>,
     ops: Vec<E::Op>,
+    tasks: Vec<Task>,
     errors: Errs<ExprTypeError>,
 }
 
@@ -82,6 +111,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             env,
             types: Vec::new(),
             ops: Vec::new(),
+            tasks: Vec::new(),
             errors: Errs::new(),
         }
     }
@@ -93,100 +123,123 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     // imported labels").  This will allow for better error messages.
     pub(crate) fn typecheck(
         mut self,
-        expr: &ExprAst,
+        expr: ExprAst,
     ) -> ExprTypeResult<(Vec<E::Op>, ExprType, Option<ExprValue>)> {
-        let mut stack = vec![expr];
-        let mut subexprs = Vec::<&ExprAst>::new();
-        while let Some(subexpr) = stack.pop() {
-            subexprs.push(subexpr);
-            match &subexpr.node {
-                ExprAstNode::Apply(func, arg) => {
-                    stack.push(func);
-                    stack.push(arg);
+        self.tasks.push(Task::Expr(expr));
+        while let Some(task) = self.tasks.pop() {
+            match task {
+                Task::Apply(func_span, arg_span) => {
+                    self.do_task_apply(func_span, arg_span);
                 }
-                ExprAstNode::BinOp(_, lhs, rhs) => {
-                    stack.push(lhs);
-                    stack.push(rhs);
+                Task::BinOp(binop_ast, lhs_span, rhs_span) => {
+                    self.do_task_binop(binop_ast, lhs_span, rhs_span);
                 }
-                ExprAstNode::BoolLiteral(_) => {}
-                ExprAstNode::HereLabel => {}
-                ExprAstNode::Identifier(_) => {}
-                ExprAstNode::Index(_, lhs, rhs) => {
-                    stack.push(lhs);
-                    stack.push(rhs);
+                Task::CondBranch(pred_span, lhs_ast, rhs_ast) => {
+                    self.do_task_cond_branch(pred_span, lhs_ast, rhs_ast);
                 }
-                ExprAstNode::IntLiteral(_) => {}
-                ExprAstNode::ListLiteral(items) => stack.extend(items),
-                ExprAstNode::Placeholder(_) => {}
-                ExprAstNode::StrLiteral(_) => {}
-                ExprAstNode::TupleLiteral(items) => stack.extend(items),
-                ExprAstNode::UnOp(_, sub) => stack.push(sub),
+                Task::CondElse(op_index, lhs_span, rhs_ast) => {
+                    self.do_task_cond_else(op_index, lhs_span, rhs_ast);
+                }
+                Task::CondJoin(op_index) => self.do_task_cond_join(op_index),
+                Task::CondUnify(pred_static, lhs_span, rhs_span) => {
+                    self.do_task_cond_unify(pred_static, lhs_span, rhs_span);
+                }
+                Task::Expr(expr_ast) => self.do_task_expr(expr_ast),
+                Task::Index(index_span, lhs_span, rhs_span) => {
+                    self.do_task_index(index_span, lhs_span, rhs_span);
+                }
+                Task::ListLiteral(spans) => self.do_task_list_literal(spans),
+                Task::PhantomExpr(expr_ast) => {
+                    self.do_task_phantom_expr(expr_ast)
+                }
+                Task::PhantomDone(size) => self.do_task_phantom_done(size),
+                Task::TupleLiteral(size) => self.do_task_tuple_literal(size),
+                Task::UnOp(unop_ast, sub_span) => {
+                    self.do_task_unop(unop_ast, sub_span);
+                }
             }
-        }
-        for subexpr in subexprs.into_iter().rev() {
-            self.typecheck_subexpr(subexpr);
         }
         debug_assert_eq!(self.types.len(), 1);
-        if self.errors.is_empty() {
-            let (expr_type, static_value) = self.types.pop().unwrap();
-            Ok((self.ops, expr_type, static_value))
-        } else {
-            Err(self.errors)
-        }
+        self.errors.result()?;
+        let (expr_type, static_value) = self.types.pop().unwrap();
+        Ok((self.ops, expr_type, static_value))
     }
 
-    fn typecheck_subexpr(&mut self, subexpr: &ExprAst) {
-        match &subexpr.node {
+    fn do_task_expr(&mut self, subexpr: ExprAst) {
+        match subexpr.node {
             ExprAstNode::Apply(func_ast, arg_ast) => {
-                self.typecheck_apply(func_ast, arg_ast);
+                self.tasks.push(Task::Apply(func_ast.span, arg_ast.span));
+                self.tasks.push(Task::Expr(*arg_ast));
+                self.tasks.push(Task::Expr(*func_ast));
             }
             ExprAstNode::BinOp(binop_ast, lhs_ast, rhs_ast) => {
-                self.typecheck_binop_node(*binop_ast, lhs_ast, rhs_ast);
+                self.tasks.push(Task::BinOp(
+                    binop_ast,
+                    lhs_ast.span,
+                    rhs_ast.span,
+                ));
+                self.tasks.push(Task::Expr(*rhs_ast));
+                self.tasks.push(Task::Expr(*lhs_ast));
             }
             ExprAstNode::BoolLiteral(boolean) => {
-                self.typecheck_primitive_literal(
+                self.push_primitive_literal(
                     ExprType::Boolean,
-                    ExprValue::Boolean(*boolean),
+                    ExprValue::Boolean(boolean),
                 );
             }
-            ExprAstNode::HereLabel => {
-                self.typecheck_here_label(subexpr.span);
+            ExprAstNode::Conditional(pred_ast, lhs_ast, rhs_ast) => {
+                self.tasks.push(Task::CondBranch(
+                    pred_ast.span,
+                    *lhs_ast,
+                    *rhs_ast,
+                ));
+                self.tasks.push(Task::Expr(*pred_ast));
             }
+            ExprAstNode::HereLabel => self.push_here_label(subexpr.span),
             ExprAstNode::Identifier(id) => {
-                self.typecheck_identifier(subexpr.span, id);
+                self.push_identifier(subexpr.span, id);
             }
             ExprAstNode::Index(index_span, lhs_ast, rhs_ast) => {
-                self.typecheck_index(*index_span, lhs_ast, rhs_ast);
+                self.tasks.push(Task::Index(
+                    index_span,
+                    lhs_ast.span,
+                    rhs_ast.span,
+                ));
+                self.tasks.push(Task::Expr(*rhs_ast));
+                self.tasks.push(Task::Expr(*lhs_ast));
             }
             ExprAstNode::IntLiteral(integer) => {
-                self.typecheck_primitive_literal(
+                self.push_primitive_literal(
                     ExprType::Integer,
-                    ExprValue::Integer(integer.clone()),
+                    ExprValue::Integer(integer),
                 );
             }
             ExprAstNode::ListLiteral(item_asts) => {
-                self.typecheck_list_literal(item_asts);
+                self.tasks.push(Task::ListLiteral(
+                    item_asts.iter().map(|ast| ast.span).collect(),
+                ));
+                self.tasks.extend(item_asts.into_iter().rev().map(Task::Expr));
             }
             ExprAstNode::Placeholder(_) => unreachable!(),
             ExprAstNode::StrLiteral(string) => {
-                self.typecheck_primitive_literal(
+                self.push_primitive_literal(
                     ExprType::String,
-                    ExprValue::String(string.clone()),
+                    ExprValue::String(string),
                 );
             }
             ExprAstNode::TupleLiteral(item_asts) => {
-                self.typecheck_tuple_literal(item_asts);
+                self.tasks.push(Task::TupleLiteral(item_asts.len()));
+                self.tasks.extend(item_asts.into_iter().rev().map(Task::Expr));
             }
             ExprAstNode::UnOp(unop_ast, sub_ast) => {
-                self.typecheck_unop_node(*unop_ast, sub_ast);
+                self.tasks.push(Task::UnOp(unop_ast, sub_ast.span));
+                self.tasks.push(Task::Expr(*sub_ast));
             }
         }
     }
 
-    fn typecheck_apply(&mut self, func_ast: &ExprAst, arg_ast: &ExprAst) {
+    fn do_task_apply(&mut self, func_span: SrcSpan, arg_span: SrcSpan) {
         debug_assert!(self.types.len() >= 2);
-        let func_span = func_ast.span;
-        let arg_span = arg_ast.span;
         let (arg_type, arg_static) = self.types.pop().unwrap();
         let (func_type, func_static) = self.types.pop().unwrap();
         let param_and_ret = match func_type {
@@ -240,11 +293,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn typecheck_binop_node(
+    fn do_task_binop(
         &mut self,
         binop_ast: (SrcSpan, BinOpAst),
-        lhs_ast: &ExprAst,
-        rhs_ast: &ExprAst,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
     ) {
         debug_assert!(self.types.len() >= 2);
         let (rhs_type, rhs_static) = self.types.pop().unwrap();
@@ -254,8 +307,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             return;
         }
         let op_span = binop_ast.0;
-        let lhs_span = lhs_ast.span;
-        let rhs_span = rhs_ast.span;
         match ExprBinOp::typecheck(
             binop_ast, lhs_span, lhs_type, rhs_span, rhs_type,
         ) {
@@ -299,7 +350,109 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn typecheck_here_label(&mut self, span: SrcSpan) {
+    fn do_task_cond_branch(
+        &mut self,
+        pred_span: SrcSpan,
+        lhs_ast: ExprAst,
+        rhs_ast: ExprAst,
+    ) {
+        debug_assert!(!self.types.is_empty());
+        let (pred_type, pred_static) = self.types.pop().unwrap();
+        if pred_type != ExprType::Boolean && pred_type != ExprType::Bottom {
+            self.errors.push(ExprTypeError::CannotUseTypeAsPredicate {
+                expr_span: pred_span,
+                expr_type: pred_type,
+            });
+        }
+        match pred_static {
+            Some(ExprValue::Boolean(true)) => {
+                self.tasks.push(Task::CondUnify(
+                    Some(true),
+                    lhs_ast.span,
+                    rhs_ast.span,
+                ));
+                self.tasks.push(Task::PhantomExpr(rhs_ast));
+                self.tasks.push(Task::Expr(lhs_ast));
+                debug_assert!(!self.ops.is_empty());
+                self.ops.pop();
+            }
+            Some(ExprValue::Boolean(false)) => {
+                self.tasks.push(Task::CondUnify(
+                    Some(false),
+                    lhs_ast.span,
+                    rhs_ast.span,
+                ));
+                self.tasks.push(Task::Expr(rhs_ast));
+                self.tasks.push(Task::PhantomExpr(lhs_ast));
+                debug_assert!(!self.ops.is_empty());
+                self.ops.pop();
+            }
+            _ => {
+                self.tasks.push(Task::CondElse(
+                    self.ops.len(),
+                    lhs_ast.span,
+                    rhs_ast,
+                ));
+                self.tasks.push(Task::Expr(lhs_ast));
+                // Add a placeholder operation, which will be replaced by the
+                // `CondElse` task.
+                self.ops.push(E::Op::skip_unless(0));
+            }
+        }
+    }
+
+    fn do_task_cond_else(
+        &mut self,
+        op_index: usize,
+        lhs_span: SrcSpan,
+        rhs_ast: ExprAst,
+    ) {
+        debug_assert!(self.ops.len() > op_index);
+        self.ops[op_index] = E::Op::skip_unless(self.ops.len() - op_index);
+        self.tasks.push(Task::CondUnify(None, lhs_span, rhs_ast.span));
+        self.tasks.push(Task::CondJoin(self.ops.len()));
+        self.tasks.push(Task::Expr(rhs_ast));
+        // Add a placeholder operation, which will be replaced by the
+        // `CondJoin` task.
+        self.ops.push(E::Op::skip(0));
+    }
+
+    fn do_task_cond_join(&mut self, op_index: usize) {
+        debug_assert!(self.ops.len() > op_index);
+        self.ops[op_index] = E::Op::skip(self.ops.len() - (op_index + 1));
+    }
+
+    fn do_task_cond_unify(
+        &mut self,
+        pred_static: Option<bool>,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
+    ) {
+        debug_assert!(self.types.len() >= 2);
+        let (rhs_type, rhs_static) = self.types.pop().unwrap();
+        let (lhs_type, lhs_static) = self.types.pop().unwrap();
+        let cond_type = if rhs_type == ExprType::Bottom {
+            lhs_type
+        } else if lhs_type == rhs_type || lhs_type == ExprType::Bottom {
+            rhs_type
+        } else {
+            self.errors.push(ExprTypeError::ConditionBranchesMustBeSameType {
+                true_branch_span: lhs_span,
+                true_branch_type: lhs_type,
+                false_branch_span: rhs_span,
+                false_branch_type: rhs_type,
+            });
+            ExprType::Bottom
+        };
+        let cond_static = match pred_static {
+            Some(true) => lhs_static,
+            Some(false) => rhs_static,
+            None => None,
+        };
+        self.types.push((cond_type, cond_static));
+    }
+
+    fn push_here_label(&mut self, span: SrcSpan) {
         match self.env.typecheck_here_label(span) {
             Ok((op, static_label)) => {
                 self.ops.push(op);
@@ -312,8 +465,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn typecheck_identifier(&mut self, span: SrcSpan, name: &Rc<str>) {
-        match self.env.typecheck_identifier(span, name) {
+    fn push_identifier(&mut self, span: SrcSpan, name: Rc<str>) {
+        match self.env.typecheck_identifier(span, &name) {
             Ok((op, id_type, id_static)) => {
                 self.ops.push(op);
                 self.types.push((id_type, id_static));
@@ -325,11 +478,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn typecheck_index(
+    fn do_task_index(
         &mut self,
         bracket_span: SrcSpan,
-        lhs_ast: &ExprAst,
-        rhs_ast: &ExprAst,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
     ) {
         debug_assert!(self.types.len() >= 2);
         let (rhs_type, rhs_static) = self.types.pop().unwrap();
@@ -353,9 +506,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     {
                         self.errors.push(ExprTypeError::StaticEvalError {
                             error: ExprEvalError::ListIndexOutOfBounds {
-                                list_span: lhs_ast.span,
+                                list_span: lhs_span,
                                 list_length: item_values.len(),
-                                index_span: rhs_ast.span,
+                                index_span: rhs_span,
                                 index_value: index,
                             },
                         });
@@ -368,15 +521,13 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.types.push((item_type, Some(result_value)));
                     }
                 } else {
-                    self.ops.push(
-                        self.env.list_index_op(lhs_ast.span, rhs_ast.span),
-                    );
+                    self.ops.push(self.env.list_index_op(lhs_span, rhs_span));
                     self.types.push((item_type, None));
                 }
             }
             (ExprType::List(_), rhs_type) => {
                 self.errors.push(ExprTypeError::CannotUseTypeAsIndex {
-                    index_span: rhs_ast.span,
+                    index_span: rhs_span,
                     index_type: rhs_type,
                 });
                 self.types.push((ExprType::Bottom, None));
@@ -391,9 +542,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     {
                         self.errors.push(
                             ExprTypeError::TupleIndexOutOfRange {
-                                tuple_span: lhs_ast.span,
+                                tuple_span: lhs_span,
                                 item_types,
-                                index_span: rhs_ast.span,
+                                index_span: rhs_span,
                                 index_value: index,
                             },
                         );
@@ -415,14 +566,14 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     }
                 } else {
                     self.errors.push(ExprTypeError::TupleIndexNotStatic {
-                        index_span: rhs_ast.span,
+                        index_span: rhs_span,
                     });
                     self.types.push((ExprType::Bottom, None));
                 }
             }
             (ExprType::Tuple(_), rhs_type) => {
                 self.errors.push(ExprTypeError::CannotUseTypeAsIndex {
-                    index_span: rhs_ast.span,
+                    index_span: rhs_span,
                     index_type: rhs_type,
                 });
                 self.types.push((ExprType::Bottom, None));
@@ -430,7 +581,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             (lhs_type, _) => {
                 self.errors.push(ExprTypeError::CannotIndexIntoType {
                     bracket_span,
-                    indexed_span: lhs_ast.span,
+                    indexed_span: lhs_span,
                     indexed_type: lhs_type,
                 });
                 self.types.push((ExprType::Bottom, None));
@@ -438,22 +589,28 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn typecheck_list_literal(&mut self, item_asts: &[ExprAst]) {
-        let num_items = item_asts.len();
+    fn do_task_list_literal(&mut self, item_spans: Vec<SrcSpan>) {
+        let num_items = item_spans.len();
         let (item_types, static_values) = self.pop_types(num_items);
-        let item_type =
-            item_types.first().cloned().unwrap_or(ExprType::Bottom);
-        for (ty, ast) in item_types.into_iter().zip(item_asts) {
-            if ty != item_type {
-                self.errors.push(ExprTypeError::ListItemsMustAllBeSameType {
-                    first_item_span: item_asts[0].span,
-                    first_item_type: item_type.clone(),
-                    other_item_span: ast.span,
-                    other_item_type: ty,
-                });
-                break;
+        let item_type = if num_items == 0 {
+            ExprType::Bottom
+        } else {
+            let item_type = item_types[0].clone();
+            let first_item_span = item_spans[0];
+            for (ty, span) in item_types.into_iter().zip(item_spans) {
+                if ty != item_type {
+                    let error = ExprTypeError::ListItemsMustAllBeSameType {
+                        first_item_span,
+                        first_item_type: item_type.clone(),
+                        other_item_span: span,
+                        other_item_type: ty,
+                    };
+                    self.errors.push(error);
+                    break;
+                }
             }
-        }
+            item_type
+        };
         let static_value = if let Some(item_values) = static_values {
             debug_assert!(self.ops.len() >= item_values.len());
             self.ops.truncate(self.ops.len() - item_values.len());
@@ -467,13 +624,28 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         self.types.push((ExprType::List(Rc::from(item_type)), static_value));
     }
 
-    fn typecheck_primitive_literal(&mut self, ty: ExprType, value: ExprValue) {
+    fn do_task_phantom_expr(&mut self, expr_ast: ExprAst) {
+        self.tasks.push(Task::PhantomDone(self.ops.len()));
+        self.tasks.push(Task::Expr(expr_ast));
+    }
+
+    fn do_task_phantom_done(&mut self, size: usize) {
+        // Delete all operations that would have been used to calculate the
+        // expression value.
+        debug_assert!(self.ops.len() >= size);
+        self.ops.truncate(size);
+        // Leave the expression's type on the type stack, but remove any static
+        // value associated with it.
+        debug_assert!(!self.types.is_empty());
+        self.types.last_mut().unwrap().1 = None;
+    }
+
+    fn push_primitive_literal(&mut self, ty: ExprType, value: ExprValue) {
         self.ops.push(E::Op::literal(value.clone()));
         self.types.push((ty, Some(value)));
     }
 
-    fn typecheck_tuple_literal(&mut self, item_asts: &[ExprAst]) {
-        let num_items = item_asts.len();
+    fn do_task_tuple_literal(&mut self, num_items: usize) {
         let (item_types, static_values) = self.pop_types(num_items);
         let static_value = if let Some(item_values) = static_values {
             debug_assert!(self.ops.len() >= item_values.len());
@@ -488,10 +660,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         self.types.push((ExprType::Tuple(Rc::from(item_types)), static_value));
     }
 
-    fn typecheck_unop_node(
+    fn do_task_unop(
         &mut self,
         unop_ast: (SrcSpan, UnOpAst),
-        sub_ast: &ExprAst,
+        sub_span: SrcSpan,
     ) {
         debug_assert!(!self.types.is_empty());
         let (sub_type, sub_static) = self.types.pop().unwrap();
@@ -499,7 +671,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             self.types.push((ExprType::Bottom, None));
             return;
         }
-        match ExprUnOp::typecheck(unop_ast, sub_ast.span, sub_type) {
+        match ExprUnOp::typecheck(unop_ast, sub_span, sub_type) {
             Ok((unop, result_type)) => {
                 if let Some(sub_value) = sub_static {
                     debug_assert!(!self.ops.is_empty());

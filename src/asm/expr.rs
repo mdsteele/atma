@@ -136,7 +136,7 @@ impl AsmTypeEnv {
 
     pub fn typecheck_expression(
         &self,
-        expr: &ExprAst,
+        expr: ExprAst,
     ) -> AsmResult<(ObjExpr, ExprType)> {
         let (ops, expr_type, _static_value) =
             ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;

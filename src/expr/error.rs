@@ -85,6 +85,25 @@ pub enum ExprTypeError {
         /// The expression type of the index expression.
         index_type: ExprType,
     },
+    /// A control flow predicate was specified using a non-boolean expression.
+    CannotUseTypeAsPredicate {
+        /// The source code span for the predicate expression.
+        expr_span: SrcSpan,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
+    /// Found a ternary condition expression whose branches don't have the same
+    /// expression type.
+    ConditionBranchesMustBeSameType {
+        /// The source code span for the `true` branch of the conditional.
+        true_branch_span: SrcSpan,
+        /// The expression type of the `true` branch of the conditional.
+        true_branch_type: ExprType,
+        /// The source code span for the `false` branch of the conditional.
+        false_branch_span: SrcSpan,
+        /// The expression type of the `false` branch of the conditional.
+        false_branch_type: ExprType,
+    },
     /// Found a list literal expression whose items don't all have the same
     /// expression type.
     ListItemsMustAllBeSameType {
@@ -220,6 +239,31 @@ impl ExprTypeError {
                 let label = format!("this expression has type {index_type}");
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_primary_label(label)
+            }
+            Self::CannotUseTypeAsPredicate { expr_span, expr_type } => {
+                let message = format!(
+                    "predicate must be of type {}, not {expr_type}",
+                    ExprType::Boolean
+                );
+                let label = format!("this expression has type {expr_type}");
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
+            }
+            Self::ConditionBranchesMustBeSameType {
+                true_branch_span,
+                true_branch_type,
+                false_branch_span,
+                false_branch_type,
+            } => {
+                let branches_span =
+                    true_branch_span.merged_with(false_branch_span);
+                let message =
+                    "both sides of a conditional must have the same type";
+                let label1 = format!("this side has type {true_branch_type}");
+                let label2 = format!("this side has type {false_branch_type}");
+                SourceError::new(SrcLoc::new(path, branches_span), message)
+                    .with_label(SrcLoc::new(path, true_branch_span), label1)
+                    .with_label(SrcLoc::new(path, false_branch_span), label2)
             }
             Self::ListItemsMustAllBeSameType {
                 first_item_span,

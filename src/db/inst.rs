@@ -134,23 +134,31 @@ pub enum AdsInstruction {
 
 impl ExprOp for AdsInstruction {
     fn literal(value: ExprValue) -> Self {
-        AdsInstruction::PushValue(value)
+        Self::PushValue(value)
     }
 
     fn make_list(num_items: usize) -> Self {
-        AdsInstruction::MakeList(num_items)
+        Self::MakeList(num_items)
     }
 
     fn make_tuple(num_items: usize) -> Self {
-        AdsInstruction::MakeTuple(num_items)
+        Self::MakeTuple(num_items)
+    }
+
+    fn skip(offset: usize) -> Self {
+        Self::Jump(offset as isize)
+    }
+
+    fn skip_unless(offset: usize) -> Self {
+        Self::BranchUnless(offset as isize)
     }
 
     fn tuple_item(index: usize) -> Self {
-        AdsInstruction::TupleItem(index)
+        Self::TupleItem(index)
     }
 
     fn unary_operation(unop: ExprUnOp) -> Self {
-        AdsInstruction::UnOp(unop)
+        Self::UnOp(unop)
     }
 }
 

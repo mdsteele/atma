@@ -223,7 +223,7 @@ impl<'a> Assembler<'a> {
             assert_ast.message.and_then(|expr_ast| {
                 errs.ok(self.typecheck_dir_expr_as(
                     (".ASSERT", "message"),
-                    &expr_ast,
+                    expr_ast,
                     ExprType::String,
                 ))
             });
@@ -231,7 +231,7 @@ impl<'a> Assembler<'a> {
         let condition_expr: ObjExpr = 'condition: {
             match errs.ok(self.typecheck_dir_expr_as(
                 (".ASSERT", "condition"),
-                &assert_ast.condition,
+                assert_ast.condition,
                 ExprType::Boolean,
             )) {
                 None => return errs.result(),
@@ -333,7 +333,8 @@ impl<'a> Assembler<'a> {
                 span: reserve_ast.directive_span,
             });
         }
-        let count: u64 = if let Some(expr_ast) = &reserve_ast.count {
+        let count: u64 = if let Some(expr_ast) = reserve_ast.count {
+            let expr_span = expr_ast.span;
             let Some(value) = errs.ok(self.typecheck_static_dir_expr_as(
                 (".RESERVE", "count"),
                 expr_ast,
@@ -347,7 +348,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::DirectiveExprOutOfRange {
                         directive: ".RESERVE",
                         component: "count",
-                        expr_span: expr_ast.span,
+                        expr_span,
                         expr_value: value.unwrap_int_ref().clone(),
                         valid_range: bigint_range(u64::MIN, u64::MAX),
                     });
@@ -370,7 +371,7 @@ impl<'a> Assembler<'a> {
         let name: Option<Rc<str>> = errs
             .ok(self.typecheck_static_dir_expr_as(
                 (".SECTION", "name"),
-                &section_ast.name,
+                section_ast.name,
                 ExprType::String,
             ))
             .map(|value| value.unwrap_str_ref().clone());
@@ -461,13 +462,14 @@ impl<'a> Assembler<'a> {
                 span: data_ast.directive_span,
             });
         }
-        match errs.ok(self.typecheck_expression(&data_ast.path_expr)) {
+        let path_span = data_ast.path_expr.span;
+        match errs.ok(self.typecheck_expression(data_ast.path_expr)) {
             Some((expr, ExprType::String)) => {
                 let Some(path_value) = expr.static_value() else {
                     errs.push(AsmError::DirectiveExprNotStatic {
                         directive: ".BINARY",
                         component: "path",
-                        expr_span: data_ast.path_expr.span,
+                        expr_span: path_span,
                     });
                     return errs.result();
                 };
@@ -481,7 +483,7 @@ impl<'a> Assembler<'a> {
                     Err(error) => {
                         errs.push(AsmError::SrcCacheError {
                             path,
-                            path_span: data_ast.path_expr.span,
+                            path_span,
                             error,
                         });
                     }
@@ -491,7 +493,7 @@ impl<'a> Assembler<'a> {
                 errs.push(AsmError::DirectiveExprTypeError {
                     directive: ".BINARY",
                     component: "path",
-                    expr_span: data_ast.path_expr.span,
+                    expr_span: path_span,
                     expr_type,
                     valid_types: vec![ExprType::String],
                 });
@@ -525,13 +527,14 @@ impl<'a> Assembler<'a> {
             });
         }
         for expr_ast in data_ast.expressions {
-            match errs.ok(self.typecheck_expression(&expr_ast)) {
+            let expr_span = expr_ast.span;
+            match errs.ok(self.typecheck_expression(expr_ast)) {
                 Some((expr, ExprType::Integer)) => {
                     let Some(value) = expr.static_value() else {
                         errs.push(AsmError::DirectiveExprNotStatic {
                             directive: ".UTF8",
                             component: "value",
-                            expr_span: expr_ast.span,
+                            expr_span,
                         });
                         return errs.result();
                     };
@@ -539,7 +542,7 @@ impl<'a> Assembler<'a> {
                     let Some(chr) = bigint.to_u32().and_then(char::from_u32)
                     else {
                         errs.push(AsmError::InvalidUnicodeScalarValue {
-                            expr_span: expr_ast.span,
+                            expr_span,
                             expr_value: bigint.clone(),
                         });
                         return errs.result();
@@ -555,7 +558,7 @@ impl<'a> Assembler<'a> {
                         errs.push(AsmError::DirectiveExprNotStatic {
                             directive: ".UTF8",
                             component: "value",
-                            expr_span: expr_ast.span,
+                            expr_span,
                         });
                         return errs.result();
                     };
@@ -569,7 +572,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive: ".UTF8",
                         component: "value",
-                        expr_span: expr_ast.span,
+                        expr_span,
                         expr_type: ty,
                         valid_types: vec![ExprType::String, ExprType::Integer],
                     });
@@ -598,8 +601,9 @@ impl<'a> Assembler<'a> {
             return errs.result();
         };
         for expr_ast in int_data.expressions {
+            let expr_span = expr_ast.span;
             let static_value: i64 = match errs
-                .ok(self.typecheck_expression(&expr_ast))
+                .ok(self.typecheck_expression(expr_ast))
             {
                 Some((mut expr, ExprType::Label)) => {
                     // TODO: If the label belongs to a chunk with an explicit
@@ -618,7 +622,7 @@ impl<'a> Assembler<'a> {
                                 errs.push(AsmError::DirectiveExprOutOfRange {
                                     directive,
                                     component: "value",
-                                    expr_span: expr_ast.span,
+                                    expr_span,
                                     expr_value: bigint.clone(),
                                     valid_range: RangeInclusive {
                                         start: BigInt::from(range.start),
@@ -639,7 +643,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive,
                         component: "value",
-                        expr_span: expr_ast.span,
+                        expr_span,
                         expr_type: ty,
                         valid_types: vec![ExprType::Integer, ExprType::Label],
                     });
@@ -802,7 +806,7 @@ impl<'a> Assembler<'a> {
     ) -> AsmResult<BigInt> {
         self.typecheck_static_dir_expr_as(
             (".SECTION", attr_name),
-            &expr_ast,
+            expr_ast,
             ExprType::Integer,
         )
         .map(|value| value.unwrap_int_ref().clone())
@@ -815,7 +819,7 @@ impl<'a> Assembler<'a> {
     ) -> AsmResult<Rc<str>> {
         self.typecheck_static_dir_expr_as(
             (".SECTION", attr_name),
-            &expr_ast,
+            expr_ast,
             ExprType::String,
         )
         .map(|value| value.unwrap_str_ref().clone())
@@ -854,9 +858,10 @@ impl<'a> Assembler<'a> {
     fn typecheck_static_dir_expr_as(
         &mut self,
         (directive, component): (&'static str, &'static str),
-        expr_ast: &ExprAst,
+        expr_ast: ExprAst,
         required_type: ExprType,
     ) -> AsmResult<ExprValue> {
+        let expr_span = expr_ast.span;
         let expr = self.typecheck_dir_expr_as(
             (directive, component),
             expr_ast,
@@ -867,7 +872,7 @@ impl<'a> Assembler<'a> {
             None => Err(Errs::one(AsmError::DirectiveExprNotStatic {
                 directive,
                 component,
-                expr_span: expr_ast.span,
+                expr_span,
             })),
         }
     }
@@ -875,9 +880,10 @@ impl<'a> Assembler<'a> {
     fn typecheck_dir_expr_as(
         &mut self,
         (directive, component): (&'static str, &'static str),
-        expr_ast: &ExprAst,
+        expr_ast: ExprAst,
         required_type: ExprType,
     ) -> AsmResult<ObjExpr> {
+        let expr_span = expr_ast.span;
         let (expr, expr_type) = self.typecheck_expression(expr_ast)?;
         if expr_type == required_type {
             Ok(expr)
@@ -885,7 +891,7 @@ impl<'a> Assembler<'a> {
             Err(Errs::one(AsmError::DirectiveExprTypeError {
                 directive,
                 component,
-                expr_span: expr_ast.span,
+                expr_span,
                 expr_type,
                 valid_types: vec![required_type],
             }))
@@ -894,7 +900,7 @@ impl<'a> Assembler<'a> {
 
     fn typecheck_expression(
         &mut self,
-        expr_ast: &ExprAst,
+        expr_ast: ExprAst,
     ) -> AsmResult<(ObjExpr, ExprType)> {
         // TODO: error if contains a name that is reserved in current arch
         self.env.typecheck_expression(expr_ast)

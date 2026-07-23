@@ -241,7 +241,7 @@ impl<'a> AdsTypeEnv<'a> {
         expr: ExprAst,
     ) -> AdsResult<(Vec<AdsInstruction>, ExprType, Option<ExprValue>)> {
         let context = self.current_src_context();
-        ExprCompiler::new(self).typecheck(&expr).map_err(|errs| {
+        ExprCompiler::new(self).typecheck(expr).map_err(|errs| {
             errs.map(|error| AdsError::ExprTypeError {
                 context: context.clone(),
                 error,

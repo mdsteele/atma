@@ -997,7 +997,7 @@ impl ConfigBuilder {
         &self,
         expr_ast: ExprAst,
     ) -> ConfigResult<(ObjExpr, ExprType, Option<ExprValue>)> {
-        self.env.typecheck_expression(&expr_ast)
+        self.env.typecheck_expression(expr_ast)
     }
 
     fn declare_entry(

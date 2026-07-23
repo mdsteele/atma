@@ -88,7 +88,7 @@ impl LinkTypeEnv {
 
     pub fn typecheck_expression(
         &self,
-        expr: &ExprAst,
+        expr: ExprAst,
     ) -> ConfigResult<(ObjExpr, ExprType, Option<ExprValue>)> {
         let (ops, expr_type, static_value) =
             ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;

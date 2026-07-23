@@ -6,7 +6,7 @@ use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
-use crate::expr::{ExprType, ExprValue};
+use crate::expr::{ExprType, ExprTypeError, ExprValue};
 use crate::parse::{
     AdsStmtAst, BreakpointAst, DeclareAst, ExprAst, IdentifierAst, LValueAst,
     LValueAstNode,
@@ -370,9 +370,12 @@ impl<'a> AdsCompiler<'a> {
         let static_pred = if let ExprType::Boolean = expr_type {
             static_value.as_ref().map(ExprValue::unwrap_bool)
         } else {
-            errs.push(AdsError::PredicateTypeError {
-                expr_loc: self.make_loc(expr_span),
-                expr_type,
+            errs.push(AdsError::ExprTypeError {
+                context: self.env.current_src_context(),
+                error: ExprTypeError::CannotUseTypeAsPredicate {
+                    expr_span,
+                    expr_type,
+                },
             });
             None
         };

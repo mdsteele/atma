@@ -36,7 +36,9 @@ const OP_LIST_INDEX: u8 = 0x43;
 const OP_MAKE_LIST: u8 = 0x44;
 const OP_MAKE_TUPLE: u8 = 0x45;
 const OP_PUSH: u8 = 0x46;
-const OP_TUPLE_ITEM: u8 = 0x47;
+const OP_SKIP: u8 = 0x47;
+const OP_SKIP_UNLESS: u8 = 0x48;
+const OP_TUPLE_ITEM: u8 = 0x49;
 
 //===========================================================================//
 
@@ -149,6 +151,11 @@ pub(crate) enum ObjExprOp {
     MakeTuple(usize),
     /// Pushes a value onto the value stack.
     Push(ExprValue),
+    /// Skips past the specified number of operations.
+    Skip(usize),
+    /// Pops the top value from the value stack (which must be a boolean).  If
+    /// the value is false, skips past the specified number of operations.
+    SkipUnless(usize),
     /// Pops the top value from the value stack (which must be a tuple), gets
     /// the specified item from that tuple, then pushes that item onto the
     /// value stack.
@@ -189,6 +196,8 @@ impl BinaryIo for ObjExprOp {
             OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(reader)?)),
             OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(reader)?)),
             OP_PUSH => Ok(Self::Push(ExprValue::read_from(reader)?)),
+            OP_SKIP => Ok(Self::Skip(usize::read_from(reader)?)),
+            OP_SKIP_UNLESS => Ok(Self::SkipUnless(usize::read_from(reader)?)),
             OP_TUPLE_ITEM => Ok(Self::TupleItem(usize::read_from(reader)?)),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -252,6 +261,14 @@ impl BinaryIo for ObjExprOp {
                 OP_PUSH.write_to(writer)?;
                 value.write_to(writer)
             }
+            Self::Skip(offset) => {
+                OP_SKIP.write_to(writer)?;
+                offset.write_to(writer)
+            }
+            Self::SkipUnless(offset) => {
+                OP_SKIP_UNLESS.write_to(writer)?;
+                offset.write_to(writer)
+            }
             Self::TupleItem(index) => {
                 OP_TUPLE_ITEM.write_to(writer)?;
                 index.write_to(writer)
@@ -273,12 +290,55 @@ impl ExprOp for ObjExprOp {
         Self::MakeTuple(num_items)
     }
 
+    fn skip(offset: usize) -> Self {
+        Self::Skip(offset)
+    }
+
+    fn skip_unless(offset: usize) -> Self {
+        Self::SkipUnless(offset)
+    }
+
     fn tuple_item(index: usize) -> Self {
         Self::TupleItem(index)
     }
 
     fn unary_operation(_unop: ExprUnOp) -> Self {
         todo!()
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::ObjExprOp;
+    use crate::expr::{ExprBinOp, ExprValue};
+    use crate::obj::assert_round_trips;
+    use num_bigint::BigInt;
+
+    #[test]
+    fn round_trip_obj_expr_op() {
+        assert_round_trips(ObjExprOp::Apply);
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::IntAdd));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::LabelSub));
+        assert_round_trips(ObjExprOp::GetValue(0));
+        assert_round_trips(ObjExprOp::GetValue(42));
+        assert_round_trips(ObjExprOp::LabelAddr);
+        assert_round_trips(ObjExprOp::ListIndex);
+        assert_round_trips(ObjExprOp::MakeList(0));
+        assert_round_trips(ObjExprOp::MakeList(3));
+        assert_round_trips(ObjExprOp::MakeTuple(0));
+        assert_round_trips(ObjExprOp::MakeTuple(2));
+        assert_round_trips(ObjExprOp::Push(ExprValue::Boolean(false)));
+        assert_round_trips(ObjExprOp::Push(ExprValue::Integer(BigInt::from(
+            12345u32,
+        ))));
+        assert_round_trips(ObjExprOp::Skip(1));
+        assert_round_trips(ObjExprOp::Skip(17));
+        assert_round_trips(ObjExprOp::SkipUnless(2));
+        assert_round_trips(ObjExprOp::SkipUnless(1234));
+        assert_round_trips(ObjExprOp::TupleItem(0));
+        assert_round_trips(ObjExprOp::TupleItem(2));
     }
 }
 
