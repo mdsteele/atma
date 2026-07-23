@@ -66,6 +66,10 @@ pub(crate) trait ExprOp {
     fn skip(offset: usize) -> Self;
 
     /// Returns an operation to pop a boolean from the stack, and skip over the
+    /// specified number of operations if that boolean is true.
+    fn skip_if(offset: usize) -> Self;
+
+    /// Returns an operation to pop a boolean from the stack, and skip over the
     /// specified number of operations if that boolean is false.
     fn skip_unless(offset: usize) -> Self;
 
@@ -89,6 +93,9 @@ enum Task {
     Expr(ExprAst),
     Index(SrcSpan, SrcSpan, SrcSpan),
     ListLiteral(Vec<SrcSpan>),
+    LogBranch(bool, SrcSpan, SrcSpan, ExprAst),
+    LogJoin(bool, usize),
+    LogUnify(bool, SrcSpan, SrcSpan, SrcSpan),
     PhantomExpr(ExprAst),
     PhantomDone(usize),
     TupleLiteral(usize),
@@ -149,6 +156,19 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.do_task_index(index_span, lhs_span, rhs_span);
                 }
                 Task::ListLiteral(spans) => self.do_task_list_literal(spans),
+                Task::LogBranch(identity, op_span, lhs_span, rhs_ast) => {
+                    self.do_task_log_branch(
+                        identity, op_span, lhs_span, rhs_ast,
+                    );
+                }
+                Task::LogJoin(identity, size) => {
+                    self.do_task_log_join(identity, size);
+                }
+                Task::LogUnify(identity, op_span, lhs_span, rhs_span) => {
+                    self.do_task_log_unify(
+                        identity, op_span, lhs_span, rhs_span,
+                    );
+                }
                 Task::PhantomExpr(expr_ast) => {
                     self.do_task_phantom_expr(expr_ast)
                 }
@@ -171,6 +191,32 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::Apply(func_ast.span, arg_ast.span));
                 self.tasks.push(Task::Expr(*arg_ast));
                 self.tasks.push(Task::Expr(*func_ast));
+            }
+            ExprAstNode::BinOp(
+                (binop_span, BinOpAst::LogAnd),
+                lhs_ast,
+                rhs_ast,
+            ) => {
+                self.tasks.push(Task::LogBranch(
+                    true,
+                    binop_span,
+                    lhs_ast.span,
+                    *rhs_ast,
+                ));
+                self.tasks.push(Task::Expr(*lhs_ast));
+            }
+            ExprAstNode::BinOp(
+                (binop_span, BinOpAst::LogOr),
+                lhs_ast,
+                rhs_ast,
+            ) => {
+                self.tasks.push(Task::LogBranch(
+                    false,
+                    binop_span,
+                    lhs_ast.span,
+                    *rhs_ast,
+                ));
+                self.tasks.push(Task::Expr(*lhs_ast));
             }
             ExprAstNode::BinOp(binop_ast, lhs_ast, rhs_ast) => {
                 self.tasks.push(Task::BinOp(
@@ -622,6 +668,95 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             None
         };
         self.types.push((ExprType::List(Rc::from(item_type)), static_value));
+    }
+
+    fn do_task_log_branch(
+        &mut self,
+        identity: bool,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
+        rhs_ast: ExprAst,
+    ) {
+        self.tasks.push(Task::LogUnify(
+            identity,
+            op_span,
+            lhs_span,
+            rhs_ast.span,
+        ));
+        debug_assert!(!self.types.is_empty());
+        match self.types.last().unwrap() {
+            (_, Some(ExprValue::Boolean(value))) if *value == identity => {
+                self.tasks.push(Task::Expr(rhs_ast));
+                debug_assert!(!self.ops.is_empty());
+                self.ops.pop();
+            }
+            (_, Some(ExprValue::Boolean(_))) => {
+                self.tasks.push(Task::PhantomExpr(rhs_ast));
+            }
+            (_, _) => {
+                self.tasks.push(Task::LogJoin(identity, self.ops.len()));
+                self.tasks.push(Task::Expr(rhs_ast));
+                // Add a placeholder operation, which will be replaced with
+                // `skip_if` or `skip_unless` by the `LogUnify` task.
+                self.ops.push(E::Op::skip(0));
+            }
+        }
+    }
+
+    fn do_task_log_join(&mut self, identity: bool, op_index: usize) {
+        debug_assert!(self.ops.len() > op_index);
+        self.ops[op_index] = if identity {
+            E::Op::skip_unless(self.ops.len() - op_index)
+        } else {
+            E::Op::skip_if(self.ops.len() - op_index)
+        };
+        self.ops.push(E::Op::skip(1));
+        self.ops.push(E::Op::literal(ExprValue::Boolean(!identity)));
+    }
+
+    fn do_task_log_unify(
+        &mut self,
+        identity: bool,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
+    ) {
+        debug_assert!(self.types.len() >= 2);
+        let (rhs_type, rhs_static) = self.types.pop().unwrap();
+        let (lhs_type, lhs_static) = self.types.pop().unwrap();
+        self.types.push(match (lhs_type, rhs_type) {
+            (ExprType::Boolean, ExprType::Boolean) => {
+                let static_value = match &lhs_static {
+                    Some(ExprValue::Boolean(value)) => {
+                        if *value == identity {
+                            rhs_static
+                        } else {
+                            lhs_static
+                        }
+                    }
+                    _ => None,
+                };
+                (ExprType::Boolean, static_value)
+            }
+            (ExprType::Bottom, _) | (_, ExprType::Bottom) => {
+                (ExprType::Bottom, None)
+            }
+            (lhs_type, rhs_type) => {
+                self.errors.push(ExprTypeError::CannotApplyBinaryOpToTypes {
+                    op_span,
+                    op: if identity {
+                        BinOpAst::LogAnd
+                    } else {
+                        BinOpAst::LogOr
+                    },
+                    lhs_span,
+                    lhs_type,
+                    rhs_span,
+                    rhs_type,
+                });
+                (ExprType::Bottom, None)
+            }
+        });
     }
 
     fn do_task_phantom_expr(&mut self, expr_ast: ExprAst) {

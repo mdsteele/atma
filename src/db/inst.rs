@@ -149,6 +149,10 @@ impl ExprOp for AdsInstruction {
         Self::Jump(offset as isize)
     }
 
+    fn skip_if(offset: usize) -> Self {
+        Self::BranchIf(offset as isize)
+    }
+
     fn skip_unless(offset: usize) -> Self {
         Self::BranchUnless(offset as isize)
     }

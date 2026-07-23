@@ -37,8 +37,9 @@ const OP_MAKE_LIST: u8 = 0x44;
 const OP_MAKE_TUPLE: u8 = 0x45;
 const OP_PUSH: u8 = 0x46;
 const OP_SKIP: u8 = 0x47;
-const OP_SKIP_UNLESS: u8 = 0x48;
-const OP_TUPLE_ITEM: u8 = 0x49;
+const OP_SKIP_IF: u8 = 0x48;
+const OP_SKIP_UNLESS: u8 = 0x49;
+const OP_TUPLE_ITEM: u8 = 0x4a;
 
 //===========================================================================//
 
@@ -154,6 +155,9 @@ pub(crate) enum ObjExprOp {
     /// Skips past the specified number of operations.
     Skip(usize),
     /// Pops the top value from the value stack (which must be a boolean).  If
+    /// the value is true, skips past the specified number of operations.
+    SkipIf(usize),
+    /// Pops the top value from the value stack (which must be a boolean).  If
     /// the value is false, skips past the specified number of operations.
     SkipUnless(usize),
     /// Pops the top value from the value stack (which must be a tuple), gets
@@ -197,6 +201,7 @@ impl BinaryIo for ObjExprOp {
             OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(reader)?)),
             OP_PUSH => Ok(Self::Push(ExprValue::read_from(reader)?)),
             OP_SKIP => Ok(Self::Skip(usize::read_from(reader)?)),
+            OP_SKIP_IF => Ok(Self::SkipIf(usize::read_from(reader)?)),
             OP_SKIP_UNLESS => Ok(Self::SkipUnless(usize::read_from(reader)?)),
             OP_TUPLE_ITEM => Ok(Self::TupleItem(usize::read_from(reader)?)),
             byte => Err(io::Error::new(
@@ -265,6 +270,10 @@ impl BinaryIo for ObjExprOp {
                 OP_SKIP.write_to(writer)?;
                 offset.write_to(writer)
             }
+            Self::SkipIf(offset) => {
+                OP_SKIP_IF.write_to(writer)?;
+                offset.write_to(writer)
+            }
             Self::SkipUnless(offset) => {
                 OP_SKIP_UNLESS.write_to(writer)?;
                 offset.write_to(writer)
@@ -292,6 +301,10 @@ impl ExprOp for ObjExprOp {
 
     fn skip(offset: usize) -> Self {
         Self::Skip(offset)
+    }
+
+    fn skip_if(offset: usize) -> Self {
+        Self::SkipIf(offset)
     }
 
     fn skip_unless(offset: usize) -> Self {
@@ -335,6 +348,8 @@ mod tests {
         ))));
         assert_round_trips(ObjExprOp::Skip(1));
         assert_round_trips(ObjExprOp::Skip(17));
+        assert_round_trips(ObjExprOp::SkipIf(2));
+        assert_round_trips(ObjExprOp::SkipIf(13));
         assert_round_trips(ObjExprOp::SkipUnless(2));
         assert_round_trips(ObjExprOp::SkipUnless(1234));
         assert_round_trips(ObjExprOp::TupleItem(0));

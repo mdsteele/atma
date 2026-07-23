@@ -35,7 +35,7 @@ pub(crate) enum ExprBinOpEvalError {
 
 impl ExprBinOpEvalError {
     /// Converts `self` into an [`ExprEvalError`].
-    pub fn into_expr_eval_error(
+    pub(crate) fn into_expr_eval_error(
         self,
         op_span: SrcSpan,
         lhs_span: SrcSpan,
@@ -171,6 +171,9 @@ impl ExprBinOp {
             (BinOpAst::Sub, ExprType::Label, ExprType::Label) => {
                 Ok((ExprBinOp::LabelSub, ExprType::Integer))
             }
+            // Logical AND/OR are special-cased in `ExprCompiler`, and are
+            // never passed to this method.
+            (BinOpAst::LogAnd | BinOpAst::LogOr, _, _) => unreachable!(),
             (op, lhs_type, rhs_type) => {
                 Err(Errs::one(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,
