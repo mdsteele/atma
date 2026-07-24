@@ -1,85 +1,12 @@
 use super::binop::{ExprBinOp, ExprBinOpEvalError};
+use super::env::{ExprEnv, ExprOp};
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
-use super::func::ExprFuncEvalError;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::{Errs, SrcSpan};
 use crate::parse::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};
 use num_bigint::BigInt;
 use std::rc::Rc;
-
-//===========================================================================//
-
-/// A type environment in which expressions can be typechecked.
-pub(crate) trait ExprEnv {
-    type Op: ExprOp;
-
-    fn typecheck_here_label(
-        &self,
-        span: SrcSpan,
-    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)>;
-
-    fn typecheck_identifier(
-        &self,
-        span: SrcSpan,
-        name: &Rc<str>,
-    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)>;
-
-    /// Returns an operation to apply a function to a value.
-    fn apply_function_op(&self, arg_span: SrcSpan) -> Self::Op;
-
-    /// Returns an operation to combine the top two stack values with the
-    /// specified binary operation.
-    fn binary_operation_op(
-        &self,
-        binop: ExprBinOp,
-        op_span: SrcSpan,
-        lhs_span: SrcSpan,
-        rhs_span: SrcSpan,
-    ) -> Self::Op;
-
-    /// Returns an operation to index into a list.
-    fn list_index_op(
-        &self,
-        list_span: SrcSpan,
-        index_span: SrcSpan,
-    ) -> Self::Op;
-}
-
-//===========================================================================//
-
-/// A type that represents a single operation for an expression stack machine.
-pub(crate) trait ExprOp {
-    /// Returns an operation to push a single literal value onto the stack.
-    fn literal(value: ExprValue) -> Self;
-
-    /// Returns an operation to collect the top `num_items` stack values (which
-    /// must all have the same type) into a list value.
-    fn make_list(num_items: usize) -> Self;
-
-    /// Returns an operation to collect the top `num_items` stack values into a
-    /// tuple value.
-    fn make_tuple(num_items: usize) -> Self;
-
-    /// Returns an operation to unconditionally skip over the specified number
-    /// of operations.
-    fn skip(offset: usize) -> Self;
-
-    /// Returns an operation to pop a boolean from the stack, and skip over the
-    /// specified number of operations if that boolean is true.
-    fn skip_if(offset: usize) -> Self;
-
-    /// Returns an operation to pop a boolean from the stack, and skip over the
-    /// specified number of operations if that boolean is false.
-    fn skip_unless(offset: usize) -> Self;
-
-    /// Returns an operation to index into a tuple.
-    fn tuple_item(index: usize) -> Self;
-
-    /// Returns an operation to modify the top stack value with the specified
-    /// unary operation.
-    fn unary_operation(unop: ExprUnOp) -> Self;
-}
 
 //===========================================================================//
 
@@ -109,7 +36,7 @@ pub(crate) struct ExprCompiler<'a, E: ExprEnv> {
     types: Vec<(ExprType, Option<ExprValue>)>,
     ops: Vec<E::Op>,
     tasks: Vec<Task>,
-    errors: Errs<ExprTypeError>,
+    errs: Errs<ExprTypeError>,
 }
 
 impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
@@ -119,7 +46,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             types: Vec::new(),
             ops: Vec::new(),
             tasks: Vec::new(),
-            errors: Errs::new(),
+            errs: Errs::new(),
         }
     }
 
@@ -180,7 +107,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             }
         }
         debug_assert_eq!(self.types.len(), 1);
-        self.errors.result()?;
+        self.errs.result()?;
         let (expr_type, static_value) = self.types.pop().unwrap();
         Ok((self.ops, expr_type, static_value))
     }
@@ -295,7 +222,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             }
             ExprType::Function(ref param_and_ret) => param_and_ret,
             other_type => {
-                self.errors.push(ExprTypeError::CannotCallType {
+                self.errs.push(ExprTypeError::CannotCallType {
                     func_span,
                     func_type: other_type,
                 });
@@ -306,7 +233,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let ret_type = param_and_ret.1.clone();
         if arg_type != param_and_ret.0 {
             let param_type = param_and_ret.1.clone();
-            self.errors.push(ExprTypeError::CannotCallFuncWithType {
+            self.errs.push(ExprTypeError::CannotCallFuncWithType {
                 func_span,
                 func_type,
                 arg_span,
@@ -326,7 +253,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             let result_value = match func.call(arg_value) {
                 Ok(ret) => ret,
                 Err(error) => {
-                    self.func_eval_error(error, arg_span);
+                    self.errs.push(ExprTypeError::StaticEvalError {
+                        error: error.into_expr_eval_error(arg_span),
+                    });
                     self.types.push((ExprType::Bottom, None));
                     return;
                 }
@@ -353,10 +282,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             return;
         }
         let op_span = binop_ast.0;
-        match ExprBinOp::typecheck(
+        match self.errs.ok(ExprBinOp::typecheck(
             binop_ast, lhs_span, lhs_type, rhs_span, rhs_type,
-        ) {
-            Ok((binop, result_type)) => {
+        )) {
+            Some((binop, result_type)) => {
                 if let Some(lhs_value) = lhs_static
                     && let Some(rhs_value) = rhs_static
                 {
@@ -376,9 +305,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                             self.types.push((result_type, None));
                         }
                         Err(error) => {
-                            self.binop_eval_error(
-                                error, op_span, lhs_span, rhs_span,
-                            );
+                            self.errs.push(ExprTypeError::StaticEvalError {
+                                error: error.into_expr_eval_error(
+                                    op_span, lhs_span, rhs_span,
+                                ),
+                            });
                             self.types.push((result_type, None));
                         }
                     }
@@ -389,10 +320,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.types.push((result_type, None));
                 }
             }
-            Err(errors) => {
-                self.errors.append(errors);
-                self.types.push((ExprType::Bottom, None));
-            }
+            None => self.types.push((ExprType::Bottom, None)),
         }
     }
 
@@ -405,7 +333,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         debug_assert!(!self.types.is_empty());
         let (pred_type, pred_static) = self.types.pop().unwrap();
         if pred_type != ExprType::Boolean && pred_type != ExprType::Bottom {
-            self.errors.push(ExprTypeError::CannotUseTypeAsPredicate {
+            self.errs.push(ExprTypeError::CannotUseTypeAsPredicate {
                 expr_span: pred_span,
                 expr_type: pred_type,
             });
@@ -482,7 +410,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         } else if lhs_type == rhs_type || lhs_type == ExprType::Bottom {
             rhs_type
         } else {
-            self.errors.push(ExprTypeError::ConditionBranchesMustBeSameType {
+            self.errs.push(ExprTypeError::ConditionBranchesMustBeSameType {
                 true_branch_span: lhs_span,
                 true_branch_type: lhs_type,
                 false_branch_span: rhs_span,
@@ -499,28 +427,22 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     }
 
     fn push_here_label(&mut self, span: SrcSpan) {
-        match self.env.typecheck_here_label(span) {
-            Ok((op, static_label)) => {
+        match self.errs.ok(self.env.typecheck_here_label(span)) {
+            Some((op, static_label)) => {
                 self.ops.push(op);
                 self.types.push((ExprType::Label, static_label));
             }
-            Err(errors) => {
-                self.errors.append(errors);
-                self.types.push((ExprType::Bottom, None));
-            }
+            None => self.types.push((ExprType::Bottom, None)),
         }
     }
 
     fn push_identifier(&mut self, span: SrcSpan, name: Rc<str>) {
-        match self.env.typecheck_identifier(span, &name) {
-            Ok((op, id_type, id_static)) => {
+        match self.errs.ok(self.env.typecheck_identifier(span, &name)) {
+            Some((op, id_type, id_static)) => {
                 self.ops.push(op);
                 self.types.push((id_type, id_static));
             }
-            Err(errors) => {
-                self.errors.append(errors);
-                self.types.push((ExprType::Bottom, None));
-            }
+            None => self.types.push((ExprType::Bottom, None)),
         }
     }
 
@@ -550,7 +472,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     if index < BigInt::ZERO
                         || index >= BigInt::from(item_values.len())
                     {
-                        self.errors.push(ExprTypeError::StaticEvalError {
+                        self.errs.push(ExprTypeError::StaticEvalError {
                             error: ExprEvalError::ListIndexOutOfBounds {
                                 list_span: lhs_span,
                                 list_length: item_values.len(),
@@ -572,7 +494,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 }
             }
             (ExprType::List(_), rhs_type) => {
-                self.errors.push(ExprTypeError::CannotUseTypeAsIndex {
+                self.errs.push(ExprTypeError::CannotUseTypeAsIndex {
                     index_span: rhs_span,
                     index_type: rhs_type,
                 });
@@ -586,14 +508,12 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     if index < BigInt::ZERO
                         || index >= BigInt::from(item_types.len())
                     {
-                        self.errors.push(
-                            ExprTypeError::TupleIndexOutOfRange {
-                                tuple_span: lhs_span,
-                                item_types,
-                                index_span: rhs_span,
-                                index_value: index,
-                            },
-                        );
+                        self.errs.push(ExprTypeError::TupleIndexOutOfRange {
+                            tuple_span: lhs_span,
+                            item_types,
+                            index_span: rhs_span,
+                            index_value: index,
+                        });
                         self.types.push((ExprType::Bottom, None));
                         return;
                     }
@@ -611,21 +531,21 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.types.push((item_type, None));
                     }
                 } else {
-                    self.errors.push(ExprTypeError::TupleIndexNotStatic {
+                    self.errs.push(ExprTypeError::TupleIndexNotStatic {
                         index_span: rhs_span,
                     });
                     self.types.push((ExprType::Bottom, None));
                 }
             }
             (ExprType::Tuple(_), rhs_type) => {
-                self.errors.push(ExprTypeError::CannotUseTypeAsIndex {
+                self.errs.push(ExprTypeError::CannotUseTypeAsIndex {
                     index_span: rhs_span,
                     index_type: rhs_type,
                 });
                 self.types.push((ExprType::Bottom, None));
             }
             (lhs_type, _) => {
-                self.errors.push(ExprTypeError::CannotIndexIntoType {
+                self.errs.push(ExprTypeError::CannotIndexIntoType {
                     bracket_span,
                     indexed_span: lhs_span,
                     indexed_type: lhs_type,
@@ -651,7 +571,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         other_item_span: span,
                         other_item_type: ty,
                     };
-                    self.errors.push(error);
+                    self.errs.push(error);
                     break;
                 }
             }
@@ -742,7 +662,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 (ExprType::Bottom, None)
             }
             (lhs_type, rhs_type) => {
-                self.errors.push(ExprTypeError::CannotApplyBinaryOpToTypes {
+                self.errs.push(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,
                     op: if identity {
                         BinOpAst::LogAnd
@@ -806,8 +726,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             self.types.push((ExprType::Bottom, None));
             return;
         }
-        match ExprUnOp::typecheck(unop_ast, sub_span, sub_type) {
-            Ok((unop, result_type)) => {
+        match self.errs.ok(ExprUnOp::typecheck(unop_ast, sub_span, sub_type)) {
+            Some((unop, result_type)) => {
                 if let Some(sub_value) = sub_static {
                     debug_assert!(!self.ops.is_empty());
                     self.ops.pop();
@@ -819,10 +739,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.types.push((result_type, None));
                 }
             }
-            Err(errors) => {
-                self.errors.append(errors);
-                self.types.push((ExprType::Bottom, None));
-            }
+            None => self.types.push((ExprType::Bottom, None)),
         }
     }
 
@@ -834,29 +751,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (item_types, static_values): (Vec<_>, Vec<Option<_>>) =
             self.types.drain((self.types.len() - num_items)..).unzip();
         (item_types, static_values.into_iter().collect())
-    }
-
-    fn binop_eval_error(
-        &mut self,
-        error: ExprBinOpEvalError,
-        op_span: SrcSpan,
-        lhs_span: SrcSpan,
-        rhs_span: SrcSpan,
-    ) {
-        let expr_eval_error =
-            error.into_expr_eval_error(op_span, lhs_span, rhs_span);
-        self.errors
-            .push(ExprTypeError::StaticEvalError { error: expr_eval_error });
-    }
-
-    fn func_eval_error(
-        &mut self,
-        error: ExprFuncEvalError,
-        arg_span: SrcSpan,
-    ) {
-        let expr_eval_error = error.into_expr_eval_error(arg_span);
-        self.errors
-            .push(ExprTypeError::StaticEvalError { error: expr_eval_error });
     }
 }
 
