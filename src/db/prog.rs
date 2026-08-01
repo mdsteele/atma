@@ -6,7 +6,9 @@ use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
-use crate::expr::{ExprType, ExprTypeError, ExprValue};
+use crate::expr::{
+    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprValue,
+};
 use crate::parse::{
     AdsStmtAst, BreakpointAst, DeclareAst, ExprAst, IdentifierAst, LValueAst,
     LValueAstNode,
@@ -121,10 +123,10 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        let (expr_type, static_value) =
+        let (expr_type, expr_static) =
             errs.with(self.typecheck_expr(expr_ast, out));
         let kind = match kind {
-            DeclareAst::Let => AdsDeclKind::Constant(static_value),
+            DeclareAst::Let => AdsDeclKind::Constant(expr_static),
             DeclareAst::Var => AdsDeclKind::Variable,
         };
         self.env.add_declaration(kind, id, expr_type);
@@ -237,7 +239,7 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
         match errs.ok(self.env.typecheck_expression(expr_ast)) {
-            Some((_, ExprType::String, Some(path_value))) => {
+            Some((_, ExprType::String, Ok(path_value))) => {
                 let path = self.joined_path(path_value.unwrap_str_ref());
                 match self.cache.fetch_or_get_cached_utf8(&path) {
                     Ok(source_code) => {
@@ -270,9 +272,10 @@ impl<'a> AdsCompiler<'a> {
                     }
                 }
             }
-            Some((_, ExprType::String, None)) => {
+            Some((_, ExprType::String, Err(reason))) => {
                 errs.push(AdsError::PathNotStatic {
                     expr_loc: self.make_loc(expr_span),
+                    reason,
                 });
             }
             Some((_, expr_type, _)) => {
@@ -347,14 +350,17 @@ impl<'a> AdsCompiler<'a> {
         &self,
         ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
-    ) -> ((ExprType, Option<ExprValue>), Errs<AdsError>) {
+    ) -> ((ExprType, ExprStatic), Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
         match errs.ok(self.env.typecheck_expression(ast)) {
-            Some((mut ops, expr_type, static_value)) => {
+            Some((mut ops, expr_type, expr_static)) => {
                 out.append(&mut ops);
-                ((expr_type, static_value), errs)
+                ((expr_type, expr_static), errs)
             }
-            None => ((ExprType::Bottom, None), errs),
+            None => (
+                (ExprType::Bottom, Err(ExprNotStaticReason::Impossible)),
+                errs,
+            ),
         }
     }
 
@@ -365,10 +371,10 @@ impl<'a> AdsCompiler<'a> {
     ) -> (Option<bool>, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
-        let (expr_type, static_value) =
+        let (expr_type, expr_static) =
             errs.with(self.typecheck_expr(expr_ast, out));
-        let static_pred = if let ExprType::Boolean = expr_type {
-            static_value.as_ref().map(ExprValue::unwrap_bool)
+        let pred_static = if let ExprType::Boolean = expr_type {
+            expr_static.ok().as_ref().map(ExprValue::unwrap_bool)
         } else {
             errs.push(AdsError::ExprTypeError {
                 context: self.env.current_src_context(),
@@ -379,7 +385,7 @@ impl<'a> AdsCompiler<'a> {
             });
             None
         };
-        (static_pred, errs)
+        (pred_static, errs)
     }
 
     fn typecheck_breakpoint(

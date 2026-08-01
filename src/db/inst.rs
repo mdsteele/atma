@@ -15,6 +15,9 @@ pub enum AdsInstruction {
         /// The source code context in which the operation appeared.
         context: Rc<AdsSrcContext>,
         /// The span of byte offsets within the context where the function
+        /// expression appeared.
+        func_span: SrcSpan,
+        /// The span of byte offsets within the context where the function
         /// argument(s) appeared.
         arg_span: SrcSpan,
     },

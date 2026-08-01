@@ -387,8 +387,8 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<ConfigVariableOr<Addr>> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::Integer, Some(static_value)) => {
+        match self.env.typecheck_expression(expr_ast)? {
+            (_, ExprType::Integer, Ok(static_value)) => {
                 let bigint = static_value.unwrap_int_ref();
                 let addr = Addr::try_from(bigint).map_err(|()| {
                     Errs::one(ConfigError::OutOfRangeAttr {
@@ -399,7 +399,7 @@ impl ConfigBuilder {
                 })?;
                 Ok(ConfigVariableOr::Static(addr))
             }
-            (expr, ExprType::Integer, None) => Ok(self.add_variable(expr)),
+            (expr, ExprType::Integer, Err(_)) => Ok(self.add_variable(expr)),
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute: ConfigAttr::ExportAddr,
                 expr_span,
@@ -449,16 +449,17 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
-        let (ty, value) = match errs.ok(self.typecheck_expression(expr_ast)) {
-            Some((_expr, ty, Some(static_value))) => {
-                (ty, ConfigVariableOr::Static(static_value))
-            }
-            Some((expr, ty, None)) => (ty, self.add_variable(expr)),
-            None => (
-                ExprType::Bottom,
-                ConfigVariableOr::Static(ExprValue::Boolean(false)),
-            ),
-        };
+        let (ty, value) =
+            match errs.ok(self.env.typecheck_expression(expr_ast)) {
+                Some((_expr, ty, Ok(static_value))) => {
+                    (ty, ConfigVariableOr::Static(static_value))
+                }
+                Some((expr, ty, Err(_))) => (ty, self.add_variable(expr)),
+                None => (
+                    ExprType::Bottom,
+                    ConfigVariableOr::Static(ExprValue::Boolean(false)),
+                ),
+            };
         self.env.add_declaration(id_ast, ty, value);
         errs.result()
     }
@@ -797,17 +798,19 @@ impl ConfigBuilder {
         entity_kind: &str,
     ) -> ConfigResult<Rc<str>> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::Entity(kind), static_value)
+        match self.env.typecheck_expression(expr_ast)? {
+            (_, ExprType::Entity(kind), expr_static)
                 if &*kind == entity_kind =>
             {
-                if let Some(value) = static_value {
-                    Ok(value.unwrap_entity())
-                } else {
-                    Err(Errs::one(ConfigError::NonStaticAttr {
-                        attribute,
-                        expr_span,
-                    }))
+                match expr_static {
+                    Ok(value) => Ok(value.unwrap_entity()),
+                    Err(reason) => {
+                        Err(Errs::one(ConfigError::NonStaticAttr {
+                            attribute,
+                            expr_span,
+                            reason,
+                        }))
+                    }
                 }
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
@@ -825,8 +828,8 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<ConfigVariableOr<Rc<[ChecksumFormat]>>> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::String, Some(static_value)) => {
+        match self.env.typecheck_expression(expr_ast)? {
+            (_, ExprType::String, Ok(static_value)) => {
                 let format = self.parse_format(
                     static_value.unwrap_str_ref(),
                     attribute,
@@ -834,7 +837,7 @@ impl ConfigBuilder {
                 )?;
                 Ok(ConfigVariableOr::Static(Rc::from([format])))
             }
-            (_, ExprType::List(inner), Some(static_value))
+            (_, ExprType::List(inner), Ok(static_value))
                 if *inner == ExprType::String =>
             {
                 let mut errs = Errs::<ConfigError>::new();
@@ -856,8 +859,8 @@ impl ConfigBuilder {
                     formats.into_boxed_slice(),
                 )))
             }
-            (expr, ExprType::String, None) => Ok(self.add_variable(expr)),
-            (expr, ExprType::List(inner), None)
+            (expr, ExprType::String, Err(_)) => Ok(self.add_variable(expr)),
+            (expr, ExprType::List(inner), Err(_))
                 if *inner == ExprType::String =>
             {
                 Ok(self.add_variable(expr))
@@ -923,8 +926,8 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<ConfigVariableOr<u64>> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::Integer, Some(static_value)) => {
+        match self.env.typecheck_expression(expr_ast)? {
+            (_, ExprType::Integer, Ok(static_value)) => {
                 let bigint = static_value.unwrap_int_ref();
                 let uint64 = bigint.to_u64().ok_or_else(|| {
                     Errs::one(ConfigError::OutOfRangeAttr {
@@ -935,10 +938,10 @@ impl ConfigBuilder {
                 })?;
                 Ok(ConfigVariableOr::Static(uint64))
             }
-            (_, ExprType::Label, Some(static_value)) => {
+            (_, ExprType::Label, Ok(static_value)) => {
                 Ok(self.add_variable(ObjExpr::from(static_value)))
             }
-            (expr, ExprType::Integer | ExprType::Label, None) => {
+            (expr, ExprType::Integer | ExprType::Label, Err(_)) => {
                 Ok(self.add_variable(expr))
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
@@ -956,12 +959,13 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<BigInt> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::Integer, Some(value)) => Ok(value.unwrap_int()),
-            (_, ExprType::Integer, None) => {
+        match self.env.typecheck_expression(expr_ast)? {
+            (_, ExprType::Integer, Ok(value)) => Ok(value.unwrap_int()),
+            (_, ExprType::Integer, Err(reason)) => {
                 Err(Errs::one(ConfigError::NonStaticAttr {
                     attribute,
                     expr_span,
+                    reason,
                 }))
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
@@ -979,11 +983,11 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<ConfigVariableOr<Rc<str>>> {
         let expr_span = expr_ast.span;
-        match self.typecheck_expression(expr_ast)? {
-            (_, ExprType::String, Some(static_value)) => {
+        match self.env.typecheck_expression(expr_ast)? {
+            (_, ExprType::String, Ok(static_value)) => {
                 Ok(ConfigVariableOr::Static(static_value.unwrap_str()))
             }
-            (expr, ExprType::String, None) => Ok(self.add_variable(expr)),
+            (expr, ExprType::String, Err(_)) => Ok(self.add_variable(expr)),
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
                 expr_span,
@@ -991,13 +995,6 @@ impl ConfigBuilder {
                 valid_types: vec![ExprType::String],
             })),
         }
-    }
-
-    fn typecheck_expression(
-        &self,
-        expr_ast: ExprAst,
-    ) -> ConfigResult<(ObjExpr, ExprType, Option<ExprValue>)> {
-        self.env.typecheck_expression(expr_ast)
     }
 
     fn declare_entry(

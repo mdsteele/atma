@@ -3,8 +3,8 @@ use super::error::{AsmError, AsmResult};
 use crate::addr::Offset;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprLabel, ExprType,
-    ExprTypeError, ExprTypeResult, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprLabel, ExprStatic,
+    ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
 use crate::parse::{ExprAst, IdentifierAst, IdentifierKind};
@@ -151,7 +151,7 @@ impl ExprEnv for AsmTypeEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         if let Some(chunk_env) = self.chunk_stack.last() {
             let chunk_index = chunk_env.chunk_index;
             let offset = BigInt::from(chunk_env.data.len());
@@ -160,7 +160,7 @@ impl ExprEnv for AsmTypeEnv {
                 offset,
             });
             let op = ObjExprOp::Push(value.clone());
-            Ok((op, Some(value)))
+            Ok((op, Ok(value)))
         } else {
             Err(Errs::one(ExprTypeError::RelativeLabelOutsideOfAnySection {
                 span,
@@ -172,18 +172,18 @@ impl ExprEnv for AsmTypeEnv {
         &self,
         span: SrcSpan,
         name: &Rc<str>,
-    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, ExprType, ExprStatic)> {
         if let Some(full_name) = self.look_up_symbol(name) {
             let value = ExprValue::Label(ExprLabel::SymbolRelative {
                 name: full_name,
                 offset: BigInt::ZERO,
             });
             let op = ObjExprOp::Push(value.clone());
-            return Ok((op, ExprType::Label, Some(value)));
+            return Ok((op, ExprType::Label, Ok(value)));
         }
         if let Some((value, expr_type)) = self.builtins.get(name) {
             let op = ObjExprOp::Push(value.clone());
-            return Ok((op, expr_type.clone(), Some(value.clone())));
+            return Ok((op, expr_type.clone(), Ok(value.clone())));
         }
         Err(Errs::one(ExprTypeError::UnknownIdentifier {
             span,
@@ -191,7 +191,11 @@ impl ExprEnv for AsmTypeEnv {
         }))
     }
 
-    fn apply_function_op(&self, _arg_span: SrcSpan) -> Self::Op {
+    fn apply_function_op(
+        &self,
+        _func_span: SrcSpan,
+        _arg_span: SrcSpan,
+    ) -> Self::Op {
         ObjExprOp::Apply
     }
 

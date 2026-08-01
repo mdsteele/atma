@@ -248,7 +248,7 @@ enum TokenKind {
     Star,
     #[token("**")]
     StarStar,
-    #[regex("\"([^\"\\n\\\\]|\\\\.)+\"", string_literal_callback)]
+    #[regex("\"([^\"\\n\\\\]|\\\\.)*\"", string_literal_callback)]
     StrLiteral(Rc<str>),
     #[token("~")]
     Tilde,
@@ -611,6 +611,10 @@ mod tests {
 
     #[test]
     fn string_literal() {
+        assert_eq!(
+            read_all("\"\""),
+            vec![token(0..2, TokenValue::StrLiteral(Rc::from("")))]
+        );
         assert_eq!(
             read_all("\"foo\\n\\t\\\\\\\"\""),
             vec![token(

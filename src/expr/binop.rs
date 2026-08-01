@@ -28,9 +28,9 @@ pub(crate) enum ExprBinOpEvalError {
     /// Tried to subtract one label from another, but the labels were in the
     /// given two different address spaces.
     SubtractLabelsInDifferentAddrspaces(Rc<str>, Rc<str>),
-    /// Could not compute the result due to an insufficiently-resolved label
-    /// value.
-    UnresolvedLabel,
+    /// Tried to subtract one label from another, but the labels have not yet
+    /// been resolved and the delta is not yet known.
+    SubtractLabelsUnresolved,
 }
 
 impl ExprBinOpEvalError {
@@ -63,7 +63,13 @@ impl ExprBinOpEvalError {
                 rhs_span,
                 rhs_space,
             },
-            Self::UnresolvedLabel => unreachable!(),
+            Self::SubtractLabelsUnresolved => {
+                ExprEvalError::SubtractLabelsUnresolved {
+                    op_span,
+                    lhs_span,
+                    rhs_span,
+                }
+            }
         }
     }
 }
@@ -340,7 +346,11 @@ impl ExprBinOp {
                             offset: rhs_offset,
                         },
                     ) if lhs_name == rhs_name => lhs_offset - rhs_offset,
-                    _ => return Err(ExprBinOpEvalError::UnresolvedLabel),
+                    _ => {
+                        return Err(
+                            ExprBinOpEvalError::SubtractLabelsUnresolved,
+                        );
+                    }
                 };
                 Ok(ExprValue::Integer(diff))
             }

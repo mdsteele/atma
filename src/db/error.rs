@@ -1,7 +1,9 @@
 use crate::error::{
     Errs, SourceContext, SourceError, SrcCacheError, SrcLoc, SrcSpan,
 };
-use crate::expr::{ExprEvalError, ExprType, ExprTypeError};
+use crate::expr::{
+    ExprEvalError, ExprNotStaticReason, ExprType, ExprTypeError,
+};
 use crate::parse::ParseError;
 use std::io;
 use std::rc::Rc;
@@ -121,6 +123,8 @@ pub enum AdsError {
     PathNotStatic {
         /// The source code location for the non-static expression.
         expr_loc: AdsSrcLoc,
+        /// The reason that the expression isn't static.
+        reason: ExprNotStaticReason,
     },
     /// A source code path was specified using a non-string expression.
     PathTypeError {
@@ -192,11 +196,12 @@ impl AdsError {
             Self::ParseError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
             }
-            Self::PathNotStatic { expr_loc } => {
+            Self::PathNotStatic { expr_loc, reason } => {
                 let message = "source code path must be static";
                 let label = "this expression isn't static";
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
+                    .with_context(&reason.context(&expr_loc.context.path))
                     .with_context(&*expr_loc.context)
             }
             Self::PathTypeError { expr_loc, expr_type } => {

@@ -93,13 +93,22 @@ pub enum ExprFuncEvalError {
 
 impl ExprFuncEvalError {
     /// Converts `self` into an [`ExprEvalError`].
-    pub fn into_expr_eval_error(self, arg_span: SrcSpan) -> ExprEvalError {
+    pub fn into_expr_eval_error(
+        self,
+        func_span: SrcSpan,
+        arg_span: SrcSpan,
+    ) -> ExprEvalError {
         match self {
             Self::InvalidArgumentType(_arg_value) => {
                 ExprEvalError::InvalidType { span: arg_span }
             }
             Self::SquareRootOfNegative(arg_value) => {
-                ExprEvalError::SquareRootOfNegative { arg_span, arg_value }
+                let expr_span = func_span.merged_with(arg_span);
+                ExprEvalError::SquareRootOfNegative {
+                    expr_span,
+                    arg_span,
+                    arg_value,
+                }
             }
         }
     }

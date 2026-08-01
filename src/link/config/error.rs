@@ -1,7 +1,7 @@
 use super::checksum::ChecksumFormat;
 use crate::addr::{Addr, Align, AlignTryFromError, Size};
 use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
-use crate::expr::{ExprType, ExprTypeError};
+use crate::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
 use std::fmt;
@@ -134,6 +134,8 @@ pub enum ConfigError {
         attribute: ConfigAttr,
         /// The source code span for the non-static expression.
         expr_span: SrcSpan,
+        /// The reason that the expression isn't static.
+        reason: ExprNotStaticReason,
     },
     /// A config attribute was given an integer value outside of its valid
     /// range.
@@ -341,7 +343,7 @@ impl ConfigError {
                     .with_label(SrcLoc::new(path, attr_span_1), "")
                     .with_label(SrcLoc::new(path, attr_span_2), "")
             }
-            Self::NonStaticAttr { attribute, expr_span } => {
+            Self::NonStaticAttr { attribute, expr_span, reason } => {
                 let message = format!(
                     "{} `{}` attribute must be static",
                     attribute.entry_kind(),
@@ -350,6 +352,7 @@ impl ConfigError {
                 let label = "this expression isn't static";
                 SourceError::new(SrcLoc::new(path, expr_span), message)
                     .with_primary_label(label)
+                    .with_context(&reason.context(path))
             }
             Self::OutOfRangeAttr { attribute, expr_span, value } => {
                 // TODO: provide the valid range of values

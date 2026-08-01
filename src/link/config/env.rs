@@ -3,8 +3,8 @@ use super::error::ConfigResult;
 use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprType, ExprTypeError,
-    ExprTypeResult, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
+    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp};
 use crate::parse::{ExprAst, IdentifierAst};
@@ -89,11 +89,11 @@ impl LinkTypeEnv {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> ConfigResult<(ObjExpr, ExprType, Option<ExprValue>)> {
-        let (ops, expr_type, static_value) =
+    ) -> ConfigResult<(ObjExpr, ExprType, ExprStatic)> {
+        let (ops, expr_type, expr_static) =
             ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;
         debug_assert!(!ops.is_empty());
-        Ok((ObjExpr { ops }, expr_type, static_value))
+        Ok((ObjExpr { ops }, expr_type, expr_static))
     }
 }
 
@@ -103,7 +103,7 @@ impl ExprEnv for LinkTypeEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         Err(Errs::one(ExprTypeError::RelativeLabelInLinkerConfig { span }))
     }
 
@@ -111,18 +111,22 @@ impl ExprEnv for LinkTypeEnv {
         &self,
         span: SrcSpan,
         name: &Rc<str>,
-    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, ExprType, ExprStatic)> {
         match self.variables.get(name) {
             Some(decl) => {
-                let (op, static_value) = match &decl.value {
+                let (op, expr_static) = match &decl.value {
                     &ConfigVariableOr::Variable(index) => {
-                        (ObjExprOp::GetValue(index), None)
+                        let reason = ExprNotStaticReason::Variable {
+                            span,
+                            name: name.clone(),
+                        };
+                        (ObjExprOp::GetValue(index), Err(reason))
                     }
                     ConfigVariableOr::Static(value) => {
-                        (ObjExprOp::Push(value.clone()), Some(value.clone()))
+                        (ObjExprOp::Push(value.clone()), Ok(value.clone()))
                     }
                 };
-                Ok((op, decl.var_type.clone(), static_value))
+                Ok((op, decl.var_type.clone(), expr_static))
             }
             None => Err(Errs::one(ExprTypeError::UnknownIdentifier {
                 span,
@@ -131,7 +135,11 @@ impl ExprEnv for LinkTypeEnv {
         }
     }
 
-    fn apply_function_op(&self, _arg_span: SrcSpan) -> Self::Op {
+    fn apply_function_op(
+        &self,
+        _func_span: SrcSpan,
+        _arg_span: SrcSpan,
+    ) -> Self::Op {
         ObjExprOp::Apply
     }
 

@@ -1,10 +1,12 @@
-use super::value::ExprType;
-use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
+use super::value::{ExprType, ExprValue};
+use crate::error::{Errs, SourceContext, SourceError, SrcLoc, SrcSpan};
 use crate::parse::{BinOpAst, UnOpAst};
 use num_bigint::{BigInt, BigUint};
 use std::rc::Rc;
 
 //===========================================================================//
+
+pub(crate) type ExprStatic = Result<ExprValue, ExprNotStaticReason>;
 
 /// A specialized `Result` type for expression typechecking.
 pub type ExprTypeResult<T> = Result<T, Errs<ExprTypeError>>;
@@ -140,6 +142,8 @@ pub enum ExprTypeError {
     TupleIndexNotStatic {
         /// The source code span for the index expression.
         index_span: SrcSpan,
+        /// The reason that the tuple index isn't static.
+        reason: ExprNotStaticReason,
     },
     /// Found a tuple indexing operation with an index value that is out of
     /// range.
@@ -295,11 +299,12 @@ impl ExprTypeError {
                     .with_primary_label("")
             }
             Self::StaticEvalError { error } => error.to_source_error(path),
-            Self::TupleIndexNotStatic { index_span } => {
+            Self::TupleIndexNotStatic { index_span, reason } => {
                 let message = "tuple index must be static";
                 let label = "this expression isn't static";
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_primary_label(label)
+                    .with_context(&reason.context(path))
             }
             Self::TupleIndexOutOfRange {
                 tuple_span,
@@ -331,7 +336,7 @@ impl ExprTypeError {
 //===========================================================================//
 
 /// An error encountered while evaluating an expression.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExprEvalError {
     /// Tried to bit shift an integer left/right by the given number of bits,
     /// but the shift amount was negative.
@@ -394,6 +399,8 @@ pub enum ExprEvalError {
     },
     /// Tried to calculate the square root of a negative number.
     SquareRootOfNegative {
+        /// The source code span for the entire square root expression.
+        expr_span: SrcSpan,
         /// The source code span for the argument of the square root.
         arg_span: SrcSpan,
         /// The value of the argument of the square root.
@@ -417,11 +424,17 @@ pub enum ExprEvalError {
         /// operation.
         rhs_space: Rc<str>,
     },
-    /// Could not compute the result due to an insufficiently-resolved label
-    /// value.
-    UnresolvedLabel {
-        /// The source code span for the label.
-        label_span: SrcSpan,
+    /// Tried to subtract one label from another, but the labels have not yet
+    /// been resolved and the delta is not yet known.
+    SubtractLabelsUnresolved {
+        /// The source code span for the subtraction operator.
+        op_span: SrcSpan,
+        /// The source code span for the left-hand side of the subtraction
+        /// operation.
+        lhs_span: SrcSpan,
+        /// The source code span for the right-hand side of the subtraction
+        /// operation.
+        rhs_span: SrcSpan,
     },
 }
 
@@ -431,27 +444,27 @@ impl ExprEvalError {
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
-                let message = "cannot shift by a negative number of bits";
+                let message = "shift distance cannot be negative";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
-                let message = "shift by too many bits";
+                let message = "shift distance cannot be too large";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::DivideByZero { rhs_span } => {
-                let message = "cannot divide by zero";
+                let message = "divisor cannot be zero";
                 let label = "the value of this expression is 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::ModByZero { rhs_span } => {
-                let message = "cannot modulo by zero";
+                let message = "modulus cannot be zero";
                 let label = "the value of this expression is 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
@@ -481,12 +494,12 @@ impl ExprEvalError {
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
-            Self::SquareRootOfNegative { arg_span, arg_value } => {
-                let message = "cannot take square root of a negative number";
+            Self::SquareRootOfNegative { expr_span, arg_span, arg_value } => {
+                let message = "square root argument must be non-negative";
                 let label =
                     format!("the value of this expression is {arg_value}");
-                SourceError::new(SrcLoc::new(path, arg_span), message)
-                    .with_primary_label(label)
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_label(SrcLoc::new(path, arg_span), label)
             }
             Self::SubtractLabelsInDifferentAddrspaces {
                 op_span,
@@ -505,10 +518,84 @@ impl ExprEvalError {
                     .with_label(SrcLoc::new(path, lhs_span), lhs_label)
                     .with_label(SrcLoc::new(path, rhs_span), rhs_label)
             }
-            Self::UnresolvedLabel { label_span } => {
-                let message = "could not resolve label";
-                SourceError::new(SrcLoc::new(path, label_span), message)
-                    .with_primary_label("")
+            Self::SubtractLabelsUnresolved { op_span, lhs_span, rhs_span } => {
+                let message =
+                    "the delta between these labels is not yet known";
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, lhs_span), "")
+                    .with_label(SrcLoc::new(path, rhs_span), "")
+            }
+        }
+    }
+}
+
+//===========================================================================//
+
+/// Describes a reason why a particular expression isn't considered static.
+#[derive(Clone, Debug)]
+pub enum ExprNotStaticReason {
+    /// Cannot statically evaluate the expression because it has type `Bottom`
+    /// (possibly due to an earlier error), and therefore it cannot have a
+    /// value.
+    Impossible,
+    /// Cannot statically evaluate the expression because an evaluation error
+    /// would occur.
+    StaticEvalError {
+        /// The evaluation error that would occur if the expression were to be
+        /// evaluated.
+        error: ExprEvalError,
+    },
+    /// Cannot statically evaluate the expression because it depends on the
+    /// value of a non-static variable.
+    Variable {
+        /// The source code span where the variable appears in the expression.
+        span: SrcSpan,
+        /// The name of the variable.
+        name: Rc<str>,
+    },
+}
+
+impl ExprNotStaticReason {
+    /// Augments `self` with the given source file path to produce a
+    /// [`SourceContext`] object that can be passed to
+    /// [`SourceError::with_context`].
+    pub fn context(self, path: &Rc<str>) -> ExprNotStaticContext {
+        ExprNotStaticContext { path: path.clone(), reason: self }
+    }
+}
+
+//===========================================================================//
+
+/// A [`SourceContext`] to explain why a particular expression isn't considered
+/// static.
+pub struct ExprNotStaticContext {
+    path: Rc<str>,
+    reason: ExprNotStaticReason,
+}
+
+impl SourceContext for ExprNotStaticContext {
+    fn annotate(&self, error: SourceError) -> SourceError {
+        match &self.reason {
+            ExprNotStaticReason::Impossible => error,
+            ExprNotStaticReason::StaticEvalError { error: eval_error } => {
+                let eval_error =
+                    eval_error.clone().to_source_error(&self.path);
+                let error = error.with_label(
+                    eval_error.loc,
+                    format!("...because {}", eval_error.message),
+                );
+                let error =
+                    eval_error.labels.into_iter().fold(error, |e, label| {
+                        e.with_label(label.loc, label.message)
+                    });
+                eval_error
+                    .notes
+                    .into_iter()
+                    .fold(error, |e, note| e.with_note(note))
+            }
+            ExprNotStaticReason::Variable { span, name } => {
+                let label = format!("...because `{name}` isn't static");
+                error.with_label(SrcLoc::new(&self.path, *span), label)
             }
         }
     }

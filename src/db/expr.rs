@@ -3,8 +3,8 @@ use super::error::{AdsError, AdsResult, AdsSrcContext};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprType, ExprTypeError,
-    ExprTypeResult, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprNotStaticReason,
+    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, IdentifierAst};
@@ -13,19 +13,9 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-#[derive(Clone)]
 pub(crate) enum AdsDeclKind {
-    Constant(Option<ExprValue>),
+    Constant(ExprStatic),
     Variable,
-}
-
-impl AdsDeclKind {
-    fn static_value(&self) -> Option<ExprValue> {
-        match self {
-            AdsDeclKind::Constant(static_value) => static_value.clone(),
-            AdsDeclKind::Variable => None,
-        }
-    }
 }
 
 //===========================================================================//
@@ -239,7 +229,7 @@ impl<'a> AdsTypeEnv<'a> {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> AdsResult<(Vec<AdsInstruction>, ExprType, Option<ExprValue>)> {
+    ) -> AdsResult<(Vec<AdsInstruction>, ExprType, ExprStatic)> {
         let context = self.current_src_context();
         ExprCompiler::new(self).typecheck(expr).map_err(|errs| {
             errs.map(|error| AdsError::ExprTypeError {
@@ -256,7 +246,7 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         Err(Errs::one(ExprTypeError::RelativeLabelInDebuggerScript { span }))
     }
 
@@ -264,25 +254,43 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         &self,
         span: SrcSpan,
         name: &Rc<str>,
-    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)> {
+    ) -> ExprTypeResult<(Self::Op, ExprType, ExprStatic)> {
         if let Some((frame_ref, decl)) = self.get_declaration(name) {
             let op = AdsInstruction::GetValue(frame_ref, decl.stack_index);
             let expr_type = decl.var_type.clone();
-            let static_value = decl.kind.static_value();
-            return Ok((op, expr_type, static_value));
+            let expr_static = match &decl.kind {
+                AdsDeclKind::Constant(expr_static) => expr_static.clone(),
+                AdsDeclKind::Variable => Err(ExprNotStaticReason::Variable {
+                    span,
+                    name: name.clone(),
+                }),
+            };
+            return Ok((op, expr_type, expr_static));
         }
         for &register in self.register_names() {
             if name.eq_ignore_ascii_case(register) {
                 let op = AdsInstruction::GetRegister(register);
-                return Ok((op, ExprType::Integer, None));
+                let expr_static = Err(ExprNotStaticReason::Variable {
+                    span,
+                    name: name.clone(),
+                });
+                return Ok((op, ExprType::Integer, expr_static));
             }
         }
         if name.eq_ignore_ascii_case("PC") {
-            return Ok((AdsInstruction::GetPc, ExprType::Integer, None));
+            let expr_static = Err(ExprNotStaticReason::Variable {
+                span,
+                name: name.clone(),
+            });
+            return Ok((
+                AdsInstruction::GetPc,
+                ExprType::Integer,
+                expr_static,
+            ));
         }
         if let Some((value, expr_type)) = self.builtins.get(name) {
             let op = AdsInstruction::PushValue(value.clone());
-            return Ok((op, expr_type.clone(), Some(value.clone())));
+            return Ok((op, expr_type.clone(), Ok(value.clone())));
         }
         Err(Errs::one(ExprTypeError::UnknownIdentifier {
             span,
@@ -290,8 +298,16 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         }))
     }
 
-    fn apply_function_op(&self, arg_span: SrcSpan) -> Self::Op {
-        AdsInstruction::Apply { context: self.current_src_context(), arg_span }
+    fn apply_function_op(
+        &self,
+        func_span: SrcSpan,
+        arg_span: SrcSpan,
+    ) -> Self::Op {
+        AdsInstruction::Apply {
+            context: self.current_src_context(),
+            func_span,
+            arg_span,
+        }
     }
 
     fn binary_operation_op(
@@ -332,6 +348,7 @@ mod tests {
         ExprValue, SimEnv,
     };
     use crate::error::SrcSpan;
+    use crate::expr::ExprNotStaticReason;
     use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, IdentifierKind};
     use num_bigint::BigInt;
     use std::assert_matches;
@@ -361,7 +378,7 @@ mod tests {
         let sim_env = SimEnv::with_nop_cpu();
         let mut env = AdsTypeEnv::new(&sim_env, Rc::from("input"));
         env.add_declaration(
-            AdsDeclKind::Constant(None),
+            AdsDeclKind::Constant(Err(ExprNotStaticReason::Impossible)),
             IdentifierAst {
                 span: SrcSpan::from_byte_range(1..4),
                 name: Rc::from("foo"),
@@ -369,10 +386,10 @@ mod tests {
             },
             ExprType::Boolean,
         );
-        let (instructions, expr_type, static_value) =
+        let (instructions, expr_type, expr_static) =
             env.typecheck_expression(id_ast("foo", 10..13)).unwrap();
         assert_eq!(expr_type, ExprType::Boolean);
-        assert_eq!(static_value, None);
+        assert_matches!(expr_static, Err(ExprNotStaticReason::Impossible));
         assert_matches!(
             instructions.as_slice(),
             [AdsInstruction::GetValue(AdsFrameRef::Global, 0)]
@@ -383,10 +400,10 @@ mod tests {
     fn typecheck_int_literal_expr() {
         let sim_env = SimEnv::with_nop_cpu();
         let env = AdsTypeEnv::new(&sim_env, Rc::from("input"));
-        let (instructions, expr_type, static_value) =
+        let (instructions, expr_type, expr_static) =
             env.typecheck_expression(int_ast(42, 0..2)).unwrap();
         assert_eq!(expr_type, ExprType::Integer);
-        assert_eq!(static_value, Some(int_value(42)));
+        assert_matches!(expr_static, Ok(value) if value == int_value(42));
         assert_matches!(instructions.as_slice(), [
             AdsInstruction::PushValue(value)
         ] if *value == int_value(42));

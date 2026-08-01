@@ -1,5 +1,5 @@
 use super::binop::ExprBinOp;
-use super::error::ExprTypeResult;
+use super::error::{ExprStatic, ExprTypeResult};
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::SrcSpan;
@@ -14,16 +14,20 @@ pub(crate) trait ExprEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
-    ) -> ExprTypeResult<(Self::Op, Option<ExprValue>)>;
+    ) -> ExprTypeResult<(Self::Op, ExprStatic)>;
 
     fn typecheck_identifier(
         &self,
         span: SrcSpan,
         name: &Rc<str>,
-    ) -> ExprTypeResult<(Self::Op, ExprType, Option<ExprValue>)>;
+    ) -> ExprTypeResult<(Self::Op, ExprType, ExprStatic)>;
 
     /// Returns an operation to apply a function to a value.
-    fn apply_function_op(&self, arg_span: SrcSpan) -> Self::Op;
+    fn apply_function_op(
+        &self,
+        func_span: SrcSpan,
+        arg_span: SrcSpan,
+    ) -> Self::Op;
 
     /// Returns an operation to combine the top two stack values with the
     /// specified binary operation.
