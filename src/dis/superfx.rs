@@ -66,6 +66,10 @@ impl Reg {
             _ => unreachable!(),
         }
     }
+
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
 }
 
 impl fmt::Display for Reg {
