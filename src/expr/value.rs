@@ -1,6 +1,6 @@
 use super::func::ExprFunc;
 use super::label::ExprLabel;
-use crate::obj::BinaryIo;
+use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::BigInt;
 use std::cmp::Ordering;
 use std::fmt;
@@ -25,7 +25,7 @@ const TAG_TUPLE: u8 = 11;
 //===========================================================================//
 
 /// Represents the type of an [`ExprValue`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ExprType {
     /// The boolean type.
     Boolean,
@@ -103,7 +103,7 @@ impl fmt::Display for ExprType {
 
 /// An expression value in an Atma assembly or object file or an Atma Debugger
 /// Script program.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ExprValue {
     /// A boolean value (false or true).
     Boolean(bool),
@@ -217,53 +217,59 @@ impl ExprValue {
 }
 
 impl BinaryIo for ExprValue {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        match u8::read_from(reader)? {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
             TAG_FALSE => Ok(ExprValue::Boolean(false)),
             TAG_TRUE => Ok(ExprValue::Boolean(true)),
-            TAG_ENTITY => Ok(ExprValue::Entity(Rc::<str>::read_from(reader)?)),
-            TAG_FUNCTION => {
-                Ok(ExprValue::Function(ExprFunc::read_from(reader)?))
+            TAG_ENTITY => {
+                Ok(ExprValue::Entity(Rc::<str>::read_from(decoder)?))
             }
-            TAG_INTEGER => Ok(ExprValue::Integer(BigInt::read_from(reader)?)),
+            TAG_FUNCTION => {
+                Ok(ExprValue::Function(ExprFunc::read_from(decoder)?))
+            }
+            TAG_INTEGER => Ok(ExprValue::Integer(BigInt::read_from(decoder)?)),
             TAG_LABEL_ADDR_ABS => {
-                let space = Rc::<str>::read_from(reader)?;
-                let address = BigInt::read_from(reader)?;
+                let space = Rc::<str>::read_from(decoder)?;
+                let address = BigInt::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::AddrAbsolute {
                     space,
                     address,
                 }))
             }
             TAG_LABEL_CHUNK_ABS => {
-                let chunk_index = usize::read_from(reader)?;
-                let address = BigInt::read_from(reader)?;
+                let chunk_index = usize::read_from(decoder)?;
+                let address = BigInt::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::ChunkAbsolute {
                     chunk_index,
                     address,
                 }))
             }
             TAG_LABEL_CHUNK_REL => {
-                let chunk_index = usize::read_from(reader)?;
-                let offset = BigInt::read_from(reader)?;
+                let chunk_index = usize::read_from(decoder)?;
+                let offset = BigInt::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::ChunkRelative {
                     chunk_index,
                     offset,
                 }))
             }
             TAG_LABEL_SYMBOL_REL => {
-                let name = Rc::<str>::read_from(reader)?;
-                let offset = BigInt::read_from(reader)?;
+                let name = Rc::<str>::read_from(decoder)?;
+                let offset = BigInt::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::SymbolRelative {
                     name,
                     offset,
                 }))
             }
             TAG_LIST => {
-                Ok(ExprValue::List(Rc::<[ExprValue]>::read_from(reader)?))
+                Ok(ExprValue::List(Rc::<[ExprValue]>::read_from(decoder)?))
             }
-            TAG_STRING => Ok(ExprValue::String(Rc::<str>::read_from(reader)?)),
+            TAG_STRING => {
+                Ok(ExprValue::String(Rc::<str>::read_from(decoder)?))
+            }
             TAG_TUPLE => {
-                Ok(ExprValue::Tuple(Rc::<[ExprValue]>::read_from(reader)?))
+                Ok(ExprValue::Tuple(Rc::<[ExprValue]>::read_from(decoder)?))
             }
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -272,59 +278,62 @@ impl BinaryIo for ExprValue {
         }
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
         match self {
-            ExprValue::Boolean(false) => TAG_FALSE.write_to(writer),
-            ExprValue::Boolean(true) => TAG_TRUE.write_to(writer),
+            ExprValue::Boolean(false) => TAG_FALSE.write_to(encoder),
+            ExprValue::Boolean(true) => TAG_TRUE.write_to(encoder),
             ExprValue::Entity(repr) => {
-                TAG_ENTITY.write_to(writer)?;
-                repr.write_to(writer)
+                TAG_ENTITY.write_to(encoder)?;
+                repr.write_to(encoder)
             }
             ExprValue::Function(func) => {
-                TAG_FUNCTION.write_to(writer)?;
-                func.write_to(writer)
+                TAG_FUNCTION.write_to(encoder)?;
+                func.write_to(encoder)
             }
             ExprValue::Integer(integer) => {
-                TAG_INTEGER.write_to(writer)?;
-                integer.write_to(writer)
+                TAG_INTEGER.write_to(encoder)?;
+                integer.write_to(encoder)
             }
             ExprValue::Label(ExprLabel::AddrAbsolute { space, address }) => {
-                TAG_LABEL_ADDR_ABS.write_to(writer)?;
-                space.write_to(writer)?;
-                address.write_to(writer)
+                TAG_LABEL_ADDR_ABS.write_to(encoder)?;
+                space.write_to(encoder)?;
+                address.write_to(encoder)
             }
             ExprValue::Label(ExprLabel::ChunkAbsolute {
                 chunk_index,
                 address,
             }) => {
-                TAG_LABEL_CHUNK_ABS.write_to(writer)?;
-                chunk_index.write_to(writer)?;
-                address.write_to(writer)
+                TAG_LABEL_CHUNK_ABS.write_to(encoder)?;
+                chunk_index.write_to(encoder)?;
+                address.write_to(encoder)
             }
             ExprValue::Label(ExprLabel::ChunkRelative {
                 chunk_index,
                 offset,
             }) => {
-                TAG_LABEL_CHUNK_REL.write_to(writer)?;
-                chunk_index.write_to(writer)?;
-                offset.write_to(writer)
+                TAG_LABEL_CHUNK_REL.write_to(encoder)?;
+                chunk_index.write_to(encoder)?;
+                offset.write_to(encoder)
             }
             ExprValue::Label(ExprLabel::SymbolRelative { name, offset }) => {
-                TAG_LABEL_SYMBOL_REL.write_to(writer)?;
-                name.write_to(writer)?;
-                offset.write_to(writer)
+                TAG_LABEL_SYMBOL_REL.write_to(encoder)?;
+                name.write_to(encoder)?;
+                offset.write_to(encoder)
             }
             ExprValue::List(list) => {
-                TAG_LIST.write_to(writer)?;
-                list.write_to(writer)
+                TAG_LIST.write_to(encoder)?;
+                list.write_to(encoder)
             }
             ExprValue::String(string) => {
-                TAG_STRING.write_to(writer)?;
-                string.write_to(writer)
+                TAG_STRING.write_to(encoder)?;
+                string.write_to(encoder)
             }
             ExprValue::Tuple(tuple) => {
-                TAG_TUPLE.write_to(writer)?;
-                tuple.write_to(writer)
+                TAG_TUPLE.write_to(encoder)?;
+                tuple.write_to(encoder)
             }
         }
     }

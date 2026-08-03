@@ -1,4 +1,4 @@
-use super::binary::BinaryIo;
+use super::binary::{BinaryIo, Decoder, Encoder};
 use super::patch::ObjPatch;
 use super::symbol::ObjSymbol;
 use crate::addr::{Addr, Align, Size};
@@ -37,16 +37,18 @@ pub struct ObjChunk {
 }
 
 impl BinaryIo for ObjChunk {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let section_name = Rc::<str>::read_from(reader)?;
-        let data = Box::<[u8]>::read_from(reader)?;
-        let size = Size::read_from(reader)?;
-        let start = Option::<Addr>::read_from(reader)?;
-        let align = Align::read_from(reader)?;
-        let within = Option::<Align>::read_from(reader)?;
-        let fill = Option::<u8>::read_from(reader)?;
-        let symbols = Box::<[ObjSymbol]>::read_from(reader)?;
-        let patches = Box::<[ObjPatch]>::read_from(reader)?;
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let section_name = Rc::<str>::read_from(decoder)?;
+        let data = Box::<[u8]>::read_from(decoder)?;
+        let size = Size::read_from(decoder)?;
+        let start = Option::<Addr>::read_from(decoder)?;
+        let align = Align::read_from(decoder)?;
+        let within = Option::<Align>::read_from(decoder)?;
+        let fill = Option::<u8>::read_from(decoder)?;
+        let symbols = Box::<[ObjSymbol]>::read_from(decoder)?;
+        let patches = Box::<[ObjPatch]>::read_from(decoder)?;
         Ok(ObjChunk {
             section_name,
             data,
@@ -60,16 +62,19 @@ impl BinaryIo for ObjChunk {
         })
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        self.section_name.write_to(writer)?;
-        self.data.write_to(writer)?;
-        self.size.write_to(writer)?;
-        self.start.write_to(writer)?;
-        self.align.write_to(writer)?;
-        self.within.write_to(writer)?;
-        self.fill.write_to(writer)?;
-        self.symbols.write_to(writer)?;
-        self.patches.write_to(writer)?;
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        self.section_name.write_to(encoder)?;
+        self.data.write_to(encoder)?;
+        self.size.write_to(encoder)?;
+        self.start.write_to(encoder)?;
+        self.align.write_to(encoder)?;
+        self.within.write_to(encoder)?;
+        self.fill.write_to(encoder)?;
+        self.symbols.write_to(encoder)?;
+        self.patches.write_to(encoder)?;
         Ok(())
     }
 }

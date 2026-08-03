@@ -9,7 +9,7 @@ mod patch;
 mod symbol;
 
 pub use assert::ObjAssert;
-pub use binary::BinaryIo;
+pub use binary::{BinaryIo, Decoder, Encoder};
 pub use chunk::ObjChunk;
 pub use expr::ObjExpr;
 pub(crate) use expr::ObjExprOp;

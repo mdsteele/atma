@@ -6,7 +6,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// A reference to a specific memory location.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ExprLabel {
     /// A reference to an absolute address in a particular address space.
     AddrAbsolute {

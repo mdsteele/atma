@@ -135,9 +135,10 @@ fn command_asm(
     if let Some(output_path) = opt_output_path {
         let mut options = fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
-        let mut writer = io::BufWriter::new(options.open(&output_path)?);
-        obj.write_to(&mut writer)?;
-        writer.flush()?;
+        let writer = io::BufWriter::new(options.open(&output_path)?);
+        let mut encoder = atma::obj::Encoder::new(writer);
+        obj.write_to(&mut encoder)?;
+        encoder.into_writer().flush()?;
     } else {
         dump_object_file(&obj);
     }
@@ -239,16 +240,17 @@ fn command_ld(
     let object_files = {
         let mut objfiles = Vec::<ObjFile>::with_capacity(objfile_paths.len());
         for objfile_path in &objfile_paths {
-            let mut reader = io::BufReader::new(fs::File::open(objfile_path)?);
-            objfiles.push(ObjFile::read_from(&mut reader)?);
+            let reader = io::BufReader::new(fs::File::open(objfile_path)?);
+            let mut decoder = atma::obj::Decoder::new(reader);
+            objfiles.push(ObjFile::read_from(&mut decoder)?);
         }
         objfiles
     };
     let linked_binary = config.link_objects(object_files)?;
     if let Some(output_path) = opt_output_path {
-        let mut output = io::BufWriter::new(fs::File::create(output_path)?);
-        linked_binary.write_to(&mut output)?;
-        output.flush()?;
+        let mut writer = io::BufWriter::new(fs::File::create(output_path)?);
+        linked_binary.write_to(&mut writer)?;
+        writer.flush()?;
     } else {
         eprintln!("Link successful.");
     }
@@ -258,8 +260,9 @@ fn command_ld(
 //===========================================================================//
 
 fn command_obj(objfile_path: PathBuf) -> Result<(), CliError> {
-    let mut reader = io::BufReader::new(fs::File::open(&objfile_path)?);
-    let objfile = ObjFile::read_from(&mut reader)?;
+    let reader = io::BufReader::new(fs::File::open(&objfile_path)?);
+    let mut decoder = atma::obj::Decoder::new(reader);
+    let objfile = ObjFile::read_from(&mut decoder)?;
     dump_object_file(&objfile);
     Ok(())
 }

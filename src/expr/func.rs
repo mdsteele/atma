@@ -1,7 +1,7 @@
 use super::error::ExprEvalError;
 use super::value::ExprValue;
 use crate::error::SrcSpan;
-use crate::obj::BinaryIo;
+use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::BigInt;
 use std::fmt;
 use std::io;
@@ -14,7 +14,7 @@ const TAG_SQRTZ: u8 = 1;
 //===========================================================================//
 
 /// A built-in function that can be applied to an [`ExprValue`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ExprFunc {
     /// Integer cube root, rounding towards zero.
     Cbrtz,
@@ -51,8 +51,10 @@ impl ExprFunc {
 }
 
 impl BinaryIo for ExprFunc {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        match u8::read_from(reader)? {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
             TAG_CBRTZ => Ok(ExprFunc::Cbrtz),
             TAG_SQRTZ => Ok(ExprFunc::Sqrtz),
             byte => Err(io::Error::new(
@@ -62,10 +64,13 @@ impl BinaryIo for ExprFunc {
         }
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
         match self {
-            Self::Cbrtz => TAG_CBRTZ.write_to(writer),
-            Self::Sqrtz => TAG_SQRTZ.write_to(writer),
+            Self::Cbrtz => TAG_CBRTZ.write_to(encoder),
+            Self::Sqrtz => TAG_SQRTZ.write_to(encoder),
         }
     }
 }

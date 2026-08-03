@@ -1,4 +1,4 @@
-use super::binary::BinaryIo;
+use super::binary::{BinaryIo, Decoder, Encoder};
 use crate::addr::Offset;
 use std::io;
 use std::rc::Rc;
@@ -18,17 +18,22 @@ pub struct ObjSymbol {
 }
 
 impl BinaryIo for ObjSymbol {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let name = Rc::<str>::read_from(reader)?;
-        let exported = bool::read_from(reader)?;
-        let offset = Offset::read_from(reader)?;
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let name = Rc::<str>::read_from(decoder)?;
+        let exported = bool::read_from(decoder)?;
+        let offset = Offset::read_from(decoder)?;
         Ok(ObjSymbol { name, exported, offset })
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        self.name.write_to(writer)?;
-        self.exported.write_to(writer)?;
-        self.offset.write_to(writer)?;
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        self.name.write_to(encoder)?;
+        self.exported.write_to(encoder)?;
+        self.offset.write_to(encoder)?;
         Ok(())
     }
 }

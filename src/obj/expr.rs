@@ -1,4 +1,4 @@
-use super::binary::BinaryIo;
+use super::binary::{BinaryIo, Decoder, Encoder};
 use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
 use num_bigint::BigInt;
 use std::io;
@@ -63,8 +63,10 @@ impl ObjExpr {
 }
 
 impl BinaryIo for ObjExpr {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let ops = Vec::<ObjExprOp>::read_from(reader)?;
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let ops = Vec::<ObjExprOp>::read_from(decoder)?;
         if ops.is_empty() {
             Err(io::Error::new(io::ErrorKind::InvalidData, "empty expression"))
         } else {
@@ -72,27 +74,30 @@ impl BinaryIo for ObjExpr {
         }
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
         debug_assert!(!self.ops.is_empty());
-        self.ops.write_to(writer)
+        self.ops.write_to(encoder)
     }
 
     fn read_option_from<R: io::BufRead>(
-        reader: &mut R,
+        decoder: &mut Decoder<R>,
     ) -> io::Result<Option<Self>> {
-        let ops = Vec::<ObjExprOp>::read_from(reader)?;
+        let ops = Vec::<ObjExprOp>::read_from(decoder)?;
         if ops.is_empty() { Ok(None) } else { Ok(Some(ObjExpr { ops })) }
     }
 
     fn write_option_to<W: io::Write>(
         option: &Option<Self>,
-        writer: &mut W,
+        encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         match option {
-            None => Vec::<ObjExprOp>::new().write_to(writer),
+            None => Vec::<ObjExprOp>::new().write_to(encoder),
             Some(value) => {
                 debug_assert!(!value.ops.is_empty());
-                value.ops.write_to(writer)
+                value.ops.write_to(encoder)
             }
         }
     }
@@ -167,8 +172,10 @@ pub(crate) enum ObjExprOp {
 }
 
 impl BinaryIo for ObjExprOp {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        match u8::read_from(reader)? {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
             // Binary ops:
             OP_ANY_CMP_EQ => Ok(Self::BinOp(ExprBinOp::AnyCmpEq)),
             OP_ANY_CMP_LE => Ok(Self::BinOp(ExprBinOp::AnyCmpLe)),
@@ -194,16 +201,16 @@ impl BinaryIo for ObjExprOp {
             OP_LABEL_SUB => Ok(Self::BinOp(ExprBinOp::LabelSub)),
             // Other ops:
             OP_APPLY => Ok(Self::Apply),
-            OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(reader)?)),
+            OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
             OP_LABEL_ADDR => Ok(Self::LabelAddr),
             OP_LIST_INDEX => Ok(Self::ListIndex),
-            OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(reader)?)),
-            OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(reader)?)),
-            OP_PUSH => Ok(Self::Push(ExprValue::read_from(reader)?)),
-            OP_SKIP => Ok(Self::Skip(usize::read_from(reader)?)),
-            OP_SKIP_IF => Ok(Self::SkipIf(usize::read_from(reader)?)),
-            OP_SKIP_UNLESS => Ok(Self::SkipUnless(usize::read_from(reader)?)),
-            OP_TUPLE_ITEM => Ok(Self::TupleItem(usize::read_from(reader)?)),
+            OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(decoder)?)),
+            OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(decoder)?)),
+            OP_PUSH => Ok(Self::Push(ExprValue::read_from(decoder)?)),
+            OP_SKIP => Ok(Self::Skip(usize::read_from(decoder)?)),
+            OP_SKIP_IF => Ok(Self::SkipIf(usize::read_from(decoder)?)),
+            OP_SKIP_UNLESS => Ok(Self::SkipUnless(usize::read_from(decoder)?)),
+            OP_TUPLE_ITEM => Ok(Self::TupleItem(usize::read_from(decoder)?)),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("unknown expression opcode: 0x{:02x}", byte),
@@ -211,76 +218,93 @@ impl BinaryIo for ObjExprOp {
         }
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
         match self {
-            Self::Apply => OP_APPLY.write_to(writer),
-            Self::BinOp(ExprBinOp::AnyCmpEq) => OP_ANY_CMP_EQ.write_to(writer),
-            Self::BinOp(ExprBinOp::AnyCmpLe) => OP_ANY_CMP_LE.write_to(writer),
-            Self::BinOp(ExprBinOp::AnyCmpLt) => OP_ANY_CMP_LT.write_to(writer),
-            Self::BinOp(ExprBinOp::AnyCmpGe) => OP_ANY_CMP_GE.write_to(writer),
-            Self::BinOp(ExprBinOp::AnyCmpGt) => OP_ANY_CMP_GT.write_to(writer),
-            Self::BinOp(ExprBinOp::AnyCmpNe) => OP_ANY_CMP_NE.write_to(writer),
+            Self::Apply => OP_APPLY.write_to(encoder),
+            Self::BinOp(ExprBinOp::AnyCmpEq) => {
+                OP_ANY_CMP_EQ.write_to(encoder)
+            }
+            Self::BinOp(ExprBinOp::AnyCmpLe) => {
+                OP_ANY_CMP_LE.write_to(encoder)
+            }
+            Self::BinOp(ExprBinOp::AnyCmpLt) => {
+                OP_ANY_CMP_LT.write_to(encoder)
+            }
+            Self::BinOp(ExprBinOp::AnyCmpGe) => {
+                OP_ANY_CMP_GE.write_to(encoder)
+            }
+            Self::BinOp(ExprBinOp::AnyCmpGt) => {
+                OP_ANY_CMP_GT.write_to(encoder)
+            }
+            Self::BinOp(ExprBinOp::AnyCmpNe) => {
+                OP_ANY_CMP_NE.write_to(encoder)
+            }
             Self::BinOp(ExprBinOp::BoolBitAnd) => {
-                OP_BOOL_BIT_AND.write_to(writer)
+                OP_BOOL_BIT_AND.write_to(encoder)
             }
             Self::BinOp(ExprBinOp::BoolBitOr) => {
-                OP_BOOL_BIT_OR.write_to(writer)
+                OP_BOOL_BIT_OR.write_to(encoder)
             }
             Self::BinOp(ExprBinOp::BoolBitXor) => {
-                OP_BOOL_BIT_XOR.write_to(writer)
+                OP_BOOL_BIT_XOR.write_to(encoder)
             }
-            Self::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(writer),
+            Self::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(encoder),
             Self::BinOp(ExprBinOp::IntBitAnd) => {
-                OP_INT_BIT_AND.write_to(writer)
+                OP_INT_BIT_AND.write_to(encoder)
             }
-            Self::BinOp(ExprBinOp::IntBitOr) => OP_INT_BIT_OR.write_to(writer),
+            Self::BinOp(ExprBinOp::IntBitOr) => {
+                OP_INT_BIT_OR.write_to(encoder)
+            }
             Self::BinOp(ExprBinOp::IntBitXor) => {
-                OP_INT_BIT_XOR.write_to(writer)
+                OP_INT_BIT_XOR.write_to(encoder)
             }
-            Self::BinOp(ExprBinOp::IntDiv) => OP_INT_DIV.write_to(writer),
-            Self::BinOp(ExprBinOp::IntMod) => OP_INT_MOD.write_to(writer),
-            Self::BinOp(ExprBinOp::IntMul) => OP_INT_MUL.write_to(writer),
-            Self::BinOp(ExprBinOp::IntPow) => OP_INT_POW.write_to(writer),
-            Self::BinOp(ExprBinOp::IntShl) => OP_INT_SHL.write_to(writer),
-            Self::BinOp(ExprBinOp::IntShr) => OP_INT_SHR.write_to(writer),
-            Self::BinOp(ExprBinOp::IntSub) => OP_INT_SUB.write_to(writer),
+            Self::BinOp(ExprBinOp::IntDiv) => OP_INT_DIV.write_to(encoder),
+            Self::BinOp(ExprBinOp::IntMod) => OP_INT_MOD.write_to(encoder),
+            Self::BinOp(ExprBinOp::IntMul) => OP_INT_MUL.write_to(encoder),
+            Self::BinOp(ExprBinOp::IntPow) => OP_INT_POW.write_to(encoder),
+            Self::BinOp(ExprBinOp::IntShl) => OP_INT_SHL.write_to(encoder),
+            Self::BinOp(ExprBinOp::IntShr) => OP_INT_SHR.write_to(encoder),
+            Self::BinOp(ExprBinOp::IntSub) => OP_INT_SUB.write_to(encoder),
             Self::BinOp(ExprBinOp::LabelAddInt) => {
-                OP_LABEL_ADD_INT.write_to(writer)
+                OP_LABEL_ADD_INT.write_to(encoder)
             }
-            Self::BinOp(ExprBinOp::LabelSub) => OP_LABEL_SUB.write_to(writer),
+            Self::BinOp(ExprBinOp::LabelSub) => OP_LABEL_SUB.write_to(encoder),
             Self::GetValue(index) => {
-                OP_GET_VALUE.write_to(writer)?;
-                index.write_to(writer)
+                OP_GET_VALUE.write_to(encoder)?;
+                index.write_to(encoder)
             }
-            Self::LabelAddr => OP_LABEL_ADDR.write_to(writer),
-            Self::ListIndex => OP_LIST_INDEX.write_to(writer),
+            Self::LabelAddr => OP_LABEL_ADDR.write_to(encoder),
+            Self::ListIndex => OP_LIST_INDEX.write_to(encoder),
             Self::MakeList(num_items) => {
-                OP_MAKE_LIST.write_to(writer)?;
-                num_items.write_to(writer)
+                OP_MAKE_LIST.write_to(encoder)?;
+                num_items.write_to(encoder)
             }
             Self::MakeTuple(num_items) => {
-                OP_MAKE_TUPLE.write_to(writer)?;
-                num_items.write_to(writer)
+                OP_MAKE_TUPLE.write_to(encoder)?;
+                num_items.write_to(encoder)
             }
             Self::Push(value) => {
-                OP_PUSH.write_to(writer)?;
-                value.write_to(writer)
+                OP_PUSH.write_to(encoder)?;
+                value.write_to(encoder)
             }
             Self::Skip(offset) => {
-                OP_SKIP.write_to(writer)?;
-                offset.write_to(writer)
+                OP_SKIP.write_to(encoder)?;
+                offset.write_to(encoder)
             }
             Self::SkipIf(offset) => {
-                OP_SKIP_IF.write_to(writer)?;
-                offset.write_to(writer)
+                OP_SKIP_IF.write_to(encoder)?;
+                offset.write_to(encoder)
             }
             Self::SkipUnless(offset) => {
-                OP_SKIP_UNLESS.write_to(writer)?;
-                offset.write_to(writer)
+                OP_SKIP_UNLESS.write_to(encoder)?;
+                offset.write_to(encoder)
             }
             Self::TupleItem(index) => {
-                OP_TUPLE_ITEM.write_to(writer)?;
-                index.write_to(writer)
+                OP_TUPLE_ITEM.write_to(encoder)?;
+                index.write_to(encoder)
             }
         }
     }

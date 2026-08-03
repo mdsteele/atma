@@ -1,4 +1,4 @@
-use super::binary::BinaryIo;
+use super::binary::{BinaryIo, Decoder, Encoder};
 use super::expr::ObjExpr;
 use crate::addr::Offset;
 use num_bigint::BigInt;
@@ -19,15 +19,20 @@ pub struct ObjPatch {
 }
 
 impl BinaryIo for ObjPatch {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        let offset = Offset::read_from(reader)?;
-        let data = ObjPatchData::read_from(reader)?;
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let offset = Offset::read_from(decoder)?;
+        let data = ObjPatchData::read_from(decoder)?;
         Ok(ObjPatch { offset, data })
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        self.offset.write_to(writer)?;
-        self.data.write_to(writer)?;
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        self.offset.write_to(encoder)?;
+        self.data.write_to(encoder)?;
         Ok(())
     }
 }
@@ -54,26 +59,31 @@ impl ObjPatchData {
 }
 
 impl BinaryIo for ObjPatchData {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        match u8::read_from(reader)? {
-            0xff => Ok(ObjPatchData::Fill(usize::read_from(reader)?)),
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
+            0xff => Ok(ObjPatchData::Fill(usize::read_from(decoder)?)),
             byte => {
                 let int_type = ObjPatchIntType::decode_from_byte(byte)?;
-                let expr = ObjExpr::read_from(reader)?;
+                let expr = ObjExpr::read_from(decoder)?;
                 Ok(ObjPatchData::Integer(int_type, expr))
             }
         }
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
         match self {
             ObjPatchData::Fill(size) => {
-                0xffu8.write_to(writer)?;
-                size.write_to(writer)
+                0xffu8.write_to(encoder)?;
+                size.write_to(encoder)
             }
             ObjPatchData::Integer(int_type, expr) => {
-                int_type.write_to(writer)?;
-                expr.write_to(writer)
+                int_type.write_to(encoder)?;
+                expr.write_to(encoder)
             }
         }
     }
@@ -153,17 +163,22 @@ impl ObjPatchIntType {
 }
 
 impl BinaryIo for ObjPatchIntType {
-    fn read_from<R: io::BufRead>(reader: &mut R) -> io::Result<Self> {
-        ObjPatchIntType::decode_from_byte(u8::read_from(reader)?)
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        ObjPatchIntType::decode_from_byte(u8::read_from(decoder)?)
     }
 
-    fn write_to<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
         match self {
-            ObjPatchIntType::U8 => 0u8.write_to(writer),
-            ObjPatchIntType::U16be => 1u8.write_to(writer),
-            ObjPatchIntType::U16le => 2u8.write_to(writer),
-            ObjPatchIntType::U24be => 3u8.write_to(writer),
-            ObjPatchIntType::U24le => 4u8.write_to(writer),
+            ObjPatchIntType::U8 => 0u8.write_to(encoder),
+            ObjPatchIntType::U16be => 1u8.write_to(encoder),
+            ObjPatchIntType::U16le => 2u8.write_to(encoder),
+            ObjPatchIntType::U24be => 3u8.write_to(encoder),
+            ObjPatchIntType::U24le => 4u8.write_to(encoder),
         }
     }
 }
