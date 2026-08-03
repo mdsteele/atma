@@ -28,18 +28,20 @@ const OP_INT_SHR: u8 = 0x29;
 const OP_INT_SUB: u8 = 0x2a;
 const OP_LABEL_ADD_INT: u8 = 0x30;
 const OP_LABEL_SUB: u8 = 0x31;
+const OP_LIST_CONCAT: u8 = 0x40;
+const OP_STR_CONCAT: u8 = 0x50;
 // Other ops:
-const OP_APPLY: u8 = 0x40;
-const OP_GET_VALUE: u8 = 0x41;
-const OP_LABEL_ADDR: u8 = 0x42;
-const OP_LIST_INDEX: u8 = 0x43;
-const OP_MAKE_LIST: u8 = 0x44;
-const OP_MAKE_TUPLE: u8 = 0x45;
-const OP_PUSH: u8 = 0x46;
-const OP_SKIP: u8 = 0x47;
-const OP_SKIP_IF: u8 = 0x48;
-const OP_SKIP_UNLESS: u8 = 0x49;
-const OP_TUPLE_ITEM: u8 = 0x4a;
+const OP_APPLY: u8 = 0x60;
+const OP_GET_VALUE: u8 = 0x61;
+const OP_LABEL_ADDR: u8 = 0x62;
+const OP_LIST_INDEX: u8 = 0x63;
+const OP_MAKE_LIST: u8 = 0x64;
+const OP_MAKE_TUPLE: u8 = 0x65;
+const OP_PUSH: u8 = 0x66;
+const OP_SKIP: u8 = 0x67;
+const OP_SKIP_IF: u8 = 0x68;
+const OP_SKIP_UNLESS: u8 = 0x69;
+const OP_TUPLE_ITEM: u8 = 0x6a;
 
 //===========================================================================//
 
@@ -199,6 +201,8 @@ impl BinaryIo for ObjExprOp {
             OP_INT_SUB => Ok(Self::BinOp(ExprBinOp::IntSub)),
             OP_LABEL_ADD_INT => Ok(Self::BinOp(ExprBinOp::LabelAddInt)),
             OP_LABEL_SUB => Ok(Self::BinOp(ExprBinOp::LabelSub)),
+            OP_LIST_CONCAT => Ok(Self::BinOp(ExprBinOp::ListConcat)),
+            OP_STR_CONCAT => Ok(Self::BinOp(ExprBinOp::StrConcat)),
             // Other ops:
             OP_APPLY => Ok(Self::Apply),
             OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
@@ -272,6 +276,12 @@ impl BinaryIo for ObjExprOp {
                 OP_LABEL_ADD_INT.write_to(encoder)
             }
             Self::BinOp(ExprBinOp::LabelSub) => OP_LABEL_SUB.write_to(encoder),
+            Self::BinOp(ExprBinOp::ListConcat) => {
+                OP_LIST_CONCAT.write_to(encoder)
+            }
+            Self::BinOp(ExprBinOp::StrConcat) => {
+                OP_STR_CONCAT.write_to(encoder)
+            }
             Self::GetValue(index) => {
                 OP_GET_VALUE.write_to(encoder)?;
                 index.write_to(encoder)
@@ -356,8 +366,10 @@ mod tests {
     #[test]
     fn round_trip_obj_expr_op() {
         assert_round_trips(ObjExprOp::Apply);
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::BoolBitOr));
         assert_round_trips(ObjExprOp::BinOp(ExprBinOp::IntAdd));
         assert_round_trips(ObjExprOp::BinOp(ExprBinOp::LabelSub));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::StrConcat));
         assert_round_trips(ObjExprOp::GetValue(0));
         assert_round_trips(ObjExprOp::GetValue(42));
         assert_round_trips(ObjExprOp::LabelAddr);

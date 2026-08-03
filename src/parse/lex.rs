@@ -238,6 +238,8 @@ enum TokenKind {
     Placeholder,
     #[token("+")]
     Plus,
+    #[token("++")]
+    PlusPlus,
     #[token("#")]
     Pound,
     #[token("?")]
@@ -306,6 +308,7 @@ impl TokenKind {
             TokenKind::ParenOpen => TokenValue::ParenOpen,
             TokenKind::Percent => TokenValue::Percent,
             TokenKind::Plus => TokenValue::Plus,
+            TokenKind::PlusPlus => TokenValue::PlusPlus,
             TokenKind::Pound => TokenValue::Pound,
             TokenKind::Question => TokenValue::Question,
             TokenKind::Slash => TokenValue::Slash,
@@ -402,6 +405,8 @@ pub enum TokenValue {
     Placeholder(Rc<str>),
     /// A "`+`" symbol.
     Plus,
+    /// A "`++`" symbol.
+    PlusPlus,
     /// A "`#`" symbol.
     Pound,
     /// A "`?`" symbol.
@@ -459,6 +464,7 @@ impl TokenValue {
             TokenValue::Percent => "`%`",
             TokenValue::Placeholder(_) => "placeholder",
             TokenValue::Plus => "`+`",
+            TokenValue::PlusPlus => "`++`",
             TokenValue::Pound => "`#`",
             TokenValue::Question => "`?`",
             TokenValue::Slash => "`/`",

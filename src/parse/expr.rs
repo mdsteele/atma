@@ -73,6 +73,8 @@ pub enum BinOpAst {
     CmpLt,
     /// "Not-equals" comparison.
     CmpNe,
+    /// Concatenation.
+    Concat,
     /// Division.
     Div,
     /// Exponentiation.
@@ -111,6 +113,7 @@ impl BinOpAst {
             | BinOpAst::CmpGt
             | BinOpAst::CmpLe
             | BinOpAst::CmpLt => ("order", "against", false),
+            BinOpAst::Concat => ("concatenate", "with", false),
             BinOpAst::Div => ("divide", "by", false),
             BinOpAst::LogAnd => ("logical AND", "with", false),
             BinOpAst::LogOr => ("logical OR", "with", false),
@@ -353,6 +356,11 @@ impl ExprAst {
                     pratt::left(BIND_MULTIPLICATIVE),
                     symbol(TokenValue::Percent),
                     |l, o, r, _| ExprAst::binop(BinOpAst::Mod, l, o, r),
+                ),
+                pratt::infix(
+                    pratt::left(BIND_ADDITIVE),
+                    symbol(TokenValue::PlusPlus),
+                    |l, o, r, _| ExprAst::binop(BinOpAst::Concat, l, o, r),
                 ),
                 pratt::infix(
                     pratt::left(BIND_ADDITIVE),

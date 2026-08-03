@@ -187,9 +187,20 @@ impl ExprTypeError {
                 };
                 let lhs_label = format!("this expression has type {lhs_type}");
                 let rhs_label = format!("this expression has type {rhs_type}");
-                SourceError::new(SrcLoc::new(path, op_span), message)
-                    .with_label(SrcLoc::new(path, lhs_span), lhs_label)
-                    .with_label(SrcLoc::new(path, rhs_span), rhs_label)
+                let mut error =
+                    SourceError::new(SrcLoc::new(path, op_span), message)
+                        .with_label(SrcLoc::new(path, lhs_span), lhs_label)
+                        .with_label(SrcLoc::new(path, rhs_span), rhs_label);
+                match (op, lhs_type, rhs_type) {
+                    (BinOpAst::Add, ExprType::List(_), ExprType::List(_))
+                    | (BinOpAst::Add, ExprType::String, ExprType::String) => {
+                        error = error.with_note(
+                            "To concatenate, use the `++` operator instead",
+                        );
+                    }
+                    _ => {}
+                }
+                error
             }
             Self::CannotApplyUnaryOpToType {
                 op_span,
