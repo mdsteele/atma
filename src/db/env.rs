@@ -2,6 +2,7 @@ use crate::addr::Addr;
 use crate::bus::{SimBus, WatchId, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -37,14 +38,14 @@ impl EnvProc {
 /// A complete simulated environment, including one or more processors and
 /// memory address spaces.
 pub struct SimEnv {
-    selected_processor: String,
-    processors: HashMap<String, EnvProc>,
+    selected_processor: Rc<str>,
+    processors: HashMap<Rc<str>, EnvProc>,
 }
 
 impl SimEnv {
     /// Constructs a new debugging environment with the given list of
     /// processors.  Panics if `processors` is empty.
-    pub fn new(processors: Vec<(String, ProcBus)>) -> SimEnv {
+    pub fn new(processors: Vec<(Rc<str>, ProcBus)>) -> SimEnv {
         if processors.is_empty() {
             panic!("must provide non-empty list of processors to SimEnv::new");
         }
@@ -60,7 +61,7 @@ impl SimEnv {
     pub(crate) fn with_nop_cpu() -> SimEnv {
         let bus = crate::bus::new_open_bus(32);
         let cpu = crate::proc::NopProc::new();
-        SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))])
+        SimEnv::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))])
     }
 
     /// Returns a human-readable, multi-line description of this simulated
@@ -73,8 +74,32 @@ impl SimEnv {
             .join("")
     }
 
-    fn describe_processor((name, proc): (&String, &EnvProc)) -> String {
+    fn describe_processor((name, proc): (&Rc<str>, &EnvProc)) -> String {
         format!("{name}: {}\n", proc.description())
+    }
+
+    /// Returns a sorted list of the names of all processors that exist in this
+    /// environment.
+    pub fn processor_names(&self) -> Vec<Rc<str>> {
+        let mut vec =
+            self.processors.keys().cloned().collect::<Vec<Rc<str>>>();
+        vec.sort_unstable();
+        vec
+    }
+
+    /// Returns true if this simulated environment contains a processor with
+    /// the given name.
+    pub fn contains_processor(&self, proc_name: &str) -> bool {
+        self.processors.contains_key(proc_name)
+    }
+
+    /// Returns a list of register names for the processor in this environment
+    /// with the given name.
+    ///
+    /// Panics if no such processor exists.
+    pub fn register_names(&self, proc_name: &str) -> &'static [&'static str] {
+        let proc = self.processors.get(proc_name).unwrap();
+        proc.proc.register_names()
     }
 
     fn current_processor(&self) -> &EnvProc {
@@ -83,6 +108,20 @@ impl SimEnv {
 
     fn current_processor_mut(&mut self) -> &mut EnvProc {
         self.processors.get_mut(&self.selected_processor).unwrap()
+    }
+
+    /// Returns the name of the currently selected processor.
+    pub fn selected_processor_name(&self) -> Rc<str> {
+        self.selected_processor.clone()
+    }
+
+    /// Selects the processor with the given name as the currently selected
+    /// processor.
+    ///
+    /// Panics if no such processor exists.
+    pub fn select_processor(&mut self, proc_name: &str) {
+        let (name, _) = self.processors.get_key_value(proc_name).unwrap();
+        self.selected_processor = name.clone();
     }
 
     /// Returns the current address of the currently selected processor's
@@ -95,12 +134,6 @@ impl SimEnv {
     /// counter.
     pub fn set_pc(&mut self, addr: Addr) {
         self.current_processor_mut().proc.set_pc(addr);
-    }
-
-    /// Returns a list of the currently selected processor's register names and
-    /// current values.
-    pub fn register_names(&self) -> &'static [&'static str] {
-        self.current_processor().proc.register_names()
     }
 
     /// Returns the value of the specified register in the currently selected

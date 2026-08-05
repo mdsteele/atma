@@ -119,7 +119,7 @@ pub enum AdsError {
         /// The parse error.
         error: ParseError,
     },
-    /// Tried to use a file path expression that wasn't static.
+    /// A source code path was specified using a non-static string expression.
     PathNotStatic {
         /// The source code location for the non-static expression.
         expr_loc: AdsSrcLoc,
@@ -128,7 +128,21 @@ pub enum AdsError {
     },
     /// A source code path was specified using a non-string expression.
     PathTypeError {
+        /// The source code location for the non-string expression.
+        expr_loc: AdsSrcLoc,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
+    /// A processor name was specified using a non-static string expression.
+    ProcNotStatic {
         /// The source code location for the non-static expression.
+        expr_loc: AdsSrcLoc,
+        /// The reason that the expression isn't static.
+        reason: ExprNotStaticReason,
+    },
+    /// A processor name was specified using a non-string expression.
+    ProcTypeError {
+        /// The source code location for the non-string expression.
         expr_loc: AdsSrcLoc,
         /// The type of the expression.
         expr_type: ExprType,
@@ -142,6 +156,17 @@ pub enum AdsError {
         path_loc: AdsSrcLoc,
         /// The error from the source cache.
         error: SrcCacheError,
+    },
+    /// Tried to switch to a processor that was doesn't exist in the simulated
+    /// system.
+    UnknownProc {
+        /// The name of the non-existent processor.
+        proc_name: Rc<str>,
+        /// The source code location for the expression that evaluated to the
+        /// unknown processor name.
+        expr_loc: AdsSrcLoc,
+        /// The list of processor names that do exist in the simulated system.
+        valid_procs: Vec<Rc<str>>,
     },
     /// Tried to modify a variable that was never declared.
     UnknownVariable {
@@ -214,12 +239,45 @@ impl AdsError {
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
             }
+            Self::ProcNotStatic { expr_loc, reason } => {
+                let message = "processor name must be static";
+                let label = "this expression isn't static";
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&reason.context(&expr_loc.context.path))
+                    .with_context(&*expr_loc.context)
+            }
+            Self::ProcTypeError { expr_loc, expr_type } => {
+                let message = format!(
+                    "processor name must be of type {}, not {expr_type}",
+                    ExprType::String
+                );
+                let label = format!("this expression has type {expr_type}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
             Self::SrcCacheError { path, path_loc, error } => {
                 let message = format!("error loading {path:?}: {error}");
                 let label = format!("Tried to load {path:?} here");
                 SourceError::new(path_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*path_loc.context)
+            }
+            Self::UnknownProc { proc_name, expr_loc, valid_procs } => {
+                let message = format!("no such processor: {proc_name:?}");
+                let note = format!(
+                    "The available processors are: {}",
+                    valid_procs
+                        .iter()
+                        .map(|name| format!("{name:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label("")
+                    .with_context(&*expr_loc.context)
+                    .with_note(note)
             }
             Self::UnknownVariable { name, loc } => {
                 let message = format!("no such variable: `{name}`");

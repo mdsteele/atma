@@ -116,6 +116,9 @@ pub enum AdsInstruction {
     /// Pops a value from the value stack (which must be an integer), and sets
     /// the simulated processsor's program counter to that value.
     SetPc,
+    /// Selects the processor with the specified name to be the currently
+    /// selected processor.
+    SetProc(Rc<str>),
     /// Pops a value from the value stack (which must be an integer), and sets
     /// the value of the specified register in the simulated processsor to the
     /// popped value.

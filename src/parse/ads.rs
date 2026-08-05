@@ -69,6 +69,8 @@ pub enum AdsStmtAst {
     When(BreakpointAst, Vec<AdsStmtAst>),
     /// Loops until the expression is false.
     While(ExprAst, Vec<AdsStmtAst>),
+    /// Switches to another processor.
+    With(ExprAst, Option<Vec<AdsStmtAst>>),
 }
 
 impl AdsStmtAst {
@@ -94,9 +96,14 @@ impl AdsStmtAst {
                 .map(|(cond, block)| AdsStmtAst::When(cond, block));
             let while_statement = keyword("while")
                 .ignore_then(ExprAst::parser())
-                .then(stmt_block)
+                .then(stmt_block.clone())
                 .then_ignore(linebreak())
                 .map(|(pred, block)| AdsStmtAst::While(pred, block));
+            let with_statement = keyword("with")
+                .ignore_then(ExprAst::parser())
+                .then(stmt_block.clone().or_not())
+                .then_ignore(linebreak())
+                .map(|(proc, block)| AdsStmtAst::With(proc, block));
             chumsky::prelude::choice((
                 declare_statement(),
                 exit_statement(),
@@ -110,6 +117,7 @@ impl AdsStmtAst {
                 use_statement(),
                 when_statement,
                 while_statement,
+                with_statement,
             ))
         })
     }

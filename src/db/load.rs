@@ -7,6 +7,7 @@ use crate::bus::{
 use crate::proc::{Mos6502, SharpSm83, SimProc, Spc700, Wdc65c816};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::rc::Rc;
 
 //===========================================================================//
 
@@ -69,7 +70,7 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     }
     if &header[..5] == b"sim65" {
         let mut processors =
-            Vec::<(String, (Box<dyn SimProc>, Box<dyn SimBus>))>::new();
+            Vec::<(Rc<str>, (Box<dyn SimProc>, Box<dyn SimBus>))>::new();
         // Read rest of sim65 header.
         let version = header[5];
         if version != 2 {
@@ -97,7 +98,7 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         cursor.write_u16::<LittleEndian>(reset_addr)?;
         let bus = new_ram_bus(ram);
         let cpu = Box::new(Mos6502::new());
-        processors.push(("cpu".to_string(), (cpu, bus)));
+        processors.push((Rc::from("cpu"), (cpu, bus)));
         return Ok(SimEnv::new(processors));
     }
 
@@ -186,7 +187,7 @@ fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     reader.read_exact(&mut rom_data)?;
     let bus = mapper.make_cpu_bus(ram_size, rom_data.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
-    let processors = vec![("cpu".to_string(), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 
@@ -275,7 +276,7 @@ fn load_gbs_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let mut cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("SP", u32::from(stack_pointer));
-    let processors = vec![("cpu".to_string(), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 
@@ -353,7 +354,7 @@ fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
 
     let bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
-    let processors = vec![("cpu".to_string(), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 
@@ -439,7 +440,7 @@ fn load_nsf_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
-    let processors = vec![("cpu".to_string(), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 
@@ -616,8 +617,8 @@ fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         new_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice()));
     let apu_proc: Box<dyn SimProc> = Box::new(Spc700::new());
     let processors = vec![
-        ("cpu".to_string(), (cpu_proc, cpu_bus)),
-        ("apu".to_string(), (apu_proc, apu_bus)),
+        (Rc::from("cpu"), (cpu_proc, cpu_bus)),
+        (Rc::from("apu"), (apu_proc, apu_bus)),
     ];
     Ok(SimEnv::new(processors))
 }
@@ -659,7 +660,7 @@ fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     cpu.set_register("Y", u32::from(reg_y));
     cpu.set_register("PSW", u32::from(reg_psw));
     cpu.set_register("SP", u32::from(reg_sp));
-    let processors = vec![("cpu".to_string(), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
     Ok(SimEnv::new(processors))
 }
 

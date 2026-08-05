@@ -13,14 +13,14 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-pub(crate) enum AdsDeclKind {
+pub(super) enum AdsDeclKind {
     Constant(ExprStatic),
     Variable,
 }
 
 //===========================================================================//
 
-pub struct AdsDecl {
+pub(super) struct AdsDecl {
     pub kind: AdsDeclKind,
     pub id_span: SrcSpan,
     pub var_type: ExprType,
@@ -33,6 +33,8 @@ struct AdsScope {
     /// The stack index, relative to the start of the call frame that this
     /// scope appears in, for the first variable in this scope.
     frame_start: usize,
+    /// The name of the currently-active processor for this scope.
+    proc_name: Rc<str>,
     /// The variables currently declared in this scope.
     variables: HashMap<Rc<str>, AdsDecl>,
     /// The total number of handlers declared in this scope.
@@ -43,9 +45,10 @@ struct AdsScope {
 }
 
 impl AdsScope {
-    fn with_start(frame_start: usize) -> AdsScope {
+    fn new(frame_start: usize, proc_name: Rc<str>) -> AdsScope {
         AdsScope {
             frame_start,
+            proc_name,
             variables: HashMap::new(),
             num_handlers: 0,
             num_variables: 0,
@@ -76,20 +79,11 @@ impl AdsScope {
     fn add_handler(&mut self) {
         self.num_handlers += 1;
     }
-
-    fn close(self, out: &mut Vec<AdsInstruction>) {
-        for _ in 0..self.num_handlers {
-            out.push(AdsInstruction::PopHandler);
-        }
-        for _ in 0..self.num_variables {
-            out.push(AdsInstruction::PopValue);
-        }
-    }
 }
 
 //===========================================================================//
 
-pub struct AdsTypeEnv<'a> {
+pub(super) struct AdsTypeEnv<'a> {
     sim_env: &'a SimEnv,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     context_stack: Vec<Rc<AdsSrcContext>>,
@@ -108,11 +102,12 @@ impl<'a> AdsTypeEnv<'a> {
             builtins.insert(Rc::from(func.name()), (value, expr_type.clone()));
         }
         let root_context = Rc::new(AdsSrcContext::root(root_path));
+        let default_proc_name = sim_env.selected_processor_name();
         AdsTypeEnv {
             sim_env,
             builtins,
             context_stack: vec![root_context],
-            frames: vec![vec![AdsScope::with_start(0)]],
+            frames: vec![vec![AdsScope::new(0, default_proc_name)]],
         }
     }
 
@@ -140,6 +135,7 @@ impl<'a> AdsTypeEnv<'a> {
         })
     }
 
+    /// Returns true if the current frame is the global (top-level) frame.
     pub fn in_global_frame(&self) -> bool {
         debug_assert!(!self.frames.is_empty());
         self.frames.len() == 1
@@ -152,37 +148,101 @@ impl<'a> AdsTypeEnv<'a> {
         frame.last().unwrap().frame_end()
     }
 
+    /// Begins a new handler frame.
+    ///
+    /// The new frame will automatically include its own root scope, which will
+    /// automatically be closed by the corresponding call to `pop_frame`.
     pub fn push_frame(&mut self) {
-        self.frames.push(vec![AdsScope::with_start(0)]);
+        debug_assert!(!self.frames.is_empty());
+        let enclosing_frame = self.frames.last_mut().unwrap();
+        debug_assert!(!enclosing_frame.is_empty());
+        let enclosing_scope = enclosing_frame.last().unwrap();
+        let proc_name = enclosing_scope.proc_name.clone();
+        self.frames.push(vec![AdsScope::new(0, proc_name)]);
     }
 
+    /// Closes the current handler frame, adding any instructions necessary to
+    /// close out its root scope.
+    ///
+    /// This method should always be called in conjunction with `push_frame`.
+    /// It is an error to pop the global frame.
     pub fn pop_frame(&mut self, out: &mut Vec<AdsInstruction>) {
         debug_assert!(self.frames.len() >= 2);
         let mut frame = self.frames.pop().unwrap();
         debug_assert_eq!(frame.len(), 1);
         let scope = frame.pop().unwrap();
-        scope.close(out);
+        self.close_scope(scope, out);
     }
 
+    /// Begins a new scope in the current handler frame (or global frame).
+    ///
+    /// The new scope will inherit the current processor of the enclosing
+    /// scope.
     pub fn push_scope(&mut self) {
         debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last_mut().unwrap();
-        debug_assert!(!frame.is_empty());
-        let start = frame.last().unwrap().frame_end();
-        frame.push(AdsScope::with_start(start));
+        let enclosing_frame = self.frames.last_mut().unwrap();
+        debug_assert!(!enclosing_frame.is_empty());
+        let enclosing_scope = enclosing_frame.last().unwrap();
+        let proc_name = enclosing_scope.proc_name.clone();
+        let start = enclosing_scope.frame_end();
+        enclosing_frame.push(AdsScope::new(start, proc_name));
     }
 
-    /// Returns the number of handlers and variables in the popped scope.
+    /// Closes the current scope, adding any instructions necessary to close
+    /// out any handlers/variables declared in this scope, and/or to restore
+    /// the current processor from the enclosing scope.
+    ///
+    /// This method should always be called in conjunction with `push_scope`.
+    /// It is an error to pop the root scope of a frame; use `pop_frame` for
+    /// that instead.
     pub fn pop_scope(&mut self, out: &mut Vec<AdsInstruction>) {
-        assert!(!self.frames.is_empty());
+        debug_assert!(!self.frames.is_empty());
         let frame = self.frames.last_mut().unwrap();
         debug_assert!(frame.len() >= 2);
         let scope = frame.pop().unwrap();
-        scope.close(out);
+        self.close_scope(scope, out);
+    }
+
+    /// Private helper method to close out the given scope after it has been
+    /// popped from the scope stack.
+    fn close_scope(&self, scope: AdsScope, out: &mut Vec<AdsInstruction>) {
+        for _ in 0..scope.num_handlers {
+            out.push(AdsInstruction::PopHandler);
+        }
+        for _ in 0..scope.num_variables {
+            out.push(AdsInstruction::PopValue);
+        }
+        let prev_proc_name = {
+            debug_assert!(!self.frames.is_empty());
+            let frame = self.frames.last().unwrap();
+            debug_assert!(!frame.is_empty());
+            let scope = frame.last().unwrap();
+            &scope.proc_name
+        };
+        if *prev_proc_name != scope.proc_name {
+            out.push(AdsInstruction::SetProc(prev_proc_name.clone()));
+        }
+    }
+
+    /// Sets the current processor for the current scope.
+    pub fn set_proc(
+        &mut self,
+        proc_name: Rc<str>,
+        out: &mut Vec<AdsInstruction>,
+    ) {
+        debug_assert!(self.contains_processor(&proc_name));
+        debug_assert!(!self.frames.is_empty());
+        let frame = self.frames.last_mut().unwrap();
+        debug_assert!(!frame.is_empty());
+        let scope = frame.last_mut().unwrap();
+        if scope.proc_name != proc_name {
+            out.push(AdsInstruction::SetProc(proc_name.clone()));
+            scope.proc_name = proc_name;
+        }
     }
 
     pub fn add_handler(&mut self) {
-        assert!(!self.frames.is_empty());
+        debug_assert!(!self.frames.is_empty());
         let frame = self.frames.last_mut().unwrap();
         debug_assert!(!frame.is_empty());
         let scope = frame.last_mut().unwrap();
@@ -195,7 +255,7 @@ impl<'a> AdsTypeEnv<'a> {
         id: IdentifierAst,
         ty: ExprType,
     ) {
-        assert!(!self.frames.is_empty());
+        debug_assert!(!self.frames.is_empty());
         let frame = self.frames.last_mut().unwrap();
         debug_assert!(!frame.is_empty());
         let scope = frame.last_mut().unwrap();
@@ -222,8 +282,26 @@ impl<'a> AdsTypeEnv<'a> {
         None
     }
 
-    pub fn register_names(&self) -> &'static [&'static str] {
-        self.sim_env.register_names()
+    /// Returns a sorted list of all processor names in the simulated
+    /// environment.
+    pub fn processor_names(&self) -> Vec<Rc<str>> {
+        self.sim_env.processor_names()
+    }
+
+    /// Returns true if the simulated environment contains a processor with the
+    /// given name.
+    pub fn contains_processor(&self, proc_name: &str) -> bool {
+        self.sim_env.contains_processor(proc_name)
+    }
+
+    /// Returns a list of register names for the current processor in the
+    /// current scope.
+    pub fn get_register_names(&self) -> &'static [&'static str] {
+        debug_assert!(!self.frames.is_empty());
+        let frame = self.frames.last().unwrap();
+        debug_assert!(!frame.is_empty());
+        let scope = frame.last().unwrap();
+        self.sim_env.register_names(&scope.proc_name)
     }
 
     pub fn typecheck_expression(
@@ -267,7 +345,7 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
             };
             return Ok((op, expr_type, expr_static));
         }
-        for &register in self.register_names() {
+        for &register in self.get_register_names() {
             if name.eq_ignore_ascii_case(register) {
                 let op = AdsInstruction::GetRegister(register);
                 let expr_static = Err(ExprNotStaticReason::Variable {

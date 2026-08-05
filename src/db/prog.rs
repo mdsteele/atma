@@ -112,6 +112,9 @@ impl<'a> AdsCompiler<'a> {
             AdsStmtAst::While(pred_ast, do_ast) => {
                 self.typecheck_while_statement(pred_ast, do_ast, out)
             }
+            AdsStmtAst::With(proc_ast, do_ast) => {
+                self.typecheck_with_statement(proc_ast, do_ast, out)
+            }
         }
     }
 
@@ -346,6 +349,51 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
+    fn typecheck_with_statement(
+        &mut self,
+        expr_ast: ExprAst,
+        maybe_do_ast: Option<Vec<AdsStmtAst>>,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        let expr_span = expr_ast.span;
+        match errs.ok(self.env.typecheck_expression(expr_ast)) {
+            Some((_, ExprType::String, Ok(proc_value))) => {
+                let proc_name = proc_value.unwrap_str();
+                if self.env.contains_processor(&proc_name) {
+                    if let Some(do_ast) = maybe_do_ast {
+                        self.env.push_scope();
+                        self.env.set_proc(proc_name, out);
+                        errs.also(self.typecheck_statements(do_ast, out));
+                        self.env.pop_scope(out);
+                    } else {
+                        self.env.set_proc(proc_name, out);
+                    }
+                } else {
+                    errs.push(AdsError::UnknownProc {
+                        proc_name,
+                        expr_loc: self.make_loc(expr_span),
+                        valid_procs: self.env.processor_names(),
+                    });
+                }
+            }
+            Some((_, ExprType::String, Err(reason))) => {
+                errs.push(AdsError::ProcNotStatic {
+                    expr_loc: self.make_loc(expr_span),
+                    reason,
+                });
+            }
+            Some((_, expr_type, _)) => {
+                errs.push(AdsError::ProcTypeError {
+                    expr_loc: self.make_loc(expr_span),
+                    expr_type,
+                });
+            }
+            None => {}
+        }
+        errs.result()
+    }
+
     fn typecheck_expr(
         &self,
         ast: ExprAst,
@@ -509,7 +557,7 @@ impl<'a> AdsCompiler<'a> {
                 (decl.var_type.clone(), Errs::one(error))
             }
             None => {
-                for &reg in self.env.register_names() {
+                for &reg in self.env.get_register_names() {
                     if id_name.eq_ignore_ascii_case(reg) {
                         out.push(AdsInstruction::SetRegister(reg));
                         return (ExprType::Integer, Errs::new());
@@ -567,7 +615,7 @@ mod tests {
         let path = Rc::<str>::from("input");
         let bus = new_open_bus(16);
         let cpu = Mos6502::new();
-        let sim = SimEnv::new(vec![("cpu".to_string(), (Box::new(cpu), bus))]);
+        let sim = SimEnv::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
         AdsProgram::compile_source(&mut cache, path, source, &sim)
             .unwrap()
             .instructions

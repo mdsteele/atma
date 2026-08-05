@@ -306,7 +306,7 @@ fn dump_object_file(obj: &ObjFile) {
 
 fn format_registers(sim_env: &SimEnv) -> String {
     sim_env
-        .register_names()
+        .register_names(&sim_env.selected_processor_name())
         .iter()
         .map(|name| {
             let value = sim_env.get_register(name).unwrap();

@@ -218,10 +218,6 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::PushValue(value) => {
                 self.value_stack.push(value.clone());
             }
-            &AdsInstruction::SetRegister(name) => {
-                let value = self.pop_u32_value();
-                self.sim.set_register(name, value);
-            }
             AdsInstruction::SetMemory => {
                 let addr = self.pop_address_value();
                 let data = self.value_stack.pop().unwrap().unwrap_int();
@@ -231,6 +227,13 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::SetPc => {
                 let addr = self.pop_address_value();
                 self.sim.set_pc(addr);
+            }
+            AdsInstruction::SetProc(proc_name) => {
+                self.sim.select_processor(proc_name);
+            }
+            &AdsInstruction::SetRegister(name) => {
+                let value = self.pop_u32_value();
+                self.sim.set_register(name, value);
             }
             &AdsInstruction::SetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
