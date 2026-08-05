@@ -2,8 +2,8 @@
 
 mod arch;
 mod builtins;
+mod env;
 mod error;
-mod expr;
 mod macros;
 
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
@@ -19,8 +19,8 @@ use crate::parse::{
     AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
 use arch::ArchTree;
+use env::AsmTypeEnv;
 pub use error::{AsmError, AsmResult};
-use expr::AsmTypeEnv;
 use macros::MacroTable;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;

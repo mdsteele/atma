@@ -1,9 +1,9 @@
-use super::env::SimEnv;
+use super::env::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::error::{
     AdsError, AdsResult, AdsSrcContext, AdsSrcLoc, AdsSrcParent,
 };
-use super::expr::{AdsDecl, AdsDeclKind, AdsTypeEnv};
 use super::inst::{AdsFrameRef, AdsInstruction};
+use super::system::SimSystem;
 use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
@@ -29,9 +29,9 @@ impl AdsProgram {
         cache: &mut dyn SrcCache,
         src_path: Rc<str>,
         source_code: &str,
-        sim_env: &SimEnv,
+        system: &SimSystem,
     ) -> AdsResult<AdsProgram> {
-        let mut compiler = AdsCompiler::new(cache, src_path, sim_env);
+        let mut compiler = AdsCompiler::new(cache, src_path, system);
         let module = compiler.env.parse_source(source_code)?;
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.typecheck_statements(module.statements, &mut instructions)?;
@@ -51,9 +51,9 @@ impl<'a> AdsCompiler<'a> {
     fn new(
         cache: &'a mut dyn SrcCache,
         root_path: Rc<str>,
-        sim_env: &'a SimEnv,
+        system: &'a SimSystem,
     ) -> AdsCompiler<'a> {
-        AdsCompiler { cache, env: AdsTypeEnv::new(sim_env, root_path) }
+        AdsCompiler { cache, env: AdsTypeEnv::new(system, root_path) }
     }
 
     fn typecheck_statements(
@@ -601,7 +601,9 @@ impl<'a> AdsCompiler<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsFrameRef, AdsInstruction, AdsProgram, ExprValue, SimEnv};
+    use super::{
+        AdsFrameRef, AdsInstruction, AdsProgram, ExprValue, SimSystem,
+    };
     use crate::bus::{WatchKind, new_open_bus};
     use crate::error::StrSrcCache;
     use crate::expr::ExprBinOp;
@@ -615,7 +617,8 @@ mod tests {
         let path = Rc::<str>::from("input");
         let bus = new_open_bus(16);
         let cpu = Mos6502::new();
-        let sim = SimEnv::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
+        let sim =
+            SimSystem::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
         AdsProgram::compile_source(&mut cache, path, source, &sim)
             .unwrap()
             .instructions

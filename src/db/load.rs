@@ -1,4 +1,4 @@
-use super::env::SimEnv;
+use super::system::SimSystem;
 use crate::addr::Addr;
 use crate::bus::{
     DmgBus, Mbc5Bus, Mmc3Bus, NesBus, SimBus, new_lorom_bus, new_nsf_bus,
@@ -33,7 +33,7 @@ const GB_HEADER_LOGO: &[u8; 0x30] = &[
 
 //===========================================================================//
 
-/// Reads a compiled binary file, and returns a simulated environment that
+/// Reads a compiled binary file, and returns a simulated system that
 /// represents it.
 ///
 /// The following binary formats are currently supported:
@@ -49,7 +49,7 @@ const GB_HEADER_LOGO: &[u8; 0x30] = &[
 /// The following binary formats will be supported in the future:
 /// * NSF2
 /// * NSFe
-pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
     if &header[..4] == b"GBS\x01" {
@@ -99,7 +99,7 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         let bus = new_ram_bus(ram);
         let cpu = Box::new(Mos6502::new());
         processors.push((Rc::from("cpu"), (cpu, bus)));
-        return Ok(SimEnv::new(processors));
+        return Ok(SimSystem::new(processors));
     }
 
     reader.seek(SeekFrom::Start(0x0104))?;
@@ -150,7 +150,7 @@ impl GbMapper {
     }
 }
 
-fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     // See https://gbdev.io/pandocs/The_Cartridge_Header.html
     reader.seek(SeekFrom::Start(0x0147))?;
     let mut metadata = [0u8; 3];
@@ -188,12 +188,12 @@ fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let bus = mapper.make_cpu_bus(ram_size, rom_data.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
     let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimEnv::new(processors))
+    Ok(SimSystem::new(processors))
 }
 
 //===========================================================================//
 
-fn load_gbs_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_gbs_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     // See https://ocremix.org/info/GBS_Format_Specification
     let mut header = [0u8; 0x70];
     reader.read_exact(&mut header)?;
@@ -277,7 +277,7 @@ fn load_gbs_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("SP", u32::from(stack_pointer));
     let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimEnv::new(processors))
+    Ok(SimSystem::new(processors))
 }
 
 //===========================================================================//
@@ -316,7 +316,7 @@ impl NesMapper {
     }
 }
 
-fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     let mut header = [0u8; 16];
     reader.read_exact(&mut header)?;
     if &header[..4] != b"NES\x1a" {
@@ -355,12 +355,12 @@ fn load_nes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     let bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
     let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimEnv::new(processors))
+    Ok(SimSystem::new(processors))
 }
 
 //===========================================================================//
 
-fn load_nsf_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_nsf_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     // See https://www.nesdev.org/wiki/NSF
     let mut header = [0u8; 0x80];
     reader.read_exact(&mut header)?;
@@ -441,7 +441,7 @@ fn load_nsf_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
     let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimEnv::new(processors))
+    Ok(SimSystem::new(processors))
 }
 
 //===========================================================================//
@@ -579,7 +579,7 @@ impl SnesRomHeader {
     }
 }
 
-fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     // From https://snes.nesdev.org/wiki/ROM_file_formats: "The data contained
     // in the file may be unheadered or headered...the headered version has 512
     // extra bytes at the start of the file...This extra data is generally
@@ -608,7 +608,7 @@ fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     reader.read_exact(&mut rom_data[..rom_size])?;
 
     let header = SnesRomHeader::detect(&rom_data)?;
-    // TODO: Put these in SimEnv metadata instead of printing them here.
+    // TODO: Put these in SimSystem metadata instead of printing them here.
     println!("Title: {}", header.title);
 
     let cpu_bus = header.make_cpu_bus(rom_data.into_boxed_slice());
@@ -620,12 +620,12 @@ fn load_snes_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
         (Rc::from("cpu"), (cpu_proc, cpu_bus)),
         (Rc::from("apu"), (apu_proc, apu_bus)),
     ];
-    Ok(SimEnv::new(processors))
+    Ok(SimSystem::new(processors))
 }
 
 //===========================================================================//
 
-fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
+fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     // See https://wiki.superfamicom.org/spc-and-rsn-file-format
     let mut header = [0u8; 0x2e];
     reader.read_exact(&mut header)?;
@@ -661,7 +661,7 @@ fn load_spc_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimEnv> {
     cpu.set_register("PSW", u32::from(reg_psw));
     cpu.set_register("SP", u32::from(reg_sp));
     let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimEnv::new(processors))
+    Ok(SimSystem::new(processors))
 }
 
 //===========================================================================//

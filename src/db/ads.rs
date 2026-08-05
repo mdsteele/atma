@@ -3,7 +3,7 @@ use super::inst::{AdsFrameRef, AdsInstruction};
 use super::prog::AdsProgram;
 use crate::addr::Addr;
 use crate::bus::WatchId;
-use crate::db::SimEnv;
+use crate::db::SimSystem;
 use crate::error::SrcCache;
 use crate::expr::{ExprEvalError, ExprValue};
 use crate::proc::SimBreak;
@@ -43,7 +43,7 @@ struct HandlerData {
 
 /// An in-progress execution of an Atma Debugger Script program.
 pub struct AdsEnvironment<W> {
-    sim: SimEnv,
+    system: SimSystem,
     program: AdsProgram,
     pc: usize,
     value_stack: Vec<ExprValue>,
@@ -59,13 +59,13 @@ impl<W: Write> AdsEnvironment<W> {
         cache: &mut dyn SrcCache,
         src_path: Rc<str>,
         source: &str,
-        sim: SimEnv,
+        system: SimSystem,
         output: W,
     ) -> AdsResult<AdsEnvironment<W>> {
         let program =
-            AdsProgram::compile_source(cache, src_path, source, &sim)?;
+            AdsProgram::compile_source(cache, src_path, source, &system)?;
         Ok(AdsEnvironment {
-            sim,
+            system,
             program,
             pc: 0,
             value_stack: Vec::new(),
@@ -135,11 +135,11 @@ impl<W: Write> AdsEnvironment<W> {
                 self.value_stack.extend(values.iter().cloned());
             }
             AdsInstruction::GetPc => {
-                let value = self.sim.pc();
+                let value = self.system.pc();
                 self.value_stack.push(ExprValue::Integer(BigInt::from(value)));
             }
             AdsInstruction::GetRegister(name) => {
-                let value = self.sim.get_register(name).unwrap();
+                let value = self.system.get_register(name).unwrap();
                 self.value_stack.push(ExprValue::Integer(BigInt::from(value)));
             }
             &AdsInstruction::GetValue(frame_ref, index) => {
@@ -189,7 +189,7 @@ impl<W: Write> AdsEnvironment<W> {
                 handlers.pop();
                 if handlers.is_empty() {
                     self.handlers.remove(&id);
-                    self.sim.unwatch(id);
+                    self.system.unwatch(id);
                 }
             }
             AdsInstruction::PopValue => {
@@ -211,7 +211,7 @@ impl<W: Write> AdsEnvironment<W> {
                 let destination_address = self.destination(offset);
                 let data = HandlerData { parent_index, destination_address };
                 let addr = self.pop_address_value();
-                let id = self.sim.watch_address(addr, kind);
+                let id = self.system.watch_address(addr, kind);
                 self.handlers.entry(id).or_default().push(data);
                 self.handler_stack.push(id);
             }
@@ -222,18 +222,18 @@ impl<W: Write> AdsEnvironment<W> {
                 let addr = self.pop_address_value();
                 let data = self.value_stack.pop().unwrap().unwrap_int();
                 let data = u8::try_from(data & BigInt::from(0xff)).unwrap();
-                self.sim.write_byte(addr, data);
+                self.system.write_byte(addr, data);
             }
             AdsInstruction::SetPc => {
                 let addr = self.pop_address_value();
-                self.sim.set_pc(addr);
+                self.system.set_pc(addr);
             }
             AdsInstruction::SetProc(proc_name) => {
-                self.sim.select_processor(proc_name);
+                self.system.select_processor(proc_name);
             }
             &AdsInstruction::SetRegister(name) => {
                 let value = self.pop_u32_value();
-                self.sim.set_register(name, value);
+                self.system.set_register(name, value);
             }
             &AdsInstruction::SetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
@@ -241,8 +241,8 @@ impl<W: Write> AdsEnvironment<W> {
                 self.value_stack[start + index] = value;
             }
             AdsInstruction::Step => {
-                let pc = self.sim.pc();
-                let instruction = self.sim.disassemble(self.sim.pc()).1;
+                let pc = self.system.pc();
+                let instruction = self.system.disassemble(self.system.pc()).1;
                 eprintln!("${pc:04x} | {instruction:16}");
                 if let Some(finished) = self.step_processor() {
                     return Ok(finished);
@@ -250,7 +250,7 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::Return => {
                 self.pc = self.call_stack.pop().unwrap().return_address;
-                if self.sim.is_mid_instruction() {
+                if self.system.is_mid_instruction() {
                     return Ok(self.step_processor().unwrap_or(false));
                 }
                 return Ok(false);
@@ -271,7 +271,7 @@ impl<W: Write> AdsEnvironment<W> {
     }
 
     fn step_processor(&mut self) -> Option<bool> {
-        match self.sim.step() {
+        match self.system.step() {
             Ok(()) => None,
             Err(SimBreak::Watchpoint(kind, id)) => {
                 eprintln!("{kind:?} watchpoint reached");
@@ -338,7 +338,7 @@ impl<W: Write> AdsEnvironment<W> {
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsEnvironment, SimEnv};
+    use super::{AdsEnvironment, SimSystem};
     use crate::error::StrSrcCache;
     use std::io::Write;
     use std::rc::Rc;
@@ -349,7 +349,7 @@ mod tests {
     ) -> AdsEnvironment<&'a mut Vec<u8>> {
         let mut cache = StrSrcCache::new();
         let path = Rc::<str>::from("input");
-        let sim = SimEnv::with_nop_cpu();
+        let sim = SimSystem::with_nop_cpu();
         AdsEnvironment::create(&mut cache, path, source, sim, output).unwrap()
     }
 

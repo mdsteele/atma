@@ -2,7 +2,7 @@ use ariadne::{self, Label, ReportKind, Source};
 use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
-use atma::db::{AdsEnvironment, SimEnv};
+use atma::db::{AdsEnvironment, SimSystem};
 use atma::error::{Errs, SourceError, SrcCache, SrcCacheError};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
@@ -151,11 +151,11 @@ fn command_db(
     binary_path: PathBuf,
     opt_ads_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
-    let mut sim_env = {
+    let mut system = {
         let file = fs::File::open(&binary_path)?;
         atma::db::load_binary(io::BufReader::new(file))?
     };
-    print!("{}", sim_env.description());
+    print!("{}", system.description());
     if let Some(ads_path) = opt_ads_path {
         let mut cache = FileSrcCache::new();
         let mut ads_env = {
@@ -166,7 +166,7 @@ fn command_db(
                 &mut cache,
                 src_path,
                 &source,
-                sim_env,
+                system,
                 io::stdout(),
             ) {
                 Ok(ads_env) => ads_env,
@@ -188,20 +188,20 @@ fn command_db(
             }
         }
     } else {
-        sim_env.watch_address(Addr::from(0xfff7u16), WatchKind::Pc);
-        sim_env.watch_address(Addr::from(0xfff9u16), WatchKind::Pc);
+        system.watch_address(Addr::from(0xfff7u16), WatchKind::Pc);
+        system.watch_address(Addr::from(0xfff9u16), WatchKind::Pc);
         loop {
-            let result = if sim_env.is_mid_instruction() {
-                sim_env.step()
+            let result = if system.is_mid_instruction() {
+                system.step()
             } else {
-                let pc = sim_env.pc();
-                let instruction = sim_env.disassemble(pc).1;
-                let result = sim_env.step();
+                let pc = system.pc();
+                let instruction = system.disassemble(pc).1;
+                let result = system.step();
                 println!(
                     "${:04x} | {:16} {}",
                     pc,
                     instruction,
-                    format_registers(&sim_env)
+                    format_registers(&system)
                 );
                 result
             };
@@ -304,12 +304,12 @@ fn dump_object_file(obj: &ObjFile) {
 
 //===========================================================================//
 
-fn format_registers(sim_env: &SimEnv) -> String {
-    sim_env
-        .register_names(&sim_env.selected_processor_name())
+fn format_registers(system: &SimSystem) -> String {
+    system
+        .register_names(&system.selected_processor_name())
         .iter()
         .map(|name| {
-            let value = sim_env.get_register(name).unwrap();
+            let value = system.get_register(name).unwrap();
             format!("{name}=${value:02x}")
         })
         .collect::<Vec<String>>()
