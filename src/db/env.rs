@@ -1,6 +1,5 @@
 use super::error::{AdsError, AdsResult, AdsSrcContext};
 use super::inst::{AdsFrameRef, AdsInstruction};
-use super::system::SimSystem;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprNotStaticReason,
@@ -8,6 +7,7 @@ use crate::expr::{
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, IdentifierAst};
+use crate::system::SimSystem;
 use std::collections::HashMap;
 use std::rc::Rc;
 

@@ -2,11 +2,13 @@ use ariadne::{self, Label, ReportKind, Source};
 use atma::addr::{Addr, Align, Offset};
 use atma::asm::assemble_source;
 use atma::bus::WatchKind;
-use atma::db::{AdsEnvironment, SimSystem};
+use atma::db::AdsEnvironment;
 use atma::error::{Errs, SourceError, SrcCache, SrcCacheError};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
 use atma::proc::SimBreak;
+use atma::system::{BinaryFormat, SimSystem, load_binary_with_format};
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Parser, Subcommand};
 use std::collections::hash_map;
 use std::collections::{HashMap, HashSet};
@@ -38,6 +40,10 @@ enum Command {
     },
     /// Simulates and debugs a compiled binary.
     Db {
+        /// The format of the binary file.
+        #[arg(short, long, default_value="auto",
+              value_parser = binary_format_parser())]
+        format: BinaryFormat,
         /// The compiled binary file to load and debug.
         binary: PathBuf,
         /// The debugger script to run, or none for interactive mode.
@@ -58,6 +64,26 @@ enum Command {
         /// The object file to inspect.
         objfile: PathBuf,
     },
+}
+
+//===========================================================================//
+
+const ALL_BINARY_FORMATS: &[(BinaryFormat, &str)] = &[
+    (BinaryFormat::Auto, "auto"),
+    (BinaryFormat::Gb, "gb"),
+    (BinaryFormat::Gbs, "gbs"),
+    (BinaryFormat::Nes, "nes"),
+    (BinaryFormat::Nsf, "nsf"),
+    (BinaryFormat::Sfc, "sfc"),
+    (BinaryFormat::Sim65, "sim65"),
+    (BinaryFormat::Spc, "spc"),
+];
+
+fn binary_format_parser() -> impl TypedValueParser {
+    PossibleValuesParser::new(ALL_BINARY_FORMATS.iter().map(|(_, name)| name))
+        .map(|s| {
+            ALL_BINARY_FORMATS.iter().find(|(_, name)| name == &s).unwrap().0
+        })
 }
 
 //===========================================================================//
@@ -92,7 +118,9 @@ fn main() -> ExitCode {
 fn run_cli() -> Result<(), ExitCode> {
     let result = match Cli::parse().command {
         Command::Asm { source, output } => command_asm(source, output),
-        Command::Db { binary, script } => command_db(binary, script),
+        Command::Db { format, binary, script } => {
+            command_db(format, binary, script)
+        }
         Command::Ld { config, objects, output } => {
             command_ld(config, objects, output)
         }
@@ -148,12 +176,13 @@ fn command_asm(
 //===========================================================================//
 
 fn command_db(
+    binary_format: BinaryFormat,
     binary_path: PathBuf,
     opt_ads_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let mut system = {
         let file = fs::File::open(&binary_path)?;
-        atma::db::load_binary(io::BufReader::new(file))?
+        load_binary_with_format(binary_format, io::BufReader::new(file))?
     };
     print!("{}", system.description());
     if let Some(ads_path) = opt_ads_path {

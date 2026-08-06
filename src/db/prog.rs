@@ -3,7 +3,6 @@ use super::error::{
     AdsError, AdsResult, AdsSrcContext, AdsSrcLoc, AdsSrcParent,
 };
 use super::inst::{AdsFrameRef, AdsInstruction};
-use super::system::SimSystem;
 use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
@@ -13,6 +12,7 @@ use crate::parse::{
     AdsStmtAst, BreakpointAst, DeclareAst, ExprAst, IdentifierAst, LValueAst,
     LValueAstNode,
 };
+use crate::system::SimSystem;
 use std::path::Path;
 use std::rc::Rc;
 
