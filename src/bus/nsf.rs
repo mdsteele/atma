@@ -3,7 +3,7 @@ use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus, new_rom_bus};
 //===========================================================================//
 
 /// Returns a simulated bus for an NSF (NES Sound Format) "cartridge".
-pub fn new_nsf_bus(
+pub fn new_nes_nsf_cart_bus(
     rom_data: Box<[u8]>,
     init_addr: u16,
     play_addr: u16,
@@ -56,7 +56,7 @@ impl NsfBus {
 impl SimBus for NsfBus {
     fn description(&self) -> String {
         format!(
-            "NSF with {} and {}",
+            "NSF cartridge with {} and {}",
             self.ram.description(),
             self.rom.description()
         )

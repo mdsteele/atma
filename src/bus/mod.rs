@@ -14,16 +14,16 @@ mod snes;
 mod ssmp;
 
 use crate::addr::Addr;
-pub use dmg::DmgBus;
+pub use dmg::new_dmg_cpu_bus;
 pub use label::LabeledBus;
-pub use lorom::new_lorom_bus;
-pub use mbc5::Mbc5Bus;
-pub use mmc3::Mmc3Bus;
-pub use nes::NesBus;
-pub use nsf::new_nsf_bus;
+pub use lorom::new_snes_lorom_cart_bus;
+pub use mbc5::new_gb_mbc5_cart_bus;
+pub use mmc3::new_nes_mmc3_cart_bus;
+pub use nes::new_nes_cpu_bus;
+pub use nsf::new_nes_nsf_cart_bus;
 pub use ram::{new_open_bus, new_ram_bus, new_rom_bus};
-pub use snes::new_snes_bus;
-pub use ssmp::new_ssmp_bus;
+pub use snes::new_snes_cpu_bus;
+pub use ssmp::new_snes_ssmp_bus;
 
 //===========================================================================//
 

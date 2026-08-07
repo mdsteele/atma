@@ -1,5 +1,7 @@
 use super::sim::SimSystem;
-use crate::bus::{DmgBus, Mbc5Bus, SimBus, new_ram_bus, new_rom_bus};
+use crate::bus::{
+    new_dmg_cpu_bus, new_gb_mbc5_cart_bus, new_ram_bus, new_rom_bus,
+};
 use crate::proc::{SharpSm83, SimProc};
 use std::io::{self, Read, Seek};
 use std::rc::Rc;
@@ -96,12 +98,12 @@ pub fn load_gbs_binary<R: Read + Seek>(
 
     let ram_bus = new_ram_bus(vec![0u8; 0x2000].into_boxed_slice());
     let rom_bus = new_rom_bus(rom_data.into_boxed_slice());
-    let cart_bus = Box::new(Mbc5Bus::new(ram_bus, rom_bus));
-    let bus: Box<dyn SimBus> = Box::new(DmgBus::with_cartridge(cart_bus));
+    let cart_bus = new_gb_mbc5_cart_bus(rom_bus, ram_bus);
+    let cpu_bus = new_dmg_cpu_bus(cart_bus);
     let mut cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("SP", u32::from(stack_pointer));
-    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, cpu_bus))];
     Ok(SimSystem::new(processors))
 }
 

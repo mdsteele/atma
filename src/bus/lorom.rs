@@ -3,7 +3,7 @@ use super::{Addr, SimBus, WatchId, WatchKind, new_open_bus};
 //===========================================================================//
 
 /// Returns a simulated SNES LoRom cartridge bus.
-pub fn new_lorom_bus(
+pub fn new_snes_lorom_cart_bus(
     rom_bus: Box<dyn SimBus>,
     sram_bus: Option<Box<dyn SimBus>>,
 ) -> Box<dyn SimBus> {

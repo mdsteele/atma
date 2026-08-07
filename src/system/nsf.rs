@@ -1,6 +1,6 @@
 use super::sim::SimSystem;
 use crate::addr::Addr;
-use crate::bus::{NesBus, SimBus, new_nsf_bus};
+use crate::bus::{new_nes_cpu_bus, new_nes_nsf_cart_bus};
 use crate::proc::{Mos6502, SimProc};
 use std::io::{self, Read, Seek};
 use std::rc::Rc;
@@ -15,6 +15,10 @@ pub fn load_nsf_binary<R: Read + Seek>(
     // See https://www.nesdev.org/wiki/NSF
     let mut header = [0u8; 0x80];
     reader.read_exact(&mut header)?;
+    if &header[..0x05] != b"NESM\x1a" {
+        let message = "incorrect magic number in NSF header";
+        return Err(io::Error::other(message));
+    }
 
     let version = header[0x05];
     if version != 1 {
@@ -93,14 +97,14 @@ pub fn load_nsf_binary<R: Read + Seek>(
         rom_data.into_boxed_slice()
     };
 
-    let cart = new_nsf_bus(rom_data, init_addr, play_addr);
-    let bus: Box<dyn SimBus> = Box::new(NesBus::with_cartridge(cart));
+    let cart_bus = new_nes_nsf_cart_bus(rom_data, init_addr, play_addr);
+    let cpu_bus = new_nes_cpu_bus(cart_bus);
     let mut cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
     cpu.set_pc(Addr::from(0x4800u16));
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
-    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
+    let processors = vec![(Rc::from("cpu"), (cpu, cpu_bus))];
     Ok(SimSystem::new(processors))
 }
 

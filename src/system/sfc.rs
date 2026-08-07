@@ -1,7 +1,7 @@
 use super::sim::SimSystem;
 use crate::bus::{
-    SimBus, new_lorom_bus, new_ram_bus, new_rom_bus, new_snes_bus,
-    new_ssmp_bus,
+    SimBus, new_ram_bus, new_rom_bus, new_snes_cpu_bus,
+    new_snes_lorom_cart_bus, new_snes_ssmp_bus,
 };
 use crate::proc::{SimProc, Spc700, Wdc65c816};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -135,12 +135,14 @@ impl SnesRomHeader {
         } else {
             Some(new_ram_bus(vec![0u8; self.sram_size].into_boxed_slice()))
         };
-        let cart: Box<dyn SimBus> = match self.mode {
-            SnesMappingMode::LoRom => new_lorom_bus(rom_bus, sram_bus),
+        let cart_bus: Box<dyn SimBus> = match self.mode {
+            SnesMappingMode::LoRom => {
+                new_snes_lorom_cart_bus(rom_bus, sram_bus)
+            }
             SnesMappingMode::HiRom => rom_bus, // TODO: sram
             _ => todo!("{:?}", self.mode),
         };
-        new_snes_bus(cart)
+        new_snes_cpu_bus(cart_bus)
     }
 }
 
@@ -190,7 +192,7 @@ pub fn load_sfc_binary<R: Read + Seek>(
     let cpu_bus = header.make_cpu_bus(rom_data.into_boxed_slice());
     let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
     let apu_bus =
-        new_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice()));
+        new_snes_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice()));
     let apu_proc: Box<dyn SimProc> = Box::new(Spc700::new());
     let processors = vec![
         (Rc::from("cpu"), (cpu_proc, cpu_bus)),

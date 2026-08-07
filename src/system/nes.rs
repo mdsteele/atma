@@ -1,6 +1,7 @@
 use super::sim::SimSystem;
 use crate::bus::{
-    Mmc3Bus, NesBus, SimBus, new_open_bus, new_ram_bus, new_rom_bus,
+    SimBus, new_nes_cpu_bus, new_nes_mmc3_cart_bus, new_open_bus, new_ram_bus,
+    new_rom_bus,
 };
 use crate::proc::{Mos6502, SimProc};
 use std::io::{self, Read, Seek};
@@ -33,12 +34,12 @@ impl NesMapper {
         } else {
             new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
         };
-        let rom_bus: Box<dyn SimBus> = new_rom_bus(rom);
-        let cart = match *self {
+        let rom_bus = new_rom_bus(rom);
+        let cart_bus = match *self {
             NesMapper::Nrom => rom_bus,
-            NesMapper::Mmc3 => Box::new(Mmc3Bus::new(ram_bus, rom_bus)),
+            NesMapper::Mmc3 => new_nes_mmc3_cart_bus(rom_bus, ram_bus),
         };
-        Box::new(NesBus::with_cartridge(cart))
+        new_nes_cpu_bus(cart_bus)
     }
 }
 

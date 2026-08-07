@@ -3,10 +3,17 @@ use bimap::BiHashMap;
 
 //===========================================================================//
 
+/// Returns a simulated NES CPU memory bus.
+pub fn new_nes_cpu_bus(cartridge_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
+    Box::new(NesBus::with_cartridge(cartridge_bus))
+}
+
+//===========================================================================//
+
 /// A simulated NES CPU memory bus.
 ///
 /// See <https://www.nesdev.org/wiki/CPU_memory_map> for details.
-pub struct NesBus {
+struct NesBus {
     ram: Box<dyn SimBus>,
     ppu_regs: PpuRegBus,
     cart: Box<dyn SimBus>,

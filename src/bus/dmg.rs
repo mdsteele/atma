@@ -3,10 +3,17 @@ use crate::addr::Addr;
 
 //===========================================================================//
 
+/// Returns a simulated classic Game Boy (DMG) CPU memory bus.
+pub fn new_dmg_cpu_bus(cartridge_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
+    Box::new(DmgBus::with_cartridge(cartridge_bus))
+}
+
+//===========================================================================//
+
 /// A simulated classic Game Boy (DMG) CPU memory bus.
 ///
 /// See <https://gbdev.io/pandocs/Memory_Map.html> for details.
-pub struct DmgBus {
+struct DmgBus {
     cart: Box<dyn SimBus>,
     vram: Box<dyn SimBus>,
     wram: Box<dyn SimBus>,

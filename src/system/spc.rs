@@ -1,6 +1,6 @@
 use super::sim::SimSystem;
 use crate::addr::Addr;
-use crate::bus::{new_ram_bus, new_ssmp_bus};
+use crate::bus::{new_ram_bus, new_snes_ssmp_bus};
 use crate::proc::{SimProc, Spc700};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
@@ -43,7 +43,7 @@ pub fn load_spc_binary<R: Read + Seek>(
     let mut ram = vec![0u8; 1 << 16];
     reader.read_exact(&mut ram)?;
 
-    let bus = new_ssmp_bus(new_ram_bus(ram.into_boxed_slice()));
+    let bus = new_snes_ssmp_bus(new_ram_bus(ram.into_boxed_slice()));
     let mut cpu: Box<dyn SimProc> = Box::new(Spc700::new());
     cpu.set_pc(Addr::from(pc));
     cpu.set_register("A", u32::from(reg_a));

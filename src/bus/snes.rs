@@ -4,7 +4,7 @@ use bimap::BiHashMap;
 //===========================================================================//
 
 /// Returns a simulated SNES CPU memory bus.
-pub fn new_snes_bus(cartridge_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
+pub fn new_snes_cpu_bus(cartridge_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
     Box::new(SnesBus::with_cartridge(cartridge_bus))
 }
 

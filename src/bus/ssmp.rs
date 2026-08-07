@@ -23,7 +23,7 @@ const INITIAL_CONTROL_FLAGS: u8 = CONTROL_FLAG_ENABLE_BOOT_ROM
 //===========================================================================//
 
 /// Returns a simulated SNES S-SMP memory bus.
-pub fn new_ssmp_bus(ram_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
+pub fn new_snes_ssmp_bus(ram_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
     Box::new(SsmpBus::with_ram(ram_bus))
 }
 

@@ -1,6 +1,7 @@
 use super::sim::SimSystem;
 use crate::bus::{
-    DmgBus, Mbc5Bus, SimBus, new_open_bus, new_ram_bus, new_rom_bus,
+    SimBus, new_dmg_cpu_bus, new_gb_mbc5_cart_bus, new_open_bus, new_ram_bus,
+    new_rom_bus,
 };
 use crate::proc::{SharpSm83, SimProc};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -42,12 +43,12 @@ impl GbMapper {
         } else {
             new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
         };
-        let rom_bus: Box<dyn SimBus> = new_rom_bus(rom);
-        let cart = match *self {
+        let rom_bus = new_rom_bus(rom);
+        let cart_bus = match *self {
             GbMapper::RomOnly => rom_bus,
-            GbMapper::Mbc5 => Box::new(Mbc5Bus::new(ram_bus, rom_bus)),
+            GbMapper::Mbc5 => new_gb_mbc5_cart_bus(rom_bus, ram_bus),
         };
-        Box::new(DmgBus::with_cartridge(cart))
+        new_dmg_cpu_bus(cart_bus)
     }
 }
 

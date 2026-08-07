@@ -9,8 +9,18 @@ const SELECT_FLAG_8000_FIXED: u8 = 0b0100_0000;
 
 //===========================================================================//
 
+/// Returns a simulated memory bus for an NES cartridge with an MMC3 mapper chip.
+pub fn new_nes_mmc3_cart_bus(
+    rom_bus: Box<dyn SimBus>,
+    sram_bus: Box<dyn SimBus>,
+) -> Box<dyn SimBus> {
+    Box::new(Mmc3Bus::new(sram_bus, rom_bus))
+}
+
+//===========================================================================//
+
 /// A simulated memory bus for an NES cartridge with an MMC3 mapper chip.
-pub struct Mmc3Bus {
+struct Mmc3Bus {
     ram: Box<dyn SimBus>,
     rom: Box<dyn SimBus>,
     bank_select: u8,
@@ -57,7 +67,7 @@ impl Mmc3Bus {
 impl SimBus for Mmc3Bus {
     fn description(&self) -> String {
         format!(
-            "MMC3 with {} and {}",
+            "MMC3 cartridge with {} and {}",
             self.ram.description(),
             self.rom.description()
         )

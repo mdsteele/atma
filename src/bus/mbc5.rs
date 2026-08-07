@@ -3,8 +3,19 @@ use crate::addr::Addr;
 
 //===========================================================================//
 
+/// Returns a simulated memory bus for a Game Boy cartridge with an MBC5 mapper
+/// chip.
+pub fn new_gb_mbc5_cart_bus(
+    rom_bus: Box<dyn SimBus>,
+    sram_bus: Box<dyn SimBus>,
+) -> Box<dyn SimBus> {
+    Box::new(Mbc5Bus::new(sram_bus, rom_bus))
+}
+
+//===========================================================================//
+
 /// A simulated memory bus for a Game Boy cartridge with an MBC5 mapper chip.
-pub struct Mbc5Bus {
+struct Mbc5Bus {
     ram: Box<dyn SimBus>,
     rom: Box<dyn SimBus>,
     rom_bank: u16,
@@ -34,7 +45,7 @@ impl Mbc5Bus {
 impl SimBus for Mbc5Bus {
     fn description(&self) -> String {
         format!(
-            "MBC5 with {} and {}",
+            "MBC5 cartridge with {} and {}",
             self.ram.description(),
             self.rom.description()
         )
