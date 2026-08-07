@@ -38,8 +38,6 @@ impl AsmModuleAst {
 /// assembly file.
 #[derive(Clone, Debug)]
 pub enum AsmStmtAst {
-    /// An anonymous local scope.
-    AnonymousScope(Vec<AsmStmtAst>),
     /// An `.ASSERT` directive.
     Assert(AsmAssertAst),
     /// A `.BINARY` directive.
@@ -53,11 +51,11 @@ pub enum AsmStmtAst {
     /// A macro invocation.
     Invoke(AsmInvokeAst),
     /// A label.
-    Label(IdentifierAst),
-    /// A named local scope.
-    NamedScope(IdentifierAst, Vec<AsmStmtAst>),
+    Label(AsmLabelAst),
     /// A `.RESERVE` directive.
     Reserve(AsmReserveAst),
+    /// A local scope.
+    Scope(AsmScopeAst),
     /// A `.SECTION` block.
     Section(AsmSectionAst),
     /// A `.UTF8` directive.
@@ -78,19 +76,21 @@ impl AsmStmtAst {
                 .ignore_then(linebreak())
                 .ignore_then(stmts.clone())
                 .then_ignore(symbol(TokenValue::BraceClose));
-            let anonymous_scope = braced_stmts
-                .clone()
-                .then_ignore(linebreak())
-                .map(AsmStmtAst::AnonymousScope);
-            let label_or_named_scope = IdentifierAst::parser()
-                .then_ignore(symbol(TokenValue::Colon))
+            let anonymous_scope =
+                braced_stmts.clone().then_ignore(linebreak()).map(|body| {
+                    AsmStmtAst::Scope(AsmScopeAst { label: None, body })
+                });
+            let label_or_named_scope = AsmLabelAst::parser()
                 .then(braced_stmts.clone().then_ignore(linebreak()).or_not())
                 .then_ignore(symbol(TokenValue::Linebreak).repeated())
-                .map(|(id, opt_scope)| {
+                .map(|(label, opt_scope)| {
                     if let Some(body) = opt_scope {
-                        AsmStmtAst::NamedScope(id, body)
+                        AsmStmtAst::Scope(AsmScopeAst {
+                            label: Some(label),
+                            body,
+                        })
                     } else {
-                        AsmStmtAst::Label(id)
+                        AsmStmtAst::Label(label)
                     }
                 });
             let def_macro_dir = directive(".DEFMACRO")
@@ -341,6 +341,31 @@ impl AsmInvokeAst {
 
 //===========================================================================//
 
+/// The abstract syntax tree for a label declared in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmLabelAst {
+    /// Whether the label is exported.
+    pub exported: bool,
+    /// The identifier for the label.
+    pub identifier: IdentifierAst,
+}
+
+impl AsmLabelAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmLabelAst, Extra<'a>> + Clone {
+        directive(".EXPORT")
+            .or_not()
+            .then(IdentifierAst::parser())
+            .then_ignore(symbol(TokenValue::Colon))
+            .map(|(export, identifier)| AsmLabelAst {
+                exported: export.is_some(),
+                identifier,
+            })
+    }
+}
+
+//===========================================================================//
+
 /// One argument for a macro.
 #[derive(Clone, Debug)]
 pub struct AsmMacroArgAst {
@@ -449,6 +474,18 @@ impl AsmReserveAst {
                 count,
             })
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a local scope in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmScopeAst {
+    /// The label for the scope if it is a named scope, or `None` if it is an
+    /// anonymous scope.
+    pub label: Option<AsmLabelAst>,
+    /// The statements inside the scope block.
+    pub body: Vec<AsmStmtAst>,
 }
 
 //===========================================================================//

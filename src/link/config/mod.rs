@@ -109,7 +109,7 @@ impl LinkConfig {
                 ExprValue::Integer(bigint) => Ok(Addr::wrap_bigint(bigint)),
                 _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
             })?;
-        let collision = positioned_binary.exported_symbols.insert(
+        let collision = positioned_binary.external_symbols.insert(
             export.name.clone(),
             AbsoluteLabel {
                 space: export.space.clone(),
@@ -133,7 +133,7 @@ impl LinkConfig {
             HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
         for import_name in &self.imports {
             let absolute_label =
-                positioned_binary.exported_symbols.get(import_name).cloned();
+                positioned_binary.external_symbols.get(import_name).cloned();
             if absolute_label.is_none() {
                 errs.push(LinkError::SymbolImportUnresolved {
                     symbol_name: import_name.clone(),

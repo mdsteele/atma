@@ -7,7 +7,7 @@ use crate::expr::{
     ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
-use crate::parse::{ExprAst, IdentifierAst, IdentifierKind};
+use crate::parse::{AsmLabelAst, ExprAst, IdentifierAst, IdentifierKind};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -43,10 +43,14 @@ impl AsmTypeEnv {
     }
 
     pub fn declare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
-        self.declare_label(id_ast)
+        self.declare_symbol(id_ast)
     }
 
-    pub fn declare_label(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
+    pub fn declare_label(&mut self, label_ast: &AsmLabelAst) -> AsmResult<()> {
+        self.declare_symbol(&label_ast.identifier)
+    }
+
+    fn declare_symbol(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
         match id_ast.kind {
             IdentifierKind::Standard => {}
             IdentifierKind::Builtin => {

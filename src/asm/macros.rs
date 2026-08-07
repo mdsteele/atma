@@ -1,9 +1,9 @@
 use super::error::{AsmError, AsmResult};
 use crate::error::{Errs, SrcSpan};
 use crate::parse::{
-    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmMacroArgAst,
-    AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, Token,
-    TokenValue,
+    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
+    AsmMacroArgAst, AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst,
+    IdentifierKind, Token, TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -135,11 +135,14 @@ impl<'a> MacroBuilder<'a> {
                     errs.also(self.scan_expression(message));
                 }
             }
-            AsmStmtAst::Import(id) | AsmStmtAst::Label(id) => {
+            AsmStmtAst::Import(id) => {
                 errs.also(self.scan_identifier(id));
             }
             AsmStmtAst::IntData(int_data) => {
                 errs.also(self.scan_expressions(&int_data.expressions));
+            }
+            AsmStmtAst::Label(label) => {
+                errs.also(self.scan_identifier(&label.identifier));
             }
             other => todo!("scan_statement {other:?}"), // TODO
         }
@@ -536,9 +539,10 @@ impl MacroExpansion {
                         .expand_expressions(&int_data.expressions),
                 })
             }
-            AsmStmtAst::Label(id) => {
-                AsmStmtAst::Label(self.expand_identifier(id))
-            }
+            AsmStmtAst::Label(label) => AsmStmtAst::Label(AsmLabelAst {
+                exported: label.exported,
+                identifier: self.expand_identifier(&label.identifier),
+            }),
             other => todo!("macro expand {other:?}"), // TODO
         }
     }

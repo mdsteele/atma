@@ -238,8 +238,11 @@ pub(super) struct PositionedBinary {
     pub regions: Vec<PositionedRegion>,
     /// For each object file, metadata about each chunk in that object file.
     pub file_chunk_metadata: Vec<Vec<ChunkMetadata>>,
-    /// The address of each exported symbol across the binary.
-    pub exported_symbols: HashMap<Rc<str>, AbsoluteLabel>,
+    /// The address of each external symbol across the binary.
+    pub external_symbols: HashMap<Rc<str>, AbsoluteLabel>,
+    /// For each object file, the address of each internal symbol in that
+    /// object files.
+    pub internal_symbols: Vec<HashMap<Rc<str>, AbsoluteLabel>>,
 }
 
 impl PositionedBinary {
@@ -252,31 +255,39 @@ impl PositionedBinary {
         let chunk_metadata =
             PositionedBinary::make_chunk_metadata(&positioned_regions);
 
-        let mut exported_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
+        let mut external_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
+        let mut internal_symbols =
+            Vec::<HashMap<Rc<str>, AbsoluteLabel>>::with_capacity(
+                object_files.len(),
+            );
         let mut errs = Errs::<LinkError>::new();
         for (object_index, object_file) in object_files.iter().enumerate() {
+            let mut file_internal_symbols =
+                HashMap::<Rc<str>, AbsoluteLabel>::new();
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
                 let chunk_id = ChunkId { object_index, chunk_index };
                 let chunk_start = chunk_metadata[&chunk_id].start.clone();
                 for symbol in chunk.symbols.iter() {
-                    if !symbol.exported {
-                        continue;
-                    }
                     let symbol_addr = chunk_start.address + symbol.offset;
-                    let collision = exported_symbols.insert(
-                        symbol.name.clone(),
-                        AbsoluteLabel {
-                            space: chunk_start.space.clone(),
-                            address: symbol_addr,
-                        },
-                    );
-                    if collision.is_some() {
-                        errs.push(LinkError::SymbolExportCollision {
-                            symbol_name: symbol.name.clone(),
-                        });
+                    let symbol_label = AbsoluteLabel {
+                        space: chunk_start.space.clone(),
+                        address: symbol_addr,
+                    };
+                    if symbol.exported {
+                        let collision = external_symbols
+                            .insert(symbol.name.clone(), symbol_label);
+                        if collision.is_some() {
+                            errs.push(LinkError::SymbolExportCollision {
+                                symbol_name: symbol.name.clone(),
+                            });
+                        }
+                    } else {
+                        file_internal_symbols
+                            .insert(symbol.name.clone(), symbol_label);
                     }
                 }
             }
+            internal_symbols.push(file_internal_symbols);
         }
         errs.result()?;
 
@@ -296,7 +307,8 @@ impl PositionedBinary {
         Ok(PositionedBinary {
             regions: positioned_regions,
             file_chunk_metadata,
-            exported_symbols,
+            external_symbols,
+            internal_symbols,
         })
     }
 

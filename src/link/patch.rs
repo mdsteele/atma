@@ -29,15 +29,21 @@ impl PatchedFile {
             object_files.len(),
             positioned_binary.file_chunk_metadata.len()
         );
+        debug_assert_eq!(
+            object_files.len(),
+            positioned_binary.internal_symbols.len()
+        );
         let mut errs = Errs::<LinkError>::new();
         let patched_files = object_files
             .into_iter()
             .zip(&positioned_binary.file_chunk_metadata)
-            .filter_map(|(file, chunk_metadata)| {
+            .zip(&positioned_binary.internal_symbols)
+            .filter_map(|((file, chunk_metadata), internal_symbols)| {
                 errs.ok(PatchedFile::patch(
                     file,
                     chunk_metadata,
-                    &positioned_binary.exported_symbols,
+                    &positioned_binary.external_symbols,
+                    internal_symbols,
                 ))
             })
             .collect::<Vec<PatchedFile>>();
@@ -48,13 +54,14 @@ impl PatchedFile {
     fn patch(
         object_file: ObjFile,
         chunk_metadata: &[ChunkMetadata],
-        exported_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
+        external_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
+        internal_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
     ) -> LinkResult<PatchedFile> {
         let mut errs = Errs::<LinkError>::new();
         let mut symbol_addrs =
             HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
         for name in object_file.imports {
-            let addr = exported_symbols.get(&name).cloned();
+            let addr = external_symbols.get(&name).cloned();
             if addr.is_none() {
                 errs.push(LinkError::SymbolImportUnresolved {
                     symbol_name: name.clone(),
@@ -64,14 +71,12 @@ impl PatchedFile {
         }
         for chunk in &object_file.chunks {
             for symbol in chunk.symbols.iter() {
-                // TODO: don't use `exported_symbols` for local symbols
-                let addr = exported_symbols.get(&symbol.name).cloned();
-                if addr.is_none() {
-                    errs.push(LinkError::SymbolImportUnresolved {
-                        symbol_name: symbol.name.clone(),
-                    });
-                }
-                symbol_addrs.insert(symbol.name.clone(), addr);
+                let addr = if symbol.exported {
+                    external_symbols.get(&symbol.name).unwrap().clone()
+                } else {
+                    internal_symbols.get(&symbol.name).unwrap().clone()
+                };
+                symbol_addrs.insert(symbol.name.clone(), Some(addr));
             }
         }
 

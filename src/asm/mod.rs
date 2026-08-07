@@ -15,8 +15,9 @@ use crate::obj::{
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
-    AsmIntTypeAst, AsmInvokeAst, AsmModuleAst, AsmReserveAst, AsmSectionAst,
-    AsmStmtAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
+    AsmIntTypeAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst, AsmReserveAst,
+    AsmScopeAst, AsmSectionAst, AsmStmtAst, AsmUtf8DataAst, ExprAst,
+    IdentifierAst,
 };
 use arch::ArchTree;
 use env::AsmTypeEnv;
@@ -115,18 +116,15 @@ impl<'a> Assembler<'a> {
         statement: &AsmStmtAst,
     ) -> AsmResult<()> {
         match statement {
-            AsmStmtAst::AnonymousScope(_) => Ok(()),
             AsmStmtAst::Assert(_) => Ok(()),
             AsmStmtAst::Binary(_) => Ok(()),
             AsmStmtAst::DefMacro(_) => Ok(()),
             AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::IntData(_) => Ok(()),
             AsmStmtAst::Invoke(_) => Ok(()),
-            AsmStmtAst::Label(id) => self.predeclare_label(id),
-            AsmStmtAst::NamedScope(id, body) => {
-                self.predeclare_named_scope(id, body)
-            }
+            AsmStmtAst::Label(label) => self.predeclare_label(label),
             AsmStmtAst::Reserve(_) => Ok(()),
+            AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
             AsmStmtAst::Section(section) => self.predeclare_section(section),
             AsmStmtAst::Utf8Data(_) => Ok(()),
         }
@@ -137,22 +135,22 @@ impl<'a> Assembler<'a> {
         self.env.declare_import(id_ast)
     }
 
-    fn predeclare_label(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
+    fn predeclare_label(&mut self, label_ast: &AsmLabelAst) -> AsmResult<()> {
         // TODO: error if name is reserved in current arch
-        self.env.declare_label(id_ast)
+        self.env.declare_label(label_ast)
     }
 
-    fn predeclare_named_scope(
-        &mut self,
-        id: &IdentifierAst,
-        body: &[AsmStmtAst],
-    ) -> AsmResult<()> {
-        let mut errs = Errs::<AsmError>::new();
-        errs.also(self.predeclare_label(id));
-        self.env.begin_scope(&id.name);
-        errs.also(self.predeclare_statements(body));
-        self.env.end_scope();
-        errs.result()
+    fn predeclare_scope(&mut self, scope_ast: &AsmScopeAst) -> AsmResult<()> {
+        if let Some(label_ast) = &scope_ast.label {
+            let mut errs = Errs::<AsmError>::new();
+            errs.also(self.predeclare_label(label_ast));
+            self.env.begin_scope(&label_ast.identifier.name);
+            errs.also(self.predeclare_statements(&scope_ast.body));
+            self.env.end_scope();
+            errs.result()
+        } else {
+            Ok(())
+        }
     }
 
     fn predeclare_section(
@@ -184,37 +182,18 @@ impl<'a> Assembler<'a> {
     /// data.
     fn expand_statement(&mut self, statement: AsmStmtAst) -> AsmResult<()> {
         match statement {
-            AsmStmtAst::AnonymousScope(body) => {
-                self.expand_anonymous_scope(body)
-            }
             AsmStmtAst::Assert(assert) => self.expand_assert(assert),
             AsmStmtAst::Binary(data) => self.expand_binary_data(data),
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::IntData(data) => self.expand_int_data(data),
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
-            AsmStmtAst::Label(id) => self.expand_label(id),
-            AsmStmtAst::NamedScope(id, body) => {
-                self.expand_named_scope(id, body)
-            }
+            AsmStmtAst::Label(label) => self.expand_label(label),
+            AsmStmtAst::Scope(scope) => self.expand_scope(scope),
             AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
             AsmStmtAst::Section(section) => self.expand_section(section),
             AsmStmtAst::Utf8Data(data) => self.expand_utf8_data(data),
         }
-    }
-
-    fn expand_anonymous_scope(
-        &mut self,
-        body: Vec<AsmStmtAst>,
-    ) -> AsmResult<()> {
-        let mut errs = Errs::<AsmError>::new();
-        let name = format!("${:x}", self.next_anonymous_scope_number);
-        self.next_anonymous_scope_number += 1;
-        self.env.begin_scope(&Rc::<str>::from(name));
-        errs.also(self.predeclare_statements(&body));
-        errs.also(self.expand_statements(body));
-        self.env.end_scope();
-        errs.result()
     }
 
     fn expand_assert(&mut self, assert_ast: AsmAssertAst) -> AsmResult<()> {
@@ -295,32 +274,42 @@ impl<'a> Assembler<'a> {
         errs.result()
     }
 
-    fn expand_label(&mut self, id_ast: IdentifierAst) -> AsmResult<()> {
-        let full_name = self.env.look_up_symbol(&id_ast.name).unwrap();
+    fn expand_label(&mut self, label_ast: AsmLabelAst) -> AsmResult<()> {
+        let full_name =
+            self.env.look_up_symbol(&label_ast.identifier.name).unwrap();
         let Some(chunk_env) = self.env.current_chunk() else {
             return Err(Errs::one(AsmError::DirectiveNotInSection {
                 directive: "label",
-                span: id_ast.span,
+                span: label_ast.identifier.span,
             }));
         };
         chunk_env.add_symbol(ObjSymbol {
             name: full_name,
-            exported: true, // TODO
+            exported: label_ast.exported,
             offset: Offset::try_from(chunk_env.total_size()).unwrap(), // TODO
         });
         Ok(())
     }
 
-    fn expand_named_scope(
-        &mut self,
-        id: IdentifierAst,
-        body: Vec<AsmStmtAst>,
-    ) -> AsmResult<()> {
+    fn expand_scope(&mut self, scope_ast: AsmScopeAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let scope_name = id.name.clone();
-        errs.also(self.expand_label(id));
+        let (scope_name, anonymous) = match scope_ast.label {
+            Some(label_ast) => {
+                let name = label_ast.identifier.name.clone();
+                errs.also(self.expand_label(label_ast));
+                (name, false)
+            }
+            None => {
+                let name = format!("${:x}", self.next_anonymous_scope_number);
+                self.next_anonymous_scope_number += 1;
+                (Rc::<str>::from(name), true)
+            }
+        };
         self.env.begin_scope(&scope_name);
-        errs.also(self.expand_statements(body));
+        if anonymous {
+            errs.also(self.predeclare_statements(&scope_ast.body));
+        }
+        errs.also(self.expand_statements(scope_ast.body));
         self.env.end_scope();
         errs.result()
     }
