@@ -253,6 +253,12 @@ impl<'a> AdsCompiler<'a> {
                                 context: self.env.current_src_context(),
                             }),
                         });
+                        // TODO: Isolate the environment somehow here;
+                        // variables from the parent source file should not
+                        // be visible to the child source file, nor
+                        // vice-versa; only handlers declared in the child
+                        // source file should affect the parent source
+                        // file.
                         self.env.push_src_context(context);
                         if let Some(module) =
                             errs.ok(self.env.parse_source(source_code))

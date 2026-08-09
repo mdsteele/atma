@@ -13,7 +13,8 @@ pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst, DeclareAst};
 pub use asm::{
     AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
     AsmIntTypeAst, AsmInvokeAst, AsmLabelAst, AsmMacroArgAst, AsmModuleAst,
-    AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmStmtAst, AsmUtf8DataAst,
+    AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmStmtAst, AsmUseAst,
+    AsmUtf8DataAst,
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{

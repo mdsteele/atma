@@ -1,4 +1,5 @@
 use super::arch::ArchTree;
+use super::error::{AsmSrcContext, AsmSrcParent};
 use super::macros::MacroTable;
 use crate::addr::Endianness;
 use crate::error::SrcSpan;
@@ -1018,6 +1019,10 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
     let mut builder = BuiltinBuilder {
         arch_tree,
         macros: MacroTable::new(),
+        context: Rc::new(AsmSrcContext {
+            path: Rc::from(""), // internal definition
+            parent: AsmSrcParent::Root,
+        }),
         placeholder_addr: Rc::from("%ADDR"),
         placeholder_addr2: Rc::from("%ADDR2"),
         placeholder_imm: Rc::from("%IMM"),
@@ -1066,6 +1071,7 @@ pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
 struct BuiltinBuilder {
     arch_tree: ArchTree,
     macros: MacroTable,
+    context: Rc<AsmSrcContext>,
     placeholder_addr: Rc<str>,
     placeholder_addr2: Rc<str>,
     placeholder_imm: Rc<str>,
@@ -1316,7 +1322,9 @@ impl BuiltinBuilder {
         };
         let definition = AsmDefMacroAst { id: macro_id(name), params, body };
         let reserved = self.arch_tree.reserved_names(arch);
-        self.macros.define(arch, reserved, definition).unwrap();
+        self.macros
+            .define(self.context.clone(), arch, reserved, definition)
+            .unwrap();
     }
 
     fn addr_arg(&self) -> AsmMacroArgAst {

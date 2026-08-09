@@ -1,9 +1,9 @@
-use super::error::{AsmError, AsmResult};
+use super::error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc};
 use crate::error::{Errs, SrcSpan};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
     AsmMacroArgAst, AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst,
-    IdentifierKind, Token, TokenValue,
+    IdentifierKind, ParseResult, Token, TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -21,6 +21,7 @@ impl MacroTable {
 
     pub fn expand(
         &self,
+        context: &Rc<AsmSrcContext>,
         arches: &[Rc<str>],
         invoke_ast: AsmInvokeAst,
     ) -> AsmResult<Vec<AsmStmtAst>> {
@@ -33,7 +34,7 @@ impl MacroTable {
             };
             if let Some(definitions) = self.definitions.get(&signature) {
                 for definition in definitions.iter().rev() {
-                    match definition.try_expand(&invoke_ast.args) {
+                    match definition.try_expand(context, &invoke_ast.args) {
                         Err(MacroError::FailedToMatchPattern) => continue,
                         Err(MacroError::FailedToParseArguments(errors)) => {
                             return Err(errors);
@@ -50,20 +51,27 @@ impl MacroTable {
         Err(Errs::one(AsmError::UnmatchedMacroInvocation {
             macro_name: name,
             arch,
-            invocation_span: invoke_ast.id.span,
+            invocation_loc: AsmSrcLoc {
+                span: invoke_ast.id.span,
+                context: context.clone(),
+            },
         }))
     }
 
     pub fn define(
         &mut self,
+        context: Rc<AsmSrcContext>,
         arch: &Rc<str>,
         reserved: &HashSet<Rc<str>>,
         def_macro_ast: AsmDefMacroAst,
     ) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let num_args = def_macro_ast.params.len();
-        let mut builder = errs
-            .with(MacroBuilder::with_params(def_macro_ast.params, reserved));
+        let mut builder = errs.with(MacroBuilder::with_params(
+            context,
+            def_macro_ast.params,
+            reserved,
+        ));
         errs.also(builder.scan_statements(&def_macro_ast.body));
         let Some(params) = errs.ok(builder.build()) else {
             return Err(errs);
@@ -84,6 +92,7 @@ impl MacroTable {
 
 /// Helper type for `MacroTable::define`.
 struct MacroBuilder<'a> {
+    context: Rc<AsmSrcContext>,
     params: Vec<AsmMacroArgAst>,
     placeholders: HashMap<Rc<str>, PlaceholderKind>,
     reserved: &'a HashSet<Rc<str>>,
@@ -91,6 +100,7 @@ struct MacroBuilder<'a> {
 
 impl<'a> MacroBuilder<'a> {
     fn with_params(
+        context: Rc<AsmSrcContext>,
         params: Vec<AsmMacroArgAst>,
         reserved: &'a HashSet<Rc<str>>,
     ) -> (MacroBuilder<'a>, Errs<AsmError>) {
@@ -102,8 +112,14 @@ impl<'a> MacroBuilder<'a> {
                     if let Some(&prev_span) = placeholders.get(name) {
                         errs.push(AsmError::DuplicateMacroPlaceholder {
                             placeholder_name: name.clone(),
-                            placeholder_span: token.span,
-                            prev_span,
+                            placeholder_loc: AsmSrcLoc {
+                                span: token.span,
+                                context: context.clone(),
+                            },
+                            prev_loc: AsmSrcLoc {
+                                span: prev_span,
+                                context: context.clone(),
+                            },
                         });
                     } else {
                         placeholders.insert(name.clone(), token.span);
@@ -115,7 +131,7 @@ impl<'a> MacroBuilder<'a> {
             .into_keys()
             .map(|name| (name, PlaceholderKind::default()))
             .collect();
-        (MacroBuilder { params, placeholders, reserved }, errs)
+        (MacroBuilder { context, params, placeholders, reserved }, errs)
     }
 
     fn scan_statements(&mut self, statements: &[AsmStmtAst]) -> AsmResult<()> {
@@ -222,7 +238,7 @@ impl<'a> MacroBuilder<'a> {
         } else {
             Err(Errs::one(AsmError::UnknownMacroPlaceholder {
                 name: name.clone(),
-                span,
+                loc: AsmSrcLoc { span, context: self.context.clone() },
             }))
         }
     }
@@ -267,7 +283,10 @@ impl<'a> MacroBuilder<'a> {
                 }
                 _ => {
                     errs.push(AsmError::MultipleMacroPlaceholders {
-                        span: param.span,
+                        loc: AsmSrcLoc {
+                            span: param.span,
+                            context: self.context.clone(),
+                        },
                     });
                     continue;
                 }
@@ -334,9 +353,11 @@ struct MacroDefinition {
 impl MacroDefinition {
     pub fn try_expand(
         &self,
+        context: &Rc<AsmSrcContext>,
         args: &[AsmMacroArgAst],
     ) -> MacroResult<Vec<AsmStmtAst>> {
-        let expansion = MacroExpansion::try_match(&self.params, args)?;
+        let expansion =
+            MacroExpansion::try_match(context, &self.params, args)?;
         Ok(expansion.expand_statements(&self.body))
     }
 }
@@ -444,14 +465,14 @@ impl MacroSubstitution {
     fn parse_tokens(
         kind: PlaceholderKind,
         tokens: &[Token],
-    ) -> AsmResult<MacroSubstitution> {
+    ) -> ParseResult<MacroSubstitution> {
         match kind {
             PlaceholderKind::Expression => {
-                let expr = ExprAst::parse(tokens).map_err(Errs::coerce)?;
+                let expr = ExprAst::parse(tokens)?;
                 Ok(MacroSubstitution::Expression(expr))
             }
             PlaceholderKind::Identifier => {
-                let id = IdentifierAst::parse(tokens).map_err(Errs::coerce)?;
+                let id = IdentifierAst::parse(tokens)?;
                 Ok(MacroSubstitution::Identifier(id))
             }
         }
@@ -483,6 +504,7 @@ struct MacroExpansion {
 
 impl MacroExpansion {
     fn try_match(
+        context: &Rc<AsmSrcContext>,
         params: &[MacroParameter],
         args: &[AsmMacroArgAst],
     ) -> MacroResult<MacroExpansion> {
@@ -501,7 +523,13 @@ impl MacroExpansion {
                 MacroArgument::Exact => {}
                 MacroArgument::Placeholder { kind, name, tokens } => {
                     if let Some(sub) =
-                        errs.ok(MacroSubstitution::parse_tokens(kind, tokens))
+                        errs.ok(MacroSubstitution::parse_tokens(kind, tokens)
+                            .map_err(|errs| {
+                                errs.map(|error| AsmError::ParseError {
+                                    context: context.clone(),
+                                    error,
+                                })
+                            }))
                     {
                         subs.insert(name, sub);
                     }

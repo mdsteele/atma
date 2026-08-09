@@ -1,5 +1,5 @@
 use super::arch::ArchTree;
-use super::error::{AsmError, AsmResult};
+use super::error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc};
 use crate::addr::Offset;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
@@ -7,7 +7,9 @@ use crate::expr::{
     ExprType, ExprTypeError, ExprTypeResult, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
-use crate::parse::{AsmLabelAst, ExprAst, IdentifierAst, IdentifierKind};
+use crate::parse::{
+    AsmLabelAst, AsmModuleAst, ExprAst, IdentifierAst, IdentifierKind,
+};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -19,11 +21,12 @@ pub(super) struct AsmTypeEnv {
     labels: HashMap<Rc<str>, SrcSpan>,
     arch_stack: Vec<Rc<str>>,
     chunk_stack: Vec<ChunkEnv>,
+    context_stack: Vec<Rc<AsmSrcContext>>,
     scope_stack: Vec<ScopeEnv>,
 }
 
 impl AsmTypeEnv {
-    pub fn new() -> AsmTypeEnv {
+    pub fn new(root_path: Rc<str>) -> AsmTypeEnv {
         let mut builtins = HashMap::<Rc<str>, (ExprValue, ExprType)>::new();
         let expr_type = ExprType::Function(Rc::new((
             ExprType::Integer,
@@ -33,13 +36,39 @@ impl AsmTypeEnv {
             let value = ExprValue::Function(func);
             builtins.insert(Rc::from(func.name()), (value, expr_type.clone()));
         }
+        let root_context = Rc::new(AsmSrcContext::root(root_path));
         AsmTypeEnv {
             builtins,
             labels: HashMap::new(),
             arch_stack: vec![Rc::from(ArchTree::ROOT_ARCH_NAME)],
             chunk_stack: Vec::new(),
+            context_stack: vec![root_context],
             scope_stack: Vec::new(),
         }
+    }
+
+    pub fn current_src_context(&self) -> Rc<AsmSrcContext> {
+        debug_assert!(!self.context_stack.is_empty());
+        self.context_stack.last().unwrap().clone()
+    }
+
+    pub fn push_src_context(&mut self, context: Rc<AsmSrcContext>) {
+        self.context_stack.push(context);
+    }
+
+    pub fn pop_src_context(&mut self) {
+        debug_assert!(self.context_stack.len() >= 2);
+        self.context_stack.pop();
+    }
+
+    pub fn parse_source(&self, source_code: &str) -> AsmResult<AsmModuleAst> {
+        AsmModuleAst::parse_source(source_code).map_err(|errs| {
+            let context = self.current_src_context();
+            errs.map(|error| AsmError::ParseError {
+                context: context.clone(),
+                error,
+            })
+        })
     }
 
     pub fn declare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
@@ -55,7 +84,7 @@ impl AsmTypeEnv {
             IdentifierKind::Standard => {}
             IdentifierKind::Builtin => {
                 return Err(Errs::one(AsmError::DeclNameIsBuiltin {
-                    span: id_ast.span,
+                    loc: self.make_loc(id_ast.span),
                     name: id_ast.name.clone(),
                 }));
             }
@@ -69,8 +98,8 @@ impl AsmTypeEnv {
         if let Some(&prev_span) = self.labels.get(&full_name) {
             Err(Errs::one(AsmError::SymbolAlreadyDeclared {
                 full_name,
-                name_span: id_ast.span,
-                prev_span,
+                name_loc: self.make_loc(id_ast.span),
+                prev_loc: self.make_loc(prev_span),
             }))
         } else {
             self.labels.insert(full_name, id_ast.span);
@@ -114,6 +143,10 @@ impl AsmTypeEnv {
         self.scope_stack.push(ScopeEnv { prefix });
     }
 
+    pub fn is_at_top_level(&self) -> bool {
+        self.scope_stack.is_empty() && self.chunk_stack.is_empty()
+    }
+
     fn current_scope_prefix(&self) -> Option<&str> {
         self.scope_stack.last().map(|scope| &*scope.prefix)
     }
@@ -143,9 +176,18 @@ impl AsmTypeEnv {
         expr: ExprAst,
     ) -> AsmResult<(ObjExpr, ExprType)> {
         let (ops, expr_type, _static_value) =
-            ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;
+            ExprCompiler::new(self).typecheck(expr).map_err(|errs| {
+                errs.map(|error| AsmError::ExprTypeError {
+                    context: self.current_src_context(),
+                    error,
+                })
+            })?;
         debug_assert!(!ops.is_empty());
         Ok((ObjExpr { ops }, expr_type))
+    }
+
+    pub fn make_loc(&self, span: SrcSpan) -> AsmSrcLoc {
+        AsmSrcLoc { span, context: self.current_src_context() }
     }
 }
 

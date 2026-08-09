@@ -66,7 +66,7 @@ impl SourceContext for AdsSrcContext {
 
 //===========================================================================//
 
-/// Describe the circumstances that gave rise to a particular
+/// Describes the circumstances that gave rise to a particular
 /// [`AdsSrcContext`].
 #[derive(Debug)]
 pub enum AdsSrcParent {

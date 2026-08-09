@@ -16,12 +16,12 @@ use crate::obj::{
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
     AsmIntTypeAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst, AsmReserveAst,
-    AsmScopeAst, AsmSectionAst, AsmStmtAst, AsmUtf8DataAst, ExprAst,
-    IdentifierAst,
+    AsmScopeAst, AsmSectionAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst,
+    ExprAst, IdentifierAst,
 };
 use arch::ArchTree;
 use env::AsmTypeEnv;
-pub use error::{AsmError, AsmResult};
+pub use error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc, AsmSrcParent};
 use macros::MacroTable;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -38,22 +38,12 @@ pub fn assemble_source(
     src_path: Rc<str>,
     source_code: &str,
 ) -> AsmResult<ObjFile> {
-    assemble_ast(
-        cache,
-        src_path,
-        AsmModuleAst::parse_source(source_code).map_err(Errs::coerce)?,
-    )
-}
-
-fn assemble_ast(
-    cache: &mut dyn SrcCache,
-    src_path: Rc<str>,
-    module: AsmModuleAst,
-) -> AsmResult<ObjFile> {
     let mut errs = Errs::<AsmError>::new();
     let mut assembler = Assembler::new(cache, src_path);
-    errs.also(assembler.predeclare_module(&module));
-    errs.also(assembler.expand_module(module));
+    if let Some(module) = errs.ok(assembler.env.parse_source(source_code)) {
+        errs.also(assembler.predeclare_module(&module));
+        errs.also(assembler.expand_module(module));
+    }
     errs.result()?;
     Ok(assembler.finish())
 }
@@ -62,7 +52,6 @@ fn assemble_ast(
 
 struct Assembler<'a> {
     cache: &'a mut dyn SrcCache,
-    src_path: Rc<str>,
     arch_tree: ArchTree,
     macros: MacroTable,
     next_anonymous_scope_number: u32,
@@ -74,15 +63,14 @@ struct Assembler<'a> {
 }
 
 impl<'a> Assembler<'a> {
-    fn new(cache: &'a mut dyn SrcCache, src_path: Rc<str>) -> Assembler<'a> {
+    fn new(cache: &'a mut dyn SrcCache, root_path: Rc<str>) -> Assembler<'a> {
         let (arch_tree, macros) = builtins::make_builtins();
         Assembler {
             cache,
-            src_path,
             arch_tree,
             macros,
             next_anonymous_scope_number: 0,
-            env: AsmTypeEnv::new(),
+            env: AsmTypeEnv::new(root_path),
             next_chunk_index: 0,
             chunks: BTreeMap::new(),
             imports: Vec::new(),
@@ -126,6 +114,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Reserve(_) => Ok(()),
             AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
             AsmStmtAst::Section(section) => self.predeclare_section(section),
+            AsmStmtAst::Use(_) => Ok(()),
             AsmStmtAst::Utf8Data(_) => Ok(()),
         }
     }
@@ -192,6 +181,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Scope(scope) => self.expand_scope(scope),
             AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
             AsmStmtAst::Section(section) => self.expand_section(section),
+            AsmStmtAst::Use(file) => self.expand_use_file(file),
             AsmStmtAst::Utf8Data(data) => self.expand_utf8_data(data),
         }
     }
@@ -230,7 +220,7 @@ impl<'a> Assembler<'a> {
                             }
                         };
                         errs.push(AsmError::AssertionStaticallyFailed {
-                            condition_span,
+                            condition_loc: self.env.make_loc(condition_span),
                             additional_message,
                         });
                         return errs.result();
@@ -256,7 +246,12 @@ impl<'a> Assembler<'a> {
     ) -> AsmResult<()> {
         let arch = self.env.current_arch();
         let reserved = self.arch_tree.reserved_names(arch);
-        self.macros.define(arch, reserved, def_macro_ast)
+        self.macros.define(
+            self.env.current_src_context(),
+            arch,
+            reserved,
+            def_macro_ast,
+        )
     }
 
     fn expand_macro_invocation(
@@ -264,9 +259,10 @@ impl<'a> Assembler<'a> {
         invoke_ast: AsmInvokeAst,
     ) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
+        let context = self.env.current_src_context();
         let arches = self.arch_tree.get_all_ancestors(self.env.current_arch());
         if let Some(statements) =
-            errs.ok(self.macros.expand(&arches, invoke_ast))
+            errs.ok(self.macros.expand(&context, &arches, invoke_ast))
         {
             errs.also(self.predeclare_statements(&statements));
             errs.also(self.expand_statements(statements));
@@ -280,7 +276,7 @@ impl<'a> Assembler<'a> {
         let Some(chunk_env) = self.env.current_chunk() else {
             return Err(Errs::one(AsmError::DirectiveNotInSection {
                 directive: "label",
-                span: label_ast.identifier.span,
+                loc: self.env.make_loc(label_ast.identifier.span),
             }));
         };
         chunk_env.add_symbol(ObjSymbol {
@@ -319,7 +315,7 @@ impl<'a> Assembler<'a> {
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
                 directive: ".RESERVE",
-                span: reserve_ast.directive_span,
+                loc: self.env.make_loc(reserve_ast.directive_span),
             });
         }
         let count: u64 = if let Some(expr_ast) = reserve_ast.count {
@@ -337,7 +333,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::DirectiveExprOutOfRange {
                         directive: ".RESERVE",
                         component: "count",
-                        expr_span,
+                        expr_loc: self.env.make_loc(expr_span),
                         expr_value: value.unwrap_int_ref().clone(),
                         valid_range: bigint_range(u64::MIN, u64::MAX),
                     });
@@ -407,7 +403,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::InvalidAttrName {
                         directive: ".SECTION",
                         attr_name: id_ast.name,
-                        attr_span: id_ast.span,
+                        attr_loc: self.env.make_loc(id_ast.span),
                     });
                 }
             }
@@ -443,68 +439,81 @@ impl<'a> Assembler<'a> {
         errs.result()
     }
 
+    fn expand_use_file(&mut self, use_ast: AsmUseAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        if !self.env.is_at_top_level() {
+            errs.push(AsmError::DirectiveNotAtTopLevel {
+                directive: ".USE",
+                loc: self.env.make_loc(use_ast.directive_span),
+            });
+        }
+        let path_span = use_ast.path.span;
+        if let Some(path) =
+            errs.ok(self.typecheck_static_path_expr(".USE", use_ast.path))
+        {
+            // TODO: skip if we've already used this path
+            match self.cache.fetch_or_get_cached_utf8(&path) {
+                Ok(source_code) => {
+                    let context = Rc::new(AsmSrcContext {
+                        path,
+                        parent: AsmSrcParent::Use(AsmSrcLoc {
+                            span: path_span,
+                            context: self.env.current_src_context(),
+                        }),
+                    });
+                    // TODO: Isolate the environment somehow here; variables
+                    // from the parent source file should not be visible to the
+                    // child source file, nor vice-versa; only handlers
+                    // declared in the child source file should affect the
+                    // parent source file.
+                    self.env.push_src_context(context);
+                    if let Some(module) =
+                        errs.ok(self.env.parse_source(source_code))
+                        && self.env.is_at_top_level()
+                    {
+                        errs.also(self.predeclare_module(&module));
+                        errs.also(self.expand_module(module));
+                    }
+                    self.env.pop_src_context();
+                }
+                Err(error) => {
+                    errs.push(AsmError::SrcCacheError {
+                        path,
+                        path_loc: self.env.make_loc(path_span),
+                        error,
+                    });
+                }
+            }
+        }
+        errs.result()
+    }
+
     fn expand_binary_data(&mut self, data_ast: AsmBinaryAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
                 directive: ".BINARY",
-                span: data_ast.directive_span,
+                loc: self.env.make_loc(data_ast.directive_span),
             });
         }
-        let path_span = data_ast.path_expr.span;
-        match errs.ok(self.typecheck_expression(data_ast.path_expr)) {
-            Some((expr, ExprType::String)) => {
-                let Some(path_value) = expr.static_value() else {
-                    errs.push(AsmError::DirectiveExprNotStatic {
-                        directive: ".BINARY",
-                        component: "path",
-                        expr_span: path_span,
+        let path_span = data_ast.path.span;
+        if let Some(path) =
+            errs.ok(self.typecheck_static_path_expr(".BINARY", data_ast.path))
+            && let Some(chunk_env) = self.env.current_chunk()
+        {
+            let chunk_data = chunk_env.data_mut();
+            match self.cache.fetch_and_write_data(&path, chunk_data) {
+                Ok(()) => {}
+                Err(error) => {
+                    errs.push(AsmError::SrcCacheError {
+                        path,
+                        path_loc: self.env.make_loc(path_span),
+                        error,
                     });
-                    return errs.result();
-                };
-                let path = self.joined_path(path_value.unwrap_str_ref());
-                let Some(chunk_env) = self.env.current_chunk() else {
-                    return errs.result();
-                };
-                let chunk_data = chunk_env.data_mut();
-                match self.cache.fetch_and_write_data(&path, chunk_data) {
-                    Ok(()) => {}
-                    Err(error) => {
-                        errs.push(AsmError::SrcCacheError {
-                            path,
-                            path_span,
-                            error,
-                        });
-                    }
                 }
             }
-            Some((_, expr_type)) => {
-                errs.push(AsmError::DirectiveExprTypeError {
-                    directive: ".BINARY",
-                    component: "path",
-                    expr_span: path_span,
-                    expr_type,
-                    valid_types: vec![ExprType::String],
-                });
-            }
-            None => {}
         }
         errs.result()
-    }
-
-    /// Given a relative path appearing in this assembly source file (e.g. in a
-    /// `.BINARY` directive), join that path to this source file's parent
-    /// directory.
-    fn joined_path(&self, relative_path: &Rc<str>) -> Rc<str> {
-        match AsRef::<Path>::as_ref(&*self.src_path).parent() {
-            None => relative_path.clone(),
-            Some(base_path) => {
-                let joined = base_path.join(&**relative_path);
-                // We can safely `unwrap()` the `to_str()` here because
-                // `joined` was made from `Path`s that came from `str`s.
-                Rc::<str>::from(joined.to_str().unwrap())
-            }
-        }
     }
 
     fn expand_utf8_data(&mut self, data_ast: AsmUtf8DataAst) -> AsmResult<()> {
@@ -512,7 +521,7 @@ impl<'a> Assembler<'a> {
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
                 directive: ".UTF8",
-                span: data_ast.directive_span,
+                loc: self.env.make_loc(data_ast.directive_span),
             });
         }
         for expr_ast in data_ast.expressions {
@@ -523,7 +532,7 @@ impl<'a> Assembler<'a> {
                         errs.push(AsmError::DirectiveExprNotStatic {
                             directive: ".UTF8",
                             component: "value",
-                            expr_span,
+                            expr_loc: self.env.make_loc(expr_span),
                         });
                         return errs.result();
                     };
@@ -531,7 +540,7 @@ impl<'a> Assembler<'a> {
                     let Some(chr) = bigint.to_u32().and_then(char::from_u32)
                     else {
                         errs.push(AsmError::InvalidUnicodeScalarValue {
-                            expr_span,
+                            expr_loc: self.env.make_loc(expr_span),
                             expr_value: bigint.clone(),
                         });
                         return errs.result();
@@ -547,7 +556,7 @@ impl<'a> Assembler<'a> {
                         errs.push(AsmError::DirectiveExprNotStatic {
                             directive: ".UTF8",
                             component: "value",
-                            expr_span,
+                            expr_loc: self.env.make_loc(expr_span),
                         });
                         return errs.result();
                     };
@@ -561,7 +570,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive: ".UTF8",
                         component: "value",
-                        expr_span,
+                        expr_loc: self.env.make_loc(expr_span),
                         expr_type: ty,
                         valid_types: vec![ExprType::String, ExprType::Integer],
                     });
@@ -578,13 +587,13 @@ impl<'a> Assembler<'a> {
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
                 directive,
-                span: int_data.directive_span,
+                loc: self.env.make_loc(int_data.directive_span),
             });
         }
         let Some(int_type) = self.int_patch_type(int_data.int_type) else {
             errs.push(AsmError::ArchHasNoEndianness {
                 directive,
-                span: int_data.directive_span,
+                loc: self.env.make_loc(int_data.directive_span),
                 arch: self.env.current_arch().clone(),
             });
             return errs.result();
@@ -611,7 +620,7 @@ impl<'a> Assembler<'a> {
                                 errs.push(AsmError::DirectiveExprOutOfRange {
                                     directive,
                                     component: "value",
-                                    expr_span,
+                                    expr_loc: self.env.make_loc(expr_span),
                                     expr_value: bigint.clone(),
                                     valid_range: RangeInclusive {
                                         start: BigInt::from(range.start),
@@ -632,7 +641,7 @@ impl<'a> Assembler<'a> {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive,
                         component: "value",
-                        expr_span,
+                        expr_loc: self.env.make_loc(expr_span),
                         expr_type: ty,
                         valid_types: vec![ExprType::Integer, ExprType::Label],
                     });
@@ -733,7 +742,7 @@ impl<'a> Assembler<'a> {
         } else {
             Err(Errs::one(AsmError::UnknownArch {
                 arch: arch.clone(),
-                span: expr_span,
+                loc: self.env.make_loc(expr_span),
             }))
         }
     }
@@ -745,7 +754,7 @@ impl<'a> Assembler<'a> {
             Errs::one(AsmError::DirectiveExprOutOfRange {
                 directive: ".SECTION",
                 component: "fill",
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_value: bigint,
                 valid_range: bigint_range(u8::MIN, u8::MAX),
             })
@@ -759,7 +768,7 @@ impl<'a> Assembler<'a> {
             Errs::one(AsmError::DirectiveExprOutOfRange {
                 directive: ".SECTION",
                 component: "start",
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_value: bigint,
                 valid_range: bigint_range(Addr::MIN, Addr::MAX),
             })
@@ -782,7 +791,7 @@ impl<'a> Assembler<'a> {
                 directive: ".SECTION",
                 attr_name,
                 error,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_value: bigint,
             })
         })
@@ -823,8 +832,8 @@ impl<'a> Assembler<'a> {
             Err(Errs::one(AsmError::DuplicateAttrName {
                 directive: ".SECTION",
                 attr_name: id_ast.name.clone(),
-                attr_span: id_ast.span,
-                prev_span,
+                attr_loc: self.env.make_loc(id_ast.span),
+                prev_loc: self.env.make_loc(prev_span),
             }))
         } else {
             prev_attrs.insert(id_ast.name.clone(), id_ast.span);
@@ -841,6 +850,35 @@ impl<'a> Assembler<'a> {
             // TODO: Error instead of crash if offset is too large.
             let offset = Offset::try_from(chunk_env.total_size()).unwrap();
             chunk_env.add_patch(ObjPatch { offset, data });
+        }
+    }
+
+    fn typecheck_static_path_expr(
+        &mut self,
+        directive: &'static str,
+        expr_ast: ExprAst,
+    ) -> AsmResult<Rc<str>> {
+        let value = self.typecheck_static_dir_expr_as(
+            (directive, "path"),
+            expr_ast,
+            ExprType::String,
+        )?;
+        Ok(self.joined_path(value.unwrap_str_ref()))
+    }
+
+    /// Given a relative path appearing in this assembly source file (e.g. in a
+    /// `.BINARY` directive), join that path to this source file's parent
+    /// directory.
+    fn joined_path(&self, relative_path: &Rc<str>) -> Rc<str> {
+        let src_path = &self.env.current_src_context().path;
+        match AsRef::<Path>::as_ref(&**src_path).parent() {
+            None => relative_path.clone(),
+            Some(base_path) => {
+                let joined = base_path.join(&**relative_path);
+                // We can safely `unwrap()` the `to_str()` here because
+                // `joined` was made from `Path`s that came from `str`s.
+                Rc::<str>::from(joined.to_str().unwrap())
+            }
         }
     }
 
@@ -861,7 +899,7 @@ impl<'a> Assembler<'a> {
             None => Err(Errs::one(AsmError::DirectiveExprNotStatic {
                 directive,
                 component,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
             })),
         }
     }
@@ -880,7 +918,7 @@ impl<'a> Assembler<'a> {
             Err(Errs::one(AsmError::DirectiveExprTypeError {
                 directive,
                 component,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![required_type],
             }))

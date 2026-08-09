@@ -58,6 +58,8 @@ pub enum AsmStmtAst {
     Scope(AsmScopeAst),
     /// A `.SECTION` block.
     Section(AsmSectionAst),
+    /// A `.USE` directive.
+    Use(AsmUseAst),
     /// A `.UTF8` directive.
     Utf8Data(AsmUtf8DataAst),
 }
@@ -132,6 +134,7 @@ impl AsmStmtAst {
                 section_dir,
                 AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
+                AsmUseAst::parser().map(AsmStmtAst::Use),
                 AsmUtf8DataAst::parser().map(AsmStmtAst::Utf8Data),
             ))
         })
@@ -173,7 +176,7 @@ pub struct AsmBinaryAst {
     /// The location in the source code where the directive token appears.
     pub directive_span: SrcSpan,
     /// The expression for the path of the file to insert.
-    pub path_expr: ExprAst,
+    pub path: ExprAst,
 }
 
 impl AsmBinaryAst {
@@ -182,9 +185,9 @@ impl AsmBinaryAst {
         directive(".BINARY")
             .then(ExprAst::parser())
             .then_ignore(linebreak())
-            .map(|(directive_span, path_expr)| AsmBinaryAst {
+            .map(|(directive_span, path)| AsmBinaryAst {
                 directive_span,
-                path_expr,
+                path,
             })
     }
 }
@@ -500,6 +503,27 @@ pub struct AsmSectionAst {
     pub attrs: Vec<(IdentifierAst, ExprAst)>,
     /// The statements inside the section block.
     pub body: Vec<AsmStmtAst>,
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a "use" directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmUseAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The expressions for the file path to use.
+    pub path: ExprAst,
+}
+
+impl AsmUseAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmUseAst, Extra<'a>> + Clone {
+        directive(".USE")
+            .then(ExprAst::parser())
+            .then_ignore(linebreak())
+            .map(|(directive_span, path)| AsmUseAst { directive_span, path })
+    }
 }
 
 //===========================================================================//

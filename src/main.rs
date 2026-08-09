@@ -152,11 +152,11 @@ fn command_asm(
     let mut cache = FileSrcCache::new();
     let source_code = io::read_to_string(fs::File::open(&source_path)?)?;
     let path = Rc::<str>::from(source_path.to_string_lossy());
-    let obj = match assemble_source(&mut cache, path.clone(), &source_code) {
+    let obj = match assemble_source(&mut cache, path, &source_code) {
         Ok(obj) => obj,
         Err(asm_errors) => {
             let source_errors =
-                asm_errors.map(|error| error.to_source_error(&path));
+                asm_errors.map(|error| error.to_source_error());
             return Err(CliError::Source(cache, source_errors));
         }
     };
