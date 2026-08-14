@@ -133,6 +133,16 @@ pub enum ExprTypeError {
         /// The source code span for the relative label.
         span: SrcSpan,
     },
+    /// Tried to use an identifier whose name is reserved under the current
+    /// architecture.
+    ReservedIdentifier {
+        /// The source code span for the  identifier.
+        span: SrcSpan,
+        /// The name of the identifier.
+        name: Rc<str>,
+        /// The name of the architecture under which the name is reserved.
+        arch: Rc<str>,
+    },
     /// Encountered an error while evaluating a static expression.
     StaticEvalError {
         /// The evaluation error.
@@ -306,6 +316,13 @@ impl ExprTypeError {
             }
             Self::RelativeLabelOutsideOfAnySection { span } => {
                 let message = "Relative labels must be within a .SECTION";
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("")
+            }
+            Self::ReservedIdentifier { span, name, arch } => {
+                let message = format!(
+                    "`{name}` is a reserved word under architecture {arch:?}"
+                );
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }

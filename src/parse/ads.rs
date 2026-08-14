@@ -1,7 +1,8 @@
 //! Facilities for parsing Atma Debugger Script.
 
 use super::atom::{Extra, keyword, linebreak, parse_tokens, symbol, tokenize};
-use super::expr::{ExprAst, IdentifierAst};
+use super::expr::ExprAst;
+use super::id::{DeclarationKind, IdentifierAst};
 use super::lvalue::LValueAst;
 use crate::parse::{ParseResult, Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
@@ -45,7 +46,7 @@ impl AdsModuleAst {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdsStmtAst {
     /// Declares a constant or variable.
-    Declare(DeclareAst, IdentifierAst, ExprAst),
+    Declare(DeclarationKind, IdentifierAst, ExprAst),
     /// Exits the script.
     Exit,
     /// Executes the first block if the expression is true, the second block
@@ -125,27 +126,6 @@ impl AdsStmtAst {
 
 //===========================================================================//
 
-/// The kind of variable declaration.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DeclareAst {
-    /// Declares a new constant.
-    Let,
-    /// Declares a new variable.
-    Var,
-}
-
-impl DeclareAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], DeclareAst, Extra<'a>> + Clone {
-        chumsky::prelude::choice((
-            keyword("let").to(DeclareAst::Let),
-            keyword("var").to(DeclareAst::Var),
-        ))
-    }
-}
-
-//===========================================================================//
-
 /// The abstract syntax tree for a breakpoint condition in an Atma Debugger
 /// Script program.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -181,12 +161,16 @@ impl BreakpointAst {
 
 fn declare_statement<'a>()
 -> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
-    DeclareAst::parser()
-        .then(IdentifierAst::parser())
-        .then_ignore(symbol(TokenValue::Equals))
-        .then(ExprAst::parser())
-        .then_ignore(linebreak())
-        .map(|((declare, id), expr)| AdsStmtAst::Declare(declare, id, expr))
+    // TODO: Allow declaring a tuple of identifiers/wildcards.
+    chumsky::prelude::choice((
+        keyword("let").to(DeclarationKind::Let),
+        keyword("var").to(DeclarationKind::Var),
+    ))
+    .then(IdentifierAst::parser())
+    .then_ignore(symbol(TokenValue::Equals))
+    .then(ExprAst::parser())
+    .then_ignore(linebreak())
+    .map(|((kind, id), expr)| AdsStmtAst::Declare(kind, id, expr))
 }
 
 fn exit_statement<'a>()
@@ -248,7 +232,7 @@ fn use_statement<'a>()
 
 #[cfg(test)]
 mod tests {
-    use super::{AdsModuleAst, AdsStmtAst, DeclareAst};
+    use super::{AdsModuleAst, AdsStmtAst, DeclarationKind};
     use crate::error::SrcSpan;
     use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, IdentifierKind};
     use num_bigint::BigInt;
@@ -290,7 +274,7 @@ mod tests {
         assert_eq!(
             read_statements("let foo = 42\n"),
             vec![AdsStmtAst::Declare(
-                DeclareAst::Let,
+                DeclarationKind::Let,
                 IdentifierAst {
                     span: SrcSpan::from_byte_range(4..7),
                     name: Rc::from("foo"),

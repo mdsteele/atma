@@ -4,7 +4,8 @@ use super::atom::{
     Context, Extra, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
-use super::expr::{ExprAst, IdentifierAst};
+use super::expr::ExprAst;
+use super::id::{DeclarationKind, IdentifierAst};
 use super::lex::{Token, TokenValue};
 use crate::error::SrcSpan;
 use chumsky::{self, IterParser, Parser};
@@ -42,6 +43,8 @@ pub enum AsmStmtAst {
     Assert(AsmAssertAst),
     /// A `.BINARY` directive.
     Binary(AsmBinaryAst),
+    /// A `.LET` or `.VAR` directive.
+    Declare(AsmDeclareAst),
     /// A `.DEFMACRO` directive.
     DefMacro(AsmDefMacroAst),
     /// An `.IMPORT` directive.
@@ -58,6 +61,8 @@ pub enum AsmStmtAst {
     Scope(AsmScopeAst),
     /// A `.SECTION` block.
     Section(AsmSectionAst),
+    /// A `.SET` directive.
+    Set(AsmSetAst),
     /// A `.USE` directive.
     Use(AsmUseAst),
     /// A `.UTF8` directive.
@@ -128,10 +133,12 @@ impl AsmStmtAst {
                 label_or_named_scope,
                 AsmAssertAst::parser().map(AsmStmtAst::Assert),
                 AsmBinaryAst::parser().map(AsmStmtAst::Binary),
+                AsmDeclareAst::parser().map(AsmStmtAst::Declare),
                 def_macro_dir,
                 import_dir,
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
                 section_dir,
+                AsmSetAst::parser().map(AsmStmtAst::Set),
                 AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
                 AsmUseAst::parser().map(AsmStmtAst::Use),
@@ -208,6 +215,40 @@ impl AsmDataTypeAst {
     -> impl Parser<'a, &'a [Token], AsmDataTypeAst, Extra<'a>> + Clone {
         AsmIntTypeAst::parser()
             .map(|(span, int_type)| AsmDataTypeAst::Int(span, int_type))
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a contanst or variable definition in an
+/// assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmDeclareAst {
+    /// The kind of declaration.
+    pub kind: DeclarationKind,
+    /// The name of the constant/variable.
+    pub id: IdentifierAst,
+    /// The expression to be assigned to the constant/variable.
+    pub expression: ExprAst,
+}
+
+impl AsmDeclareAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmDeclareAst, Extra<'a>> + Clone {
+        // TODO: Allow declaring a tuple of identifiers/wildcards.
+        chumsky::prelude::choice((
+            directive(".LET").to(DeclarationKind::Let),
+            directive(".VAR").to(DeclarationKind::Var),
+        ))
+        .then(IdentifierAst::parser())
+        .then_ignore(symbol(TokenValue::Equals))
+        .then(ExprAst::parser())
+        .then_ignore(linebreak())
+        .map(|((kind, id), expression)| AsmDeclareAst {
+            kind,
+            id,
+            expression,
+        })
     }
 }
 
@@ -503,6 +544,30 @@ pub struct AsmSectionAst {
     pub attrs: Vec<(IdentifierAst, ExprAst)>,
     /// The statements inside the section block.
     pub body: Vec<AsmStmtAst>,
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for setting a variable in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmSetAst {
+    /// The name of the variable.
+    pub id: IdentifierAst,
+    /// The expression to be assigned to the variable.
+    pub expression: ExprAst,
+}
+
+impl AsmSetAst {
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], AsmSetAst, Extra<'a>> + Clone {
+        // TODO: Support other kinds of lvalues
+        directive(".SET")
+            .ignore_then(IdentifierAst::parser())
+            .then_ignore(symbol(TokenValue::Equals))
+            .then(ExprAst::parser())
+            .then_ignore(linebreak())
+            .map(|(id, expression)| AsmSetAst { id, expression })
+    }
 }
 
 //===========================================================================//

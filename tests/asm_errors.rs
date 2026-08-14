@@ -29,7 +29,7 @@ fn arch_has_no_endianness() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::ArchHasNoEndianness{ directive: ".U16", arch, .. },
+        AsmError::ArchHasNoEndianness { directive: ".U16", arch, .. },
     ] if &**arch == "none");
 }
 
@@ -49,8 +49,23 @@ fn decl_name_is_builtin() {
     .IMPORT %sqrtz
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::DeclNameIsBuiltin{ name, .. },
+        AsmError::AssignmentToBuiltin { name, .. },
     ] if &**name == "%sqrtz");
+}
+
+#[test]
+fn declare_label_as_variable() {
+    let source = r#"\
+    .SECTION "TEST", arch="none"
+    foo: {
+      .LET bar = 0
+      bar: .u8 0
+    }
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::SymbolAlreadyDeclared { full_name, .. },
+    ] if &**full_name == "foo::bar");
 }
 
 #[test]
@@ -61,7 +76,7 @@ fn directive_expr_out_of_range() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::DirectiveExprOutOfRange{
+        AsmError::DirectiveExprOutOfRange {
             directive: ".U8",
             component: "value",
             expr_value,
@@ -77,7 +92,7 @@ fn directive_expr_type_error() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::DirectiveExprTypeError{
+        AsmError::DirectiveExprTypeError {
             directive: ".SECTION",
             component: "within",
             expr_type: ExprType::String,
@@ -105,7 +120,7 @@ fn duplicate_attr_name() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::DuplicateAttrName{ directive: ".SECTION", attr_name, .. },
+        AsmError::DuplicateAttrName { directive: ".SECTION", attr_name, .. },
     ] if &**attr_name == "align");
 }
 
@@ -118,7 +133,7 @@ fn duplicate_macro_placeholder() {
     }
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::DuplicateMacroPlaceholder{ placeholder_name, .. },
+        AsmError::DuplicateMacroPlaceholder { placeholder_name, .. },
     ] if &**placeholder_name == "%BAR");
 }
 
@@ -129,7 +144,7 @@ fn invalid_alignment_value() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::InvalidAlignmentValue{
+        AsmError::InvalidAlignmentValue {
             directive: ".SECTION",
             attr_name,
             error: AlignTryFromError::NotAPowerOfTwo,
@@ -146,7 +161,7 @@ fn invalid_attr_name() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::InvalidAttrName{
+        AsmError::InvalidAttrName {
             directive: ".SECTION",
             attr_name,
             ..
@@ -162,7 +177,7 @@ fn invalid_unicode_scalar_value() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::InvalidUnicodeScalarValue{ expr_value, .. },
+        AsmError::InvalidUnicodeScalarValue { expr_value, .. },
     ] if *expr_value == BigInt::from(0xdf00));
 }
 
@@ -181,6 +196,43 @@ fn multiple_macro_placeholders() {
 }
 
 #[test]
+fn set_variable_immutable() {
+    let source = r#"\
+    .LET foo = 0
+    .SET foo = 1
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::CannotModifyConstant { name, .. },
+    ] if &**name == "foo");
+}
+
+#[test]
+fn set_variable_type_error() {
+    let source = r#"\
+    .VAR foo = 0
+    .SET foo = %false
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::VariableTypeError {
+            expr_type: ExprType::Boolean,
+            lvalue_type: ExprType::Integer,
+            ..
+        }]
+    );
+}
+
+#[test]
+fn set_variable_unknown() {
+    let source = r#"\
+    .SET foo = %false
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::UnknownVariable { name, .. },
+    ] if &**name == "foo");
+}
+
+#[test]
 fn symbol_already_declared() {
     let source = r#"\
     .SECTION "TEST"
@@ -189,7 +241,7 @@ fn symbol_already_declared() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::SymbolAlreadyDeclared{ full_name, .. },
+        AsmError::SymbolAlreadyDeclared { full_name, .. },
     ] if &**full_name == "foo");
 }
 
@@ -200,7 +252,7 @@ fn unknown_arch() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::UnknownArch{ arch, .. },
+        AsmError::UnknownArch { arch, .. },
     ] if &**arch == "x86");
 }
 
@@ -212,7 +264,7 @@ fn unknown_macro_placeholder() {
     }
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::UnknownMacroPlaceholder{ name, .. },
+        AsmError::UnknownMacroPlaceholder { name, .. },
     ] if &**name == "%BAZ");
 }
 
@@ -224,7 +276,7 @@ fn unmatched_macro_invocation() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::UnmatchedMacroInvocation{ macro_name, arch, .. },
+        AsmError::UnmatchedMacroInvocation { macro_name, arch, .. },
     ] if &**macro_name == "XCE" && &**arch == "6502");
 }
 

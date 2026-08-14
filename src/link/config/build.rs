@@ -449,18 +449,20 @@ impl ConfigBuilder {
         expr_ast: ExprAst,
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
-        let (ty, value) =
+        let (expr_type, value) =
             match errs.ok(self.env.typecheck_expression(expr_ast)) {
-                Some((_expr, ty, Ok(static_value))) => {
-                    (ty, ConfigVariableOr::Static(static_value))
+                Some((_, expr_type, Ok(static_value))) => {
+                    (expr_type, ConfigVariableOr::Static(static_value))
                 }
-                Some((expr, ty, Err(_))) => (ty, self.add_variable(expr)),
+                Some((expr, expr_type, Err(_))) => {
+                    (expr_type, self.add_variable(expr))
+                }
                 None => (
                     ExprType::Bottom,
                     ConfigVariableOr::Static(ExprValue::Boolean(false)),
                 ),
             };
-        self.env.add_declaration(id_ast, ty, value);
+        self.env.add_declaration(id_ast, expr_type, value);
         errs.result()
     }
 

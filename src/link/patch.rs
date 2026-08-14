@@ -80,7 +80,8 @@ impl PatchedFile {
             }
         }
 
-        let patcher = FilePatcher::new(chunk_metadata, symbol_addrs);
+        let mut patcher = FilePatcher::new(chunk_metadata, symbol_addrs);
+        errs.also(patcher.evaluate_variables(object_file.variables));
         if errs.ok(patcher.check_assertions(object_file.asserts)).is_none() {
             assert!(!errs.is_empty());
             return Err(errs);
@@ -134,6 +135,17 @@ impl<'a> FilePatcher<'a> {
             context: LinkSymbolContext { chunk_metadata, symbol_addrs },
             env: LinkEvalEnv::new(),
         }
+    }
+
+    pub fn evaluate_variables(
+        &mut self,
+        variables: Vec<ObjExpr>,
+    ) -> LinkResult<()> {
+        let mut errs = Errs::<LinkError>::new();
+        for expr in variables {
+            errs.also(self.env.evaluate_variable(&expr, &self.context));
+        }
+        errs.result()
     }
 
     pub fn check_assertions(&self, asserts: Vec<ObjAssert>) -> LinkResult<()> {

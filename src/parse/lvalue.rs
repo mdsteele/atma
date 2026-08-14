@@ -1,5 +1,6 @@
 use super::atom::{Extra, symbol};
-use super::expr::{ExprAst, IdentifierAst};
+use super::expr::ExprAst;
+use super::id::IdentifierAst;
 use super::lex::{Token, TokenValue};
 use crate::error::SrcSpan;
 use chumsky::{self, IterParser, Parser};
@@ -68,6 +69,8 @@ pub enum LValueAstNode {
     Tuple(Vec<LValueAst>),
     /// Assign to a variable (or simulated processor register or PC).
     Variable(Rc<str>),
+    // TODO: Allow list/tuple index assignment as an lvalue node
+    // TODO: Allow wildcard (underscore) as an lvalue node
 }
 
 //===========================================================================//

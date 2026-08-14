@@ -4,7 +4,8 @@ use super::atom::{
     Extra, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
-use super::expr::{ExprAst, IdentifierAst};
+use super::expr::ExprAst;
+use super::id::IdentifierAst;
 use super::lex::{Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 

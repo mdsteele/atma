@@ -39,10 +39,10 @@ pub struct LinkConfig {
     /// files.  These symbols can be used to define non-static variables,
     /// exports, and checksums.
     pub imports: Vec<Rc<str>>,
-    /// Local non-static variables declared in this configuration, which are be
-    /// evaluated (in order) after all chunks and sections have been positioned
-    /// in their memory regions, and can then be used by export and checksum
-    /// configurations (or by later variables).
+    /// Local non-static variables declared in this configuration, which are to
+    /// be evaluated (in order) after all chunks and sections have been
+    /// positioned in their memory regions, and can then be used by export and
+    /// checksum configurations (or by later variables).
     pub variables: Vec<ObjExpr>,
     /// Symbols defined and exported by the linker config.
     pub exports: Vec<ExportConfig>,
@@ -89,8 +89,7 @@ impl LinkConfig {
         let symbol_context =
             errs.with(self.resolve_imports(positioned_binary));
         for expr in &self.variables {
-            let value = eval_env.evaluate_expression(expr, &symbol_context)?;
-            eval_env.push_variable(value);
+            errs.also(eval_env.evaluate_variable(expr, &symbol_context));
         }
         for export in &self.exports {
             errs.also(self.export_symbol(export, positioned_binary, eval_env));

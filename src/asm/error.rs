@@ -2,7 +2,7 @@ use crate::addr::{Align, AlignTryFromError};
 use crate::error::{
     Errs, SourceContext, SourceError, SrcCacheError, SrcLoc, SrcSpan,
 };
-use crate::expr::{ExprType, ExprTypeError};
+use crate::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
 use std::range::RangeInclusive;
@@ -106,13 +106,22 @@ pub enum AsmError {
         /// The additional message value for the assertion, if any.
         additional_message: Option<Rc<str>>,
     },
-    /// Tried to declare something using a built-in identifier.
-    DeclNameIsBuiltin {
+    /// Tried to assign to a built-in identifier.
+    AssignmentToBuiltin {
         /// The source code location for the identifier that we tried to
-        /// declare.
+        /// declare or assign to.
         loc: AsmSrcLoc,
-        /// The name of the identifier that we tried to declare.
+        /// The name of the identifier.
         name: Rc<str>,
+    },
+    /// Tried to modify a constant (or label).
+    CannotModifyConstant {
+        /// The name of the constant.
+        name: Rc<str>,
+        /// The source code location where the constant was used as an lvalue.
+        lvalue_loc: AsmSrcLoc,
+        /// The source code location for the constant's declaration.
+        decl_loc: AsmSrcLoc,
     },
     /// A static directive attribute had a non-static expression.
     DirectiveExprNotStatic {
@@ -123,6 +132,8 @@ pub enum AsmError {
         component: &'static str,
         /// The source code location for the non-static expression.
         expr_loc: AsmSrcLoc,
+        /// The reason that the expression isn't static.
+        reason: ExprNotStaticReason,
     },
     /// An directive was given an integer expression whose value was statically
     /// out of range.
@@ -280,6 +291,13 @@ pub enum AsmError {
         /// The source code location for the placeholder.
         loc: AsmSrcLoc,
     },
+    /// Tried to modify a variable that was never declared.
+    UnknownVariable {
+        /// The name of the undeclared variable.
+        name: Rc<str>,
+        /// The source code location for the unknown variable name.
+        loc: AsmSrcLoc,
+    },
     /// Found a macro invocation with no matching macro definition.
     UnmatchedMacroInvocation {
         /// The name of the macro.
@@ -288,6 +306,18 @@ pub enum AsmError {
         arch: Rc<str>,
         /// The source code location for the macro invocation.
         invocation_loc: AsmSrcLoc,
+    },
+    /// Tried to assign an expression of one type to an lvalue of a different
+    /// type.
+    VariableTypeError {
+        /// The source code location for the right-hand expression.
+        expr_loc: AsmSrcLoc,
+        /// The type of the expression.
+        expr_type: ExprType,
+        /// The source code location for the lvalue.
+        lvalue_loc: AsmSrcLoc,
+        /// The type of the lvalue.
+        lvalue_type: ExprType,
     },
 }
 
@@ -317,25 +347,38 @@ impl AsmError {
                     .with_primary_label("")
                     .with_context(&*condition_loc.context)
             }
-            Self::DeclNameIsBuiltin { loc, name } => {
-                let message = format!(
-                    "cannot declare `{name}`; identifiers starting with `%` \
-                     are reserved"
-                );
+            Self::AssignmentToBuiltin { loc, name } => {
+                let message =
+                    format!("cannot assign to builtin identifier `{name}`");
+                let note = "Lowercase identifiers starting with `%` are \
+                            reserved for immutable builtins.";
                 SourceError::new(loc.primary(), message)
                     .with_primary_label("")
+                    .with_note(note)
                     .with_context(&*loc.context)
+            }
+            Self::CannotModifyConstant { name, lvalue_loc, decl_loc } => {
+                let message =
+                    format!("cannot change value of constant `{name}`");
+                let label1 = format!("`{name}` was declared here");
+                let label2 = format!("cannot set value of `{name}` here");
+                SourceError::new(lvalue_loc.primary(), message)
+                    .with_label(decl_loc.primary(), label1)
+                    .with_primary_label(label2)
+                    .with_context(&*lvalue_loc.context)
             }
             Self::DirectiveExprNotStatic {
                 directive,
                 component,
                 expr_loc,
+                reason,
             } => {
                 let message =
                     format!("{directive} {component} must be static");
                 let label = "this expression isn't static";
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
+                    .with_context(&reason.context(&expr_loc.context.path))
                     .with_context(&*expr_loc.context)
             }
             Self::DirectiveExprOutOfRange {
@@ -483,7 +526,7 @@ impl AsmError {
             }
             Self::SymbolAlreadyDeclared { full_name, name_loc, prev_loc } => {
                 let message =
-                    format!("symbol was already declared: {}", full_name);
+                    format!("symbol `{full_name}` was already declared");
                 let label1 = "previously declared here";
                 let label2 = "redeclared here";
                 SourceError::new(name_loc.primary(), message)
@@ -506,6 +549,13 @@ impl AsmError {
                     .with_primary_label("")
                     .with_context(&*loc.context)
             }
+            Self::UnknownVariable { name, loc } => {
+                let message = format!("no such variable: `{name}`");
+                let label = "this was never declared";
+                SourceError::new(loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*loc.context)
+            }
             Self::UnmatchedMacroInvocation {
                 macro_name,
                 arch,
@@ -517,6 +567,24 @@ impl AsmError {
                 SourceError::new(invocation_loc.primary(), message)
                     .with_primary_label("")
                     .with_context(&*invocation_loc.context)
+            }
+            Self::VariableTypeError {
+                expr_loc,
+                expr_type,
+                lvalue_loc,
+                lvalue_type,
+            } => {
+                let message = format!(
+                    "cannot assign {expr_type} value to {lvalue_type} \
+                     destination"
+                );
+                let label1 = format!("this expression has type {expr_type}");
+                let label2 =
+                    format!("this destination has type {lvalue_type}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label1)
+                    .with_label(lvalue_loc.primary(), label2)
+                    .with_context(&*lvalue_loc.context)
             }
         }
     }

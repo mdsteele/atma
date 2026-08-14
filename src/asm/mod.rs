@@ -8,19 +8,18 @@ mod macros;
 
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
-use crate::expr::{ExprType, ExprValue};
+use crate::expr::{ExprStatic, ExprType, ExprValue};
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
     ObjPatchIntType, ObjSymbol,
 };
 use crate::parse::{
-    AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDefMacroAst, AsmIntDataAst,
-    AsmIntTypeAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst, AsmReserveAst,
-    AsmScopeAst, AsmSectionAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst,
-    ExprAst, IdentifierAst,
+    AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst,
+    AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst,
+    AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst,
+    AsmUseAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
-use arch::ArchTree;
-use env::AsmTypeEnv;
+use env::{AsmDeclValue, AsmTypeEnv};
 pub use error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc, AsmSrcParent};
 use macros::MacroTable;
 use num_bigint::BigInt;
@@ -52,13 +51,13 @@ pub fn assemble_source(
 
 struct Assembler<'a> {
     cache: &'a mut dyn SrcCache,
-    arch_tree: ArchTree,
     macros: MacroTable,
     next_anonymous_scope_number: u32,
     env: AsmTypeEnv,
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<Rc<str>>,
+    variables: Vec<ObjExpr>,
     asserts: Vec<ObjAssert>,
 }
 
@@ -67,13 +66,13 @@ impl<'a> Assembler<'a> {
         let (arch_tree, macros) = builtins::make_builtins();
         Assembler {
             cache,
-            arch_tree,
             macros,
             next_anonymous_scope_number: 0,
-            env: AsmTypeEnv::new(root_path),
+            env: AsmTypeEnv::new(root_path, arch_tree),
             next_chunk_index: 0,
             chunks: BTreeMap::new(),
             imports: Vec::new(),
+            variables: Vec::new(),
             asserts: Vec::new(),
         }
     }
@@ -106,6 +105,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(_) => Ok(()),
             AsmStmtAst::Binary(_) => Ok(()),
+            AsmStmtAst::Declare(_) => Ok(()),
             AsmStmtAst::DefMacro(_) => Ok(()),
             AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::IntData(_) => Ok(()),
@@ -114,18 +114,17 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Reserve(_) => Ok(()),
             AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
             AsmStmtAst::Section(section) => self.predeclare_section(section),
+            AsmStmtAst::Set(_) => Ok(()),
             AsmStmtAst::Use(_) => Ok(()),
             AsmStmtAst::Utf8Data(_) => Ok(()),
         }
     }
 
     fn predeclare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
-        // TODO: error if name is reserved in current arch
         self.env.declare_import(id_ast)
     }
 
     fn predeclare_label(&mut self, label_ast: &AsmLabelAst) -> AsmResult<()> {
-        // TODO: error if name is reserved in current arch
         self.env.declare_label(label_ast)
     }
 
@@ -133,7 +132,7 @@ impl<'a> Assembler<'a> {
         if let Some(label_ast) = &scope_ast.label {
             let mut errs = Errs::<AsmError>::new();
             errs.also(self.predeclare_label(label_ast));
-            self.env.begin_scope(&label_ast.identifier.name);
+            self.env.begin_scope(label_ast.identifier.name.clone(), false);
             errs.also(self.predeclare_statements(&scope_ast.body));
             self.env.end_scope();
             errs.result()
@@ -173,6 +172,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(assert) => self.expand_assert(assert),
             AsmStmtAst::Binary(data) => self.expand_binary_data(data),
+            AsmStmtAst::Declare(decl) => self.expand_declaration(decl),
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::IntData(data) => self.expand_int_data(data),
@@ -181,6 +181,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Scope(scope) => self.expand_scope(scope),
             AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
             AsmStmtAst::Section(section) => self.expand_section(section),
+            AsmStmtAst::Set(set) => self.expand_assignment(set),
             AsmStmtAst::Use(file) => self.expand_use_file(file),
             AsmStmtAst::Utf8Data(data) => self.expand_utf8_data(data),
         }
@@ -188,7 +189,7 @@ impl<'a> Assembler<'a> {
 
     fn expand_assert(&mut self, assert_ast: AsmAssertAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let opt_message_expr: Option<ObjExpr> =
+        let opt_message: Option<(ObjExpr, ExprStatic)> =
             assert_ast.message.and_then(|expr_ast| {
                 errs.ok(self.typecheck_dir_expr_as(
                     (".ASSERT", "message"),
@@ -204,34 +205,94 @@ impl<'a> Assembler<'a> {
                 ExprType::Boolean,
             )) {
                 None => return errs.result(),
-                Some(condition_expr) => match condition_expr.static_value() {
-                    None => condition_expr,
-                    Some(ExprValue::Boolean(true)) => return errs.result(),
-                    Some(_) => {
-                        let additional_message = match &opt_message_expr {
-                            None => None,
-                            Some(message_expr) => {
-                                match message_expr.static_value() {
-                                    Some(value) => {
-                                        Some(value.unwrap_str_ref().clone())
-                                    }
-                                    None => break 'condition condition_expr,
-                                }
-                            }
-                        };
-                        errs.push(AsmError::AssertionStaticallyFailed {
-                            condition_loc: self.env.make_loc(condition_span),
-                            additional_message,
-                        });
-                        return errs.result();
-                    }
-                },
+                Some((_, Ok(ExprValue::Boolean(true)))) => {
+                    return errs.result();
+                }
+                Some((condition_expr, Ok(_))) => {
+                    let additional_message = match &opt_message {
+                        None => None,
+                        Some((_, Ok(value))) => {
+                            Some(value.unwrap_str_ref().clone())
+                        }
+                        Some((_, Err(_))) => break 'condition condition_expr,
+                    };
+                    errs.push(AsmError::AssertionStaticallyFailed {
+                        condition_loc: self.env.make_loc(condition_span),
+                        additional_message,
+                    });
+                    return errs.result();
+                }
+                Some((condition_expr, Err(_))) => condition_expr,
             }
         };
         self.asserts.push(ObjAssert {
             condition: condition_expr,
-            message: opt_message_expr,
+            message: opt_message.map(|(expr, _)| expr),
         });
+        errs.result()
+    }
+
+    fn expand_assignment(&mut self, set_ast: AsmSetAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let expr_span = set_ast.expression.span;
+        let expr_check =
+            errs.ok(self.env.typecheck_expression(set_ast.expression));
+        let lvalue_span = set_ast.id.span;
+        let lvalue_name = set_ast.id.name.clone();
+        let lvalue_check = errs.ok(self.env.typecheck_lvalue(set_ast.id));
+        match (expr_check, lvalue_check) {
+            (_, Some(ExprType::Bottom)) => {}
+            (Some((_, ExprType::Bottom, _)), _) => {}
+            (Some((expr, expr_type, expr_static)), Some(lvalue_type))
+                if expr_type == lvalue_type =>
+            {
+                let decl_value = match expr_static {
+                    Ok(static_value) => AsmDeclValue::Static(static_value),
+                    Err(reason) => {
+                        let variable_index = self.variables.len();
+                        self.variables.push(expr);
+                        AsmDeclValue::Variable(variable_index, reason)
+                    }
+                };
+                self.env.reassign_variable(lvalue_name, decl_value);
+            }
+            (Some((_, expr_type, _)), Some(lvalue_type)) => {
+                errs.push(AsmError::VariableTypeError {
+                    expr_loc: self.env.make_loc(expr_span),
+                    expr_type,
+                    lvalue_loc: self.env.make_loc(lvalue_span),
+                    lvalue_type,
+                });
+            }
+            _ => {}
+        }
+        errs.result()
+    }
+
+    fn expand_declaration(
+        &mut self,
+        declare_ast: AsmDeclareAst,
+    ) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let Some((expr, expr_type, expr_static)) =
+            errs.ok(self.env.typecheck_expression(declare_ast.expression))
+        else {
+            return errs.result();
+        };
+        let decl_value = match expr_static {
+            Ok(static_value) => AsmDeclValue::Static(static_value),
+            Err(reason) => {
+                let variable_index = self.variables.len();
+                self.variables.push(expr);
+                AsmDeclValue::Variable(variable_index, reason)
+            }
+        };
+        errs.also(self.env.declare_variable(
+            declare_ast.kind,
+            declare_ast.id,
+            expr_type,
+            decl_value,
+        ));
         errs.result()
     }
 
@@ -245,7 +306,7 @@ impl<'a> Assembler<'a> {
         def_macro_ast: AsmDefMacroAst,
     ) -> AsmResult<()> {
         let arch = self.env.current_arch();
-        let reserved = self.arch_tree.reserved_names(arch);
+        let reserved = self.env.arch_tree().reserved_names(arch);
         self.macros.define(
             self.env.current_src_context(),
             arch,
@@ -260,7 +321,8 @@ impl<'a> Assembler<'a> {
     ) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let context = self.env.current_src_context();
-        let arches = self.arch_tree.get_all_ancestors(self.env.current_arch());
+        let arches =
+            self.env.arch_tree().get_all_ancestors(self.env.current_arch());
         if let Some(statements) =
             errs.ok(self.macros.expand(&context, &arches, invoke_ast))
         {
@@ -272,7 +334,7 @@ impl<'a> Assembler<'a> {
 
     fn expand_label(&mut self, label_ast: AsmLabelAst) -> AsmResult<()> {
         let full_name =
-            self.env.look_up_symbol(&label_ast.identifier.name).unwrap();
+            self.env.current_scope().prefixed(&label_ast.identifier.name);
         let Some(chunk_env) = self.env.current_chunk() else {
             return Err(Errs::one(AsmError::DirectiveNotInSection {
                 directive: "label",
@@ -301,7 +363,7 @@ impl<'a> Assembler<'a> {
                 (Rc::<str>::from(name), true)
             }
         };
-        self.env.begin_scope(&scope_name);
+        self.env.begin_scope(scope_name, anonymous);
         if anonymous {
             errs.also(self.predeclare_statements(&scope_ast.body));
         }
@@ -413,7 +475,7 @@ impl<'a> Assembler<'a> {
         self.next_chunk_index += 1;
         self.env.begin_chunk(chunk_index);
         if let Some(arch) = arch {
-            self.set_current_arch(arch);
+            self.env.set_current_arch(arch);
         }
         // TODO: don't attempt to expand statements if the arch was invalid
         errs.also(self.expand_statements(section_ast.body));
@@ -526,16 +588,8 @@ impl<'a> Assembler<'a> {
         }
         for expr_ast in data_ast.expressions {
             let expr_span = expr_ast.span;
-            match errs.ok(self.typecheck_expression(expr_ast)) {
-                Some((expr, ExprType::Integer)) => {
-                    let Some(value) = expr.static_value() else {
-                        errs.push(AsmError::DirectiveExprNotStatic {
-                            directive: ".UTF8",
-                            component: "value",
-                            expr_loc: self.env.make_loc(expr_span),
-                        });
-                        return errs.result();
-                    };
+            match errs.ok(self.env.typecheck_expression(expr_ast)) {
+                Some((_, ExprType::Integer, Ok(value))) => {
                     let bigint = value.unwrap_int_ref();
                     let Some(chr) = bigint.to_u32().and_then(char::from_u32)
                     else {
@@ -551,27 +605,31 @@ impl<'a> Assembler<'a> {
                             .extend_from_slice(chr.to_string().as_bytes());
                     }
                 }
-                Some((expr, ExprType::String)) => {
-                    let Some(value) = expr.static_value() else {
-                        errs.push(AsmError::DirectiveExprNotStatic {
-                            directive: ".UTF8",
-                            component: "value",
-                            expr_loc: self.env.make_loc(expr_span),
-                        });
-                        return errs.result();
-                    };
+                Some((_, ExprType::String, Ok(value))) => {
                     if let Some(chunk_env) = self.env.current_chunk() {
                         chunk_env.data_mut().extend_from_slice(
                             value.unwrap_str_ref().as_bytes(),
                         );
                     }
                 }
-                Some((_, ty)) => {
+                Some((
+                    _,
+                    ExprType::Integer | ExprType::String,
+                    Err(reason),
+                )) => {
+                    errs.push(AsmError::DirectiveExprNotStatic {
+                        directive: ".UTF8",
+                        component: "value",
+                        expr_loc: self.env.make_loc(expr_span),
+                        reason,
+                    });
+                }
+                Some((_, expr_type, _)) => {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive: ".UTF8",
                         component: "value",
                         expr_loc: self.env.make_loc(expr_span),
-                        expr_type: ty,
+                        expr_type,
                         valid_types: vec![ExprType::String, ExprType::Integer],
                     });
                 }
@@ -601,9 +659,9 @@ impl<'a> Assembler<'a> {
         for expr_ast in int_data.expressions {
             let expr_span = expr_ast.span;
             let static_value: i64 = match errs
-                .ok(self.typecheck_expression(expr_ast))
+                .ok(self.env.typecheck_expression(expr_ast))
             {
-                Some((mut expr, ExprType::Label)) => {
+                Some((mut expr, ExprType::Label, _)) => {
                     // TODO: If the label belongs to a chunk with an explicit
                     // start address, then the label's address value is static
                     // and no patch is necessary.
@@ -611,38 +669,36 @@ impl<'a> Assembler<'a> {
                     self.try_add_patch(ObjPatchData::Integer(int_type, expr));
                     0
                 }
-                Some((expr, ExprType::Integer)) => match expr.static_value() {
-                    Some(value) => {
-                        let bigint = value.unwrap_int_ref();
-                        match int_type.value_in_range(bigint) {
-                            Ok(value) => value,
-                            Err(range) => {
-                                errs.push(AsmError::DirectiveExprOutOfRange {
-                                    directive,
-                                    component: "value",
-                                    expr_loc: self.env.make_loc(expr_span),
-                                    expr_value: bigint.clone(),
-                                    valid_range: RangeInclusive {
-                                        start: BigInt::from(range.start),
-                                        last: BigInt::from(range.last),
-                                    },
-                                });
-                                0
-                            }
+                Some((_, ExprType::Integer, Ok(value))) => {
+                    let bigint = value.unwrap_int_ref();
+                    match int_type.value_in_range(bigint) {
+                        Ok(value) => value,
+                        Err(range) => {
+                            errs.push(AsmError::DirectiveExprOutOfRange {
+                                directive,
+                                component: "value",
+                                expr_loc: self.env.make_loc(expr_span),
+                                expr_value: bigint.clone(),
+                                valid_range: RangeInclusive {
+                                    start: BigInt::from(range.start),
+                                    last: BigInt::from(range.last),
+                                },
+                            });
+                            0
                         }
                     }
-                    None => {
-                        let data = ObjPatchData::Integer(int_type, expr);
-                        self.try_add_patch(data);
-                        0
-                    }
-                },
-                Some((_, ty)) => {
+                }
+                Some((expr, ExprType::Integer, Err(_))) => {
+                    let data = ObjPatchData::Integer(int_type, expr);
+                    self.try_add_patch(data);
+                    0
+                }
+                Some((_, expr_type, _)) => {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive,
                         component: "value",
                         expr_loc: self.env.make_loc(expr_span),
-                        expr_type: ty,
+                        expr_type,
                         valid_types: vec![ExprType::Integer, ExprType::Label],
                     });
                     0
@@ -677,11 +733,6 @@ impl<'a> Assembler<'a> {
             }
         }
         errs.result()
-    }
-
-    fn set_current_arch(&mut self, arch: Rc<str>) {
-        debug_assert!(self.arch_tree.contains_arch(&arch));
-        self.env.set_current_arch(arch);
     }
 
     fn data_type_size(&self, data_type: AsmDataTypeAst) -> u64 {
@@ -723,7 +774,7 @@ impl<'a> Assembler<'a> {
         le_type: ObjPatchIntType,
     ) -> Option<ObjPatchIntType> {
         let arch = self.env.current_arch();
-        match self.arch_tree.native_endianness(arch) {
+        match self.env.arch_tree().native_endianness(arch) {
             Some(Endianness::BigEndian) => Some(be_type),
             Some(Endianness::LittleEndian) => Some(le_type),
             None => None,
@@ -737,7 +788,7 @@ impl<'a> Assembler<'a> {
     fn chunk_arch_attr(&mut self, expr_ast: ExprAst) -> AsmResult<Rc<str>> {
         let expr_span = expr_ast.span;
         let arch = self.chunk_static_str_attr("arch", expr_ast)?;
-        if self.arch_tree.contains_arch(&arch) {
+        if self.env.arch_tree().contains_arch(&arch) {
             Ok(arch)
         } else {
             Err(Errs::one(AsmError::UnknownArch {
@@ -889,17 +940,18 @@ impl<'a> Assembler<'a> {
         required_type: ExprType,
     ) -> AsmResult<ExprValue> {
         let expr_span = expr_ast.span;
-        let expr = self.typecheck_dir_expr_as(
+        let (_, expr_static) = self.typecheck_dir_expr_as(
             (directive, component),
             expr_ast,
             required_type,
         )?;
-        match expr.static_value() {
-            Some(value) => Ok(value.clone()),
-            None => Err(Errs::one(AsmError::DirectiveExprNotStatic {
+        match expr_static {
+            Ok(value) => Ok(value),
+            Err(reason) => Err(Errs::one(AsmError::DirectiveExprNotStatic {
                 directive,
                 component,
                 expr_loc: self.env.make_loc(expr_span),
+                reason,
             })),
         }
     }
@@ -909,11 +961,12 @@ impl<'a> Assembler<'a> {
         (directive, component): (&'static str, &'static str),
         expr_ast: ExprAst,
         required_type: ExprType,
-    ) -> AsmResult<ObjExpr> {
+    ) -> AsmResult<(ObjExpr, ExprStatic)> {
         let expr_span = expr_ast.span;
-        let (expr, expr_type) = self.typecheck_expression(expr_ast)?;
+        let (expr, expr_type, expr_static) =
+            self.env.typecheck_expression(expr_ast)?;
         if expr_type == required_type {
-            Ok(expr)
+            Ok((expr, expr_static))
         } else {
             Err(Errs::one(AsmError::DirectiveExprTypeError {
                 directive,
@@ -925,18 +978,11 @@ impl<'a> Assembler<'a> {
         }
     }
 
-    fn typecheck_expression(
-        &mut self,
-        expr_ast: ExprAst,
-    ) -> AsmResult<(ObjExpr, ExprType)> {
-        // TODO: error if contains a name that is reserved in current arch
-        self.env.typecheck_expression(expr_ast)
-    }
-
     fn finish(self) -> ObjFile {
         ObjFile {
             chunks: self.chunks.into_values().collect(),
             imports: self.imports,
+            variables: self.variables,
             asserts: self.asserts,
         }
     }

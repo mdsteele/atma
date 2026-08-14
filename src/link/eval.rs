@@ -88,7 +88,9 @@ impl<'a> LinkSymbolContext<'a> {
 //===========================================================================//
 
 pub(super) struct LinkEvalEnv {
-    variables: Vec<ExprValue>,
+    /// Evaluated variable values, or `None` for variables whose evaluation
+    /// failed.
+    variables: Vec<Option<ExprValue>>,
 }
 
 impl LinkEvalEnv {
@@ -96,18 +98,34 @@ impl LinkEvalEnv {
         Self { variables: Vec::new() }
     }
 
-    /// Pushes a new variable onto the variable stack.
-    pub fn push_variable(&mut self, variable: ExprValue) {
-        self.variables.push(variable);
+    /// Evaluates an expression and pushes the result onto the variable stack.
+    pub fn evaluate_variable(
+        &mut self,
+        expr: &ObjExpr,
+        context: &LinkSymbolContext,
+    ) -> LinkResult<()> {
+        match self.evaluate_expression(expr, context) {
+            Ok(value) => {
+                self.variables.push(Some(value));
+                Ok(())
+            }
+            Err(errs) => {
+                self.variables.push(None);
+                Err(errs)
+            }
+        }
     }
 
-    /// Gets the value of the variable at the given index, or `None` if no such
-    /// variable exists.
-    pub fn get_variable(&self, index: usize) -> Option<&ExprValue> {
+    fn get_variable(&self, index: usize) -> LinkResult<&ExprValue> {
         if index < self.variables.len() {
-            Some(&self.variables[index])
+            // If `self.variables[index]` is None, then evaluating that
+            // variable failed, and an error was already reported, so we should
+            // fail silently here.
+            self.variables[index].as_ref().ok_or_else(Errs::new)
         } else {
-            None
+            // Invalid variable index.  That shouldn't happen if
+            // unless the object file was corrupted.
+            Err(Errs::one(LinkError::MalformedPatchExpression))
         }
     }
 
@@ -121,14 +139,7 @@ impl LinkEvalEnv {
     {
         match variable {
             ConfigVariableOr::Variable(index) => {
-                match self.get_variable(index) {
-                    Some(expr_value) => func(expr_value),
-                    None => {
-                        // Invalid variable index.  That shouldn't happen if
-                        // unless the object file was corrupted.
-                        Err(Errs::one(LinkError::MalformedPatchExpression))
-                    }
-                }
+                func(self.get_variable(index)?)
             }
             ConfigVariableOr::Static(value) => Ok(value),
         }
@@ -168,15 +179,8 @@ impl LinkEvalEnv {
                     }
                 }
                 &ObjExprOp::GetValue(index) => {
-                    if let Some(value) = self.get_variable(index) {
-                        expr_stack.push(value.clone());
-                    } else {
-                        // Invalid variable index.  That shouldn't happen if
-                        // unless the object file was corrupted.
-                        return Err(Errs::one(
-                            LinkError::MalformedPatchExpression,
-                        ));
-                    }
+                    let value = self.get_variable(index)?;
+                    expr_stack.push(value.clone());
                 }
                 ObjExprOp::LabelAddr => {
                     match expr_stack.pop() {

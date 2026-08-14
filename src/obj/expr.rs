@@ -53,17 +53,6 @@ pub struct ObjExpr {
     pub(crate) ops: Vec<ObjExprOp>,
 }
 
-impl ObjExpr {
-    /// If the value of this expression is statically known at assembly time,
-    /// returns that value.
-    pub fn static_value(&self) -> Option<&ExprValue> {
-        match &*self.ops {
-            &[ObjExprOp::Push(ref value)] => Some(value),
-            _ => None,
-        }
-    }
-}
-
 impl BinaryIo for ObjExpr {
     fn read_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,

@@ -9,8 +9,8 @@ use crate::expr::{
     ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprValue,
 };
 use crate::parse::{
-    AdsStmtAst, BreakpointAst, DeclareAst, ExprAst, IdentifierAst, LValueAst,
-    LValueAstNode,
+    AdsStmtAst, BreakpointAst, DeclarationKind, ExprAst, IdentifierAst,
+    LValueAst, LValueAstNode,
 };
 use crate::system::SimSystem;
 use std::path::Path;
@@ -120,7 +120,7 @@ impl<'a> AdsCompiler<'a> {
 
     fn typecheck_declare_statement(
         &mut self,
-        kind: DeclareAst,
+        kind: DeclarationKind,
         id: IdentifierAst,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
@@ -129,8 +129,8 @@ impl<'a> AdsCompiler<'a> {
         let (expr_type, expr_static) =
             errs.with(self.typecheck_expr(expr_ast, out));
         let kind = match kind {
-            DeclareAst::Let => AdsDeclKind::Constant(expr_static),
-            DeclareAst::Var => AdsDeclKind::Variable,
+            DeclarationKind::Let => AdsDeclKind::Constant(expr_static),
+            DeclarationKind::Var => AdsDeclKind::Variable,
         };
         self.env.add_declaration(kind, id, expr_type);
         errs.result()
