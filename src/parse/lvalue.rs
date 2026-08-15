@@ -52,7 +52,10 @@ impl LValueAst {
                 span: id_ast.span,
                 node: LValueAstNode::Variable(id_ast.name),
             });
-            chumsky::prelude::choice((memory, tuple, variable))
+            let wildcard = symbol(TokenValue::Underscore).map(|token| {
+                LValueAst { span: token.span, node: LValueAstNode::Wildcard }
+            });
+            chumsky::prelude::choice((memory, tuple, variable, wildcard))
         })
     }
 }
@@ -70,7 +73,11 @@ pub enum LValueAstNode {
     /// Assign to a variable (or simulated processor register or PC).
     Variable(Rc<str>),
     // TODO: Allow list/tuple index assignment as an lvalue node
-    // TODO: Allow wildcard (underscore) as an lvalue node
+    /// Ignore the expression.
+    ///
+    /// This is mostly only useful when used as one element of a `Tuple`
+    /// L-value.
+    Wildcard,
 }
 
 //===========================================================================//

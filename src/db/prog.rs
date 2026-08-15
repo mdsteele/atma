@@ -220,10 +220,7 @@ impl<'a> AdsCompiler<'a> {
         let expr_span = expr_ast.span;
         let (expr_type, _) = errs.with(self.typecheck_expr(expr_ast, out));
         let lvalue_type = errs.with(self.typecheck_lvalue(lvalue_ast, out));
-        if !(expr_type == ExprType::Bottom
-            || lvalue_type == ExprType::Bottom
-            || expr_type == lvalue_type)
-        {
+        if !expr_type.is_subtype_of(&lvalue_type) {
             errs.push(AdsError::VariableTypeError {
                 expr_loc: self.make_loc(expr_span),
                 expr_type,
@@ -406,16 +403,14 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> ((ExprType, ExprStatic), Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
-        match errs.ok(self.env.typecheck_expression(ast)) {
+        let type_static = match errs.ok(self.env.typecheck_expression(ast)) {
             Some((mut ops, expr_type, expr_static)) => {
                 out.append(&mut ops);
-                ((expr_type, expr_static), errs)
+                (expr_type, expr_static)
             }
-            None => (
-                (ExprType::Bottom, Err(ExprNotStaticReason::Impossible)),
-                errs,
-            ),
-        }
+            None => (ExprType::Undefined, Err(ExprNotStaticReason::TypeError)),
+        };
+        (type_static, errs)
     }
 
     fn typecheck_predicate(
@@ -497,6 +492,10 @@ impl<'a> AdsCompiler<'a> {
             LValueAstNode::Variable(name) => {
                 self.typecheck_variable_lvalue(lvalue_ast.span, name, out)
             }
+            LValueAstNode::Wildcard => {
+                out.push(AdsInstruction::PopValue);
+                (ExprType::Undefined, Errs::new())
+            }
         }
     }
 
@@ -577,7 +576,7 @@ impl<'a> AdsCompiler<'a> {
                     name: id_name,
                     loc: self.make_loc(id_span),
                 };
-                (ExprType::Bottom, Errs::one(error))
+                (ExprType::Undefined, Errs::one(error))
             }
         }
     }

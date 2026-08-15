@@ -240,12 +240,10 @@ impl<'a> Assembler<'a> {
         let lvalue_span = set_ast.id.span;
         let lvalue_name = set_ast.id.name.clone();
         let lvalue_check = errs.ok(self.env.typecheck_lvalue(set_ast.id));
-        match (expr_check, lvalue_check) {
-            (_, Some(ExprType::Bottom)) => {}
-            (Some((_, ExprType::Bottom, _)), _) => {}
-            (Some((expr, expr_type, expr_static)), Some(lvalue_type))
-                if expr_type == lvalue_type =>
-            {
+        if let (Some((expr, expr_type, expr_static)), Some(lvalue_type)) =
+            (expr_check, lvalue_check)
+        {
+            if expr_type.is_subtype_of(&lvalue_type) {
                 let decl_value = match expr_static {
                     Ok(static_value) => AsmDeclValue::Static(static_value),
                     Err(reason) => {
@@ -255,8 +253,7 @@ impl<'a> Assembler<'a> {
                     }
                 };
                 self.env.reassign_variable(lvalue_name, decl_value);
-            }
-            (Some((_, expr_type, _)), Some(lvalue_type)) => {
+            } else {
                 errs.push(AsmError::VariableTypeError {
                     expr_loc: self.env.make_loc(expr_span),
                     expr_type,
@@ -264,7 +261,6 @@ impl<'a> Assembler<'a> {
                     lvalue_type,
                 });
             }
-            _ => {}
         }
         errs.result()
     }

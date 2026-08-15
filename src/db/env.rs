@@ -455,7 +455,7 @@ mod tests {
         let system = SimSystem::with_nop_cpu();
         let mut env = AdsTypeEnv::new(&system, Rc::from("input"));
         env.add_declaration(
-            AdsDeclKind::Constant(Err(ExprNotStaticReason::Impossible)),
+            AdsDeclKind::Constant(Err(ExprNotStaticReason::Phantom)),
             IdentifierAst {
                 span: SrcSpan::from_byte_range(1..4),
                 name: Rc::from("foo"),
@@ -466,7 +466,7 @@ mod tests {
         let (instructions, expr_type, expr_static) =
             env.typecheck_expression(id_ast("foo", 10..13)).unwrap();
         assert_eq!(expr_type, ExprType::Boolean);
-        assert_matches!(expr_static, Err(ExprNotStaticReason::Impossible));
+        assert_matches!(expr_static, Err(ExprNotStaticReason::Phantom));
         assert_matches!(
             instructions.as_slice(),
             [AdsInstruction::GetValue(AdsFrameRef::Global, 0)]

@@ -562,10 +562,11 @@ impl ExprEvalError {
 /// Describes a reason why a particular expression isn't considered static.
 #[derive(Clone, Debug)]
 pub enum ExprNotStaticReason {
-    /// Cannot statically evaluate the expression because it has type `Bottom`
-    /// (possibly due to an earlier error), and therefore it cannot have a
-    /// value.
-    Impossible,
+    /// No need to statically evaluate the expression, because it is an
+    /// unreachable "phantom" expression that will never be evaluated and is
+    /// only relevant for typechecking (e.g. the untaken branch of a
+    /// conditional whose predicate boolean is statically known).
+    Phantom,
     /// Cannot statically evaluate the expression because an evaluation error
     /// would occur.
     StaticEvalError {
@@ -573,6 +574,9 @@ pub enum ExprNotStaticReason {
         /// evaluated.
         error: ExprEvalError,
     },
+    /// Cannot statically evaluate the expression because the expression did
+    /// not typecheck successfully.
+    TypeError,
     /// Cannot statically evaluate the expression because it depends on the
     /// value of a non-static variable.
     Variable {
@@ -604,7 +608,7 @@ pub struct ExprNotStaticContext {
 impl SourceContext for ExprNotStaticContext {
     fn annotate(&self, error: SourceError) -> SourceError {
         match &self.reason {
-            ExprNotStaticReason::Impossible => error,
+            ExprNotStaticReason::Phantom => error,
             ExprNotStaticReason::StaticEvalError { error: eval_error } => {
                 let eval_error =
                     eval_error.clone().to_source_error(&self.path);
@@ -621,6 +625,7 @@ impl SourceContext for ExprNotStaticContext {
                     .into_iter()
                     .fold(error, |e, note| e.with_note(note))
             }
+            ExprNotStaticReason::TypeError => error,
             ExprNotStaticReason::Variable { span, name } => {
                 let label = format!("...because `{name}` isn't static");
                 error.with_label(SrcLoc::new(&self.path, *span), label)

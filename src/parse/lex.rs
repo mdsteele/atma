@@ -208,7 +208,7 @@ enum TokenKind {
     GreaterGreater,
     #[token(">")]
     GreaterThan,
-    #[regex(r"[_A-Za-z][_A-Za-z0-9]*")]
+    #[regex(r"[A-Za-z][_A-Za-z0-9]*|_[_A-Za-z0-9]+")]
     Identifier,
     #[regex(r"%[01]+", binary_literal_callback)]
     #[regex(r"[0-9]+", decimal_literal_callback)]
@@ -254,6 +254,8 @@ enum TokenKind {
     StrLiteral(Rc<str>),
     #[token("~")]
     Tilde,
+    #[token("_")]
+    Underscore,
 }
 
 impl TokenKind {
@@ -316,6 +318,7 @@ impl TokenKind {
             TokenKind::StarStar => TokenValue::StarStar,
             TokenKind::StrLiteral(string) => TokenValue::StrLiteral(string),
             TokenKind::Tilde => TokenValue::Tilde,
+            TokenKind::Underscore => TokenValue::Underscore,
         };
         let token = Token { span: token_span, value: token_value };
         if let Some(backslash_span) = lexer.extras.backslash {
@@ -421,6 +424,8 @@ pub enum TokenValue {
     StrLiteral(Rc<str>),
     /// A "`~`" symbol.
     Tilde,
+    /// A "`_`" symbol.
+    Underscore,
 }
 
 impl TokenValue {
@@ -472,6 +477,7 @@ impl TokenValue {
             TokenValue::StarStar => "`**`",
             TokenValue::StrLiteral(_) => "string literal",
             TokenValue::Tilde => "`~`",
+            TokenValue::Underscore => "`_`",
         }
     }
 }

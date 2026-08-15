@@ -29,7 +29,10 @@ const TAG_TUPLE: u8 = 11;
 pub enum ExprType {
     /// The boolean type.
     Boolean,
-    /// The bottom type, used for expressions that don't typecheck.
+    /// The bottom type, which no values inhabit, and which is a subtype of
+    /// every other type.
+    ///
+    /// For example, this is the item type of an empty list literal.
     Bottom,
     /// An opaque object type with the given human-readable type name.
     Entity(Rc<str>),
@@ -46,25 +49,126 @@ pub enum ExprType {
     String,
     /// A heterogenous tuple type, with elements of the given types.
     Tuple(Rc<[ExprType]>),
+    /// Used for expressions and variables that have no meaningful type because
+    /// they failed to typecheck.
+    ///
+    /// This is also used for "wildcard" L-values (i.e. `_`), to which
+    /// expressions of any type may be assigned.
+    Undefined,
 }
 
 impl ExprType {
     /// Returns true if this type supports totally ordered comparisons.  If
     /// this returns true for an `ExprType`, then calling `partial_cmp` on two
     /// `ExprValue`s of that type will always return a non-`None` value.
+    ///
+    /// This returns `true` for `Bottom` and `Undefined`; since no concrete
+    /// values of those types exist, the above implication is trivially true.
     pub(crate) fn is_ord(&self) -> bool {
         match self {
-            ExprType::Boolean => true,
-            ExprType::Bottom => false,
-            ExprType::Entity(_) => false,
-            ExprType::Function(_) => false,
-            ExprType::Integer => true,
-            ExprType::Label => false,
-            ExprType::List(item_type) => item_type.is_ord(),
-            ExprType::String => true,
-            ExprType::Tuple(item_types) => {
-                item_types.iter().all(ExprType::is_ord)
+            Self::Boolean => true,
+            Self::Bottom => true,
+            Self::Entity(_) => false,
+            Self::Function(_) => false,
+            Self::Integer => true,
+            Self::Label => false,
+            Self::List(item_type) => item_type.is_ord(),
+            Self::String => true,
+            Self::Tuple(item_types) => item_types.iter().all(Self::is_ord),
+            Self::Undefined => true,
+        }
+    }
+
+    /// Returns true if `self` is a subtype of `other` (i.e. if it is legal to
+    /// assign a value of type `self` to a variable of type `other`).
+    ///
+    /// In general:
+    /// * If the two types are the same, returns true.
+    /// * If either type is `Undefined`, returns true.
+    /// * If `self` is `Bottom`, returns true.
+    /// * If both types are `Function`s, returns true if the output type of
+    ///   `self` is a subtype of the output type of `other` AND the input type
+    ///   of `other` is a subtype of the input type of `self`.
+    /// * If both types are `List`s, returns true if the item type of `self` is
+    ///   a subtype of the item type of `other`.
+    /// * If both types are `Tuple`s of equal length, returns true if each item
+    ///   type in `self` is a subtype of the corresponding item type in
+    ///   `other`.
+    /// * Otherwise, returns false.
+    pub fn is_subtype_of(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Undefined, _) | (_, Self::Undefined) => true,
+            (Self::Bottom, _) => true,
+            (Self::Function(types1), Self::Function(types2)) => {
+                types2.0.is_subtype_of(&types1.0)
+                    && types1.1.is_subtype_of(&types2.1)
             }
+            (Self::List(item1), Self::List(item2)) => {
+                item1.is_subtype_of(item2)
+            }
+            (Self::Tuple(items1), Self::Tuple(items2)) => {
+                items1.len() == items2.len()
+                    && items1
+                        .iter()
+                        .zip(items2.iter())
+                        .all(|(item1, item2)| item1.is_subtype_of(item2))
+            }
+            (type1, type2) => type1 == type2,
+        }
+    }
+
+    /// Returns the union of two types, if one exists (e.g. the type of a
+    /// ternary conditional expression whose branches have the two given
+    /// types).
+    ///
+    /// In general:
+    /// * If the two types are the same, the result is that type.
+    /// * If either type is `Undefined`, the result is `Undefined`.
+    /// * If either type is `Bottom`, the result is the other type.
+    /// * If both types are `Function`s with the same input type, the result is
+    ///   a `Function` with that input type, whose output type is the union of
+    ///   the two output types (if that union exists).
+    /// * If both types are `List`s, the result is a `List` of the union of the
+    ///   two item types (if that union exists).
+    /// * If both types are `Tuple`s of equal length, the result is a `Tuple`
+    ///   of the pairwise unions of the item types (if those unions exist).
+    /// * Otherwise, no union exists and the result is `None`, in which case a
+    ///   type error should be reported, and `Undefined` should be used as the
+    ///   unified type.
+    pub fn union(&self, other: &Self) -> Option<Self> {
+        match (self, other) {
+            (Self::Undefined, _) | (_, Self::Undefined) => {
+                Some(Self::Undefined)
+            }
+            (Self::Bottom, expr_type) | (expr_type, Self::Bottom) => {
+                Some(expr_type.clone())
+            }
+            (Self::Function(types1), Self::Function(types2)) => {
+                if types1.0 == types2.0 {
+                    let param_type = types1.0.clone();
+                    let result_type = types1.1.union(&types2.1)?;
+                    Some(Self::Function(Rc::new((param_type, result_type))))
+                } else {
+                    None
+                }
+            }
+            (Self::List(item1), Self::List(item2)) => {
+                Some(Self::List(Rc::new(item1.union(item2)?)))
+            }
+            (Self::Tuple(items1), Self::Tuple(items2)) => {
+                if items1.len() == items2.len() {
+                    let item_types = items1
+                        .iter()
+                        .zip(items2.iter())
+                        .map(|(item1, item2)| item1.union(item2))
+                        .collect::<Option<Vec<ExprType>>>()?;
+                    Some(Self::Tuple(Rc::from(item_types)))
+                } else {
+                    None
+                }
+            }
+            (type1, type2) if type1 == type2 => Some(type1.clone()),
+            _ => None,
         }
     }
 }
@@ -73,7 +177,7 @@ impl fmt::Display for ExprType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ExprType::Boolean => f.write_str("bool"),
-            ExprType::Bottom => f.write_str("bottom"),
+            ExprType::Bottom => f.write_str("!"),
             ExprType::Entity(type_name) => f.write_str(type_name),
             ExprType::Function(types) => {
                 f.write_str("[")?;
@@ -95,6 +199,7 @@ impl fmt::Display for ExprType {
                 comma_separate(f, item_types)?;
                 f.write_str(")")
             }
+            ExprType::Undefined => f.write_str("_"),
         }
     }
 }
@@ -439,6 +544,8 @@ mod tests {
         assert_eq!(ExprType::Integer.to_string(), "int");
         assert_eq!(ExprType::Label.to_string(), "label");
         assert_eq!(ExprType::String.to_string(), "str");
+        assert_eq!(ExprType::Bottom.to_string(), "!");
+        assert_eq!(ExprType::Undefined.to_string(), "_");
     }
 
     #[test]
@@ -487,6 +594,8 @@ mod tests {
             ty,
         ]))));
         assert_eq!(ty.to_string(), "{(str, {{int}})}");
+        let ty = ExprType::List(Rc::from(ExprType::Bottom));
+        assert_eq!(ty.to_string(), "{!}");
     }
 
     #[test]

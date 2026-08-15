@@ -458,7 +458,7 @@ impl ConfigBuilder {
                     (expr_type, self.add_variable(expr))
                 }
                 None => (
-                    ExprType::Bottom,
+                    ExprType::Undefined,
                     ConfigVariableOr::Static(ExprValue::Boolean(false)),
                 ),
             };
