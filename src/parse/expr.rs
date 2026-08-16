@@ -29,6 +29,8 @@ const BIND_EXPONENTIATE: u16 = 11;
 /// A unary operation on an expression in an abstract syntax tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnOpAst {
+    /// Address of label.
+    AddrOf,
     /// Bitwise NOT.
     BitNot,
     /// Logical NOT.
@@ -42,6 +44,7 @@ impl UnOpAst {
     /// subexpression.
     pub(crate) fn verb(self) -> &'static str {
         match self {
+            UnOpAst::AddrOf => "take address of",
             UnOpAst::BitNot => "bitwise-NOT",
             UnOpAst::LogNot => "logical-NOT",
             UnOpAst::Neg => "negate",
@@ -247,6 +250,11 @@ impl ExprAst {
                     pratt::left(BIND_EXPONENTIATE),
                     symbol(TokenValue::StarStar),
                     |l, o, r, _| ExprAst::binop(BinOpAst::Pow, l, o, r),
+                ),
+                pratt::prefix(
+                    BIND_UNARY_PREFIX,
+                    symbol(TokenValue::And),
+                    |o, s, _| ExprAst::unop(UnOpAst::AddrOf, o, s),
                 ),
                 pratt::prefix(
                     BIND_UNARY_PREFIX,

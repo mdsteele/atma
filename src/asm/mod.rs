@@ -8,7 +8,7 @@ mod macros;
 
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
-use crate::expr::{ExprStatic, ExprType, ExprValue};
+use crate::expr::{ExprStatic, ExprType, ExprUnOp, ExprValue};
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
     ObjPatchIntType, ObjSymbol,
@@ -661,7 +661,7 @@ impl<'a> Assembler<'a> {
                     // TODO: If the label belongs to a chunk with an explicit
                     // start address, then the label's address value is static
                     // and no patch is necessary.
-                    expr.ops.push(ObjExprOp::LabelAddr);
+                    expr.ops.push(ObjExprOp::UnOp(ExprUnOp::AddrOf));
                     self.try_add_patch(ObjPatchData::Integer(int_type, expr));
                     0
                 }

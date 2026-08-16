@@ -366,6 +366,14 @@ impl ExprTypeError {
 /// An error encountered while evaluating an expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExprEvalError {
+    /// Tried to get the address of a label, but the label has not yet been
+    /// resolved and its address is not yet known.
+    AddrOfLabelUnresolved {
+        /// The source code span for the address-of operator.
+        op_span: SrcSpan,
+        /// The source code span for the argument of the address-of operation.
+        arg_span: SrcSpan,
+    },
     /// Tried to bit shift an integer left/right by the given number of bits,
     /// but the shift amount was negative.
     BitShiftByNegative {
@@ -471,6 +479,11 @@ impl ExprEvalError {
     /// source file containing the expression.
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
+            Self::AddrOfLabelUnresolved { op_span, arg_span } => {
+                let message = "the address of this label is not yet known";
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, arg_span), "")
+            }
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
                 let message = "shift distance cannot be negative";
                 let label =

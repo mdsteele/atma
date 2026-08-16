@@ -182,22 +182,6 @@ impl LinkEvalEnv {
                     let value = self.get_variable(index)?;
                     expr_stack.push(value.clone());
                 }
-                ObjExprOp::LabelAddr => {
-                    match expr_stack.pop() {
-                        Some(ExprValue::Label(label)) => {
-                            let resolved = context.resolve_label(&label)?;
-                            let address = BigInt::from(resolved.address);
-                            expr_stack.push(ExprValue::Integer(address));
-                        }
-                        _ => {
-                            // The expression has a type error.  That shouldn't
-                            // happen if unless the object file was corrupted.
-                            return Err(Errs::one(
-                                LinkError::MalformedPatchExpression,
-                            ));
-                        }
-                    }
-                }
                 ObjExprOp::Push(ExprValue::Label(label)) => {
                     let resolved = context.resolve_label(label)?;
                     expr_stack.push(ExprValue::Label(

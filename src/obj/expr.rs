@@ -25,20 +25,20 @@ const OP_SHL: u8 = 0x0f;
 const OP_SHR: u8 = 0x10;
 const OP_SUB: u8 = 0x11;
 // Unary ops:
-const OP_BIT_NOT: u8 = 0x20;
-const OP_NEG: u8 = 0x21;
+const OP_ADDR_OF: u8 = 0x20;
+const OP_BIT_NOT: u8 = 0x21;
+const OP_NEG: u8 = 0x22;
 // Other ops:
 const OP_APPLY: u8 = 0x30;
 const OP_GET_VALUE: u8 = 0x31;
-const OP_LABEL_ADDR: u8 = 0x32;
-const OP_LIST_INDEX: u8 = 0x33;
-const OP_MAKE_LIST: u8 = 0x34;
-const OP_MAKE_TUPLE: u8 = 0x35;
-const OP_PUSH: u8 = 0x36;
-const OP_SKIP: u8 = 0x37;
-const OP_SKIP_IF: u8 = 0x38;
-const OP_SKIP_UNLESS: u8 = 0x39;
-const OP_TUPLE_ITEM: u8 = 0x3a;
+const OP_LIST_INDEX: u8 = 0x32;
+const OP_MAKE_LIST: u8 = 0x33;
+const OP_MAKE_TUPLE: u8 = 0x34;
+const OP_PUSH: u8 = 0x35;
+const OP_SKIP: u8 = 0x36;
+const OP_SKIP_IF: u8 = 0x37;
+const OP_SKIP_UNLESS: u8 = 0x38;
+const OP_TUPLE_ITEM: u8 = 0x39;
 
 //===========================================================================//
 
@@ -125,10 +125,6 @@ pub(crate) enum ObjExprOp {
     /// Copies the value at the specified index in the value stack, and pushes
     /// the copied value onto the stack.
     GetValue(usize),
-    /// Pops the top value from the value stack (which must be a label), and
-    /// pushes the runtime address of that label (as an integer) onto the value
-    /// stack.
-    LabelAddr,
     /// Pops the top two values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then pushes that list
@@ -188,12 +184,12 @@ impl BinaryIo for ObjExprOp {
             OP_SHR => Ok(Self::BinOp(ExprBinOp::Shr)),
             OP_SUB => Ok(Self::BinOp(ExprBinOp::Sub)),
             // Unary ops:
+            OP_ADDR_OF => Ok(Self::UnOp(ExprUnOp::AddrOf)),
             OP_BIT_NOT => Ok(Self::UnOp(ExprUnOp::BitNot)),
             OP_NEG => Ok(Self::UnOp(ExprUnOp::Neg)),
             // Other ops:
             OP_APPLY => Ok(Self::Apply),
             OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
-            OP_LABEL_ADDR => Ok(Self::LabelAddr),
             OP_LIST_INDEX => Ok(Self::ListIndex),
             OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(decoder)?)),
             OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(decoder)?)),
@@ -237,7 +233,6 @@ impl BinaryIo for ObjExprOp {
                 OP_GET_VALUE.write_to(encoder)?;
                 index.write_to(encoder)
             }
-            Self::LabelAddr => OP_LABEL_ADDR.write_to(encoder),
             Self::ListIndex => OP_LIST_INDEX.write_to(encoder),
             Self::MakeList(num_items) => {
                 OP_MAKE_LIST.write_to(encoder)?;
@@ -267,6 +262,7 @@ impl BinaryIo for ObjExprOp {
                 OP_TUPLE_ITEM.write_to(encoder)?;
                 index.write_to(encoder)
             }
+            Self::UnOp(ExprUnOp::AddrOf) => OP_ADDR_OF.write_to(encoder),
             Self::UnOp(ExprUnOp::BitNot) => OP_BIT_NOT.write_to(encoder),
             Self::UnOp(ExprUnOp::Neg) => OP_NEG.write_to(encoder),
         }
@@ -321,7 +317,6 @@ mod tests {
         assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Sub));
         assert_round_trips(ObjExprOp::GetValue(0));
         assert_round_trips(ObjExprOp::GetValue(42));
-        assert_round_trips(ObjExprOp::LabelAddr);
         assert_round_trips(ObjExprOp::ListIndex);
         assert_round_trips(ObjExprOp::MakeList(0));
         assert_round_trips(ObjExprOp::MakeList(3));
@@ -339,6 +334,7 @@ mod tests {
         assert_round_trips(ObjExprOp::SkipUnless(1234));
         assert_round_trips(ObjExprOp::TupleItem(0));
         assert_round_trips(ObjExprOp::TupleItem(2));
+        assert_round_trips(ObjExprOp::UnOp(ExprUnOp::AddrOf));
         assert_round_trips(ObjExprOp::UnOp(ExprUnOp::BitNot));
         assert_round_trips(ObjExprOp::UnOp(ExprUnOp::Neg));
     }
