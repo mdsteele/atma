@@ -2,7 +2,6 @@ use super::func::ExprFunc;
 use super::label::ExprLabel;
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::BigInt;
-use std::cmp::Ordering;
 use std::fmt;
 use std::io;
 use std::rc::Rc;
@@ -58,27 +57,6 @@ pub enum ExprType {
 }
 
 impl ExprType {
-    /// Returns true if this type supports totally ordered comparisons.  If
-    /// this returns true for an `ExprType`, then calling `partial_cmp` on two
-    /// `ExprValue`s of that type will always return a non-`None` value.
-    ///
-    /// This returns `true` for `Bottom` and `Undefined`; since no concrete
-    /// values of those types exist, the above implication is trivially true.
-    pub(crate) fn is_ord(&self) -> bool {
-        match self {
-            Self::Boolean => true,
-            Self::Bottom => true,
-            Self::Entity(_) => false,
-            Self::Function(_) => false,
-            Self::Integer => true,
-            Self::Label => false,
-            Self::List(item_type) => item_type.is_ord(),
-            Self::String => true,
-            Self::Tuple(item_types) => item_types.iter().all(Self::is_ord),
-            Self::Undefined => true,
-        }
-    }
-
     /// Returns true if `self` is a subtype of `other` (i.e. if it is legal to
     /// assign a value of type `self` to a variable of type `other`).
     ///
@@ -475,29 +453,6 @@ impl fmt::Display for ExprValue {
                 comma_separate(f, values)?;
                 f.write_str(")")
             }
-        }
-    }
-}
-
-impl PartialOrd for ExprValue {
-    fn partial_cmp(&self, other: &ExprValue) -> Option<Ordering> {
-        match (self, other) {
-            (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
-                Some(lhs.cmp(rhs))
-            }
-            (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
-                Some(lhs.cmp(rhs))
-            }
-            (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
-                lhs.partial_cmp(rhs)
-            }
-            (ExprValue::String(lhs), ExprValue::String(rhs)) => {
-                Some(lhs.cmp(rhs))
-            }
-            // TODO: lists
-            // TODO: tuples
-            _ if self == other => Some(Ordering::Equal),
-            _ => None,
         }
     }
 }

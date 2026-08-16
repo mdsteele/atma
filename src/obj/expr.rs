@@ -6,42 +6,36 @@ use std::io;
 //===========================================================================//
 
 // Binary ops:
-const OP_ANY_CMP_EQ: u8 = 0x00;
-const OP_ANY_CMP_LE: u8 = 0x01;
-const OP_ANY_CMP_LT: u8 = 0x02;
-const OP_ANY_CMP_GE: u8 = 0x03;
-const OP_ANY_CMP_GT: u8 = 0x04;
-const OP_ANY_CMP_NE: u8 = 0x05;
-const OP_BOOL_BIT_AND: u8 = 0x11;
-const OP_BOOL_BIT_OR: u8 = 0x12;
-const OP_BOOL_BIT_XOR: u8 = 0x13;
-const OP_INT_ADD: u8 = 0x20;
-const OP_INT_BIT_AND: u8 = 0x21;
-const OP_INT_BIT_OR: u8 = 0x22;
-const OP_INT_BIT_XOR: u8 = 0x23;
-const OP_INT_DIV: u8 = 0x24;
-const OP_INT_MOD: u8 = 0x25;
-const OP_INT_MUL: u8 = 0x26;
-const OP_INT_POW: u8 = 0x27;
-const OP_INT_SHL: u8 = 0x28;
-const OP_INT_SHR: u8 = 0x29;
-const OP_INT_SUB: u8 = 0x2a;
-const OP_LABEL_ADD_INT: u8 = 0x30;
-const OP_LABEL_SUB: u8 = 0x31;
-const OP_LIST_CONCAT: u8 = 0x40;
-const OP_STR_CONCAT: u8 = 0x50;
+const OP_ADD: u8 = 0x00;
+const OP_BIT_AND: u8 = 0x01;
+const OP_BIT_OR: u8 = 0x02;
+const OP_BIT_XOR: u8 = 0x03;
+const OP_CMP_EQ: u8 = 0x04;
+const OP_CMP_LE: u8 = 0x05;
+const OP_CMP_LT: u8 = 0x06;
+const OP_CMP_GE: u8 = 0x07;
+const OP_CMP_GT: u8 = 0x08;
+const OP_CMP_NE: u8 = 0x09;
+const OP_CONCAT: u8 = 0x0a;
+const OP_DIV: u8 = 0x0b;
+const OP_MOD: u8 = 0x0c;
+const OP_MUL: u8 = 0x0d;
+const OP_POW: u8 = 0x0e;
+const OP_SHL: u8 = 0x0f;
+const OP_SHR: u8 = 0x10;
+const OP_SUB: u8 = 0x11;
 // Other ops:
-const OP_APPLY: u8 = 0x60;
-const OP_GET_VALUE: u8 = 0x61;
-const OP_LABEL_ADDR: u8 = 0x62;
-const OP_LIST_INDEX: u8 = 0x63;
-const OP_MAKE_LIST: u8 = 0x64;
-const OP_MAKE_TUPLE: u8 = 0x65;
-const OP_PUSH: u8 = 0x66;
-const OP_SKIP: u8 = 0x67;
-const OP_SKIP_IF: u8 = 0x68;
-const OP_SKIP_UNLESS: u8 = 0x69;
-const OP_TUPLE_ITEM: u8 = 0x6a;
+const OP_APPLY: u8 = 0x20;
+const OP_GET_VALUE: u8 = 0x21;
+const OP_LABEL_ADDR: u8 = 0x22;
+const OP_LIST_INDEX: u8 = 0x23;
+const OP_MAKE_LIST: u8 = 0x24;
+const OP_MAKE_TUPLE: u8 = 0x25;
+const OP_PUSH: u8 = 0x26;
+const OP_SKIP: u8 = 0x27;
+const OP_SKIP_IF: u8 = 0x28;
+const OP_SKIP_UNLESS: u8 = 0x29;
+const OP_TUPLE_ITEM: u8 = 0x2a;
 
 //===========================================================================//
 
@@ -168,30 +162,24 @@ impl BinaryIo for ObjExprOp {
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
             // Binary ops:
-            OP_ANY_CMP_EQ => Ok(Self::BinOp(ExprBinOp::AnyCmpEq)),
-            OP_ANY_CMP_LE => Ok(Self::BinOp(ExprBinOp::AnyCmpLe)),
-            OP_ANY_CMP_LT => Ok(Self::BinOp(ExprBinOp::AnyCmpLt)),
-            OP_ANY_CMP_GE => Ok(Self::BinOp(ExprBinOp::AnyCmpGe)),
-            OP_ANY_CMP_GT => Ok(Self::BinOp(ExprBinOp::AnyCmpGt)),
-            OP_ANY_CMP_NE => Ok(Self::BinOp(ExprBinOp::AnyCmpNe)),
-            OP_BOOL_BIT_AND => Ok(Self::BinOp(ExprBinOp::BoolBitAnd)),
-            OP_BOOL_BIT_OR => Ok(Self::BinOp(ExprBinOp::BoolBitOr)),
-            OP_BOOL_BIT_XOR => Ok(Self::BinOp(ExprBinOp::BoolBitXor)),
-            OP_INT_ADD => Ok(Self::BinOp(ExprBinOp::IntAdd)),
-            OP_INT_BIT_AND => Ok(Self::BinOp(ExprBinOp::IntBitAnd)),
-            OP_INT_BIT_OR => Ok(Self::BinOp(ExprBinOp::IntBitOr)),
-            OP_INT_BIT_XOR => Ok(Self::BinOp(ExprBinOp::IntBitXor)),
-            OP_INT_DIV => Ok(Self::BinOp(ExprBinOp::IntDiv)),
-            OP_INT_MOD => Ok(Self::BinOp(ExprBinOp::IntMod)),
-            OP_INT_MUL => Ok(Self::BinOp(ExprBinOp::IntMul)),
-            OP_INT_POW => Ok(Self::BinOp(ExprBinOp::IntPow)),
-            OP_INT_SHL => Ok(Self::BinOp(ExprBinOp::IntShl)),
-            OP_INT_SHR => Ok(Self::BinOp(ExprBinOp::IntShr)),
-            OP_INT_SUB => Ok(Self::BinOp(ExprBinOp::IntSub)),
-            OP_LABEL_ADD_INT => Ok(Self::BinOp(ExprBinOp::LabelAddInt)),
-            OP_LABEL_SUB => Ok(Self::BinOp(ExprBinOp::LabelSub)),
-            OP_LIST_CONCAT => Ok(Self::BinOp(ExprBinOp::ListConcat)),
-            OP_STR_CONCAT => Ok(Self::BinOp(ExprBinOp::StrConcat)),
+            OP_ADD => Ok(Self::BinOp(ExprBinOp::Add)),
+            OP_BIT_AND => Ok(Self::BinOp(ExprBinOp::BitAnd)),
+            OP_BIT_OR => Ok(Self::BinOp(ExprBinOp::BitOr)),
+            OP_BIT_XOR => Ok(Self::BinOp(ExprBinOp::BitXor)),
+            OP_CMP_EQ => Ok(Self::BinOp(ExprBinOp::CmpEq)),
+            OP_CMP_LE => Ok(Self::BinOp(ExprBinOp::CmpLe)),
+            OP_CMP_LT => Ok(Self::BinOp(ExprBinOp::CmpLt)),
+            OP_CMP_GE => Ok(Self::BinOp(ExprBinOp::CmpGe)),
+            OP_CMP_GT => Ok(Self::BinOp(ExprBinOp::CmpGt)),
+            OP_CMP_NE => Ok(Self::BinOp(ExprBinOp::CmpNe)),
+            OP_CONCAT => Ok(Self::BinOp(ExprBinOp::Concat)),
+            OP_DIV => Ok(Self::BinOp(ExprBinOp::Div)),
+            OP_MOD => Ok(Self::BinOp(ExprBinOp::Mod)),
+            OP_MUL => Ok(Self::BinOp(ExprBinOp::Mul)),
+            OP_POW => Ok(Self::BinOp(ExprBinOp::Pow)),
+            OP_SHL => Ok(Self::BinOp(ExprBinOp::Shl)),
+            OP_SHR => Ok(Self::BinOp(ExprBinOp::Shr)),
+            OP_SUB => Ok(Self::BinOp(ExprBinOp::Sub)),
             // Other ops:
             OP_APPLY => Ok(Self::Apply),
             OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
@@ -217,60 +205,24 @@ impl BinaryIo for ObjExprOp {
     ) -> io::Result<()> {
         match self {
             Self::Apply => OP_APPLY.write_to(encoder),
-            Self::BinOp(ExprBinOp::AnyCmpEq) => {
-                OP_ANY_CMP_EQ.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::AnyCmpLe) => {
-                OP_ANY_CMP_LE.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::AnyCmpLt) => {
-                OP_ANY_CMP_LT.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::AnyCmpGe) => {
-                OP_ANY_CMP_GE.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::AnyCmpGt) => {
-                OP_ANY_CMP_GT.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::AnyCmpNe) => {
-                OP_ANY_CMP_NE.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::BoolBitAnd) => {
-                OP_BOOL_BIT_AND.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::BoolBitOr) => {
-                OP_BOOL_BIT_OR.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::BoolBitXor) => {
-                OP_BOOL_BIT_XOR.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::IntAdd) => OP_INT_ADD.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntBitAnd) => {
-                OP_INT_BIT_AND.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::IntBitOr) => {
-                OP_INT_BIT_OR.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::IntBitXor) => {
-                OP_INT_BIT_XOR.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::IntDiv) => OP_INT_DIV.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntMod) => OP_INT_MOD.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntMul) => OP_INT_MUL.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntPow) => OP_INT_POW.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntShl) => OP_INT_SHL.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntShr) => OP_INT_SHR.write_to(encoder),
-            Self::BinOp(ExprBinOp::IntSub) => OP_INT_SUB.write_to(encoder),
-            Self::BinOp(ExprBinOp::LabelAddInt) => {
-                OP_LABEL_ADD_INT.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::LabelSub) => OP_LABEL_SUB.write_to(encoder),
-            Self::BinOp(ExprBinOp::ListConcat) => {
-                OP_LIST_CONCAT.write_to(encoder)
-            }
-            Self::BinOp(ExprBinOp::StrConcat) => {
-                OP_STR_CONCAT.write_to(encoder)
-            }
+            Self::BinOp(ExprBinOp::Add) => OP_ADD.write_to(encoder),
+            Self::BinOp(ExprBinOp::BitAnd) => OP_BIT_AND.write_to(encoder),
+            Self::BinOp(ExprBinOp::BitOr) => OP_BIT_OR.write_to(encoder),
+            Self::BinOp(ExprBinOp::BitXor) => OP_BIT_XOR.write_to(encoder),
+            Self::BinOp(ExprBinOp::CmpEq) => OP_CMP_EQ.write_to(encoder),
+            Self::BinOp(ExprBinOp::CmpLe) => OP_CMP_LE.write_to(encoder),
+            Self::BinOp(ExprBinOp::CmpLt) => OP_CMP_LT.write_to(encoder),
+            Self::BinOp(ExprBinOp::CmpGe) => OP_CMP_GE.write_to(encoder),
+            Self::BinOp(ExprBinOp::CmpGt) => OP_CMP_GT.write_to(encoder),
+            Self::BinOp(ExprBinOp::CmpNe) => OP_CMP_NE.write_to(encoder),
+            Self::BinOp(ExprBinOp::Concat) => OP_CONCAT.write_to(encoder),
+            Self::BinOp(ExprBinOp::Div) => OP_DIV.write_to(encoder),
+            Self::BinOp(ExprBinOp::Mod) => OP_MOD.write_to(encoder),
+            Self::BinOp(ExprBinOp::Mul) => OP_MUL.write_to(encoder),
+            Self::BinOp(ExprBinOp::Pow) => OP_POW.write_to(encoder),
+            Self::BinOp(ExprBinOp::Shl) => OP_SHL.write_to(encoder),
+            Self::BinOp(ExprBinOp::Shr) => OP_SHR.write_to(encoder),
+            Self::BinOp(ExprBinOp::Sub) => OP_SUB.write_to(encoder),
             Self::GetValue(index) => {
                 OP_GET_VALUE.write_to(encoder)?;
                 index.write_to(encoder)
@@ -355,8 +307,8 @@ mod tests {
     #[test]
     fn round_trip_obj_expr_op() {
         assert_round_trips(ObjExprOp::Apply);
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::BoolBitOr));
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::IntAdd));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::BitOr));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Add));
         assert_round_trips(ObjExprOp::BinOp(ExprBinOp::LabelSub));
         assert_round_trips(ObjExprOp::BinOp(ExprBinOp::StrConcat));
         assert_round_trips(ObjExprOp::GetValue(0));

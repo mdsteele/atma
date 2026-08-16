@@ -4,6 +4,7 @@ use crate::expr::{ExprLabel, ExprType, ExprValue};
 use crate::parse::BinOpAst;
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Euclid, Pow, Signed, ToPrimitive, Zero};
+use std::cmp::Ordering;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -20,6 +21,12 @@ pub(crate) enum ExprBinOpEvalError {
     BitShiftOutOfRange(BigUint),
     /// Tried to divide an integer, but the divisor was zero.
     DivideByZero,
+    /// Tried to perform a binary operation, but one or both of the operands
+    /// had the wrong type at runtime.
+    ///
+    /// This should normally be prevented by static typechecking, but can occur
+    /// due to e.g. a corrupted object file.
+    InvalidType,
     /// Tried to modulo an integer, but the modulus was zero.
     ModByZero,
     /// Tried to exponentiate an integer with the given exponent, but the
@@ -49,6 +56,9 @@ impl ExprBinOpEvalError {
                 ExprEvalError::BitShiftOutOfRange { rhs_span, rhs_value }
             }
             Self::DivideByZero => ExprEvalError::DivideByZero { rhs_span },
+            Self::InvalidType => ExprEvalError::InvalidType {
+                span: lhs_span.merged_with(rhs_span),
+            },
             Self::ModByZero => ExprEvalError::ModByZero { rhs_span },
             Self::PowNegativeExponent(rhs_value) => {
                 ExprEvalError::PowNegativeExponent { rhs_span, rhs_value }
@@ -78,30 +88,24 @@ impl ExprBinOpEvalError {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ExprBinOp {
-    AnyCmpEq,
-    AnyCmpLe,
-    AnyCmpLt,
-    AnyCmpGe,
-    AnyCmpGt,
-    AnyCmpNe,
-    BoolBitAnd,
-    BoolBitOr,
-    BoolBitXor,
-    IntAdd,
-    IntBitAnd,
-    IntBitOr,
-    IntBitXor,
-    IntDiv,
-    IntMod,
-    IntMul,
-    IntPow,
-    IntShl,
-    IntShr,
-    IntSub,
-    LabelAddInt,
-    LabelSub,
-    ListConcat,
-    StrConcat,
+    Add,
+    BitAnd,
+    BitOr,
+    BitXor,
+    CmpEq,
+    CmpLe,
+    CmpLt,
+    CmpGe,
+    CmpGt,
+    CmpNe,
+    Concat,
+    Div,
+    Mod,
+    Mul,
+    Pow,
+    Shl,
+    Shr,
+    Sub,
 }
 
 impl ExprBinOp {
@@ -112,80 +116,108 @@ impl ExprBinOp {
         rhs_span: SrcSpan,
         rhs_type: ExprType,
     ) -> ExprTypeResult<(ExprBinOp, ExprType)> {
+        // TODO: Allow one or both operands to have type `Bottom`, with result
+        // type `Bottom`, as long as the other operand has a valid type.
+        // (e.g. bottom & int is OK, but bottom & str is not OK.)
         match (op, lhs_type, rhs_type) {
             (BinOpAst::Add, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntAdd, ExprType::Integer))
+                Ok((Self::Add, ExprType::Integer))
+            }
+            (BinOpAst::Add, ExprType::Integer, ExprType::Label) => {
+                Ok((Self::Add, ExprType::Label))
             }
             (BinOpAst::Add, ExprType::Label, ExprType::Integer) => {
-                Ok((Self::LabelAddInt, ExprType::Label))
+                Ok((Self::Add, ExprType::Label))
             }
+            // TODO: support bitwise arithmetic between labels and integers
             (BinOpAst::BitAnd, ExprType::Boolean, ExprType::Boolean) => {
-                Ok((Self::BoolBitAnd, ExprType::Boolean))
+                Ok((Self::BitAnd, ExprType::Boolean))
             }
             (BinOpAst::BitAnd, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntBitAnd, ExprType::Integer))
+                Ok((Self::BitAnd, ExprType::Integer))
             }
             (BinOpAst::BitOr, ExprType::Boolean, ExprType::Boolean) => {
-                Ok((Self::BoolBitOr, ExprType::Boolean))
+                Ok((Self::BitOr, ExprType::Boolean))
             }
             (BinOpAst::BitOr, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntBitOr, ExprType::Integer))
+                Ok((Self::BitOr, ExprType::Integer))
             }
             (BinOpAst::BitXor, ExprType::Boolean, ExprType::Boolean) => {
-                Ok((Self::BoolBitXor, ExprType::Boolean))
+                Ok((Self::BitXor, ExprType::Boolean))
             }
             (BinOpAst::BitXor, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntBitXor, ExprType::Integer))
+                Ok((Self::BitXor, ExprType::Integer))
             }
-            (BinOpAst::CmpEq, t1, t2) if t1 == t2 => {
-                Ok((Self::AnyCmpEq, ExprType::Boolean))
+            (BinOpAst::CmpEq, t1, t2)
+                if let Some(t3) = t1.union(&t2)
+                    && is_ordered_type(&t3) =>
+            {
+                Ok((Self::CmpEq, ExprType::Boolean))
             }
-            (BinOpAst::CmpLe, t1, t2) if t1 == t2 && t1.is_ord() => {
-                Ok((Self::AnyCmpLe, ExprType::Boolean))
+            (BinOpAst::CmpLe, t1, t2)
+                if let Some(t3) = t1.union(&t2)
+                    && is_ordered_type(&t3) =>
+            {
+                Ok((Self::CmpLe, ExprType::Boolean))
             }
-            (BinOpAst::CmpLt, t1, t2) if t1 == t2 && t1.is_ord() => {
-                Ok((Self::AnyCmpLt, ExprType::Boolean))
+            (BinOpAst::CmpLt, t1, t2)
+                if let Some(t3) = t1.union(&t2)
+                    && is_ordered_type(&t3) =>
+            {
+                Ok((Self::CmpLt, ExprType::Boolean))
             }
-            (BinOpAst::CmpGe, t1, t2) if t1 == t2 && t1.is_ord() => {
-                Ok((Self::AnyCmpGe, ExprType::Boolean))
+            (BinOpAst::CmpGe, t1, t2)
+                if let Some(t3) = t1.union(&t2)
+                    && is_ordered_type(&t3) =>
+            {
+                Ok((Self::CmpGe, ExprType::Boolean))
             }
-            (BinOpAst::CmpGt, t1, t2) if t1 == t2 && t1.is_ord() => {
-                Ok((Self::AnyCmpGt, ExprType::Boolean))
+            (BinOpAst::CmpGt, t1, t2)
+                if let Some(t3) = t1.union(&t2)
+                    && is_ordered_type(&t3) =>
+            {
+                Ok((Self::CmpGt, ExprType::Boolean))
             }
-            (BinOpAst::CmpNe, t1, t2) if t1 == t2 => {
-                Ok((Self::AnyCmpNe, ExprType::Boolean))
+            (BinOpAst::CmpNe, t1, t2)
+                if let Some(t3) = t1.union(&t2)
+                    && is_ordered_type(&t3) =>
+            {
+                Ok((Self::CmpNe, ExprType::Boolean))
             }
             (BinOpAst::Concat, ExprType::List(t1), ExprType::List(t2))
-                if t1 == t2 =>
+                if let Some(t3) = t1.union(&t2) =>
             {
-                Ok((Self::ListConcat, ExprType::List(t1)))
+                Ok((Self::Concat, ExprType::List(Rc::new(t3))))
             }
             (BinOpAst::Concat, ExprType::String, ExprType::String) => {
-                Ok((Self::StrConcat, ExprType::String))
+                Ok((Self::Concat, ExprType::String))
             }
             (BinOpAst::Div, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntDiv, ExprType::Integer))
+                Ok((Self::Div, ExprType::Integer))
             }
             (BinOpAst::Mod, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntMod, ExprType::Integer))
+                Ok((Self::Mod, ExprType::Integer))
             }
             (BinOpAst::Mul, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntMul, ExprType::Integer))
+                Ok((Self::Mul, ExprType::Integer))
             }
             (BinOpAst::Pow, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntPow, ExprType::Integer))
+                Ok((Self::Pow, ExprType::Integer))
             }
             (BinOpAst::Shl, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntShl, ExprType::Integer))
+                Ok((Self::Shl, ExprType::Integer))
             }
             (BinOpAst::Shr, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntShr, ExprType::Integer))
+                Ok((Self::Shr, ExprType::Integer))
             }
             (BinOpAst::Sub, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::IntSub, ExprType::Integer))
+                Ok((Self::Sub, ExprType::Integer))
+            }
+            (BinOpAst::Sub, ExprType::Label, ExprType::Integer) => {
+                Ok((Self::Sub, ExprType::Label))
             }
             (BinOpAst::Sub, ExprType::Label, ExprType::Label) => {
-                Ok((Self::LabelSub, ExprType::Integer))
+                Ok((Self::Sub, ExprType::Integer))
             }
             // Logical AND/OR are special-cased in `ExprCompiler`, and are
             // never passed to this method.
@@ -209,167 +241,132 @@ impl ExprBinOp {
         rhs: ExprValue,
     ) -> Result<ExprValue, ExprBinOpEvalError> {
         match self {
-            Self::AnyCmpEq => Ok(ExprValue::Boolean(lhs == rhs)),
-            Self::AnyCmpLe => Ok(ExprValue::Boolean(lhs <= rhs)),
-            Self::AnyCmpLt => Ok(ExprValue::Boolean(lhs < rhs)),
-            Self::AnyCmpGe => Ok(ExprValue::Boolean(lhs >= rhs)),
-            Self::AnyCmpGt => Ok(ExprValue::Boolean(lhs > rhs)),
-            Self::AnyCmpNe => Ok(ExprValue::Boolean(lhs != rhs)),
-            Self::BoolBitAnd => {
-                Ok(ExprValue::Boolean(lhs.unwrap_bool() & rhs.unwrap_bool()))
-            }
-            Self::BoolBitOr => {
-                Ok(ExprValue::Boolean(lhs.unwrap_bool() | rhs.unwrap_bool()))
-            }
-            Self::BoolBitXor => {
-                Ok(ExprValue::Boolean(lhs.unwrap_bool() ^ rhs.unwrap_bool()))
-            }
-            Self::IntAdd => {
-                Ok(ExprValue::Integer(lhs.unwrap_int() + rhs.unwrap_int()))
-            }
-            Self::IntBitAnd => {
-                Ok(ExprValue::Integer(lhs.unwrap_int() & rhs.unwrap_int()))
-            }
-            Self::IntBitOr => {
-                Ok(ExprValue::Integer(lhs.unwrap_int() | rhs.unwrap_int()))
-            }
-            Self::IntBitXor => {
-                Ok(ExprValue::Integer(lhs.unwrap_int() ^ rhs.unwrap_int()))
-            }
-            Self::IntDiv => {
-                let divisor = rhs.unwrap_int();
-                if divisor.is_zero() {
-                    Err(ExprBinOpEvalError::DivideByZero)
-                } else {
-                    Ok(ExprValue::Integer(
-                        lhs.unwrap_int().div_euclid(&divisor),
-                    ))
+            Self::Add => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs + rhs))
                 }
-            }
-            Self::IntMod => {
-                let modulus = rhs.unwrap_int();
-                if modulus.is_zero() {
-                    Err(ExprBinOpEvalError::ModByZero)
-                } else {
-                    Ok(ExprValue::Integer(
-                        lhs.unwrap_int().rem_euclid(&modulus),
-                    ))
+                (ExprValue::Integer(int), ExprValue::Label(label))
+                | (ExprValue::Label(label), ExprValue::Integer(int)) => {
+                    Ok(ExprValue::Label(label + int))
                 }
-            }
-            Self::IntMul => {
-                Ok(ExprValue::Integer(lhs.unwrap_int() * rhs.unwrap_int()))
-            }
-            Self::IntPow => {
-                let exponent = rhs.unwrap_int();
-                if exponent.is_negative() {
-                    Err(ExprBinOpEvalError::PowNegativeExponent(exponent))
-                } else {
-                    Ok(ExprValue::Integer(
-                        lhs.unwrap_int().pow(exponent.magnitude()),
-                    ))
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::BitAnd => match (lhs, rhs) {
+                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
+                    Ok(ExprValue::Boolean(lhs & rhs))
                 }
-            }
-            Self::IntShl => {
-                let shift = Self::get_bit_shift_amount(rhs.unwrap_int())?;
-                Ok(ExprValue::Integer(lhs.unwrap_int() << shift))
-            }
-            Self::IntShr => {
-                let shift = Self::get_bit_shift_amount(rhs.unwrap_int())?;
-                Ok(ExprValue::Integer(lhs.unwrap_int() >> shift))
-            }
-            Self::IntSub => {
-                Ok(ExprValue::Integer(lhs.unwrap_int() - rhs.unwrap_int()))
-            }
-            Self::LabelAddInt => {
-                let label = match lhs.unwrap_label() {
-                    ExprLabel::AddrAbsolute { space, address } => {
-                        ExprLabel::AddrAbsolute {
-                            space,
-                            address: address + rhs.unwrap_int(),
-                        }
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs & rhs))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::BitOr => match (lhs, rhs) {
+                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
+                    Ok(ExprValue::Boolean(lhs | rhs))
+                }
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs | rhs))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::BitXor => match (lhs, rhs) {
+                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
+                    Ok(ExprValue::Boolean(lhs ^ rhs))
+                }
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs ^ rhs))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::CmpEq => Ok(ExprValue::Boolean(
+                compare_values(&lhs, &rhs)? == Ordering::Equal,
+            )),
+            Self::CmpLe => Ok(ExprValue::Boolean(
+                compare_values(&lhs, &rhs)? != Ordering::Greater,
+            )),
+            Self::CmpLt => Ok(ExprValue::Boolean(
+                compare_values(&lhs, &rhs)? == Ordering::Less,
+            )),
+            Self::CmpGe => Ok(ExprValue::Boolean(
+                compare_values(&lhs, &rhs)? != Ordering::Less,
+            )),
+            Self::CmpGt => Ok(ExprValue::Boolean(
+                compare_values(&lhs, &rhs)? == Ordering::Greater,
+            )),
+            Self::CmpNe => Ok(ExprValue::Boolean(
+                compare_values(&lhs, &rhs)? != Ordering::Equal,
+            )),
+            Self::Concat => match (lhs, rhs) {
+                (ExprValue::List(lhs), ExprValue::List(rhs)) => {
+                    Ok(ExprValue::List(Rc::from([lhs, rhs].concat())))
+                }
+                (ExprValue::String(lhs), ExprValue::String(rhs)) => {
+                    Ok(ExprValue::String(Rc::from([lhs, rhs].concat())))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Div => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    if rhs.is_zero() {
+                        Err(ExprBinOpEvalError::DivideByZero)
+                    } else {
+                        Ok(ExprValue::Integer(lhs.div_euclid(&rhs)))
                     }
-                    ExprLabel::ChunkAbsolute { chunk_index, address } => {
-                        ExprLabel::ChunkAbsolute {
-                            chunk_index,
-                            address: address + rhs.unwrap_int(),
-                        }
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Mod => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    if rhs.is_zero() {
+                        Err(ExprBinOpEvalError::ModByZero)
+                    } else {
+                        Ok(ExprValue::Integer(lhs.rem_euclid(&rhs)))
                     }
-                    ExprLabel::ChunkRelative { chunk_index, offset } => {
-                        ExprLabel::ChunkRelative {
-                            chunk_index,
-                            offset: offset + rhs.unwrap_int(),
-                        }
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Mul => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs * rhs))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Pow => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    if rhs.is_negative() {
+                        Err(ExprBinOpEvalError::PowNegativeExponent(rhs))
+                    } else {
+                        Ok(ExprValue::Integer(lhs.pow(rhs.magnitude())))
                     }
-                    ExprLabel::SymbolRelative { name, offset } => {
-                        ExprLabel::SymbolRelative {
-                            name,
-                            offset: offset + rhs.unwrap_int(),
-                        }
-                    }
-                };
-                Ok(ExprValue::Label(label))
-            }
-            Self::LabelSub => {
-                let diff = match (lhs.unwrap_label(), rhs.unwrap_label()) {
-                    (
-                        ExprLabel::AddrAbsolute {
-                            space: lhs_space,
-                            address: lhs_addr,
-                        },
-                        ExprLabel::AddrAbsolute {
-                            space: rhs_space,
-                            address: rhs_addr,
-                        },
-                    ) => {
-                        if lhs_space != rhs_space {
-                            return Err(ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(lhs_space, rhs_space));
-                        }
-                        lhs_addr - rhs_addr
-                    }
-                    (
-                        ExprLabel::ChunkAbsolute {
-                            chunk_index: lhs_index,
-                            address: lhs_addr,
-                        },
-                        ExprLabel::ChunkAbsolute {
-                            chunk_index: rhs_index,
-                            address: rhs_addr,
-                        },
-                    ) if lhs_index == rhs_index => lhs_addr - rhs_addr,
-                    (
-                        ExprLabel::ChunkRelative {
-                            chunk_index: lhs_index,
-                            offset: lhs_offset,
-                        },
-                        ExprLabel::ChunkRelative {
-                            chunk_index: rhs_index,
-                            offset: rhs_offset,
-                        },
-                    ) if lhs_index == rhs_index => lhs_offset - rhs_offset,
-                    (
-                        ExprLabel::SymbolRelative {
-                            name: lhs_name,
-                            offset: lhs_offset,
-                        },
-                        ExprLabel::SymbolRelative {
-                            name: rhs_name,
-                            offset: rhs_offset,
-                        },
-                    ) if lhs_name == rhs_name => lhs_offset - rhs_offset,
-                    _ => {
-                        return Err(
-                            ExprBinOpEvalError::SubtractLabelsUnresolved,
-                        );
-                    }
-                };
-                Ok(ExprValue::Integer(diff))
-            }
-            Self::ListConcat => Ok(ExprValue::List(Rc::from(
-                [lhs.unwrap_list(), rhs.unwrap_list()].concat(),
-            ))),
-            Self::StrConcat => Ok(ExprValue::String(Rc::from(
-                [lhs.unwrap_str(), rhs.unwrap_str()].concat(),
-            ))),
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Shl => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    let shift = Self::get_bit_shift_amount(rhs)?;
+                    Ok(ExprValue::Integer(lhs << shift))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Shr => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    let shift = Self::get_bit_shift_amount(rhs)?;
+                    Ok(ExprValue::Integer(lhs >> shift))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Sub => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs - rhs))
+                }
+                (ExprValue::Label(label), ExprValue::Integer(int)) => {
+                    Ok(ExprValue::Label(label - int))
+                }
+                (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
+                    Ok(ExprValue::Integer(subtract_labels(&lhs, &rhs)?))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
         }
     }
 
@@ -389,6 +386,119 @@ impl ExprBinOp {
     }
 }
 
+/// Returns true if values of the given `ExprType` are comparable with
+/// e.g. less/greater-than operators.
+///
+/// This returns `true` for `Bottom` and `Undefined`; since no concrete values
+/// of those types exist, it is trivially true that such values are comparable,
+/// and indeed it is legal to e.g. compare two expressions of type `Bottom`.
+fn is_ordered_type(expr_type: &ExprType) -> bool {
+    match expr_type {
+        ExprType::Boolean => true,
+        ExprType::Bottom => true,
+        ExprType::Entity(_) => false,
+        ExprType::Function(_) => false,
+        ExprType::Integer => true,
+        ExprType::Label => true,
+        ExprType::List(item_type) => is_ordered_type(item_type),
+        ExprType::String => true,
+        ExprType::Tuple(item_types) => item_types.iter().all(is_ordered_type),
+        ExprType::Undefined => true,
+    }
+}
+
+/// Compares two expression values.
+///
+/// This will return an error if the values are of incompatible types, or if
+/// they are of a non-ordered type (i.e. one for which `is_ordered_type`
+/// returns false), or if they are labels in different address spaces, or they
+/// are unresolved labels that cannot be compared yet.
+fn compare_values(
+    lhs_value: &ExprValue,
+    rhs_value: &ExprValue,
+) -> Result<Ordering, ExprBinOpEvalError> {
+    match (lhs_value, rhs_value) {
+        (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => Ok(lhs.cmp(rhs)),
+        (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => Ok(lhs.cmp(rhs)),
+        (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
+            match subtract_labels(lhs, rhs)?.sign() {
+                num_bigint::Sign::Minus => Ok(Ordering::Less),
+                num_bigint::Sign::NoSign => Ok(Ordering::Equal),
+                num_bigint::Sign::Plus => Ok(Ordering::Greater),
+            }
+        }
+        (ExprValue::List(lhs_items), ExprValue::List(rhs_items)) => {
+            for (lhs, rhs) in lhs_items.iter().zip(rhs_items.iter()) {
+                match compare_values(lhs, rhs)? {
+                    Ordering::Equal => continue,
+                    other => return Ok(other),
+                }
+            }
+            Ok(lhs_items.len().cmp(&rhs_items.len()))
+        }
+        (ExprValue::String(lhs), ExprValue::String(rhs)) => Ok(lhs.cmp(rhs)),
+        (ExprValue::Tuple(lhs_items), ExprValue::Tuple(rhs_items)) => {
+            if lhs_items.len() != rhs_items.len() {
+                return Err(ExprBinOpEvalError::InvalidType);
+            }
+            for (lhs, rhs) in lhs_items.iter().zip(rhs_items.iter()) {
+                match compare_values(lhs, rhs)? {
+                    Ordering::Equal => continue,
+                    other => return Ok(other),
+                }
+            }
+            Ok(Ordering::Equal)
+        }
+        _ => Err(ExprBinOpEvalError::InvalidType),
+    }
+}
+
+fn subtract_labels(
+    lhs: &ExprLabel,
+    rhs: &ExprLabel,
+) -> Result<BigInt, ExprBinOpEvalError> {
+    match (lhs, rhs) {
+        (
+            ExprLabel::AddrAbsolute { space: lhs_space, address: lhs_addr },
+            ExprLabel::AddrAbsolute { space: rhs_space, address: rhs_addr },
+        ) => {
+            if lhs_space != rhs_space {
+                Err(ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(
+                    lhs_space.clone(),
+                    rhs_space.clone(),
+                ))
+            } else {
+                Ok(lhs_addr - rhs_addr)
+            }
+        }
+        (
+            ExprLabel::ChunkAbsolute {
+                chunk_index: lhs_index,
+                address: lhs_addr,
+            },
+            ExprLabel::ChunkAbsolute {
+                chunk_index: rhs_index,
+                address: rhs_addr,
+            },
+        ) if lhs_index == rhs_index => Ok(lhs_addr - rhs_addr),
+        (
+            ExprLabel::ChunkRelative {
+                chunk_index: lhs_index,
+                offset: lhs_offset,
+            },
+            ExprLabel::ChunkRelative {
+                chunk_index: rhs_index,
+                offset: rhs_offset,
+            },
+        ) if lhs_index == rhs_index => Ok(lhs_offset - rhs_offset),
+        (
+            ExprLabel::SymbolRelative { name: lhs_name, offset: lhs_offset },
+            ExprLabel::SymbolRelative { name: rhs_name, offset: rhs_offset },
+        ) if lhs_name == rhs_name => Ok(lhs_offset - rhs_offset),
+        _ => Err(ExprBinOpEvalError::SubtractLabelsUnresolved),
+    }
+}
+
 //===========================================================================//
 
 #[cfg(test)]
@@ -404,7 +514,7 @@ mod tests {
     #[test]
     fn divide_by_zero() {
         assert_eq!(
-            ExprBinOp::IntDiv.evaluate(int_value(1), int_value(0)),
+            ExprBinOp::Div.evaluate(int_value(1), int_value(0)),
             Err(ExprBinOpEvalError::DivideByZero)
         );
     }
@@ -412,7 +522,7 @@ mod tests {
     #[test]
     fn modulo_by_zero() {
         assert_eq!(
-            ExprBinOp::IntMod.evaluate(int_value(1), int_value(0)),
+            ExprBinOp::Mod.evaluate(int_value(1), int_value(0)),
             Err(ExprBinOpEvalError::ModByZero)
         );
     }
@@ -420,7 +530,7 @@ mod tests {
     #[test]
     fn pow_by_negative() {
         assert_eq!(
-            ExprBinOp::IntPow.evaluate(int_value(20), int_value(-5)),
+            ExprBinOp::Pow.evaluate(int_value(20), int_value(-5)),
             Err(ExprBinOpEvalError::PowNegativeExponent(BigInt::from(-5)))
         );
     }
@@ -428,11 +538,11 @@ mod tests {
     #[test]
     fn shift_by_negative() {
         assert_eq!(
-            ExprBinOp::IntShl.evaluate(int_value(16), int_value(-2)),
+            ExprBinOp::Shl.evaluate(int_value(16), int_value(-2)),
             Err(ExprBinOpEvalError::BitShiftByNegative(BigInt::from(-2)))
         );
         assert_eq!(
-            ExprBinOp::IntShr.evaluate(int_value(16), int_value(-2)),
+            ExprBinOp::Shr.evaluate(int_value(16), int_value(-2)),
             Err(ExprBinOpEvalError::BitShiftByNegative(BigInt::from(-2)))
         );
     }

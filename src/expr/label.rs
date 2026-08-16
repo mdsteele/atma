@@ -1,6 +1,6 @@
 use num_bigint::{BigInt, Sign};
-use std::cmp::Ordering;
 use std::fmt;
+use std::ops;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -68,75 +68,32 @@ impl fmt::Display for ExprLabel {
     }
 }
 
-impl PartialOrd for ExprLabel {
-    fn partial_cmp(&self, other: &ExprLabel) -> Option<Ordering> {
-        match (self, other) {
-            (
-                ExprLabel::AddrAbsolute {
-                    space: lhs_space,
-                    address: lhs_addr,
-                },
-                ExprLabel::AddrAbsolute {
-                    space: rhs_space,
-                    address: rhs_addr,
-                },
-            ) => {
-                if lhs_space == rhs_space {
-                    Some(lhs_addr.cmp(rhs_addr))
-                } else {
-                    None
-                }
+impl ops::Add<BigInt> for ExprLabel {
+    type Output = Self;
+
+    fn add(self, rhs: BigInt) -> Self {
+        match self {
+            Self::AddrAbsolute { space, address } => {
+                Self::AddrAbsolute { space, address: address + rhs }
             }
-            (
-                ExprLabel::ChunkAbsolute {
-                    chunk_index: lhs_index,
-                    address: lhs_addr,
-                },
-                ExprLabel::ChunkAbsolute {
-                    chunk_index: rhs_index,
-                    address: rhs_addr,
-                },
-            ) => {
-                if lhs_index == rhs_index {
-                    Some(lhs_addr.cmp(rhs_addr))
-                } else {
-                    None
-                }
+            Self::ChunkAbsolute { chunk_index, address } => {
+                Self::ChunkAbsolute { chunk_index, address: address + rhs }
             }
-            (
-                ExprLabel::ChunkRelative {
-                    chunk_index: lhs_index,
-                    offset: lhs_offset,
-                },
-                ExprLabel::ChunkRelative {
-                    chunk_index: rhs_index,
-                    offset: rhs_offset,
-                },
-            ) => {
-                if lhs_index == rhs_index {
-                    Some(lhs_offset.cmp(rhs_offset))
-                } else {
-                    None
-                }
+            Self::ChunkRelative { chunk_index, offset } => {
+                Self::ChunkRelative { chunk_index, offset: offset + rhs }
             }
-            (
-                ExprLabel::SymbolRelative {
-                    name: lhs_name,
-                    offset: lhs_offset,
-                },
-                ExprLabel::SymbolRelative {
-                    name: rhs_name,
-                    offset: rhs_offset,
-                },
-            ) => {
-                if lhs_name == rhs_name {
-                    Some(lhs_offset.cmp(rhs_offset))
-                } else {
-                    None
-                }
+            Self::SymbolRelative { name, offset } => {
+                Self::SymbolRelative { name, offset: offset + rhs }
             }
-            _ => None,
         }
+    }
+}
+
+impl ops::Sub<BigInt> for ExprLabel {
+    type Output = Self;
+
+    fn sub(self, rhs: BigInt) -> Self {
+        self + (-rhs)
     }
 }
 
