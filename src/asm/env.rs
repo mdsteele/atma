@@ -3,9 +3,9 @@ use super::error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc};
 use crate::addr::Offset;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprLabel,
-    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprTypeResult,
-    ExprUnOp, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
+    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
+    make_global_builtin_values,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
 use crate::parse::{
@@ -29,15 +29,7 @@ pub(super) struct AsmTypeEnv {
 
 impl AsmTypeEnv {
     pub fn new(root_path: Rc<str>, arch_tree: ArchTree) -> AsmTypeEnv {
-        let mut builtins = HashMap::<Rc<str>, (ExprValue, ExprType)>::new();
-        let expr_type = ExprType::Function(Rc::new((
-            ExprType::Integer,
-            ExprType::Integer,
-        )));
-        for func in [ExprFunc::Cbrtz, ExprFunc::Sqrtz] {
-            let value = ExprValue::Function(func);
-            builtins.insert(Rc::from(func.name()), (value, expr_type.clone()));
-        }
+        let builtins = make_global_builtin_values();
         let root_context = Rc::new(AsmSrcContext::root(root_path));
         AsmTypeEnv {
             arch_tree,

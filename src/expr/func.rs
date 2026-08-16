@@ -5,11 +5,13 @@ use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::BigInt;
 use std::fmt;
 use std::io;
+use std::rc::Rc;
 
 //===========================================================================//
 
 const TAG_CBRTZ: u8 = 0;
-const TAG_SQRTZ: u8 = 1;
+const TAG_ERROR: u8 = 1;
+const TAG_SQRTZ: u8 = 2;
 
 //===========================================================================//
 
@@ -18,6 +20,8 @@ const TAG_SQRTZ: u8 = 1;
 pub enum ExprFunc {
     /// Integer cube root, rounding towards zero.
     Cbrtz,
+    /// Takes a string message and fails evaluation with that message.
+    Error,
     /// Integer square root, rounding towards zero.
     Sqrtz,
 }
@@ -30,6 +34,7 @@ impl ExprFunc {
     ) -> Result<ExprValue, ExprFuncEvalError> {
         match self {
             Self::Cbrtz => Ok(ExprValue::Integer(get_int(arg)?.cbrt())),
+            Self::Error => Err(ExprFuncEvalError::ErrorMessage(get_str(arg)?)),
             Self::Sqrtz => {
                 let arg = get_int(arg)?;
                 if arg >= BigInt::ZERO {
@@ -45,6 +50,7 @@ impl ExprFunc {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Cbrtz => "%cbrtz",
+            Self::Error => "%error",
             Self::Sqrtz => "%sqrtz",
         }
     }
@@ -56,6 +62,7 @@ impl BinaryIo for ExprFunc {
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
             TAG_CBRTZ => Ok(ExprFunc::Cbrtz),
+            TAG_ERROR => Ok(ExprFunc::Error),
             TAG_SQRTZ => Ok(ExprFunc::Sqrtz),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -70,6 +77,7 @@ impl BinaryIo for ExprFunc {
     ) -> io::Result<()> {
         match self {
             Self::Cbrtz => TAG_CBRTZ.write_to(encoder),
+            Self::Error => TAG_ERROR.write_to(encoder),
             Self::Sqrtz => TAG_SQRTZ.write_to(encoder),
         }
     }
@@ -86,6 +94,8 @@ impl fmt::Display for ExprFunc {
 /// An error that can occur while calling an [ExprFunc] with an [ExprValue].
 #[derive(Debug, Eq, PartialEq)]
 pub enum ExprFuncEvalError {
+    /// Called the `%error` function with the given message string.
+    ErrorMessage(Rc<str>),
     /// Received a value of the wrong type.
     ///
     /// This shouldn't normally happen unless an object file has been
@@ -104,6 +114,10 @@ impl ExprFuncEvalError {
         arg_span: SrcSpan,
     ) -> ExprEvalError {
         match self {
+            Self::ErrorMessage(message) => {
+                let span = func_span.merged_with(arg_span);
+                ExprEvalError::ErrorMessage { span, message }
+            }
             Self::InvalidArgumentType(_arg_value) => {
                 ExprEvalError::InvalidType { span: arg_span }
             }
@@ -124,6 +138,13 @@ impl ExprFuncEvalError {
 fn get_int(input: ExprValue) -> Result<BigInt, ExprFuncEvalError> {
     match input {
         ExprValue::Integer(bigint) => Ok(bigint),
+        other => Err(ExprFuncEvalError::InvalidArgumentType(other)),
+    }
+}
+
+fn get_str(input: ExprValue) -> Result<Rc<str>, ExprFuncEvalError> {
+    match input {
+        ExprValue::String(string) => Ok(string),
         other => Err(ExprFuncEvalError::InvalidArgumentType(other)),
     }
 }
@@ -163,6 +184,19 @@ mod tests {
     }
 
     #[test]
+    fn call_error() {
+        let func = ExprFunc::Error;
+        assert_eq!(
+            func.call(str_value("foobar")),
+            Err(ExprFuncEvalError::ErrorMessage(Rc::from("foobar")))
+        );
+        assert_eq!(
+            func.call(int_value(0)),
+            Err(ExprFuncEvalError::InvalidArgumentType(int_value(0)))
+        );
+    }
+
+    #[test]
     fn call_sqrtz() {
         let func = ExprFunc::Sqrtz;
         assert_eq!(func.call(int_value(0)), Ok(int_value(0)));
@@ -182,6 +216,7 @@ mod tests {
     #[test]
     fn round_trips() {
         assert_round_trips(ExprFunc::Cbrtz);
+        assert_round_trips(ExprFunc::Error);
         assert_round_trips(ExprFunc::Sqrtz);
     }
 }

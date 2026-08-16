@@ -2,8 +2,9 @@ use super::error::{AdsError, AdsResult, AdsSrcContext};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprNotStaticReason,
-    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprNotStaticReason, ExprStatic,
+    ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
+    make_global_builtin_values,
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, IdentifierAst};
@@ -92,15 +93,7 @@ pub(super) struct AdsTypeEnv<'a> {
 
 impl<'a> AdsTypeEnv<'a> {
     pub fn new(system: &'a SimSystem, root_path: Rc<str>) -> AdsTypeEnv<'a> {
-        let mut builtins = HashMap::<Rc<str>, (ExprValue, ExprType)>::new();
-        let expr_type = ExprType::Function(Rc::new((
-            ExprType::Integer,
-            ExprType::Integer,
-        )));
-        for func in [ExprFunc::Cbrtz, ExprFunc::Sqrtz] {
-            let value = ExprValue::Function(func);
-            builtins.insert(Rc::from(func.name()), (value, expr_type.clone()));
-        }
+        let builtins = make_global_builtin_values();
         let root_context = Rc::new(AdsSrcContext::root(root_path));
         let default_proc_name = system.selected_processor_name();
         AdsTypeEnv {

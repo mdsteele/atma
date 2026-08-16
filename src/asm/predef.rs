@@ -873,7 +873,7 @@ enum Reg {
 
 //===========================================================================//
 
-pub(super) fn make_builtins() -> (ArchTree, MacroTable) {
+pub(super) fn make_predefined_arch_macros() -> (ArchTree, MacroTable) {
     let mut arch_tree = ArchTree::new();
 
     let arch_65xx = Rc::<str>::from("65xx");

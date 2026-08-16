@@ -154,26 +154,36 @@ impl LinkEvalEnv {
         let mut expr_stack = Vec::<ExprValue>::new();
         for op in &expr.ops {
             match op {
-                &ObjExprOp::BinOp(binop) => {
-                    let opt_rhs = expr_stack.pop();
-                    let opt_lhs = expr_stack.pop();
-                    match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            match binop.evaluate(lhs, rhs) {
-                                Ok(result) => expr_stack.push(result),
-                                Err(_) => {
-                                    // TODO: add error details
-                                    return Err(Errs::one(
-                                        LinkError::PatchEvaluationFailed,
-                                    ));
-                                }
+                ObjExprOp::Apply => {
+                    let arg_value = pop_value(&mut expr_stack)?;
+                    let func_value = pop_value(&mut expr_stack)?;
+                    if let ExprValue::Function(func) = func_value {
+                        match func.call(arg_value) {
+                            Ok(result_value) => expr_stack.push(result_value),
+                            Err(_) => {
+                                // TODO: add error details
+                                return Err(Errs::one(
+                                    LinkError::PatchEvaluationFailed,
+                                ));
                             }
                         }
-                        _ => {
-                            // Stack underflow.  That shouldn't happen if
-                            // unless the object file was corrupted.
+                    } else {
+                        // Type error.  That shouldn't happen unless the
+                        // object file was corrupted.
+                        return Err(Errs::one(
+                            LinkError::MalformedPatchExpression,
+                        ));
+                    }
+                }
+                &ObjExprOp::BinOp(binop) => {
+                    let rhs = pop_value(&mut expr_stack)?;
+                    let lhs = pop_value(&mut expr_stack)?;
+                    match binop.evaluate(lhs, rhs) {
+                        Ok(result) => expr_stack.push(result),
+                        Err(_) => {
+                            // TODO: add error details
                             return Err(Errs::one(
-                                LinkError::MalformedPatchExpression,
+                                LinkError::PatchEvaluationFailed,
                             ));
                         }
                     }
@@ -193,23 +203,13 @@ impl LinkEvalEnv {
                 }
                 ObjExprOp::Push(value) => expr_stack.push(value.clone()),
                 &ObjExprOp::UnOp(unop) => {
-                    match expr_stack.pop() {
-                        Some(arg) => {
-                            match unop.evaluate(arg) {
-                                Ok(result) => expr_stack.push(result),
-                                Err(_) => {
-                                    // TODO: add error details
-                                    return Err(Errs::one(
-                                        LinkError::PatchEvaluationFailed,
-                                    ));
-                                }
-                            }
-                        }
-                        _ => {
-                            // Stack underflow.  That shouldn't happen if
-                            // unless the object file was corrupted.
+                    let arg = pop_value(&mut expr_stack)?;
+                    match unop.evaluate(arg) {
+                        Ok(result) => expr_stack.push(result),
+                        Err(_) => {
+                            // TODO: add error details
                             return Err(Errs::one(
-                                LinkError::MalformedPatchExpression,
+                                LinkError::PatchEvaluationFailed,
                             ));
                         }
                     }
@@ -217,11 +217,22 @@ impl LinkEvalEnv {
                 other => todo!("{other:?}"),
             }
         }
-        if let Some(value) = expr_stack.pop()
-            && expr_stack.is_empty()
-        {
-            Ok(value)
-        } else {
+        let value = pop_value(&mut expr_stack)?;
+        if !expr_stack.is_empty() {
+            // More than one value left on the stack at the end.  That
+            // shouldn't happen unless the object file was corrupted.
+            return Err(Errs::one(LinkError::MalformedPatchExpression));
+        }
+        Ok(value)
+    }
+}
+
+fn pop_value(expr_stack: &mut Vec<ExprValue>) -> LinkResult<ExprValue> {
+    match expr_stack.pop() {
+        Some(value) => Ok(value),
+        None => {
+            // Stack underflow.  That shouldn't happen unless
+            // the object file was corrupted.
             Err(Errs::one(LinkError::MalformedPatchExpression))
         }
     }

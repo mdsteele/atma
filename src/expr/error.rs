@@ -398,6 +398,13 @@ pub enum ExprEvalError {
         /// operation.
         rhs_span: SrcSpan,
     },
+    /// Called the built-in `%error` function with the given message string.
+    ErrorMessage {
+        /// The source code span for the `%error` function call expression.
+        span: SrcSpan,
+        /// The error message.
+        message: Rc<str>,
+    },
     /// Found a value of the wrong type.
     ///
     /// This shouldn't normally happen unless an object file has been
@@ -503,6 +510,10 @@ impl ExprEvalError {
                 let label = "the value of this expression is 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
+            }
+            Self::ErrorMessage { span, message } => {
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("")
             }
             Self::ModByZero { rhs_span } => {
                 let message = "modulus cannot be zero";

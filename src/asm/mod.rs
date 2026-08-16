@@ -1,10 +1,10 @@
 //! Facilities for assembling source files into object files.
 
 mod arch;
-mod builtins;
 mod env;
 mod error;
 mod macros;
+mod predef;
 
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
@@ -63,7 +63,7 @@ struct Assembler<'a> {
 
 impl<'a> Assembler<'a> {
     fn new(cache: &'a mut dyn SrcCache, root_path: Rc<str>) -> Assembler<'a> {
-        let (arch_tree, macros) = builtins::make_builtins();
+        let (arch_tree, macros) = predef::make_predefined_arch_macros();
         Assembler {
             cache,
             macros,

@@ -5,6 +5,7 @@ use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
     ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
+    make_global_builtin_values,
 };
 use crate::obj::{ObjExpr, ObjExprOp};
 use crate::parse::{ExprAst, IdentifierAst};
@@ -23,6 +24,7 @@ pub(super) struct LinkDecl {
 //===========================================================================//
 
 pub(super) struct LinkTypeEnv {
+    builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     exports: HashMap<Rc<str>, SrcSpan>,
     imports: HashMap<Rc<str>, SrcSpan>,
     variables: HashMap<Rc<str>, LinkDecl>,
@@ -31,6 +33,7 @@ pub(super) struct LinkTypeEnv {
 impl LinkTypeEnv {
     pub fn new() -> LinkTypeEnv {
         LinkTypeEnv {
+            builtins: make_global_builtin_values(),
             exports: HashMap::new(),
             imports: HashMap::new(),
             variables: HashMap::new(),
@@ -112,27 +115,29 @@ impl ExprEnv for LinkTypeEnv {
         span: SrcSpan,
         name: &Rc<str>,
     ) -> ExprTypeResult<(Self::Op, ExprType, ExprStatic)> {
-        match self.variables.get(name) {
-            Some(decl) => {
-                let (op, expr_static) = match &decl.value {
-                    &ConfigVariableOr::Variable(index) => {
-                        let reason = ExprNotStaticReason::Variable {
-                            span,
-                            name: name.clone(),
-                        };
-                        (ObjExprOp::GetValue(index), Err(reason))
-                    }
-                    ConfigVariableOr::Static(value) => {
-                        (ObjExprOp::Push(value.clone()), Ok(value.clone()))
-                    }
-                };
-                Ok((op, decl.var_type.clone(), expr_static))
-            }
-            None => Err(Errs::one(ExprTypeError::UnknownIdentifier {
-                span,
-                name: name.clone(),
-            })),
+        if let Some(decl) = self.variables.get(name) {
+            let (op, expr_static) = match &decl.value {
+                &ConfigVariableOr::Variable(index) => {
+                    let reason = ExprNotStaticReason::Variable {
+                        span,
+                        name: name.clone(),
+                    };
+                    (ObjExprOp::GetValue(index), Err(reason))
+                }
+                ConfigVariableOr::Static(value) => {
+                    (ObjExprOp::Push(value.clone()), Ok(value.clone()))
+                }
+            };
+            return Ok((op, decl.var_type.clone(), expr_static));
         }
+        if let Some((value, expr_type)) = self.builtins.get(name) {
+            let op = ObjExprOp::Push(value.clone());
+            return Ok((op, expr_type.clone(), Ok(value.clone())));
+        }
+        Err(Errs::one(ExprTypeError::UnknownIdentifier {
+            span,
+            name: name.clone(),
+        }))
     }
 
     fn apply_function_op(

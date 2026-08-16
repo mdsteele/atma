@@ -1,6 +1,7 @@
 //! Facilities for manipulating expression types and values.
 
 mod binop;
+mod builtin;
 mod check;
 mod env;
 mod error;
@@ -10,6 +11,7 @@ mod unop;
 mod value;
 
 pub(crate) use binop::ExprBinOp;
+pub(crate) use builtin::make_global_builtin_values;
 pub(crate) use check::ExprCompiler;
 pub(crate) use env::{ExprEnv, ExprOp};
 pub(crate) use error::ExprStatic;
