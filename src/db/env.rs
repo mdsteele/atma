@@ -3,7 +3,7 @@ use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprNotStaticReason,
-    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
+    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, IdentifierAst};
@@ -412,6 +412,20 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
             context: self.current_src_context(),
             list_span,
             index_span,
+        }
+    }
+
+    fn unary_operation_op(
+        &self,
+        unop: ExprUnOp,
+        op_span: SrcSpan,
+        arg_span: SrcSpan,
+    ) -> Self::Op {
+        AdsInstruction::UnOp {
+            context: self.current_src_context(),
+            unop,
+            op_span,
+            arg_span,
         }
     }
 }

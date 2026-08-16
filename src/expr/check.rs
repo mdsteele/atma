@@ -740,25 +740,40 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     fn do_task_unop(
         &mut self,
         unop_ast: (SrcSpan, UnOpAst),
-        sub_span: SrcSpan,
+        arg_span: SrcSpan,
     ) {
         debug_assert!(!self.types.is_empty());
-        let (sub_type, sub_static) = self.types.pop().unwrap();
-        if sub_type == ExprType::Undefined {
+        let (arg_type, arg_static) = self.types.pop().unwrap();
+        if arg_type == ExprType::Undefined {
             self.types.push(UNDEFINED);
             return;
         }
-        match self.errs.ok(ExprUnOp::typecheck(unop_ast, sub_span, sub_type)) {
-            Some((unop, result_type)) => match sub_static {
-                Ok(sub_value) => {
-                    debug_assert!(!self.ops.is_empty());
-                    self.ops.pop();
-                    let result_value = unop.evaluate(sub_value);
-                    self.ops.push(E::Op::literal(result_value.clone()));
-                    self.types.push((result_type, Ok(result_value)));
-                }
+        let op_span = unop_ast.0;
+        match self.errs.ok(ExprUnOp::typecheck(unop_ast, arg_span, arg_type)) {
+            Some((unop, result_type)) => match arg_static {
+                Ok(arg_value) => match unop.evaluate(arg_value) {
+                    Ok(result_value) => {
+                        debug_assert!(!self.ops.is_empty());
+                        self.ops.pop();
+                        self.ops.push(E::Op::literal(result_value.clone()));
+                        self.types.push((result_type, Ok(result_value)));
+                    }
+                    Err(unop_error) => {
+                        self.ops.push(
+                            self.env
+                                .unary_operation_op(unop, op_span, arg_span),
+                        );
+                        let reason = ExprNotStaticReason::StaticEvalError {
+                            error: unop_error
+                                .into_expr_eval_error(op_span, arg_span),
+                        };
+                        self.types.push((result_type, Err(reason)));
+                    }
+                },
                 Err(reason) => {
-                    self.ops.push(E::Op::unary_operation(unop));
+                    self.ops.push(
+                        self.env.unary_operation_op(unop, op_span, arg_span),
+                    );
                     self.types.push((result_type, Err(reason)));
                 }
             },

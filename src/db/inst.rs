@@ -135,7 +135,18 @@ pub enum AdsInstruction {
     /// Pops the top value from the value stack, evaluates the specified unary
     /// operation using that value, then pushes the result onto the value
     /// stack.
-    UnOp(ExprUnOp),
+    UnOp {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The unary operator.
+        unop: ExprUnOp,
+        /// The span of byte offsets within the context where the operator
+        /// appeared.
+        op_span: SrcSpan,
+        /// The span of byte offsets within the context where the argument
+        /// subexpression appeared.
+        arg_span: SrcSpan,
+    },
 }
 
 impl ExprOp for AdsInstruction {
@@ -165,10 +176,6 @@ impl ExprOp for AdsInstruction {
 
     fn tuple_item(index: usize) -> Self {
         Self::TupleItem(index)
-    }
-
-    fn unary_operation(unop: ExprUnOp) -> Self {
-        Self::UnOp(unop)
     }
 }
 

@@ -5,7 +5,7 @@ use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprFunc, ExprLabel,
     ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprTypeResult,
-    ExprValue,
+    ExprUnOp, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
 use crate::parse::{
@@ -389,6 +389,15 @@ impl ExprEnv for AsmTypeEnv {
         _index_span: SrcSpan,
     ) -> Self::Op {
         ObjExprOp::ListIndex
+    }
+
+    fn unary_operation_op(
+        &self,
+        unop: ExprUnOp,
+        _op_span: SrcSpan,
+        _arg_span: SrcSpan,
+    ) -> Self::Op {
+        ObjExprOp::UnOp(unop)
     }
 }
 

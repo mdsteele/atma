@@ -45,6 +45,15 @@ pub(crate) trait ExprEnv {
         list_span: SrcSpan,
         index_span: SrcSpan,
     ) -> Self::Op;
+
+    /// Returns an operation to modify the top stack value with the specified
+    /// unary operation.
+    fn unary_operation_op(
+        &self,
+        unop: ExprUnOp,
+        op_span: SrcSpan,
+        arg_span: SrcSpan,
+    ) -> Self::Op;
 }
 
 //===========================================================================//
@@ -76,10 +85,6 @@ pub(crate) trait ExprOp {
 
     /// Returns an operation to index into a tuple.
     fn tuple_item(index: usize) -> Self;
-
-    /// Returns an operation to modify the top stack value with the specified
-    /// unary operation.
-    fn unary_operation(unop: ExprUnOp) -> Self;
 }
 
 //===========================================================================//

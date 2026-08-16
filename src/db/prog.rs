@@ -643,7 +643,7 @@ mod tests {
         assert_matches!(compile("if pc == 1 {\nexit\n}\n").as_slice(), [
             AdsInstruction::GetPc,
             AdsInstruction::PushValue(int_value_1),
-            AdsInstruction::BinOp { binop: ExprBinOp::AnyCmpEq, .. },
+            AdsInstruction::BinOp { binop: ExprBinOp::CmpEq, .. },
             AdsInstruction::BranchUnless(1),
             AdsInstruction::Exit,
             AdsInstruction::Exit,
@@ -768,7 +768,7 @@ mod tests {
             AdsInstruction::Step,
             AdsInstruction::GetPc,
             AdsInstruction::PushValue(int_value_5),
-            AdsInstruction::BinOp { binop: ExprBinOp::AnyCmpLt, .. },
+            AdsInstruction::BinOp { binop: ExprBinOp::CmpLt, .. },
             AdsInstruction::BranchIf(-5),
             AdsInstruction::Exit,
         ] if *int_value_5 == int_value(5));

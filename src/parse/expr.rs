@@ -42,8 +42,8 @@ impl UnOpAst {
     /// subexpression.
     pub(crate) fn verb(self) -> &'static str {
         match self {
-            UnOpAst::BitNot => "bitwise NOT",
-            UnOpAst::LogNot => "logical NOT",
+            UnOpAst::BitNot => "bitwise-NOT",
+            UnOpAst::LogNot => "logical-NOT",
             UnOpAst::Neg => "negate",
         }
     }
@@ -106,9 +106,9 @@ impl BinOpAst {
     pub(crate) fn verb_conj_rev(self) -> (&'static str, &'static str, bool) {
         match self {
             BinOpAst::Add => ("add", "to", true),
-            BinOpAst::BitAnd => ("bitwise AND", "with", false),
-            BinOpAst::BitOr => ("bitwise OR", "with", false),
-            BinOpAst::BitXor => ("bitwise XOR", "with", false),
+            BinOpAst::BitAnd => ("bitwise-AND", "with", false),
+            BinOpAst::BitOr => ("bitwise-OR", "with", false),
+            BinOpAst::BitXor => ("bitwise-XOR", "with", false),
             BinOpAst::CmpEq | BinOpAst::CmpNe => ("equate", "with", false),
             BinOpAst::CmpGe
             | BinOpAst::CmpGt
@@ -116,8 +116,8 @@ impl BinOpAst {
             | BinOpAst::CmpLt => ("order", "against", false),
             BinOpAst::Concat => ("concatenate", "with", false),
             BinOpAst::Div => ("divide", "by", false),
-            BinOpAst::LogAnd => ("logical AND", "with", false),
-            BinOpAst::LogOr => ("logical OR", "with", false),
+            BinOpAst::LogAnd => ("logical-AND", "with", false),
+            BinOpAst::LogOr => ("logical-OR", "with", false),
             BinOpAst::Mod => ("modulo", "by", false),
             BinOpAst::Mul => ("multiply", "by", false),
             BinOpAst::Pow => ("exponentiate", "by", false),

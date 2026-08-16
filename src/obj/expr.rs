@@ -24,18 +24,21 @@ const OP_POW: u8 = 0x0e;
 const OP_SHL: u8 = 0x0f;
 const OP_SHR: u8 = 0x10;
 const OP_SUB: u8 = 0x11;
+// Unary ops:
+const OP_BIT_NOT: u8 = 0x20;
+const OP_NEG: u8 = 0x21;
 // Other ops:
-const OP_APPLY: u8 = 0x20;
-const OP_GET_VALUE: u8 = 0x21;
-const OP_LABEL_ADDR: u8 = 0x22;
-const OP_LIST_INDEX: u8 = 0x23;
-const OP_MAKE_LIST: u8 = 0x24;
-const OP_MAKE_TUPLE: u8 = 0x25;
-const OP_PUSH: u8 = 0x26;
-const OP_SKIP: u8 = 0x27;
-const OP_SKIP_IF: u8 = 0x28;
-const OP_SKIP_UNLESS: u8 = 0x29;
-const OP_TUPLE_ITEM: u8 = 0x2a;
+const OP_APPLY: u8 = 0x30;
+const OP_GET_VALUE: u8 = 0x31;
+const OP_LABEL_ADDR: u8 = 0x32;
+const OP_LIST_INDEX: u8 = 0x33;
+const OP_MAKE_LIST: u8 = 0x34;
+const OP_MAKE_TUPLE: u8 = 0x35;
+const OP_PUSH: u8 = 0x36;
+const OP_SKIP: u8 = 0x37;
+const OP_SKIP_IF: u8 = 0x38;
+const OP_SKIP_UNLESS: u8 = 0x39;
+const OP_TUPLE_ITEM: u8 = 0x3a;
 
 //===========================================================================//
 
@@ -154,6 +157,10 @@ pub(crate) enum ObjExprOp {
     /// the specified item from that tuple, then pushes that item onto the
     /// value stack.
     TupleItem(usize),
+    /// Pops the top value from the value stack, evaluates the specified unary
+    /// operation using that value, then pushes the result onto the value
+    /// stack.
+    UnOp(ExprUnOp),
 }
 
 impl BinaryIo for ObjExprOp {
@@ -180,6 +187,9 @@ impl BinaryIo for ObjExprOp {
             OP_SHL => Ok(Self::BinOp(ExprBinOp::Shl)),
             OP_SHR => Ok(Self::BinOp(ExprBinOp::Shr)),
             OP_SUB => Ok(Self::BinOp(ExprBinOp::Sub)),
+            // Unary ops:
+            OP_BIT_NOT => Ok(Self::UnOp(ExprUnOp::BitNot)),
+            OP_NEG => Ok(Self::UnOp(ExprUnOp::Neg)),
             // Other ops:
             OP_APPLY => Ok(Self::Apply),
             OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
@@ -257,6 +267,8 @@ impl BinaryIo for ObjExprOp {
                 OP_TUPLE_ITEM.write_to(encoder)?;
                 index.write_to(encoder)
             }
+            Self::UnOp(ExprUnOp::BitNot) => OP_BIT_NOT.write_to(encoder),
+            Self::UnOp(ExprUnOp::Neg) => OP_NEG.write_to(encoder),
         }
     }
 }
@@ -289,10 +301,6 @@ impl ExprOp for ObjExprOp {
     fn tuple_item(index: usize) -> Self {
         Self::TupleItem(index)
     }
-
-    fn unary_operation(_unop: ExprUnOp) -> Self {
-        todo!()
-    }
 }
 
 //===========================================================================//
@@ -300,17 +308,17 @@ impl ExprOp for ObjExprOp {
 #[cfg(test)]
 mod tests {
     use super::ObjExprOp;
-    use crate::expr::{ExprBinOp, ExprValue};
+    use crate::expr::{ExprBinOp, ExprUnOp, ExprValue};
     use crate::obj::assert_round_trips;
     use num_bigint::BigInt;
 
     #[test]
     fn round_trip_obj_expr_op() {
         assert_round_trips(ObjExprOp::Apply);
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::BitOr));
         assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Add));
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::LabelSub));
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::StrConcat));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::BitOr));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Concat));
+        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Sub));
         assert_round_trips(ObjExprOp::GetValue(0));
         assert_round_trips(ObjExprOp::GetValue(42));
         assert_round_trips(ObjExprOp::LabelAddr);
@@ -331,6 +339,8 @@ mod tests {
         assert_round_trips(ObjExprOp::SkipUnless(1234));
         assert_round_trips(ObjExprOp::TupleItem(0));
         assert_round_trips(ObjExprOp::TupleItem(2));
+        assert_round_trips(ObjExprOp::UnOp(ExprUnOp::BitNot));
+        assert_round_trips(ObjExprOp::UnOp(ExprUnOp::Neg));
     }
 }
 

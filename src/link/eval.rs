@@ -208,6 +208,28 @@ impl LinkEvalEnv {
                     ));
                 }
                 ObjExprOp::Push(value) => expr_stack.push(value.clone()),
+                &ObjExprOp::UnOp(unop) => {
+                    match expr_stack.pop() {
+                        Some(arg) => {
+                            match unop.evaluate(arg) {
+                                Ok(result) => expr_stack.push(result),
+                                Err(_) => {
+                                    // TODO: add error details
+                                    return Err(Errs::one(
+                                        LinkError::PatchEvaluationFailed,
+                                    ));
+                                }
+                            }
+                        }
+                        _ => {
+                            // Stack underflow.  That shouldn't happen if
+                            // unless the object file was corrupted.
+                            return Err(Errs::one(
+                                LinkError::MalformedPatchExpression,
+                            ));
+                        }
+                    }
+                }
                 other => todo!("{other:?}"),
             }
         }

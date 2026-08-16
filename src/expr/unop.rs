@@ -1,15 +1,40 @@
-use super::error::{ExprTypeError, ExprTypeResult};
+use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
 use crate::parse::UnOpAst;
 
 //===========================================================================//
 
+/// An error that can occur while evaluating an [ExprUnOp] on an [ExprValue].
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum ExprUnOpEvalError {
+    /// Tried to perform a unary operation, but the operand had the wrong type
+    /// at runtime.
+    ///
+    /// This should normally be prevented by static typechecking, but can occur
+    /// due to e.g. a corrupted object file.
+    InvalidType,
+}
+
+impl ExprUnOpEvalError {
+    /// Converts `self` into an [`ExprEvalError`].
+    pub(crate) fn into_expr_eval_error(
+        self,
+        _op_span: SrcSpan,
+        arg_span: SrcSpan,
+    ) -> ExprEvalError {
+        match self {
+            Self::InvalidType => ExprEvalError::InvalidType { span: arg_span },
+        }
+    }
+}
+
+//===========================================================================//
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ExprUnOp {
-    BoolNot,
-    IntBitNot,
-    IntNeg,
+    BitNot,
+    Neg,
 }
 
 impl ExprUnOp {
@@ -19,14 +44,14 @@ impl ExprUnOp {
         arg_type: ExprType,
     ) -> ExprTypeResult<(ExprUnOp, ExprType)> {
         match (op, arg_type) {
-            (UnOpAst::Neg, ExprType::Integer) => {
-                Ok((ExprUnOp::IntNeg, ExprType::Integer))
+            (UnOpAst::Neg, ExprType::Integer | ExprType::Bottom) => {
+                Ok((ExprUnOp::Neg, ExprType::Integer))
             }
-            (UnOpAst::LogNot, ExprType::Boolean) => {
-                Ok((ExprUnOp::BoolNot, ExprType::Boolean))
+            (UnOpAst::LogNot, ExprType::Boolean | ExprType::Bottom) => {
+                Ok((ExprUnOp::BitNot, ExprType::Boolean))
             }
-            (UnOpAst::BitNot, ExprType::Integer) => {
-                Ok((ExprUnOp::IntBitNot, ExprType::Integer))
+            (UnOpAst::BitNot, ExprType::Integer | ExprType::Bottom) => {
+                Ok((ExprUnOp::BitNot, ExprType::Integer))
             }
             (op, arg_type) => {
                 Err(Errs::one(ExprTypeError::CannotApplyUnaryOpToType {
@@ -39,11 +64,20 @@ impl ExprUnOp {
         }
     }
 
-    pub(crate) fn evaluate(self, arg: ExprValue) -> ExprValue {
+    pub(crate) fn evaluate(
+        self,
+        arg: ExprValue,
+    ) -> Result<ExprValue, ExprUnOpEvalError> {
         match self {
-            ExprUnOp::BoolNot => ExprValue::Boolean(!arg.unwrap_bool()),
-            ExprUnOp::IntBitNot => ExprValue::Integer(!arg.unwrap_int()),
-            ExprUnOp::IntNeg => ExprValue::Integer(-arg.unwrap_int()),
+            ExprUnOp::BitNot => match arg {
+                ExprValue::Boolean(arg) => Ok(ExprValue::Boolean(!arg)),
+                ExprValue::Integer(arg) => Ok(ExprValue::Integer(!arg)),
+                _ => Err(ExprUnOpEvalError::InvalidType),
+            },
+            ExprUnOp::Neg => match arg {
+                ExprValue::Integer(arg) => Ok(ExprValue::Integer(-arg)),
+                _ => Err(ExprUnOpEvalError::InvalidType),
+            },
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
-    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprValue,
+    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp};
 use crate::parse::{ExprAst, IdentifierAst};
@@ -159,6 +159,15 @@ impl ExprEnv for LinkTypeEnv {
         _index_span: SrcSpan,
     ) -> Self::Op {
         ObjExprOp::ListIndex
+    }
+
+    fn unary_operation_op(
+        &self,
+        unop: ExprUnOp,
+        _op_span: SrcSpan,
+        _arg_span: SrcSpan,
+    ) -> Self::Op {
+        ObjExprOp::UnOp(unop)
     }
 }
 

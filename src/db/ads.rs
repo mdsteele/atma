@@ -108,7 +108,7 @@ impl<W: Write> AdsEnvironment<W> {
                 let rhs = self.value_stack.pop().unwrap();
                 let lhs = self.value_stack.pop().unwrap();
                 match binop.evaluate(lhs, rhs) {
-                    Ok(result) => self.value_stack.push(result),
+                    Ok(value) => self.value_stack.push(value),
                     Err(error) => {
                         return Err(AdsRuntimeError::ExprEvalError {
                             context: context.clone(),
@@ -260,10 +260,19 @@ impl<W: Write> AdsEnvironment<W> {
                 debug_assert!(index < items.len());
                 self.value_stack.push(items[index].clone());
             }
-            AdsInstruction::UnOp(unop) => {
+            AdsInstruction::UnOp { context, unop, op_span, arg_span } => {
                 debug_assert!(!self.value_stack.is_empty());
-                let sub = self.value_stack.pop().unwrap();
-                self.value_stack.push(unop.evaluate(sub));
+                let arg = self.value_stack.pop().unwrap();
+                match unop.evaluate(arg) {
+                    Ok(value) => self.value_stack.push(value),
+                    Err(error) => {
+                        return Err(AdsRuntimeError::ExprEvalError {
+                            context: context.clone(),
+                            error: error
+                                .into_expr_eval_error(*op_span, *arg_span),
+                        });
+                    }
+                }
             }
         }
         self.pc += 1;
