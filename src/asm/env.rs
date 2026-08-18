@@ -1,5 +1,5 @@
 use super::arch::ArchTree;
-use super::error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc};
+use super::error::{AsmError, AsmResult};
 use crate::addr::Offset;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
@@ -7,7 +7,10 @@ use crate::expr::{
     ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
     make_global_builtin_values,
 };
-use crate::obj::{ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSymbol};
+use crate::obj::{
+    ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSrcContext, ObjSrcLoc,
+    ObjSymbol,
+};
 use crate::parse::{
     AsmLabelAst, AsmModuleAst, DeclarationKind, ExprAst, IdentifierAst,
     IdentifierKind,
@@ -23,14 +26,14 @@ pub(super) struct AsmTypeEnv {
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     arch_stack: Vec<Rc<str>>,
     chunk_stack: Vec<ChunkEnv>,
-    context_stack: Vec<Rc<AsmSrcContext>>,
+    context_stack: Vec<Rc<ObjSrcContext>>,
     scope_stack: Vec<AsmScopeEnv>,
 }
 
 impl AsmTypeEnv {
     pub fn new(root_path: Rc<str>, arch_tree: ArchTree) -> AsmTypeEnv {
         let builtins = make_global_builtin_values();
-        let root_context = Rc::new(AsmSrcContext::root(root_path));
+        let root_context = Rc::new(ObjSrcContext::root(root_path));
         AsmTypeEnv {
             arch_tree,
             builtins,
@@ -45,12 +48,12 @@ impl AsmTypeEnv {
         &self.arch_tree
     }
 
-    pub fn current_src_context(&self) -> Rc<AsmSrcContext> {
+    pub fn current_src_context(&self) -> Rc<ObjSrcContext> {
         debug_assert!(!self.context_stack.is_empty());
         self.context_stack.last().unwrap().clone()
     }
 
-    pub fn push_src_context(&mut self, context: Rc<AsmSrcContext>) {
+    pub fn push_src_context(&mut self, context: Rc<ObjSrcContext>) {
         self.context_stack.push(context);
     }
 
@@ -302,8 +305,8 @@ impl AsmTypeEnv {
         })
     }
 
-    pub fn make_loc(&self, span: SrcSpan) -> AsmSrcLoc {
-        AsmSrcLoc { span, context: self.current_src_context() }
+    pub fn make_loc(&self, span: SrcSpan) -> ObjSrcLoc {
+        ObjSrcLoc { span, context: self.current_src_context() }
     }
 }
 
@@ -359,37 +362,56 @@ impl ExprEnv for AsmTypeEnv {
 
     fn apply_function_op(
         &self,
-        _func_span: SrcSpan,
-        _arg_span: SrcSpan,
+        func_span: SrcSpan,
+        arg_span: SrcSpan,
     ) -> Self::Op {
-        ObjExprOp::Apply
+        ObjExprOp::Apply {
+            context: self.current_src_context(),
+            func_span,
+            arg_span,
+        }
     }
 
     fn binary_operation_op(
         &self,
         binop: ExprBinOp,
-        _op_span: SrcSpan,
-        _lhs_span: SrcSpan,
-        _rhs_span: SrcSpan,
+        op_span: SrcSpan,
+        lhs_span: SrcSpan,
+        rhs_span: SrcSpan,
     ) -> Self::Op {
-        ObjExprOp::BinOp(binop)
+        ObjExprOp::BinOp {
+            context: self.current_src_context(),
+            binop,
+            op_span,
+            lhs_span,
+            rhs_span,
+        }
     }
 
     fn list_index_op(
         &self,
-        _list_span: SrcSpan,
-        _index_span: SrcSpan,
+        list_span: SrcSpan,
+        index_span: SrcSpan,
     ) -> Self::Op {
-        ObjExprOp::ListIndex
+        ObjExprOp::ListIndex {
+            context: self.current_src_context(),
+            list_span,
+            index_span,
+        }
     }
 
     fn unary_operation_op(
         &self,
         unop: ExprUnOp,
-        _op_span: SrcSpan,
-        _arg_span: SrcSpan,
+        op_span: SrcSpan,
+        arg_span: SrcSpan,
     ) -> Self::Op {
-        ObjExprOp::UnOp(unop)
+        ObjExprOp::UnOp {
+            context: self.current_src_context(),
+            unop,
+            op_span,
+            arg_span,
+        }
     }
 }
 
@@ -495,7 +517,7 @@ impl AsmScopeEnv {
 #[derive(Clone)]
 struct AsmDecl {
     pub kind: AsmDeclKind,
-    pub id_loc: AsmSrcLoc,
+    pub id_loc: ObjSrcLoc,
     pub expr_type: ExprType,
     pub value: AsmDeclValue,
 }

@@ -4,11 +4,16 @@ use atma::expr::ExprType;
 use atma::link::{ConfigAttr, ConfigEntryKind, ConfigError, LinkConfig};
 use num_bigint::BigInt;
 use std::assert_matches;
+use std::rc::Rc;
 
 //===========================================================================//
 
 fn config_errors(source: &str) -> Vec<ConfigError> {
-    match LinkConfig::from_source(source) {
+    let config_path = Rc::<str>::from("input");
+    let config_source = Rc::<str>::from(source);
+    let mut cache = atma::error::StrSrcCache::new();
+    cache.add_source(config_path.clone(), config_source.clone());
+    match LinkConfig::from_source(&mut cache, config_path, &config_source) {
         Ok(_) => vec![],
         Err(errs) => errs.into_iter().collect::<Vec<_>>(),
     }

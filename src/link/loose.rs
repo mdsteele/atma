@@ -3,7 +3,7 @@ use super::error::LinkError;
 use super::types::ChunkId;
 use crate::addr::{Addr, Align, Size};
 use crate::error::Errs;
-use crate::obj::ObjFile;
+use crate::obj::{ObjFile, ObjSrcLoc};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
@@ -33,6 +33,9 @@ pub(super) struct LooseChunk {
 pub(super) struct LooseSection {
     /// The name of this section.
     pub name: Rc<str>,
+    /// The linker config source code location where the section was
+    /// declared.
+    pub name_loc: ObjSrcLoc,
     /// The name of the memory region that this section should be placed in.
     pub region: Rc<str>,
     /// If set, then the section must start at exactly this address.
@@ -83,6 +86,7 @@ impl LooseSection {
                 }
                 loose_sections.push(LooseSection {
                     name: section.name.clone(),
+                    name_loc: section.name_loc.clone(),
                     region: section.region.clone(),
                     start: section.start,
                     size: section.size,
@@ -97,16 +101,18 @@ impl LooseSection {
         };
         for (object_index, object_file) in object_files.iter().enumerate() {
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
-                let section_index =
-                    match section_name_to_index.get(&chunk.section_name) {
-                        Some(index) => *index,
-                        None => {
-                            errs.push(LinkError::ChunkSectionDoesNotExist {
-                                section_name: chunk.section_name.clone(),
-                            });
-                            continue;
-                        }
-                    };
+                let section_index = match section_name_to_index
+                    .get(&chunk.section_name)
+                {
+                    Some(index) => *index,
+                    None => {
+                        errs.push(LinkError::ChunkSectionDoesNotExist {
+                            section_name: chunk.section_name.clone(),
+                            section_name_loc: chunk.section_name_loc.clone(),
+                        });
+                        continue;
+                    }
+                };
                 let section = &mut loose_sections[section_index];
                 if section.is_bss {
                     if chunk.fill.is_some() {

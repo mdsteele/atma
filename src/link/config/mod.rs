@@ -10,9 +10,9 @@ use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
 use super::types::AbsoluteLabel;
 use crate::addr::{Addr, Align, Range, Size};
-use crate::error::Errs;
+use crate::error::{Errs, SrcCache};
 use crate::expr::ExprValue;
-use crate::obj::{ObjExpr, ObjFile};
+use crate::obj::{ObjExpr, ObjFile, ObjSrcLoc};
 use crate::parse::LinkConfigAst;
 use build::ConfigBuilder;
 pub use checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
@@ -38,7 +38,7 @@ pub struct LinkConfig {
     /// Names of symbols that are imported into this configuration from object
     /// files.  These symbols can be used to define non-static variables,
     /// exports, and checksums.
-    pub imports: Vec<Rc<str>>,
+    pub imports: Vec<ImportConfig>,
     /// Local non-static variables declared in this configuration, which are to
     /// be evaluated (in order) after all chunks and sections have been
     /// positioned in their memory regions, and can then be used by export and
@@ -53,9 +53,13 @@ pub struct LinkConfig {
 
 impl LinkConfig {
     /// Sources source code into a linker configuration.
-    pub fn from_source(source: &str) -> ConfigResult<LinkConfig> {
+    pub fn from_source(
+        _cache: &mut dyn SrcCache,
+        src_path: Rc<str>,
+        source: &str,
+    ) -> ConfigResult<LinkConfig> {
         let ast = LinkConfigAst::parse_source(source).map_err(Errs::coerce)?;
-        ConfigBuilder::new().build(ast)
+        ConfigBuilder::new(src_path).build(ast)
     }
 
     /// Given a set of object files, patches all chunks and returns them in the
@@ -108,18 +112,23 @@ impl LinkConfig {
                 ExprValue::Integer(bigint) => Ok(Addr::wrap_bigint(bigint)),
                 _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
             })?;
+        let absolute_label = AbsoluteLabel {
+            space: export.space.clone(),
+            address: symbol_addr,
+        };
         let collision = positioned_binary.external_symbols.insert(
             export.name.clone(),
-            AbsoluteLabel {
-                space: export.space.clone(),
-                address: symbol_addr,
-            },
+            (absolute_label, export.name_loc.clone()),
         );
         match collision {
             None => Ok(()),
-            Some(_) => Err(Errs::one(LinkError::SymbolExportCollision {
-                symbol_name: export.name.clone(),
-            })),
+            Some((_, prev_loc)) => {
+                Err(Errs::one(LinkError::SymbolExportCollision {
+                    symbol_name: export.name.clone(),
+                    export_loc: export.name_loc.clone(),
+                    prev_loc,
+                }))
+            }
         }
     }
 
@@ -130,15 +139,18 @@ impl LinkConfig {
         let mut errs = Errs::<LinkError>::new();
         let mut symbol_addrs =
             HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
-        for import_name in &self.imports {
-            let absolute_label =
-                positioned_binary.external_symbols.get(import_name).cloned();
-            if absolute_label.is_none() {
+        for import in &self.imports {
+            let opt_absolute_label = positioned_binary
+                .external_symbols
+                .get(&import.name)
+                .map(|(label, _)| label.clone());
+            if opt_absolute_label.is_none() {
                 errs.push(LinkError::SymbolImportUnresolved {
-                    symbol_name: import_name.clone(),
+                    symbol_name: import.name.clone(),
+                    import_loc: import.loc.clone(),
                 });
             }
-            symbol_addrs.insert(import_name.clone(), absolute_label);
+            symbol_addrs.insert(import.name.clone(), opt_absolute_label);
         }
         let symbol_context = LinkSymbolContext {
             chunk_metadata: &[], // a linker config has no chunks
@@ -169,6 +181,9 @@ pub struct AddrspaceConfig {
 pub struct RegionConfig {
     /// The name of this memory region.
     pub name: Rc<str>,
+    /// The linker config source code location where the memory region was
+    /// declared.
+    pub name_loc: ObjSrcLoc,
     /// The name of the address space that this memory region exists in.
     pub space: Rc<str>,
     /// The range of addresses covered by this memory region.
@@ -186,6 +201,9 @@ pub struct RegionConfig {
 pub struct SectionConfig {
     /// The name of this section.
     pub name: Rc<str>,
+    /// The linker config source code location where the section was
+    /// declared.
+    pub name_loc: ObjSrcLoc,
     /// The name of the memory region that this section should be placed in.
     pub region: Rc<str>,
     /// If set, then the section must start at exactly this address.
@@ -205,11 +223,24 @@ pub struct SectionConfig {
 
 //===========================================================================//
 
+/// A linker configuration for a single imported symbol.
+#[derive(Debug)]
+pub struct ImportConfig {
+    /// The name of the imported symbol.
+    pub name: Rc<str>,
+    /// The linker config source location for the import.
+    pub loc: ObjSrcLoc,
+}
+
+//===========================================================================//
+
 /// A linker configuration for a single exported symbol.
 #[derive(Debug)]
 pub struct ExportConfig {
     /// The name of the exported symbol.
     pub name: Rc<str>,
+    /// The linker config source code location where the export was declared.
+    pub name_loc: ObjSrcLoc,
     /// The name of the address space that this symbol exists in.
     pub space: Rc<str>,
     /// The address of the symbol.

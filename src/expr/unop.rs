@@ -1,7 +1,15 @@
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprLabel, ExprType, ExprValue};
+use crate::obj::{BinaryIo, Decoder, Encoder};
 use crate::parse::UnOpAst;
+use std::io;
+
+//===========================================================================//
+
+const TAG_ADDR_OF: u8 = 0x00;
+const TAG_BIT_NOT: u8 = 0x01;
+const TAG_NEG: u8 = 0x02;
 
 //===========================================================================//
 
@@ -98,6 +106,49 @@ impl ExprUnOp {
                 _ => Err(ExprUnOpEvalError::InvalidType),
             },
         }
+    }
+}
+
+impl BinaryIo for ExprUnOp {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
+            TAG_ADDR_OF => Ok(Self::AddrOf),
+            TAG_BIT_NOT => Ok(Self::BitNot),
+            TAG_NEG => Ok(Self::Neg),
+            byte => Err(io::Error::other(format!(
+                "unknown unop tag: 0x{:02x}",
+                byte
+            ))),
+        }
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        let tag = match self {
+            Self::AddrOf => TAG_ADDR_OF,
+            Self::BitNot => TAG_BIT_NOT,
+            Self::Neg => TAG_NEG,
+        };
+        tag.write_to(encoder)
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::ExprUnOp;
+    use crate::obj::assert_round_trips;
+
+    #[test]
+    fn binary_io_round_trip() {
+        assert_round_trips(ExprUnOp::AddrOf);
+        assert_round_trips(ExprUnOp::BitNot);
+        assert_round_trips(ExprUnOp::Neg);
     }
 }
 

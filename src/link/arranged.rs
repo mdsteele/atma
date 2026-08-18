@@ -5,7 +5,7 @@ use super::place::try_place;
 use super::types::ChunkId;
 use crate::addr::{Addr, Align, Offset, Range, Size};
 use crate::error::Errs;
-use crate::obj::ObjFile;
+use crate::obj::{ObjFile, ObjSrcLoc};
 use rangemap::RangeInclusiveSet;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -46,6 +46,9 @@ impl ArrangedChunk {
 pub(super) struct ArrangedSection {
     /// The name of this section.
     pub name: Rc<str>,
+    /// The linker config source code location where the section was
+    /// declared.
+    pub name_loc: ObjSrcLoc,
     /// The name of the memory region that this section should be placed in.
     pub region: Rc<str>,
     /// If set, then the section must start at exactly this address.
@@ -166,6 +169,7 @@ impl ArrangedSection {
             .max(section.size.unwrap_or(Size::ZERO));
         let arranged_section = ArrangedSection {
             name: section.name,
+            name_loc: section.name_loc,
             region: section.region,
             start: section.start,
             align: section.align,
@@ -183,6 +187,9 @@ impl ArrangedSection {
 pub(super) struct ArrangedRegion {
     /// The name of this memory region.
     pub name: Rc<str>,
+    /// The linker config source code location where the memory region was
+    /// declared.
+    pub name_loc: ObjSrcLoc,
     /// The name of the address space that this memory region exists in.
     pub space: Rc<str>,
     /// The range of addresses covered by this memory region.
@@ -217,6 +224,7 @@ impl ArrangedRegion {
             let addrspace = addrspaces[&region.space];
             arranged_regions.push(ArrangedRegion {
                 name: region.name.clone(),
+                name_loc: region.name_loc.clone(),
                 space: region.space.clone(),
                 range: region.range,
                 sections: Vec::new(),

@@ -1,44 +1,25 @@
 use super::binary::{BinaryIo, Decoder, Encoder};
+use super::context::ObjSrcContext;
+use crate::error::SrcSpan;
 use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
 use num_bigint::BigInt;
 use std::io;
+use std::rc::Rc;
 
 //===========================================================================//
 
-// Binary ops:
-const OP_ADD: u8 = 0x00;
-const OP_BIT_AND: u8 = 0x01;
-const OP_BIT_OR: u8 = 0x02;
-const OP_BIT_XOR: u8 = 0x03;
-const OP_CMP_EQ: u8 = 0x04;
-const OP_CMP_LE: u8 = 0x05;
-const OP_CMP_LT: u8 = 0x06;
-const OP_CMP_GE: u8 = 0x07;
-const OP_CMP_GT: u8 = 0x08;
-const OP_CMP_NE: u8 = 0x09;
-const OP_CONCAT: u8 = 0x0a;
-const OP_DIV: u8 = 0x0b;
-const OP_MOD: u8 = 0x0c;
-const OP_MUL: u8 = 0x0d;
-const OP_POW: u8 = 0x0e;
-const OP_SHL: u8 = 0x0f;
-const OP_SHR: u8 = 0x10;
-const OP_SUB: u8 = 0x11;
-// Unary ops:
-const OP_ADDR_OF: u8 = 0x20;
-const OP_BIT_NOT: u8 = 0x21;
-const OP_NEG: u8 = 0x22;
-// Other ops:
-const OP_APPLY: u8 = 0x30;
-const OP_GET_VALUE: u8 = 0x31;
-const OP_LIST_INDEX: u8 = 0x32;
-const OP_MAKE_LIST: u8 = 0x33;
-const OP_MAKE_TUPLE: u8 = 0x34;
-const OP_PUSH: u8 = 0x35;
-const OP_SKIP: u8 = 0x36;
-const OP_SKIP_IF: u8 = 0x37;
-const OP_SKIP_UNLESS: u8 = 0x38;
-const OP_TUPLE_ITEM: u8 = 0x39;
+const OP_APPLY: u8 = 0x00;
+const OP_BINOP: u8 = 0x01;
+const OP_GET_VALUE: u8 = 0x02;
+const OP_LIST_INDEX: u8 = 0x03;
+const OP_MAKE_LIST: u8 = 0x04;
+const OP_MAKE_TUPLE: u8 = 0x05;
+const OP_PUSH: u8 = 0x06;
+const OP_SKIP: u8 = 0x07;
+const OP_SKIP_IF: u8 = 0x08;
+const OP_SKIP_UNLESS: u8 = 0x09;
+const OP_TUPLE_ITEM: u8 = 0x0a;
+const OP_UNOP: u8 = 0x0b;
 
 //===========================================================================//
 
@@ -116,12 +97,35 @@ pub(crate) enum ObjExprOp {
     /// Pops the top two values from the value stack, calls the
     /// second-from-the-top value with the topmost value as an argument, then
     /// pushes the result onto the value stack.
-    Apply,
+    Apply {
+        /// The source code context in which the operation appeared.
+        context: Rc<ObjSrcContext>,
+        /// The span of byte offsets within the context where the function
+        /// expression appeared.
+        func_span: SrcSpan,
+        /// The span of byte offsets within the context where the function
+        /// argument(s) appeared.
+        arg_span: SrcSpan,
+    },
     /// Pops the top two values from the value stack, evaluates the specified
     /// binary operation using the second-from-the-top value as the left-hand
     /// side and the topmost value as the right-hand side, then pushes the
     /// result onto the value stack.
-    BinOp(ExprBinOp),
+    BinOp {
+        /// The source code context in which the operation appeared.
+        context: Rc<ObjSrcContext>,
+        /// The binary operator.
+        binop: ExprBinOp,
+        /// The span of byte offsets within the context where the operator
+        /// appeared.
+        op_span: SrcSpan,
+        /// The span of byte offsets within the context where the
+        /// left-hand-side subexpression appeared.
+        lhs_span: SrcSpan,
+        /// The span of byte offsets within the context where the
+        /// right-hand-side subexpression appeared.
+        rhs_span: SrcSpan,
+    },
     /// Copies the value at the specified index in the value stack, and pushes
     /// the copied value onto the stack.
     GetValue(usize),
@@ -130,7 +134,16 @@ pub(crate) enum ObjExprOp {
     /// second-from-the-top value (which must be a list), then pushes that list
     /// element back onto the stack. If the index value is out of range, a
     /// link-time error will occur.
-    ListIndex,
+    ListIndex {
+        /// The source code context in which the operation appeared.
+        context: Rc<ObjSrcContext>,
+        /// The span of byte offsets within the context where the list
+        /// subexpression appeared.
+        list_span: SrcSpan,
+        /// The span of byte offsets within the context where the index
+        /// subexpression appeared.
+        index_span: SrcSpan,
+    },
     /// Pops the specified number of values from the value stack (which must
     /// all have the same type), packs them into a list (with the topmost value
     /// last), then pushes that list onto the value stack.
@@ -156,7 +169,18 @@ pub(crate) enum ObjExprOp {
     /// Pops the top value from the value stack, evaluates the specified unary
     /// operation using that value, then pushes the result onto the value
     /// stack.
-    UnOp(ExprUnOp),
+    UnOp {
+        /// The source code context in which the operation appeared.
+        context: Rc<ObjSrcContext>,
+        /// The unary operator.
+        unop: ExprUnOp,
+        /// The span of byte offsets within the context where the operator
+        /// appeared.
+        op_span: SrcSpan,
+        /// The span of byte offsets within the context where the argument
+        /// subexpression appeared.
+        arg_span: SrcSpan,
+    },
 }
 
 impl BinaryIo for ObjExprOp {
@@ -164,33 +188,27 @@ impl BinaryIo for ObjExprOp {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
-            // Binary ops:
-            OP_ADD => Ok(Self::BinOp(ExprBinOp::Add)),
-            OP_BIT_AND => Ok(Self::BinOp(ExprBinOp::BitAnd)),
-            OP_BIT_OR => Ok(Self::BinOp(ExprBinOp::BitOr)),
-            OP_BIT_XOR => Ok(Self::BinOp(ExprBinOp::BitXor)),
-            OP_CMP_EQ => Ok(Self::BinOp(ExprBinOp::CmpEq)),
-            OP_CMP_LE => Ok(Self::BinOp(ExprBinOp::CmpLe)),
-            OP_CMP_LT => Ok(Self::BinOp(ExprBinOp::CmpLt)),
-            OP_CMP_GE => Ok(Self::BinOp(ExprBinOp::CmpGe)),
-            OP_CMP_GT => Ok(Self::BinOp(ExprBinOp::CmpGt)),
-            OP_CMP_NE => Ok(Self::BinOp(ExprBinOp::CmpNe)),
-            OP_CONCAT => Ok(Self::BinOp(ExprBinOp::Concat)),
-            OP_DIV => Ok(Self::BinOp(ExprBinOp::Div)),
-            OP_MOD => Ok(Self::BinOp(ExprBinOp::Mod)),
-            OP_MUL => Ok(Self::BinOp(ExprBinOp::Mul)),
-            OP_POW => Ok(Self::BinOp(ExprBinOp::Pow)),
-            OP_SHL => Ok(Self::BinOp(ExprBinOp::Shl)),
-            OP_SHR => Ok(Self::BinOp(ExprBinOp::Shr)),
-            OP_SUB => Ok(Self::BinOp(ExprBinOp::Sub)),
-            // Unary ops:
-            OP_ADDR_OF => Ok(Self::UnOp(ExprUnOp::AddrOf)),
-            OP_BIT_NOT => Ok(Self::UnOp(ExprUnOp::BitNot)),
-            OP_NEG => Ok(Self::UnOp(ExprUnOp::Neg)),
-            // Other ops:
-            OP_APPLY => Ok(Self::Apply),
+            OP_APPLY => {
+                let context = Rc::<ObjSrcContext>::read_from(decoder)?;
+                let func_span = SrcSpan::read_from(decoder)?;
+                let arg_span = SrcSpan::read_from(decoder)?;
+                Ok(Self::Apply { context, func_span, arg_span })
+            }
+            OP_BINOP => {
+                let context = Rc::<ObjSrcContext>::read_from(decoder)?;
+                let binop = ExprBinOp::read_from(decoder)?;
+                let op_span = SrcSpan::read_from(decoder)?;
+                let lhs_span = SrcSpan::read_from(decoder)?;
+                let rhs_span = SrcSpan::read_from(decoder)?;
+                Ok(Self::BinOp { context, binop, op_span, lhs_span, rhs_span })
+            }
             OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
-            OP_LIST_INDEX => Ok(Self::ListIndex),
+            OP_LIST_INDEX => {
+                let context = Rc::<ObjSrcContext>::read_from(decoder)?;
+                let list_span = SrcSpan::read_from(decoder)?;
+                let index_span = SrcSpan::read_from(decoder)?;
+                Ok(Self::ListIndex { context, list_span, index_span })
+            }
             OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(decoder)?)),
             OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(decoder)?)),
             OP_PUSH => Ok(Self::Push(ExprValue::read_from(decoder)?)),
@@ -198,6 +216,13 @@ impl BinaryIo for ObjExprOp {
             OP_SKIP_IF => Ok(Self::SkipIf(usize::read_from(decoder)?)),
             OP_SKIP_UNLESS => Ok(Self::SkipUnless(usize::read_from(decoder)?)),
             OP_TUPLE_ITEM => Ok(Self::TupleItem(usize::read_from(decoder)?)),
+            OP_UNOP => {
+                let context = Rc::<ObjSrcContext>::read_from(decoder)?;
+                let unop = ExprUnOp::read_from(decoder)?;
+                let op_span = SrcSpan::read_from(decoder)?;
+                let arg_span = SrcSpan::read_from(decoder)?;
+                Ok(Self::UnOp { context, unop, op_span, arg_span })
+            }
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("unknown expression opcode: 0x{:02x}", byte),
@@ -210,30 +235,30 @@ impl BinaryIo for ObjExprOp {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         match self {
-            Self::Apply => OP_APPLY.write_to(encoder),
-            Self::BinOp(ExprBinOp::Add) => OP_ADD.write_to(encoder),
-            Self::BinOp(ExprBinOp::BitAnd) => OP_BIT_AND.write_to(encoder),
-            Self::BinOp(ExprBinOp::BitOr) => OP_BIT_OR.write_to(encoder),
-            Self::BinOp(ExprBinOp::BitXor) => OP_BIT_XOR.write_to(encoder),
-            Self::BinOp(ExprBinOp::CmpEq) => OP_CMP_EQ.write_to(encoder),
-            Self::BinOp(ExprBinOp::CmpLe) => OP_CMP_LE.write_to(encoder),
-            Self::BinOp(ExprBinOp::CmpLt) => OP_CMP_LT.write_to(encoder),
-            Self::BinOp(ExprBinOp::CmpGe) => OP_CMP_GE.write_to(encoder),
-            Self::BinOp(ExprBinOp::CmpGt) => OP_CMP_GT.write_to(encoder),
-            Self::BinOp(ExprBinOp::CmpNe) => OP_CMP_NE.write_to(encoder),
-            Self::BinOp(ExprBinOp::Concat) => OP_CONCAT.write_to(encoder),
-            Self::BinOp(ExprBinOp::Div) => OP_DIV.write_to(encoder),
-            Self::BinOp(ExprBinOp::Mod) => OP_MOD.write_to(encoder),
-            Self::BinOp(ExprBinOp::Mul) => OP_MUL.write_to(encoder),
-            Self::BinOp(ExprBinOp::Pow) => OP_POW.write_to(encoder),
-            Self::BinOp(ExprBinOp::Shl) => OP_SHL.write_to(encoder),
-            Self::BinOp(ExprBinOp::Shr) => OP_SHR.write_to(encoder),
-            Self::BinOp(ExprBinOp::Sub) => OP_SUB.write_to(encoder),
+            Self::Apply { context, func_span, arg_span } => {
+                OP_APPLY.write_to(encoder)?;
+                context.write_to(encoder)?;
+                func_span.write_to(encoder)?;
+                arg_span.write_to(encoder)
+            }
+            Self::BinOp { context, binop, op_span, lhs_span, rhs_span } => {
+                OP_BINOP.write_to(encoder)?;
+                context.write_to(encoder)?;
+                binop.write_to(encoder)?;
+                op_span.write_to(encoder)?;
+                lhs_span.write_to(encoder)?;
+                rhs_span.write_to(encoder)
+            }
             Self::GetValue(index) => {
                 OP_GET_VALUE.write_to(encoder)?;
                 index.write_to(encoder)
             }
-            Self::ListIndex => OP_LIST_INDEX.write_to(encoder),
+            Self::ListIndex { context, list_span, index_span } => {
+                OP_LIST_INDEX.write_to(encoder)?;
+                context.write_to(encoder)?;
+                list_span.write_to(encoder)?;
+                index_span.write_to(encoder)
+            }
             Self::MakeList(num_items) => {
                 OP_MAKE_LIST.write_to(encoder)?;
                 num_items.write_to(encoder)
@@ -262,9 +287,13 @@ impl BinaryIo for ObjExprOp {
                 OP_TUPLE_ITEM.write_to(encoder)?;
                 index.write_to(encoder)
             }
-            Self::UnOp(ExprUnOp::AddrOf) => OP_ADDR_OF.write_to(encoder),
-            Self::UnOp(ExprUnOp::BitNot) => OP_BIT_NOT.write_to(encoder),
-            Self::UnOp(ExprUnOp::Neg) => OP_NEG.write_to(encoder),
+            Self::UnOp { context, unop, op_span, arg_span } => {
+                OP_UNOP.write_to(encoder)?;
+                context.write_to(encoder)?;
+                unop.write_to(encoder)?;
+                op_span.write_to(encoder)?;
+                arg_span.write_to(encoder)
+            }
         }
     }
 }
@@ -304,20 +333,37 @@ impl ExprOp for ObjExprOp {
 #[cfg(test)]
 mod tests {
     use super::ObjExprOp;
+    use crate::error::SrcSpan;
     use crate::expr::{ExprBinOp, ExprUnOp, ExprValue};
-    use crate::obj::assert_round_trips;
+    use crate::obj::{ObjSrcContext, ObjSrcParent, assert_round_trips};
     use num_bigint::BigInt;
+    use std::rc::Rc;
 
     #[test]
     fn round_trip_obj_expr_op() {
-        assert_round_trips(ObjExprOp::Apply);
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Add));
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::BitOr));
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Concat));
-        assert_round_trips(ObjExprOp::BinOp(ExprBinOp::Sub));
+        let context = Rc::new(ObjSrcContext {
+            path: Rc::from("input"),
+            parent: ObjSrcParent::Root,
+        });
+        assert_round_trips(ObjExprOp::Apply {
+            context: context.clone(),
+            func_span: SrcSpan::from_byte_range(5..10),
+            arg_span: SrcSpan::from_byte_range(10..15),
+        });
+        assert_round_trips(ObjExprOp::BinOp {
+            context: context.clone(),
+            binop: ExprBinOp::BitOr,
+            op_span: SrcSpan::from_byte_range(11..12),
+            lhs_span: SrcSpan::from_byte_range(5..10),
+            rhs_span: SrcSpan::from_byte_range(13..18),
+        });
         assert_round_trips(ObjExprOp::GetValue(0));
         assert_round_trips(ObjExprOp::GetValue(42));
-        assert_round_trips(ObjExprOp::ListIndex);
+        assert_round_trips(ObjExprOp::ListIndex {
+            context: context.clone(),
+            list_span: SrcSpan::from_byte_range(5..10),
+            index_span: SrcSpan::from_byte_range(11..13),
+        });
         assert_round_trips(ObjExprOp::MakeList(0));
         assert_round_trips(ObjExprOp::MakeList(3));
         assert_round_trips(ObjExprOp::MakeTuple(0));
@@ -334,9 +380,12 @@ mod tests {
         assert_round_trips(ObjExprOp::SkipUnless(1234));
         assert_round_trips(ObjExprOp::TupleItem(0));
         assert_round_trips(ObjExprOp::TupleItem(2));
-        assert_round_trips(ObjExprOp::UnOp(ExprUnOp::AddrOf));
-        assert_round_trips(ObjExprOp::UnOp(ExprUnOp::BitNot));
-        assert_round_trips(ObjExprOp::UnOp(ExprUnOp::Neg));
+        assert_round_trips(ObjExprOp::UnOp {
+            context: context.clone(),
+            unop: ExprUnOp::Neg,
+            op_span: SrcSpan::from_byte_range(11..12),
+            arg_span: SrcSpan::from_byte_range(13..18),
+        });
     }
 }
 

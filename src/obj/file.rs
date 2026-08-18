@@ -2,8 +2,8 @@ use super::assert::ObjAssert;
 use super::binary::{BinaryIo, Decoder, Encoder};
 use super::chunk::ObjChunk;
 use super::expr::ObjExpr;
+use super::import::ObjImport;
 use std::io;
-use std::rc::Rc;
 
 //===========================================================================//
 
@@ -11,8 +11,8 @@ use std::rc::Rc;
 pub struct ObjFile {
     /// The section chunks to be linked.
     pub chunks: Vec<ObjChunk>,
-    /// The fully qualified names of the symbols imported by this object file.
-    pub imports: Vec<Rc<str>>,
+    /// External symbols imported by this object file.
+    pub imports: Vec<ObjImport>,
     /// Local non-static variables declared in this object file, which are to
     /// evaluated (in order) after all symbols have been resolved, and can then
     /// be used by assertion and patch expressions (or by later variables).
@@ -26,7 +26,7 @@ impl BinaryIo for ObjFile {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         let chunks = Vec::<ObjChunk>::read_from(decoder)?;
-        let imports = Vec::<Rc<str>>::read_from(decoder)?;
+        let imports = Vec::<ObjImport>::read_from(decoder)?;
         let variables = Vec::<ObjExpr>::read_from(decoder)?;
         let asserts = Vec::<ObjAssert>::read_from(decoder)?;
         Ok(ObjFile { chunks, imports, variables, asserts })

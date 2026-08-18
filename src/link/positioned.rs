@@ -5,7 +5,7 @@ use super::place::try_place;
 use super::types::{AbsoluteLabel, ChunkId, ChunkMetadata};
 use crate::addr::{Addr, Size};
 use crate::error::Errs;
-use crate::obj::ObjFile;
+use crate::obj::{ObjFile, ObjSrcLoc};
 use rangemap::RangeInclusiveSet;
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -157,6 +157,7 @@ impl PositionedRegion {
             if section.size == Size::ZERO {
                 errs.push(LinkError::SectionIsEmpty {
                     section_name: section.name,
+                    section_loc: section.name_loc,
                 });
                 continue;
             }
@@ -181,7 +182,10 @@ impl PositionedRegion {
                 range_set.insert(section_range.into());
             } else {
                 errs.push(LinkError::SectionCannotBePlaced {
+                    region_name: region.name.clone(),
+                    region_loc: region.name_loc.clone(),
                     section_name: section.name,
+                    section_loc: section.name_loc,
                 });
             }
         }
@@ -239,7 +243,7 @@ pub(super) struct PositionedBinary {
     /// For each object file, metadata about each chunk in that object file.
     pub file_chunk_metadata: Vec<Vec<ChunkMetadata>>,
     /// The address of each external symbol across the binary.
-    pub external_symbols: HashMap<Rc<str>, AbsoluteLabel>,
+    pub external_symbols: HashMap<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>,
     /// For each object file, the address of each internal symbol in that
     /// object files.
     pub internal_symbols: Vec<HashMap<Rc<str>, AbsoluteLabel>>,
@@ -255,7 +259,8 @@ impl PositionedBinary {
         let chunk_metadata =
             PositionedBinary::make_chunk_metadata(&positioned_regions);
 
-        let mut external_symbols = HashMap::<Rc<str>, AbsoluteLabel>::new();
+        let mut external_symbols =
+            HashMap::<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>::new();
         let mut internal_symbols =
             Vec::<HashMap<Rc<str>, AbsoluteLabel>>::with_capacity(
                 object_files.len(),
@@ -274,11 +279,15 @@ impl PositionedBinary {
                         address: symbol_addr,
                     };
                     if symbol.exported {
-                        let collision = external_symbols
-                            .insert(symbol.name.clone(), symbol_label);
-                        if collision.is_some() {
+                        let collision = external_symbols.insert(
+                            symbol.name.clone(),
+                            (symbol_label, symbol.loc.clone()),
+                        );
+                        if let Some((_, prev_loc)) = collision {
                             errs.push(LinkError::SymbolExportCollision {
                                 symbol_name: symbol.name.clone(),
+                                export_loc: symbol.loc.clone(),
+                                prev_loc,
                             });
                         }
                     } else {

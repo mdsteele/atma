@@ -154,16 +154,20 @@ impl LinkEvalEnv {
         let mut expr_stack = Vec::<ExprValue>::new();
         for op in &expr.ops {
             match op {
-                ObjExprOp::Apply => {
+                ObjExprOp::Apply { context, func_span, arg_span } => {
                     let arg_value = pop_value(&mut expr_stack)?;
                     let func_value = pop_value(&mut expr_stack)?;
                     if let ExprValue::Function(func) = func_value {
                         match func.call(arg_value) {
                             Ok(result_value) => expr_stack.push(result_value),
-                            Err(_) => {
-                                // TODO: add error details
+                            Err(error) => {
                                 return Err(Errs::one(
-                                    LinkError::PatchEvaluationFailed,
+                                    LinkError::ExprEvalError {
+                                        context: context.clone(),
+                                        error: error.into_expr_eval_error(
+                                            *func_span, *arg_span,
+                                        ),
+                                    },
                                 ));
                             }
                         }
@@ -175,16 +179,24 @@ impl LinkEvalEnv {
                         ));
                     }
                 }
-                &ObjExprOp::BinOp(binop) => {
+                ObjExprOp::BinOp {
+                    context,
+                    binop,
+                    op_span,
+                    lhs_span,
+                    rhs_span,
+                } => {
                     let rhs = pop_value(&mut expr_stack)?;
                     let lhs = pop_value(&mut expr_stack)?;
                     match binop.evaluate(lhs, rhs) {
                         Ok(result) => expr_stack.push(result),
-                        Err(_) => {
-                            // TODO: add error details
-                            return Err(Errs::one(
-                                LinkError::PatchEvaluationFailed,
-                            ));
+                        Err(error) => {
+                            return Err(Errs::one(LinkError::ExprEvalError {
+                                context: context.clone(),
+                                error: error.into_expr_eval_error(
+                                    *op_span, *lhs_span, *rhs_span,
+                                ),
+                            }));
                         }
                     }
                 }
@@ -202,15 +214,16 @@ impl LinkEvalEnv {
                     ));
                 }
                 ObjExprOp::Push(value) => expr_stack.push(value.clone()),
-                &ObjExprOp::UnOp(unop) => {
+                ObjExprOp::UnOp { context, unop, op_span, arg_span } => {
                     let arg = pop_value(&mut expr_stack)?;
                     match unop.evaluate(arg) {
                         Ok(result) => expr_stack.push(result),
-                        Err(_) => {
-                            // TODO: add error details
-                            return Err(Errs::one(
-                                LinkError::PatchEvaluationFailed,
-                            ));
+                        Err(error) => {
+                            return Err(Errs::one(LinkError::ExprEvalError {
+                                context: context.clone(),
+                                error: error
+                                    .into_expr_eval_error(*op_span, *arg_span),
+                            }));
                         }
                     }
                 }

@@ -1,4 +1,5 @@
 use crate::addr::{Addr, Align, Offset, Size};
+use crate::error::SrcSpan;
 use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::ToPrimitive;
 use std::any::{Any, TypeId, type_name};
@@ -511,6 +512,30 @@ impl BinaryIo for Size {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         BigUint::from(*self).write_to(encoder)
+    }
+}
+
+impl BinaryIo for SrcSpan {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let start = usize::read_from(decoder)?;
+        let size = usize::read_from(decoder)?;
+        Ok(SrcSpan::from_byte_range(start..(start + size)))
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        // Most `SrcSpan`s are short, and small `usize` values can be encoded
+        // in fewer bytes than large `usize` values, so we can save some
+        // encoding size by encoding the start start and size of the byte range
+        // rather than the start and the end.
+        let byte_range = self.byte_range();
+        byte_range.start.write_to(encoder)?;
+        (byte_range.end - byte_range.start).write_to(encoder)?;
+        Ok(())
     }
 }
 

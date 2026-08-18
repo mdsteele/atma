@@ -10,8 +10,9 @@ use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{ExprStatic, ExprType, ExprUnOp, ExprValue};
 use crate::obj::{
-    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjPatch, ObjPatchData,
-    ObjPatchIntType, ObjSymbol,
+    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch,
+    ObjPatchData, ObjPatchIntType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
+    ObjSymbol,
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst,
@@ -20,7 +21,7 @@ use crate::parse::{
     AsmUseAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
 use env::{AsmDeclValue, AsmTypeEnv};
-pub use error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc, AsmSrcParent};
+pub use error::{AsmError, AsmResult};
 use macros::MacroTable;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -56,7 +57,7 @@ struct Assembler<'a> {
     env: AsmTypeEnv,
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
-    imports: Vec<Rc<str>>,
+    imports: Vec<ObjImport>,
     variables: Vec<ObjExpr>,
     asserts: Vec<ObjAssert>,
 }
@@ -293,7 +294,10 @@ impl<'a> Assembler<'a> {
     }
 
     fn expand_import(&mut self, id_ast: IdentifierAst) -> AsmResult<()> {
-        self.imports.push(id_ast.name);
+        self.imports.push(ObjImport {
+            full_name: id_ast.name,
+            loc: self.env.make_loc(id_ast.span),
+        });
         Ok(())
     }
 
@@ -331,14 +335,16 @@ impl<'a> Assembler<'a> {
     fn expand_label(&mut self, label_ast: AsmLabelAst) -> AsmResult<()> {
         let full_name =
             self.env.current_scope().prefixed(&label_ast.identifier.name);
+        let loc = self.env.make_loc(label_ast.identifier.span);
         let Some(chunk_env) = self.env.current_chunk() else {
             return Err(Errs::one(AsmError::DirectiveNotInSection {
                 directive: "label",
-                loc: self.env.make_loc(label_ast.identifier.span),
+                loc,
             }));
         };
         chunk_env.add_symbol(ObjSymbol {
             name: full_name,
+            loc,
             exported: label_ast.exported,
             offset: Offset::try_from(chunk_env.total_size()).unwrap(), // TODO
         });
@@ -411,6 +417,7 @@ impl<'a> Assembler<'a> {
 
     fn expand_section(&mut self, section_ast: AsmSectionAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
+        let section_name_loc = self.env.make_loc(section_ast.name.span);
         let name: Option<Rc<str>> = errs
             .ok(self.typecheck_static_dir_expr_as(
                 (".SECTION", "name"),
@@ -482,6 +489,7 @@ impl<'a> Assembler<'a> {
         if let Some(section_name) = name {
             let chunk = ObjChunk {
                 section_name,
+                section_name_loc,
                 data: finished_chunk.data,
                 size,
                 start,
@@ -512,9 +520,9 @@ impl<'a> Assembler<'a> {
             // TODO: skip if we've already used this path
             match self.cache.fetch_or_get_cached_utf8(&path) {
                 Ok(source_code) => {
-                    let context = Rc::new(AsmSrcContext {
+                    let context = Rc::new(ObjSrcContext {
                         path,
-                        parent: AsmSrcParent::Use(AsmSrcLoc {
+                        parent: ObjSrcParent::Use(ObjSrcLoc {
                             span: path_span,
                             context: self.env.current_src_context(),
                         }),
@@ -661,7 +669,12 @@ impl<'a> Assembler<'a> {
                     // TODO: If the label belongs to a chunk with an explicit
                     // start address, then the label's address value is static
                     // and no patch is necessary.
-                    expr.ops.push(ObjExprOp::UnOp(ExprUnOp::AddrOf));
+                    expr.ops.push(ObjExprOp::UnOp {
+                        context: self.env.current_src_context(),
+                        unop: ExprUnOp::AddrOf,
+                        op_span: expr_span,
+                        arg_span: expr_span,
+                    });
                     self.try_add_patch(ObjPatchData::Integer(int_type, expr));
                     0
                 }

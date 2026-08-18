@@ -2,8 +2,8 @@ use super::checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
 use super::env::LinkTypeEnv;
 use super::error::{ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult};
 use super::{
-    AddrspaceConfig, ConfigVariableOr, ExportConfig, LinkConfig, RegionConfig,
-    SectionConfig,
+    AddrspaceConfig, ConfigVariableOr, ExportConfig, ImportConfig, LinkConfig,
+    RegionConfig, SectionConfig,
 };
 use crate::addr::{Addr, Align, Range, Size};
 use crate::error::{Errs, SrcSpan};
@@ -33,9 +33,9 @@ pub(super) struct ConfigBuilder {
 }
 
 impl ConfigBuilder {
-    pub(super) fn new() -> ConfigBuilder {
+    pub(super) fn new(src_path: Rc<str>) -> ConfigBuilder {
         ConfigBuilder {
-            env: LinkTypeEnv::new(),
+            env: LinkTypeEnv::new(src_path),
             config: LinkConfig {
                 addrspaces: Vec::new(),
                 bss: Vec::new(),
@@ -375,6 +375,7 @@ impl ConfigBuilder {
         let address = addr.unwrap_or_default();
         self.config.exports.push(ExportConfig {
             name: entry.id.name.clone(),
+            name_loc: self.env.make_loc(entry.id.span),
             space: space.clone(),
             address,
         });
@@ -437,7 +438,10 @@ impl ConfigBuilder {
             }));
         }
         if self.env.get_import(&id_ast.name).is_none() {
-            self.config.imports.push(id_ast.name.clone());
+            self.config.imports.push(ImportConfig {
+                name: id_ast.name.clone(),
+                loc: self.env.make_loc(id_ast.span),
+            });
         }
         self.env.add_import(id_ast);
         Ok(())
@@ -592,6 +596,7 @@ impl ConfigBuilder {
         };
         let region = RegionConfig {
             name: entry.id.name,
+            name_loc: self.env.make_loc(entry.id.span),
             space: space.unwrap_or_default(),
             range,
             fill,
@@ -718,6 +723,7 @@ impl ConfigBuilder {
         }
         self.config.sections.push(SectionConfig {
             name: entry.id.name,
+            name_loc: self.env.make_loc(entry.id.span),
             region: region.unwrap_or_default(),
             start,
             size,

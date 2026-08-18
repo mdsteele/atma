@@ -1,5 +1,6 @@
-use super::error::{AsmError, AsmResult, AsmSrcContext, AsmSrcLoc};
+use super::error::{AsmError, AsmResult};
 use crate::error::{Errs, SrcSpan};
+use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
     AsmMacroArgAst, AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst,
@@ -21,7 +22,7 @@ impl MacroTable {
 
     pub fn expand(
         &self,
-        context: &Rc<AsmSrcContext>,
+        context: &Rc<ObjSrcContext>,
         arches: &[Rc<str>],
         invoke_ast: AsmInvokeAst,
     ) -> AsmResult<Vec<AsmStmtAst>> {
@@ -51,7 +52,7 @@ impl MacroTable {
         Err(Errs::one(AsmError::UnmatchedMacroInvocation {
             macro_name: name,
             arch,
-            invocation_loc: AsmSrcLoc {
+            invocation_loc: ObjSrcLoc {
                 span: invoke_ast.id.span,
                 context: context.clone(),
             },
@@ -60,7 +61,7 @@ impl MacroTable {
 
     pub fn define(
         &mut self,
-        context: Rc<AsmSrcContext>,
+        context: Rc<ObjSrcContext>,
         arch: &Rc<str>,
         reserved: &HashSet<Rc<str>>,
         def_macro_ast: AsmDefMacroAst,
@@ -92,7 +93,7 @@ impl MacroTable {
 
 /// Helper type for `MacroTable::define`.
 struct MacroBuilder<'a> {
-    context: Rc<AsmSrcContext>,
+    context: Rc<ObjSrcContext>,
     params: Vec<AsmMacroArgAst>,
     placeholders: HashMap<Rc<str>, PlaceholderKind>,
     reserved: &'a HashSet<Rc<str>>,
@@ -100,7 +101,7 @@ struct MacroBuilder<'a> {
 
 impl<'a> MacroBuilder<'a> {
     fn with_params(
-        context: Rc<AsmSrcContext>,
+        context: Rc<ObjSrcContext>,
         params: Vec<AsmMacroArgAst>,
         reserved: &'a HashSet<Rc<str>>,
     ) -> (MacroBuilder<'a>, Errs<AsmError>) {
@@ -112,11 +113,11 @@ impl<'a> MacroBuilder<'a> {
                     if let Some(&prev_span) = placeholders.get(name) {
                         errs.push(AsmError::DuplicateMacroPlaceholder {
                             placeholder_name: name.clone(),
-                            placeholder_loc: AsmSrcLoc {
+                            placeholder_loc: ObjSrcLoc {
                                 span: token.span,
                                 context: context.clone(),
                             },
-                            prev_loc: AsmSrcLoc {
+                            prev_loc: ObjSrcLoc {
                                 span: prev_span,
                                 context: context.clone(),
                             },
@@ -238,7 +239,7 @@ impl<'a> MacroBuilder<'a> {
         } else {
             Err(Errs::one(AsmError::UnknownMacroPlaceholder {
                 name: name.clone(),
-                loc: AsmSrcLoc { span, context: self.context.clone() },
+                loc: ObjSrcLoc { span, context: self.context.clone() },
             }))
         }
     }
@@ -283,7 +284,7 @@ impl<'a> MacroBuilder<'a> {
                 }
                 _ => {
                     errs.push(AsmError::MultipleMacroPlaceholders {
-                        loc: AsmSrcLoc {
+                        loc: ObjSrcLoc {
                             span: param.span,
                             context: self.context.clone(),
                         },
@@ -353,7 +354,7 @@ struct MacroDefinition {
 impl MacroDefinition {
     pub fn try_expand(
         &self,
-        context: &Rc<AsmSrcContext>,
+        context: &Rc<ObjSrcContext>,
         args: &[AsmMacroArgAst],
     ) -> MacroResult<Vec<AsmStmtAst>> {
         let expansion =
@@ -504,7 +505,7 @@ struct MacroExpansion {
 
 impl MacroExpansion {
     fn try_match(
-        context: &Rc<AsmSrcContext>,
+        context: &Rc<ObjSrcContext>,
         params: &[MacroParameter],
         args: &[AsmMacroArgAst],
     ) -> MacroResult<MacroExpansion> {

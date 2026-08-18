@@ -1,8 +1,8 @@
 use ariadne::{self, Label, ReportKind, Source};
 use atma::addr::{Addr, Align, Offset};
-use atma::asm::assemble_source;
+use atma::asm::{AsmError, assemble_source};
 use atma::bus::WatchKind;
-use atma::db::AdsEnvironment;
+use atma::db::{AdsEnvironment, AdsError};
 use atma::error::{Errs, SourceError, SrcCache, SrcCacheError};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
@@ -91,18 +91,11 @@ fn binary_format_parser() -> impl TypedValueParser {
 enum CliError {
     Io(io::Error),
     Source(FileSrcCache, Errs<SourceError>),
-    Link(Errs<LinkError>),
 }
 
 impl From<io::Error> for CliError {
     fn from(error: io::Error) -> CliError {
         CliError::Io(error)
-    }
-}
-
-impl From<Errs<LinkError>> for CliError {
-    fn from(errors: Errs<LinkError>) -> CliError {
-        CliError::Link(errors)
     }
 }
 
@@ -136,10 +129,6 @@ fn run_cli() -> Result<(), ExitCode> {
             report_source_errors(cache, source_errors);
             Err(ExitCode::FAILURE)
         }
-        Err(CliError::Link(link_errors)) => {
-            report_link_errors(link_errors);
-            Err(ExitCode::FAILURE)
-        }
     }
 }
 
@@ -155,8 +144,7 @@ fn command_asm(
     let obj = match assemble_source(&mut cache, path, &source_code) {
         Ok(obj) => obj,
         Err(asm_errors) => {
-            let source_errors =
-                asm_errors.map(|error| error.to_source_error());
+            let source_errors = asm_errors.map(AsmError::to_source_error);
             return Err(CliError::Source(cache, source_errors));
         }
     };
@@ -201,7 +189,7 @@ fn command_db(
                 Ok(ads_env) => ads_env,
                 Err(ads_errors) => {
                     let source_errors =
-                        ads_errors.map(|error| error.to_source_error());
+                        ads_errors.map(AdsError::to_source_error);
                     return Err(CliError::Source(cache, source_errors));
                 }
             }
@@ -256,15 +244,19 @@ fn command_ld(
     objfile_paths: Vec<PathBuf>,
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
-    let cache = FileSrcCache::new();
+    let mut cache = FileSrcCache::new();
     let config = {
-        let source = io::read_to_string(fs::File::open(&config_path)?)?;
-        LinkConfig::from_source(&source).map_err(|config_errors| {
-            let path = Rc::<str>::from(config_path.to_string_lossy());
-            let source_errors =
-                config_errors.map(|error| error.to_source_error(&path));
-            CliError::Source(cache, source_errors)
-        })?
+        let source_code = io::read_to_string(fs::File::open(&config_path)?)?;
+        let path = Rc::<str>::from(config_path.to_string_lossy());
+        match LinkConfig::from_source(&mut cache, path, &source_code) {
+            Ok(config) => config,
+            Err(errs) => {
+                let path = Rc::<str>::from(config_path.to_string_lossy());
+                let source_errors =
+                    errs.map(|error| error.to_source_error(&path));
+                return Err(CliError::Source(cache, source_errors));
+            }
+        }
     };
     let object_files = {
         let mut objfiles = Vec::<ObjFile>::with_capacity(objfile_paths.len());
@@ -275,7 +267,10 @@ fn command_ld(
         }
         objfiles
     };
-    let linked_binary = config.link_objects(object_files)?;
+    let linked_binary = config.link_objects(object_files).map_err(|errs| {
+        let source_errors = errs.map(LinkError::to_source_error);
+        CliError::Source(cache, source_errors)
+    })?;
     if let Some(output_path) = opt_output_path {
         let mut writer = io::BufWriter::new(fs::File::create(output_path)?);
         linked_binary.write_to(&mut writer)?;
@@ -444,16 +439,6 @@ impl ariadne::Cache<Rc<str>> for FileSrcCache {
 }
 
 //===========================================================================//
-
-fn report_link_errors(errors: Errs<LinkError>) {
-    for error in errors {
-        report_link_error(error);
-    }
-}
-
-fn report_link_error(error: LinkError) {
-    eprintln!("Link error: {error:?}");
-}
 
 fn report_source_errors(mut cache: FileSrcCache, errors: Errs<SourceError>) {
     for error in errors {

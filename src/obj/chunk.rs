@@ -1,4 +1,5 @@
 use super::binary::{BinaryIo, Decoder, Encoder};
+use super::context::ObjSrcLoc;
 use super::patch::ObjPatch;
 use super::symbol::ObjSymbol;
 use crate::addr::{Addr, Align, Size};
@@ -11,6 +12,9 @@ use std::rc::Rc;
 pub struct ObjChunk {
     /// The name of the linker section to which this chunk belongs.
     pub section_name: Rc<str>,
+    /// The source code location for the expression in the chunk declaration
+    /// that evaluated to the section name.
+    pub section_name_loc: ObjSrcLoc,
     /// Static data (before patches are applied) at the start of this chunk.
     pub data: Box<[u8]>,
     /// The size of the chunk, in bytes.  This may be greater than `data.len()`
@@ -41,6 +45,7 @@ impl BinaryIo for ObjChunk {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         let section_name = Rc::<str>::read_from(decoder)?;
+        let section_name_loc = ObjSrcLoc::read_from(decoder)?;
         let data = Box::<[u8]>::read_from(decoder)?;
         let size = Size::read_from(decoder)?;
         let start = Option::<Addr>::read_from(decoder)?;
@@ -51,6 +56,7 @@ impl BinaryIo for ObjChunk {
         let patches = Box::<[ObjPatch]>::read_from(decoder)?;
         Ok(ObjChunk {
             section_name,
+            section_name_loc,
             data,
             size,
             start,
@@ -67,6 +73,7 @@ impl BinaryIo for ObjChunk {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         self.section_name.write_to(encoder)?;
+        self.section_name_loc.write_to(encoder)?;
         self.data.write_to(encoder)?;
         self.size.write_to(encoder)?;
         self.start.write_to(encoder)?;

@@ -1,82 +1,11 @@
 use crate::addr::{Align, AlignTryFromError};
-use crate::error::{
-    Errs, SourceContext, SourceError, SrcCacheError, SrcLoc, SrcSpan,
-};
+use crate::error::{Errs, SourceError, SrcCacheError};
 use crate::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
+use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
 use std::range::RangeInclusive;
 use std::rc::Rc;
-
-//===========================================================================//
-
-/// A span of byte offsets within a particular assembly source code context.
-#[derive(Clone, Debug)]
-pub struct AsmSrcLoc {
-    /// The span of byte offsets within the context.
-    pub span: SrcSpan,
-    /// The file context that this location exists within.
-    pub context: Rc<AsmSrcContext>,
-}
-
-impl AsmSrcLoc {
-    /// Returns the primary [`SrcLoc`] for `self`, ignoring any further
-    /// context.
-    fn primary(&self) -> SrcLoc {
-        SrcLoc { path: self.context.path.clone(), span: self.span }
-    }
-}
-
-//===========================================================================//
-
-/// A context in which an [`AsmSrcLoc`] exists.
-#[derive(Debug)]
-pub struct AsmSrcContext {
-    /// The path for the source code file.
-    pub path: Rc<str>,
-    /// The parent context that gave rise to this context.
-    pub parent: AsmSrcParent,
-}
-
-impl AsmSrcContext {
-    pub(crate) fn root(path: Rc<str>) -> AsmSrcContext {
-        AsmSrcContext { path, parent: AsmSrcParent::Root }
-    }
-}
-
-impl SourceContext for AsmSrcContext {
-    fn annotate(&self, mut error: SourceError) -> SourceError {
-        let mut context: &AsmSrcContext = self;
-        loop {
-            match &context.parent {
-                AsmSrcParent::Root => return error,
-                AsmSrcParent::Use(loc) => {
-                    let label =
-                        format!("Included `{}` from here", context.path);
-                    error = error.with_label(
-                        SrcLoc::new(&loc.context.path, loc.span),
-                        label,
-                    );
-                    context = &loc.context;
-                }
-            }
-        }
-    }
-}
-
-//===========================================================================//
-
-/// Describes the circumstances that gave rise to a particular
-/// [`AsmSrcContext`].
-#[derive(Debug)]
-pub enum AsmSrcParent {
-    /// Indicates that the context has no parent; it is already the main
-    /// assembly code file.
-    Root,
-    /// Indicates that the context was created by a `.USE` directive, whose
-    /// path expression is at the given location.
-    Use(AsmSrcLoc),
-}
 
 //===========================================================================//
 
@@ -94,7 +23,7 @@ pub enum AsmError {
         /// The directive name (e.g. `".U16"`).
         directive: &'static str,
         /// The source code location for the directive.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
         /// The name of the architecture.
         arch: Rc<str>,
     },
@@ -102,7 +31,7 @@ pub enum AsmError {
     AssertionStaticallyFailed {
         /// The source code location for the assertion condition expression
         /// that evaluated to false.
-        condition_loc: AsmSrcLoc,
+        condition_loc: ObjSrcLoc,
         /// The additional message value for the assertion, if any.
         additional_message: Option<Rc<str>>,
     },
@@ -110,7 +39,7 @@ pub enum AsmError {
     AssignmentToBuiltin {
         /// The source code location for the identifier that we tried to
         /// declare or assign to.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
         /// The name of the identifier.
         name: Rc<str>,
     },
@@ -119,9 +48,9 @@ pub enum AsmError {
         /// The name of the constant.
         name: Rc<str>,
         /// The source code location where the constant was used as an lvalue.
-        lvalue_loc: AsmSrcLoc,
+        lvalue_loc: ObjSrcLoc,
         /// The source code location for the constant's declaration.
-        decl_loc: AsmSrcLoc,
+        decl_loc: ObjSrcLoc,
     },
     /// A static directive attribute had a non-static expression.
     DirectiveExprNotStatic {
@@ -131,7 +60,7 @@ pub enum AsmError {
         /// (e.g. `"name"`).
         component: &'static str,
         /// The source code location for the non-static expression.
-        expr_loc: AsmSrcLoc,
+        expr_loc: ObjSrcLoc,
         /// The reason that the expression isn't static.
         reason: ExprNotStaticReason,
     },
@@ -144,7 +73,7 @@ pub enum AsmError {
         /// (e.g. `"name"`).
         component: &'static str,
         /// The source code location for the expression.
-        expr_loc: AsmSrcLoc,
+        expr_loc: ObjSrcLoc,
         /// The value of the expression.
         expr_value: BigInt,
         /// The range that the expression value must be within.
@@ -158,7 +87,7 @@ pub enum AsmError {
         /// (e.g. `"name"`).
         component: &'static str,
         /// The source code location for the expresion.
-        expr_loc: AsmSrcLoc,
+        expr_loc: ObjSrcLoc,
         /// The actual type of the expression.
         expr_type: ExprType,
         /// The permissible types for the expression.
@@ -170,7 +99,7 @@ pub enum AsmError {
         /// The directive name (e.g. `".USE"`).
         directive: &'static str,
         /// The source code location for the directive.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
     },
     /// A directive (or label) that must be in a `.SECTION` was found outside
     /// of any `.SECTION`.
@@ -178,7 +107,7 @@ pub enum AsmError {
         /// The directive name (e.g. `".SECTION"`), or "label".
         directive: &'static str,
         /// The source code location for the directive or label.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
     },
     /// A directive was given two attributes with the same name.
     DuplicateAttrName {
@@ -188,10 +117,10 @@ pub enum AsmError {
         attr_name: Rc<str>,
         /// The source code location for the duplicate instance of this
         /// attribute name.
-        attr_loc: AsmSrcLoc,
+        attr_loc: ObjSrcLoc,
         /// The source code location for the earlier instance of this attribute
         /// name.
-        prev_loc: AsmSrcLoc,
+        prev_loc: ObjSrcLoc,
     },
     /// A macro definnition included two placeholders with the same name.
     DuplicateMacroPlaceholder {
@@ -199,15 +128,15 @@ pub enum AsmError {
         placeholder_name: Rc<str>,
         /// The source code location for the duplicate instance of this
         /// placeholder name.
-        placeholder_loc: AsmSrcLoc,
+        placeholder_loc: ObjSrcLoc,
         /// The source code location for the earlier instance of this
         /// placeholder name.
-        prev_loc: AsmSrcLoc,
+        prev_loc: ObjSrcLoc,
     },
     /// An expression failed to typecheck.
     ExprTypeError {
         /// The context that the expression appeared within.
-        context: Rc<AsmSrcContext>,
+        context: Rc<ObjSrcContext>,
         /// The typechecking error.
         error: ExprTypeError,
     },
@@ -221,7 +150,7 @@ pub enum AsmError {
         error: AlignTryFromError,
         /// The source code location for the expression that evaluated to an
         /// invalid alignment value.
-        expr_loc: AsmSrcLoc,
+        expr_loc: ObjSrcLoc,
         /// The value of the expression.
         expr_value: BigInt,
     },
@@ -232,13 +161,13 @@ pub enum AsmError {
         /// The unknkown attribute name.
         attr_name: Rc<str>,
         /// The source code location for the attribute name.
-        attr_loc: AsmSrcLoc,
+        attr_loc: ObjSrcLoc,
     },
     /// A unicode scalar value expression had an invalid value.
     InvalidUnicodeScalarValue {
         /// The source code location for the expression that evaluated to an
         /// invalid unicode scalar value.
-        expr_loc: AsmSrcLoc,
+        expr_loc: ObjSrcLoc,
         /// The value of the expression.
         expr_value: BigInt,
     },
@@ -247,12 +176,12 @@ pub enum AsmError {
     MultipleMacroPlaceholders {
         // TODO: add more error details
         /// The source code location for the macro parameter.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
     },
     /// An piece of assembly source code failed to parse.
     ParseError {
         /// The context that the parse error occurred within.
-        context: Rc<AsmSrcContext>,
+        context: Rc<ObjSrcContext>,
         /// The parse error.
         error: ParseError,
     },
@@ -262,7 +191,7 @@ pub enum AsmError {
         path: Rc<str>,
         /// The source code location for the expression that determined the
         /// file to be fetched.
-        path_loc: AsmSrcLoc,
+        path_loc: ObjSrcLoc,
         /// The error from the source cache.
         error: SrcCacheError,
     },
@@ -272,9 +201,9 @@ pub enum AsmError {
         full_name: Rc<str>,
         /// The source code location for the duplicate declaration of the
         /// symbol.
-        name_loc: AsmSrcLoc,
+        name_loc: ObjSrcLoc,
         /// The source code location for the earlier declaration of the symbol.
-        prev_loc: AsmSrcLoc,
+        prev_loc: ObjSrcLoc,
     },
     /// Tried to switch to an architecture that was never defined.
     UnknownArch {
@@ -282,21 +211,21 @@ pub enum AsmError {
         arch: Rc<str>,
         /// The source code location for the expression that evaluated to the
         /// unknown architecture name.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
     },
     /// Tried to use an undeclared placeholder in a macro definition.
     UnknownMacroPlaceholder {
         /// The name of the undefined placeholder.
         name: Rc<str>,
         /// The source code location for the placeholder.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
     },
     /// Tried to modify a variable that was never declared.
     UnknownVariable {
         /// The name of the undeclared variable.
         name: Rc<str>,
         /// The source code location for the unknown variable name.
-        loc: AsmSrcLoc,
+        loc: ObjSrcLoc,
     },
     /// Found a macro invocation with no matching macro definition.
     UnmatchedMacroInvocation {
@@ -305,17 +234,17 @@ pub enum AsmError {
         /// The name of the current architecture.
         arch: Rc<str>,
         /// The source code location for the macro invocation.
-        invocation_loc: AsmSrcLoc,
+        invocation_loc: ObjSrcLoc,
     },
     /// Tried to assign an expression of one type to an lvalue of a different
     /// type.
     VariableTypeError {
         /// The source code location for the right-hand expression.
-        expr_loc: AsmSrcLoc,
+        expr_loc: ObjSrcLoc,
         /// The type of the expression.
         expr_type: ExprType,
         /// The source code location for the lvalue.
-        lvalue_loc: AsmSrcLoc,
+        lvalue_loc: ObjSrcLoc,
         /// The type of the lvalue.
         lvalue_type: ExprType,
     },

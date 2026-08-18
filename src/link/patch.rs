@@ -7,7 +7,7 @@ use crate::error::Errs;
 use crate::expr::ExprValue;
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjPatchData,
-    ObjPatchIntType,
+    ObjPatchIntType, ObjSrcLoc,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -54,29 +54,32 @@ impl PatchedFile {
     fn patch(
         object_file: ObjFile,
         chunk_metadata: &[ChunkMetadata],
-        external_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
+        external_symbols: &HashMap<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>,
         internal_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
     ) -> LinkResult<PatchedFile> {
         let mut errs = Errs::<LinkError>::new();
         let mut symbol_addrs =
             HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
-        for name in object_file.imports {
-            let addr = external_symbols.get(&name).cloned();
-            if addr.is_none() {
+        for import in object_file.imports {
+            let opt_absolute_label = external_symbols
+                .get(&import.full_name)
+                .map(|(label, _)| label.clone());
+            if opt_absolute_label.is_none() {
                 errs.push(LinkError::SymbolImportUnresolved {
-                    symbol_name: name.clone(),
+                    symbol_name: import.full_name.clone(),
+                    import_loc: import.loc,
                 });
             }
-            symbol_addrs.insert(name, addr);
+            symbol_addrs.insert(import.full_name, opt_absolute_label);
         }
         for chunk in &object_file.chunks {
             for symbol in chunk.symbols.iter() {
-                let addr = if symbol.exported {
-                    external_symbols.get(&symbol.name).unwrap().clone()
+                let absolute_label = if symbol.exported {
+                    external_symbols.get(&symbol.name).unwrap().0.clone()
                 } else {
                     internal_symbols.get(&symbol.name).unwrap().clone()
                 };
-                symbol_addrs.insert(symbol.name.clone(), Some(addr));
+                symbol_addrs.insert(symbol.name.clone(), Some(absolute_label));
             }
         }
 

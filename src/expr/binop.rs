@@ -1,11 +1,34 @@
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprLabel, ExprType, ExprValue};
+use crate::obj::{BinaryIo, Decoder, Encoder};
 use crate::parse::BinOpAst;
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Euclid, Pow, Signed, ToPrimitive, Zero};
 use std::cmp::Ordering;
+use std::io;
 use std::rc::Rc;
+
+//===========================================================================//
+
+const TAG_ADD: u8 = 0x00;
+const TAG_BIT_AND: u8 = 0x01;
+const TAG_BIT_OR: u8 = 0x02;
+const TAG_BIT_XOR: u8 = 0x03;
+const TAG_CMP_EQ: u8 = 0x04;
+const TAG_CMP_LE: u8 = 0x05;
+const TAG_CMP_LT: u8 = 0x06;
+const TAG_CMP_GE: u8 = 0x07;
+const TAG_CMP_GT: u8 = 0x08;
+const TAG_CMP_NE: u8 = 0x09;
+const TAG_CONCAT: u8 = 0x0a;
+const TAG_DIV: u8 = 0x0b;
+const TAG_MOD: u8 = 0x0c;
+const TAG_MUL: u8 = 0x0d;
+const TAG_POW: u8 = 0x0e;
+const TAG_SHL: u8 = 0x0f;
+const TAG_SHR: u8 = 0x10;
+const TAG_SUB: u8 = 0x11;
 
 //===========================================================================//
 
@@ -499,12 +522,71 @@ fn subtract_labels(
     }
 }
 
+impl BinaryIo for ExprBinOp {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
+            TAG_ADD => Ok(Self::Add),
+            TAG_BIT_AND => Ok(Self::BitAnd),
+            TAG_BIT_OR => Ok(Self::BitOr),
+            TAG_BIT_XOR => Ok(Self::BitXor),
+            TAG_CMP_EQ => Ok(Self::CmpEq),
+            TAG_CMP_LE => Ok(Self::CmpLe),
+            TAG_CMP_LT => Ok(Self::CmpLt),
+            TAG_CMP_GE => Ok(Self::CmpGe),
+            TAG_CMP_GT => Ok(Self::CmpGt),
+            TAG_CMP_NE => Ok(Self::CmpNe),
+            TAG_CONCAT => Ok(Self::Concat),
+            TAG_DIV => Ok(Self::Div),
+            TAG_MOD => Ok(Self::Mod),
+            TAG_MUL => Ok(Self::Mul),
+            TAG_POW => Ok(Self::Pow),
+            TAG_SHL => Ok(Self::Shl),
+            TAG_SHR => Ok(Self::Shr),
+            TAG_SUB => Ok(Self::Sub),
+            byte => Err(io::Error::other(format!(
+                "unknown binop tag: 0x{:02x}",
+                byte
+            ))),
+        }
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        let tag = match self {
+            Self::Add => TAG_ADD,
+            Self::BitAnd => TAG_BIT_AND,
+            Self::BitOr => TAG_BIT_OR,
+            Self::BitXor => TAG_BIT_XOR,
+            Self::CmpEq => TAG_CMP_EQ,
+            Self::CmpLe => TAG_CMP_LE,
+            Self::CmpLt => TAG_CMP_LT,
+            Self::CmpGe => TAG_CMP_GE,
+            Self::CmpGt => TAG_CMP_GT,
+            Self::CmpNe => TAG_CMP_NE,
+            Self::Concat => TAG_CONCAT,
+            Self::Div => TAG_DIV,
+            Self::Mod => TAG_MOD,
+            Self::Mul => TAG_MUL,
+            Self::Pow => TAG_POW,
+            Self::Shl => TAG_SHL,
+            Self::Shr => TAG_SHR,
+            Self::Sub => TAG_SUB,
+        };
+        tag.write_to(encoder)
+    }
+}
+
 //===========================================================================//
 
 #[cfg(test)]
 mod tests {
     use super::{ExprBinOp, ExprBinOpEvalError};
     use crate::expr::ExprValue;
+    use crate::obj::assert_round_trips;
     use num_bigint::BigInt;
 
     fn int_value(value: i32) -> ExprValue {
@@ -512,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn divide_by_zero() {
+    fn eval_divide_by_zero() {
         assert_eq!(
             ExprBinOp::Div.evaluate(int_value(1), int_value(0)),
             Err(ExprBinOpEvalError::DivideByZero)
@@ -520,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn modulo_by_zero() {
+    fn eval_modulo_by_zero() {
         assert_eq!(
             ExprBinOp::Mod.evaluate(int_value(1), int_value(0)),
             Err(ExprBinOpEvalError::ModByZero)
@@ -528,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn pow_by_negative() {
+    fn eval_pow_by_negative() {
         assert_eq!(
             ExprBinOp::Pow.evaluate(int_value(20), int_value(-5)),
             Err(ExprBinOpEvalError::PowNegativeExponent(BigInt::from(-5)))
@@ -536,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn shift_by_negative() {
+    fn eval_shift_by_negative() {
         assert_eq!(
             ExprBinOp::Shl.evaluate(int_value(16), int_value(-2)),
             Err(ExprBinOpEvalError::BitShiftByNegative(BigInt::from(-2)))
@@ -545,6 +627,28 @@ mod tests {
             ExprBinOp::Shr.evaluate(int_value(16), int_value(-2)),
             Err(ExprBinOpEvalError::BitShiftByNegative(BigInt::from(-2)))
         );
+    }
+
+    #[test]
+    fn binary_io_round_trip() {
+        assert_round_trips(ExprBinOp::Add);
+        assert_round_trips(ExprBinOp::BitAnd);
+        assert_round_trips(ExprBinOp::BitOr);
+        assert_round_trips(ExprBinOp::BitXor);
+        assert_round_trips(ExprBinOp::CmpEq);
+        assert_round_trips(ExprBinOp::CmpLe);
+        assert_round_trips(ExprBinOp::CmpLt);
+        assert_round_trips(ExprBinOp::CmpGe);
+        assert_round_trips(ExprBinOp::CmpGt);
+        assert_round_trips(ExprBinOp::CmpNe);
+        assert_round_trips(ExprBinOp::Concat);
+        assert_round_trips(ExprBinOp::Div);
+        assert_round_trips(ExprBinOp::Mod);
+        assert_round_trips(ExprBinOp::Mul);
+        assert_round_trips(ExprBinOp::Pow);
+        assert_round_trips(ExprBinOp::Shl);
+        assert_round_trips(ExprBinOp::Shr);
+        assert_round_trips(ExprBinOp::Sub);
     }
 }
 

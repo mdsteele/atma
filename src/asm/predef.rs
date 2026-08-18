@@ -1,8 +1,8 @@
 use super::arch::ArchTree;
-use super::error::{AsmSrcContext, AsmSrcParent};
 use super::macros::MacroTable;
 use crate::addr::Endianness;
 use crate::error::SrcSpan;
+use crate::obj::{ObjSrcContext, ObjSrcParent};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst,
     AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst, ExprAstNode, IdentifierAst,
@@ -1019,9 +1019,9 @@ pub(super) fn make_predefined_arch_macros() -> (ArchTree, MacroTable) {
     let mut builder = BuiltinBuilder {
         arch_tree,
         macros: MacroTable::new(),
-        context: Rc::new(AsmSrcContext {
+        context: Rc::new(ObjSrcContext {
             path: Rc::from(""), // internal definition
-            parent: AsmSrcParent::Root,
+            parent: ObjSrcParent::Root,
         }),
         placeholder_addr: Rc::from("%ADDR"),
         placeholder_addr2: Rc::from("%ADDR2"),
@@ -1071,7 +1071,7 @@ pub(super) fn make_predefined_arch_macros() -> (ArchTree, MacroTable) {
 struct BuiltinBuilder {
     arch_tree: ArchTree,
     macros: MacroTable,
-    context: Rc<AsmSrcContext>,
+    context: Rc<ObjSrcContext>,
     placeholder_addr: Rc<str>,
     placeholder_addr2: Rc<str>,
     placeholder_imm: Rc<str>,

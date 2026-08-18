@@ -22,7 +22,7 @@ impl SrcLoc {
 //===========================================================================//
 
 /// A span of byte offsets within source code text.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct SrcSpan {
     start: usize,
     end: usize,
