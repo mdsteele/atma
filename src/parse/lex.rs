@@ -155,13 +155,15 @@ fn error_callback(lexer: &mut logos::Lexer<TokenKind>) -> LexerError {
 #[logos(error(LexerError, callback = error_callback))]
 #[logos(extras = LexerState)]
 #[logos(skip r"[ \t]+")] // whitespace
-#[logos(skip r";[^\n]*")] // comments
+#[logos(skip(r";[^\n]*", allow_greedy = true))] // comments
 #[logos(utf8 = true)]
 enum TokenKind {
     #[token("&")]
     And,
     #[token("&&")]
     AndAnd,
+    #[token("<-")]
+    ArrowLeft,
     #[token("\\", backslash_callback)]
     Backslash,
     #[token("!")]
@@ -267,6 +269,7 @@ impl TokenKind {
         let token_value = match self {
             TokenKind::And => TokenValue::And,
             TokenKind::AndAnd => TokenValue::AndAnd,
+            TokenKind::ArrowLeft => TokenValue::ArrowLeft,
             TokenKind::Backslash => unreachable!(),
             TokenKind::Bang => TokenValue::Bang,
             TokenKind::BangEquals => TokenValue::BangEquals,
@@ -338,6 +341,8 @@ pub enum TokenValue {
     And,
     /// A "`&&`" symbol.
     AndAnd,
+    /// A "`<-`" symbol.
+    ArrowLeft,
     /// A "`!`" symbol.
     Bang,
     /// A "`!=`" symbol.
@@ -434,6 +439,7 @@ impl TokenValue {
         match &self {
             TokenValue::And => "`&`",
             TokenValue::AndAnd => "`&&`",
+            TokenValue::ArrowLeft => "`<-`",
             TokenValue::Bang => "`!`",
             TokenValue::BangEquals => "`!=`",
             TokenValue::BoolLiteral(_) => "boolean literal",
@@ -559,6 +565,13 @@ mod tests {
     #[test]
     fn comment() {
         assert_eq!(read_all(";;; Hello, world!"), vec![]);
+        assert_eq!(
+            read_all(";\n!"),
+            vec![
+                token(1..2, TokenValue::Linebreak),
+                token(2..3, TokenValue::Bang)
+            ]
+        );
     }
 
     #[test]

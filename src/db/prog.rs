@@ -6,13 +6,15 @@ use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
-    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprValue,
+    ExprBinOp, ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError,
+    ExprValue,
 };
 use crate::parse::{
     AdsStmtAst, BreakpointAst, DeclarationKind, ExprAst, IdentifierAst,
     LValueAst, LValueAstNode,
 };
 use crate::system::SimSystem;
+use num_bigint::BigInt;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -34,7 +36,7 @@ impl AdsProgram {
         let mut compiler = AdsCompiler::new(cache, src_path, system);
         let module = compiler.env.parse_source(source_code)?;
         let mut instructions = Vec::<AdsInstruction>::new();
-        compiler.typecheck_statements(module.statements, &mut instructions)?;
+        compiler.compile_statements(module.statements, &mut instructions)?;
         instructions.push(AdsInstruction::Exit);
         Ok(AdsProgram { instructions })
     }
@@ -56,36 +58,39 @@ impl<'a> AdsCompiler<'a> {
         AdsCompiler { cache, env: AdsTypeEnv::new(system, root_path) }
     }
 
-    fn typecheck_statements(
+    fn compile_statements(
         &mut self,
         statements: Vec<AdsStmtAst>,
         instructions_out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
         for statement in statements {
-            errs.also(self.typecheck_statement(statement, instructions_out));
+            errs.also(self.compile_statement(statement, instructions_out));
         }
         errs.result()
     }
 
-    fn typecheck_statement(
+    fn compile_statement(
         &mut self,
         statement: AdsStmtAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         match statement {
             AdsStmtAst::Declare(kind, id, expr_ast) => {
-                self.typecheck_declare_statement(kind, id, expr_ast, out)
+                self.compile_declare_statement(kind, id, expr_ast, out)
             }
             AdsStmtAst::Exit => {
                 out.push(AdsInstruction::Exit);
                 Ok(())
             }
+            AdsStmtAst::For(opt_id, expr_ast, do_ast) => {
+                self.compile_for_statement(opt_id, expr_ast, do_ast, out)
+            }
             AdsStmtAst::If(pred_ast, then_ast, else_ast) => {
-                self.typecheck_if_statement(pred_ast, then_ast, else_ast, out)
+                self.compile_if_statement(pred_ast, then_ast, else_ast, out)
             }
             AdsStmtAst::Print(expr_ast) => {
-                self.typecheck_print_statement(expr_ast, out)
+                self.compile_print_statement(expr_ast, out)
             }
             AdsStmtAst::Relax => Ok(()),
             AdsStmtAst::Run => {
@@ -94,31 +99,31 @@ impl<'a> AdsCompiler<'a> {
                 Ok(())
             }
             AdsStmtAst::RunUntil(breakpoint_ast) => {
-                self.typecheck_run_until_statement(breakpoint_ast, out)
+                self.compile_run_until_statement(breakpoint_ast, out)
             }
             AdsStmtAst::Set(lvalue, expr_ast) => {
-                self.typecheck_set_statement(lvalue, expr_ast, out)
+                self.compile_set_statement(lvalue, expr_ast, out)
             }
             AdsStmtAst::Step => {
                 out.push(AdsInstruction::Step);
                 Ok(())
             }
             AdsStmtAst::Use(expr_ast) => {
-                self.typecheck_use_statement(expr_ast, out)
+                self.compile_use_statement(expr_ast, out)
             }
             AdsStmtAst::When(breakpoint_ast, do_ast) => {
-                self.typecheck_when_statement(breakpoint_ast, do_ast, out)
+                self.compile_when_statement(breakpoint_ast, do_ast, out)
             }
             AdsStmtAst::While(pred_ast, do_ast) => {
-                self.typecheck_while_statement(pred_ast, do_ast, out)
+                self.compile_while_statement(pred_ast, do_ast, out)
             }
             AdsStmtAst::With(proc_ast, do_ast) => {
-                self.typecheck_with_statement(proc_ast, do_ast, out)
+                self.compile_with_statement(proc_ast, do_ast, out)
             }
         }
     }
 
-    fn typecheck_declare_statement(
+    fn compile_declare_statement(
         &mut self,
         kind: DeclarationKind,
         id: IdentifierAst,
@@ -127,7 +132,7 @@ impl<'a> AdsCompiler<'a> {
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
         let (expr_type, expr_static) =
-            errs.with(self.typecheck_expr(expr_ast, out));
+            errs.with(self.compile_expr(expr_ast, out));
         let kind = match kind {
             DeclarationKind::Let => AdsDeclKind::Constant(expr_static),
             DeclarationKind::Var => AdsDeclKind::Variable,
@@ -136,7 +141,87 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_if_statement(
+    fn compile_for_statement(
+        &mut self,
+        opt_id: Option<IdentifierAst>,
+        expr_ast: ExprAst,
+        do_ast: Vec<AdsStmtAst>,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        self.env.push_scope();
+        // Set up sequence to iterate over:
+        let seq_index = self.env.add_internal_variable();
+        let expr_span = expr_ast.span;
+        let var_type = match errs.with(self.compile_expr(expr_ast, out)).0 {
+            ExprType::List(item_type) => Rc::unwrap_or_clone(item_type),
+            expr_type => {
+                errs.push(AdsError::ExprTypeError {
+                    context: self.env.current_src_context(),
+                    error: ExprTypeError::CannotUseTypeAsIterator {
+                        expr_span,
+                        expr_type,
+                    },
+                });
+                ExprType::Undefined
+            }
+        };
+        // Set up index of iteration:
+        let index_index = self.env.add_internal_variable();
+        out.push(AdsInstruction::PushValue(ExprValue::Integer(BigInt::ZERO)));
+        // Compile loop body:
+        let mut do_stmts = Vec::<AdsInstruction>::new();
+        self.env.push_scope();
+        if let Some(id) = opt_id {
+            let reason = ExprNotStaticReason::Variable {
+                span: id.span,
+                name: id.name.clone(),
+            };
+            let decl_kind = AdsDeclKind::Constant(Err(reason));
+            self.env.add_declaration(decl_kind, id, var_type);
+            do_stmts.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_index));
+            do_stmts
+                .push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
+            do_stmts.push(AdsInstruction::ListIndex {
+                context: self.env.current_src_context(),
+                list_span: SrcSpan::INTERNAL,
+                index_span: SrcSpan::INTERNAL,
+            });
+        }
+        errs.also(self.compile_statements(do_ast, &mut do_stmts));
+        self.env.pop_scope(&mut do_stmts);
+        let do_stmts_len = do_stmts.len() as isize;
+        // Start by jumping over the loop body and the index increment:
+        out.push(AdsInstruction::Jump(do_stmts_len + 4));
+        out.append(&mut do_stmts);
+        // Add instructions to increment index of iteration:
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
+        out.push(AdsInstruction::PushValue(ExprValue::Integer(BigInt::ONE)));
+        out.push(AdsInstruction::BinOp {
+            context: self.env.current_src_context(),
+            binop: ExprBinOp::Add,
+            op_span: SrcSpan::INTERNAL,
+            lhs_span: SrcSpan::INTERNAL,
+            rhs_span: SrcSpan::INTERNAL,
+        });
+        out.push(AdsInstruction::SetValue(AdsFrameRef(0), index_index));
+        // Add instructions to check index against sequence length:
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_index));
+        out.push(AdsInstruction::ListLength);
+        out.push(AdsInstruction::BinOp {
+            context: self.env.current_src_context(),
+            binop: ExprBinOp::CmpLt,
+            op_span: SrcSpan::INTERNAL,
+            lhs_span: SrcSpan::INTERNAL,
+            rhs_span: SrcSpan::INTERNAL,
+        });
+        out.push(AdsInstruction::BranchIf(-9 - do_stmts_len));
+        self.env.pop_scope(out);
+        errs.result()
+    }
+
+    fn compile_if_statement(
         &mut self,
         pred_ast: ExprAst,
         then_ast: Vec<AdsStmtAst>,
@@ -144,15 +229,15 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        let _static_pred = errs.with(self.typecheck_predicate(pred_ast, out));
+        let _static_pred = errs.with(self.compile_predicate(pred_ast, out));
         // TODO: use static_pred to elide predicate and dead branch
         self.env.push_scope();
         let mut then_stmts = Vec::<AdsInstruction>::new();
-        errs.also(self.typecheck_statements(then_ast, &mut then_stmts));
+        errs.also(self.compile_statements(then_ast, &mut then_stmts));
         self.env.pop_scope(&mut then_stmts);
         self.env.push_scope();
         let mut else_stmts = Vec::<AdsInstruction>::new();
-        errs.also(self.typecheck_statements(else_ast, &mut else_stmts));
+        errs.also(self.compile_statements(else_ast, &mut else_stmts));
         self.env.pop_scope(&mut else_stmts);
         if !else_stmts.is_empty() {
             then_stmts.push(AdsInstruction::Jump(else_stmts.len() as isize));
@@ -163,13 +248,13 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_print_statement(
+    fn compile_print_statement(
         &mut self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let expr_span = expr_ast.span;
-        let (_, errs) = self.typecheck_expr(expr_ast, out);
+        let (_, errs) = self.compile_expr(expr_ast, out);
         errs.result()?;
         out.push(AdsInstruction::Print {
             loc: AdsSrcLoc {
@@ -180,36 +265,29 @@ impl<'a> AdsCompiler<'a> {
         Ok(())
     }
 
-    fn typecheck_run_until_statement(
+    fn compile_run_until_statement(
         &mut self,
         breakpoint_ast: BreakpointAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
-        let mut breakpoint_ops = Vec::<AdsInstruction>::new();
-        let breakpoint_kind =
-            self.typecheck_breakpoint(breakpoint_ast, &mut breakpoint_ops)?;
-        let (outer_ref, inner_ref) = if self.env.in_global_frame() {
-            (AdsFrameRef::Global, AdsFrameRef::Global)
-        } else {
-            (AdsFrameRef::Local(0), AdsFrameRef::Local(1))
-        };
-        let index = self.env.frame_end();
+        self.env.push_scope();
+        let is_done_index = self.env.add_internal_variable();
         out.push(AdsInstruction::PushValue(ExprValue::Boolean(false)));
-        out.append(&mut breakpoint_ops);
+        let breakpoint_kind = self.compile_breakpoint(breakpoint_ast, out)?;
+        self.env.add_handler();
         out.push(AdsInstruction::PushHandler(breakpoint_kind, 1));
         out.push(AdsInstruction::Jump(3));
         out.push(AdsInstruction::PushValue(ExprValue::Boolean(true)));
-        out.push(AdsInstruction::SetValue(inner_ref, index));
+        out.push(AdsInstruction::SetValue(AdsFrameRef(1), is_done_index));
         out.push(AdsInstruction::Return);
         out.push(AdsInstruction::Step);
-        out.push(AdsInstruction::GetValue(outer_ref, index));
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), is_done_index));
         out.push(AdsInstruction::BranchUnless(-3));
-        out.push(AdsInstruction::PopHandler);
-        out.push(AdsInstruction::PopValue);
+        self.env.pop_scope(out);
         Ok(())
     }
 
-    fn typecheck_set_statement(
+    fn compile_set_statement(
         &mut self,
         lvalue_ast: LValueAst,
         expr_ast: ExprAst,
@@ -218,8 +296,8 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let lvalue_span = lvalue_ast.span;
         let expr_span = expr_ast.span;
-        let (expr_type, _) = errs.with(self.typecheck_expr(expr_ast, out));
-        let lvalue_type = errs.with(self.typecheck_lvalue(lvalue_ast, out));
+        let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
+        let lvalue_type = errs.with(self.compile_lvalue(lvalue_ast, out));
         if !expr_type.is_subtype_of(&lvalue_type) {
             errs.push(AdsError::VariableTypeError {
                 expr_loc: self.make_loc(expr_span),
@@ -231,7 +309,7 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_use_statement(
+    fn compile_use_statement(
         &mut self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
@@ -261,7 +339,7 @@ impl<'a> AdsCompiler<'a> {
                             errs.ok(self.env.parse_source(source_code))
                         {
                             errs.also(
-                                self.typecheck_statements(
+                                self.compile_statements(
                                     module.statements,
                                     out,
                                 ),
@@ -295,7 +373,7 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_when_statement(
+    fn compile_when_statement(
         &mut self,
         breakpoint_ast: BreakpointAst,
         do_ast: Vec<AdsStmtAst>,
@@ -303,13 +381,13 @@ impl<'a> AdsCompiler<'a> {
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
         if let Some(kind) =
-            errs.ok(self.typecheck_breakpoint(breakpoint_ast, out))
+            errs.ok(self.compile_breakpoint(breakpoint_ast, out))
         {
             out.push(AdsInstruction::PushHandler(kind, 1));
         }
         self.env.push_frame();
         let mut do_stmts = Vec::<AdsInstruction>::new();
-        errs.also(self.typecheck_statements(do_ast, &mut do_stmts));
+        errs.also(self.compile_statements(do_ast, &mut do_stmts));
         self.env.pop_frame(&mut do_stmts);
         do_stmts.push(AdsInstruction::Return);
         self.env.add_handler();
@@ -318,7 +396,7 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_while_statement(
+    fn compile_while_statement(
         &mut self,
         pred_ast: ExprAst,
         do_ast: Vec<AdsStmtAst>,
@@ -327,10 +405,10 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let mut pred_insts = Vec::<AdsInstruction>::new();
         let static_pred =
-            errs.with(self.typecheck_predicate(pred_ast, &mut pred_insts));
+            errs.with(self.compile_predicate(pred_ast, &mut pred_insts));
         self.env.push_scope();
         let mut do_stmts = Vec::<AdsInstruction>::new();
-        errs.also(self.typecheck_statements(do_ast, &mut do_stmts));
+        errs.also(self.compile_statements(do_ast, &mut do_stmts));
         self.env.pop_scope(&mut do_stmts);
         let do_stmts_len = do_stmts.len() as isize;
         match static_pred {
@@ -352,7 +430,7 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_with_statement(
+    fn compile_with_statement(
         &mut self,
         expr_ast: ExprAst,
         maybe_do_ast: Option<Vec<AdsStmtAst>>,
@@ -367,7 +445,7 @@ impl<'a> AdsCompiler<'a> {
                     if let Some(do_ast) = maybe_do_ast {
                         self.env.push_scope();
                         self.env.set_proc(proc_name, out);
-                        errs.also(self.typecheck_statements(do_ast, out));
+                        errs.also(self.compile_statements(do_ast, out));
                         self.env.pop_scope(out);
                     } else {
                         self.env.set_proc(proc_name, out);
@@ -397,7 +475,7 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_expr(
+    fn compile_expr(
         &self,
         ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
@@ -413,7 +491,7 @@ impl<'a> AdsCompiler<'a> {
         (type_static, errs)
     }
 
-    fn typecheck_predicate(
+    fn compile_predicate(
         &self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
@@ -421,7 +499,7 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
         let (expr_type, expr_static) =
-            errs.with(self.typecheck_expr(expr_ast, out));
+            errs.with(self.compile_expr(expr_ast, out));
         let pred_static = if let ExprType::Boolean = expr_type {
             expr_static.ok().as_ref().map(ExprValue::unwrap_bool)
         } else {
@@ -437,36 +515,36 @@ impl<'a> AdsCompiler<'a> {
         (pred_static, errs)
     }
 
-    fn typecheck_breakpoint(
+    fn compile_breakpoint(
         &self,
         ast: BreakpointAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<WatchKind> {
         let kind = match ast {
             BreakpointAst::Pc(expr_ast) => {
-                self.typecheck_breakpoint_addr(expr_ast, out)?;
+                self.compile_breakpoint_addr(expr_ast, out)?;
                 WatchKind::Pc
             }
             BreakpointAst::Read(expr_ast) => {
-                self.typecheck_breakpoint_addr(expr_ast, out)?;
+                self.compile_breakpoint_addr(expr_ast, out)?;
                 WatchKind::Read
             }
             BreakpointAst::Write(expr_ast) => {
-                self.typecheck_breakpoint_addr(expr_ast, out)?;
+                self.compile_breakpoint_addr(expr_ast, out)?;
                 WatchKind::Write
             }
         };
         Ok(kind)
     }
 
-    fn typecheck_breakpoint_addr(
+    fn compile_breakpoint_addr(
         &self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
-        match errs.with(self.typecheck_expr(expr_ast, out)) {
+        match errs.with(self.compile_expr(expr_ast, out)) {
             (ExprType::Integer, _) => {}
             // TODO: Allow `ExprType::Label` as well.
             (expr_type, _) => errs.push(AdsError::MemoryAddrTypeError {
@@ -477,20 +555,20 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn typecheck_lvalue(
+    fn compile_lvalue(
         &self,
         lvalue_ast: LValueAst,
         out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
         match lvalue_ast.node {
             LValueAstNode::Memory(expr_ast) => {
-                self.typecheck_memory_lvalue(expr_ast, out)
+                self.compile_memory_lvalue(expr_ast, out)
             }
             LValueAstNode::Tuple(lvalue_asts) => {
-                self.typecheck_tuple_lvalue(lvalue_asts, out)
+                self.compile_tuple_lvalue(lvalue_asts, out)
             }
             LValueAstNode::Variable(name) => {
-                self.typecheck_variable_lvalue(lvalue_ast.span, name, out)
+                self.compile_variable_lvalue(lvalue_ast.span, name, out)
             }
             LValueAstNode::Wildcard => {
                 out.push(AdsInstruction::PopValue);
@@ -499,14 +577,14 @@ impl<'a> AdsCompiler<'a> {
         }
     }
 
-    fn typecheck_memory_lvalue(
+    fn compile_memory_lvalue(
         &self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
-        let (expr_type, _) = errs.with(self.typecheck_expr(expr_ast, out));
+        let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
         out.push(AdsInstruction::SetMemory);
         // TODO: Allow `ExprType::Label` as well.
         if expr_type != ExprType::Integer {
@@ -518,7 +596,7 @@ impl<'a> AdsCompiler<'a> {
         (ExprType::Integer, errs)
     }
 
-    fn typecheck_tuple_lvalue(
+    fn compile_tuple_lvalue(
         &self,
         lvalue_asts: Vec<LValueAst>,
         out: &mut Vec<AdsInstruction>,
@@ -527,13 +605,13 @@ impl<'a> AdsCompiler<'a> {
         out.push(AdsInstruction::ExpandTuple);
         let mut types = Vec::<ExprType>::new();
         for lvalue_ast in lvalue_asts.into_iter().rev() {
-            types.push(errs.with(self.typecheck_lvalue(lvalue_ast, out)));
+            types.push(errs.with(self.compile_lvalue(lvalue_ast, out)));
         }
         types.reverse();
         (ExprType::Tuple(Rc::from(types)), errs)
     }
 
-    fn typecheck_variable_lvalue(
+    fn compile_variable_lvalue(
         &self,
         id_span: SrcSpan,
         id_name: Rc<str>,
@@ -713,7 +791,7 @@ mod tests {
         assert_matches!(compile("var x = 1\nset x = 2\n").as_slice(), [
             AdsInstruction::PushValue(int_value_1),
             AdsInstruction::PushValue(int_value_2),
-            AdsInstruction::SetValue(AdsFrameRef::Global, 0),
+            AdsInstruction::SetValue(AdsFrameRef(0), 0),
             AdsInstruction::Exit,
         ] if *int_value_1 == int_value(1) && *int_value_2 == int_value(2));
     }

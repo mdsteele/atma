@@ -168,6 +168,10 @@ impl<W: Write> AdsEnvironment<W> {
                 let item = lhs[usize::try_from(rhs).unwrap()].clone();
                 self.value_stack.push(item);
             }
+            AdsInstruction::ListLength => {
+                let len = self.value_stack.pop().unwrap().unwrap_list().len();
+                self.value_stack.push(ExprValue::Integer(BigInt::from(len)));
+            }
             &AdsInstruction::MakeList(num_items) => {
                 debug_assert!(self.value_stack.len() >= num_items);
                 let start = self.value_stack.len() - num_items;
@@ -327,18 +331,16 @@ impl<W: Write> AdsEnvironment<W> {
     }
 
     fn frame_start(&self, frame_ref: AdsFrameRef) -> usize {
-        match frame_ref {
-            AdsFrameRef::Global => 0,
-            AdsFrameRef::Local(mut depth) => {
-                debug_assert!(!self.call_stack.is_empty());
-                let mut frame_index = self.call_stack.len() - 1;
-                while depth > 0 {
-                    frame_index =
-                        self.call_stack[frame_index].parent_index.unwrap();
-                    depth -= 1;
-                }
-                self.call_stack[frame_index].frame_start
-            }
+        let mut call_frame: Option<&CallFrame> = self.call_stack.last();
+        for _ in 0..frame_ref.0 {
+            call_frame = call_frame
+                .unwrap()
+                .parent_index
+                .map(|index| &self.call_stack[index]);
+        }
+        match call_frame {
+            None => 0,
+            Some(frame) => frame.frame_start,
         }
     }
 }

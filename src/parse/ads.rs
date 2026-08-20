@@ -45,10 +45,13 @@ impl AdsModuleAst {
 /// module.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdsStmtAst {
+    // TODO: Allow tuple/wildcard LValues in Declare and For statements
     /// Declares a constant or variable.
     Declare(DeclarationKind, IdentifierAst, ExprAst),
     /// Exits the script.
     Exit,
+    /// Executes the loop once for each value in the sequence.
+    For(Option<IdentifierAst>, ExprAst, Vec<AdsStmtAst>),
     /// Executes the first block if the expression is true, the second block
     /// otherwise.
     If(ExprAst, Vec<AdsStmtAst>, Vec<AdsStmtAst>),
@@ -82,6 +85,16 @@ impl AdsStmtAst {
                 .ignore_then(linebreak())
                 .ignore_then(statement.repeated().collect::<Vec<_>>())
                 .then_ignore(symbol(TokenValue::BraceClose));
+            let for_statement = keyword("for")
+                .ignore_then(
+                    IdentifierAst::parser()
+                        .then_ignore(symbol(TokenValue::ArrowLeft))
+                        .or_not(),
+                )
+                .then(ExprAst::parser())
+                .then(stmt_block.clone())
+                .then_ignore(linebreak())
+                .map(|((var, seq), block)| AdsStmtAst::For(var, seq, block));
             let if_statement = keyword("if")
                 .ignore_then(ExprAst::parser())
                 .then(stmt_block.clone())
@@ -108,6 +121,7 @@ impl AdsStmtAst {
             chumsky::prelude::choice((
                 declare_statement(),
                 exit_statement(),
+                for_statement,
                 if_statement,
                 print_statement(),
                 relax_statement(),

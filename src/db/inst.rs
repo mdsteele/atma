@@ -7,7 +7,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 #[derive(Debug)]
-pub enum AdsInstruction {
+pub(crate) enum AdsInstruction {
     /// Pops the top two values from the value stack, calls the
     /// second-from-the-top value with the topmost value as an argument, then
     /// pushes the result onto the value stack.
@@ -77,6 +77,9 @@ pub enum AdsInstruction {
         /// subexpression appeared.
         index_span: SrcSpan,
     },
+    /// Pops the top value from the value stack (which must be a list), then
+    /// pushes the length of that list (as an integer) onto the value stack.
+    ListLength,
     /// Adds the given offset to the ADS program counter.
     Jump(isize),
     /// Pops the specified number of values from the value stack (which must
@@ -181,10 +184,9 @@ impl ExprOp for AdsInstruction {
 
 //===========================================================================//
 
+/// A reference to a lexical handler frame; zero for the current lexical frame,
+/// 1 for the innermost enclosing lexical frame, etc.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AdsFrameRef {
-    Global,       // outermost frame
-    Local(usize), // 0 for innermost frame, 1 for next most inner, etc.
-}
+pub(crate) struct AdsFrameRef(pub usize);
 
 //===========================================================================//

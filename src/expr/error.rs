@@ -87,6 +87,13 @@ pub enum ExprTypeError {
         /// The expression type of the index expression.
         index_type: ExprType,
     },
+    /// A for loop iterator was specified using an expression of invalid type.
+    CannotUseTypeAsIterator {
+        /// The source code span for the iterator expression.
+        expr_span: SrcSpan,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
     /// A control flow predicate was specified using a non-boolean expression.
     CannotUseTypeAsPredicate {
         /// The source code span for the predicate expression.
@@ -263,6 +270,12 @@ impl ExprTypeError {
                 let message = format!("cannot use {index_type} as an index");
                 let label = format!("this expression has type {index_type}");
                 SourceError::new(SrcLoc::new(path, index_span), message)
+                    .with_primary_label(label)
+            }
+            Self::CannotUseTypeAsIterator { expr_span, expr_type } => {
+                let message = format!("cannot iterate over {expr_type}");
+                let label = format!("this expression has type {expr_type}");
+                SourceError::new(SrcLoc::new(path, expr_span), message)
                     .with_primary_label(label)
             }
             Self::CannotUseTypeAsPredicate { expr_span, expr_type } => {

@@ -41,7 +41,8 @@ struct AdsScope {
     /// The total number of handlers declared in this scope.
     num_handlers: usize,
     /// The total number of variables declared in this scope.  Note that this
-    /// may be greater than `self.variables.len()`, due to shadowing.
+    /// may be greater than `self.variables.len()`, due to shadowed variables
+    /// and/or internal variables.
     num_variables: usize,
 }
 
@@ -77,6 +78,12 @@ impl AdsScope {
         self.num_variables += 1;
     }
 
+    fn add_internal_variable(&mut self) -> usize {
+        let index = self.frame_end();
+        self.num_variables += 1;
+        index
+    }
+
     fn add_handler(&mut self) {
         self.num_handlers += 1;
     }
@@ -88,7 +95,7 @@ pub(super) struct AdsTypeEnv<'a> {
     system: &'a SimSystem,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     context_stack: Vec<Rc<AdsSrcContext>>,
-    frames: Vec<Vec<AdsScope>>,
+    frame_stack: Vec<Vec<AdsScope>>,
 }
 
 impl<'a> AdsTypeEnv<'a> {
@@ -100,12 +107,19 @@ impl<'a> AdsTypeEnv<'a> {
             system,
             builtins,
             context_stack: vec![root_context],
-            frames: vec![vec![AdsScope::new(0, default_proc_name)]],
+            frame_stack: vec![vec![AdsScope::new(0, default_proc_name)]],
         }
     }
 
+    fn current_scope(&self) -> &AdsScope {
+        self.frame_stack.last().unwrap().last().unwrap()
+    }
+
+    fn current_scope_mut(&mut self) -> &mut AdsScope {
+        self.frame_stack.last_mut().unwrap().last_mut().unwrap()
+    }
+
     pub fn current_src_context(&self) -> Rc<AdsSrcContext> {
-        debug_assert!(!self.context_stack.is_empty());
         self.context_stack.last().unwrap().clone()
     }
 
@@ -128,30 +142,15 @@ impl<'a> AdsTypeEnv<'a> {
         })
     }
 
-    /// Returns true if the current frame is the global (top-level) frame.
-    pub fn in_global_frame(&self) -> bool {
-        debug_assert!(!self.frames.is_empty());
-        self.frames.len() == 1
-    }
-
-    pub fn frame_end(&self) -> usize {
-        debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last().unwrap();
-        debug_assert!(!frame.is_empty());
-        frame.last().unwrap().frame_end()
-    }
-
     /// Begins a new handler frame.
     ///
     /// The new frame will automatically include its own root scope, which will
     /// automatically be closed by the corresponding call to `pop_frame`.
     pub fn push_frame(&mut self) {
-        debug_assert!(!self.frames.is_empty());
-        let enclosing_frame = self.frames.last_mut().unwrap();
-        debug_assert!(!enclosing_frame.is_empty());
+        let enclosing_frame = self.frame_stack.last_mut().unwrap();
         let enclosing_scope = enclosing_frame.last().unwrap();
         let proc_name = enclosing_scope.proc_name.clone();
-        self.frames.push(vec![AdsScope::new(0, proc_name)]);
+        self.frame_stack.push(vec![AdsScope::new(0, proc_name)]);
     }
 
     /// Closes the current handler frame, adding any instructions necessary to
@@ -160,8 +159,8 @@ impl<'a> AdsTypeEnv<'a> {
     /// This method should always be called in conjunction with `push_frame`.
     /// It is an error to pop the global frame.
     pub fn pop_frame(&mut self, out: &mut Vec<AdsInstruction>) {
-        debug_assert!(self.frames.len() >= 2);
-        let mut frame = self.frames.pop().unwrap();
+        debug_assert!(self.frame_stack.len() >= 2);
+        let mut frame = self.frame_stack.pop().unwrap();
         debug_assert_eq!(frame.len(), 1);
         let scope = frame.pop().unwrap();
         self.close_scope(scope, out);
@@ -172,9 +171,7 @@ impl<'a> AdsTypeEnv<'a> {
     /// The new scope will inherit the current processor of the enclosing
     /// scope.
     pub fn push_scope(&mut self) {
-        debug_assert!(!self.frames.is_empty());
-        let enclosing_frame = self.frames.last_mut().unwrap();
-        debug_assert!(!enclosing_frame.is_empty());
+        let enclosing_frame = self.frame_stack.last_mut().unwrap();
         let enclosing_scope = enclosing_frame.last().unwrap();
         let proc_name = enclosing_scope.proc_name.clone();
         let start = enclosing_scope.frame_end();
@@ -189,8 +186,7 @@ impl<'a> AdsTypeEnv<'a> {
     /// It is an error to pop the root scope of a frame; use `pop_frame` for
     /// that instead.
     pub fn pop_scope(&mut self, out: &mut Vec<AdsInstruction>) {
-        debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last_mut().unwrap();
+        let frame = self.frame_stack.last_mut().unwrap();
         debug_assert!(frame.len() >= 2);
         let scope = frame.pop().unwrap();
         self.close_scope(scope, out);
@@ -205,13 +201,7 @@ impl<'a> AdsTypeEnv<'a> {
         for _ in 0..scope.num_variables {
             out.push(AdsInstruction::PopValue);
         }
-        let prev_proc_name = {
-            debug_assert!(!self.frames.is_empty());
-            let frame = self.frames.last().unwrap();
-            debug_assert!(!frame.is_empty());
-            let scope = frame.last().unwrap();
-            &scope.proc_name
-        };
+        let prev_proc_name = &self.current_scope().proc_name;
         if *prev_proc_name != scope.proc_name {
             out.push(AdsInstruction::SetProc(prev_proc_name.clone()));
         }
@@ -224,10 +214,7 @@ impl<'a> AdsTypeEnv<'a> {
         out: &mut Vec<AdsInstruction>,
     ) {
         debug_assert!(self.contains_processor(&proc_name));
-        debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last_mut().unwrap();
-        debug_assert!(!frame.is_empty());
-        let scope = frame.last_mut().unwrap();
+        let scope = self.current_scope_mut();
         if scope.proc_name != proc_name {
             out.push(AdsInstruction::SetProc(proc_name.clone()));
             scope.proc_name = proc_name;
@@ -235,39 +222,33 @@ impl<'a> AdsTypeEnv<'a> {
     }
 
     pub fn add_handler(&mut self) {
-        debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last_mut().unwrap();
-        debug_assert!(!frame.is_empty());
-        let scope = frame.last_mut().unwrap();
-        scope.add_handler();
+        self.current_scope_mut().add_handler();
+    }
+
+    /// Adds a variable to the current scope that is internal to the compiler
+    /// (i.e. it has no associated declaration), and returns the frame
+    /// reference and frame-relative stack index for the new variable.
+    pub fn add_internal_variable(&mut self) -> usize {
+        self.current_scope_mut().add_internal_variable()
     }
 
     pub fn add_declaration(
         &mut self,
         kind: AdsDeclKind,
         id: IdentifierAst,
-        ty: ExprType,
+        expr_type: ExprType,
     ) {
-        debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last_mut().unwrap();
-        debug_assert!(!frame.is_empty());
-        let scope = frame.last_mut().unwrap();
-        scope.add_declaration(kind, id, ty);
+        self.current_scope_mut().add_declaration(kind, id, expr_type);
     }
 
     pub fn get_declaration(
         &self,
         id: &str,
     ) -> Option<(AdsFrameRef, &AdsDecl)> {
-        let num_frames = self.frames.len();
-        for (frame_index, frame) in self.frames.iter().rev().enumerate() {
+        for (frame_index, frame) in self.frame_stack.iter().rev().enumerate() {
             for scope in frame.iter().rev() {
                 if let Some(decl) = scope.get_declaration(id) {
-                    let frame_ref = if frame_index + 1 == num_frames {
-                        AdsFrameRef::Global
-                    } else {
-                        AdsFrameRef::Local(frame_index)
-                    };
+                    let frame_ref = AdsFrameRef(frame_index);
                     return Some((frame_ref, decl));
                 }
             }
@@ -289,11 +270,7 @@ impl<'a> AdsTypeEnv<'a> {
     /// Returns a list of register names for the current processor in the
     /// current scope.
     pub fn get_register_names(&self) -> &'static [&'static str] {
-        debug_assert!(!self.frames.is_empty());
-        let frame = self.frames.last().unwrap();
-        debug_assert!(!frame.is_empty());
-        let scope = frame.last().unwrap();
-        self.system.register_names(&scope.proc_name)
+        self.system.register_names(&self.current_scope().proc_name)
     }
 
     pub fn typecheck_expression(
@@ -476,7 +453,7 @@ mod tests {
         assert_matches!(expr_static, Err(ExprNotStaticReason::Phantom));
         assert_matches!(
             instructions.as_slice(),
-            [AdsInstruction::GetValue(AdsFrameRef::Global, 0)]
+            [AdsInstruction::GetValue(AdsFrameRef(0), 0)]
         );
     }
 

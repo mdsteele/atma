@@ -1329,7 +1329,7 @@ impl BuiltinBuilder {
 
     fn addr_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![token(TokenValue::Placeholder(
                 self.placeholder_addr.clone(),
             ))],
@@ -1338,7 +1338,7 @@ impl BuiltinBuilder {
 
     fn addr2_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![token(TokenValue::Placeholder(
                 self.placeholder_addr2.clone(),
             ))],
@@ -1347,7 +1347,7 @@ impl BuiltinBuilder {
 
     fn addr_plus_reg_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
                 token(TokenValue::Plus),
@@ -1358,7 +1358,7 @@ impl BuiltinBuilder {
 
     fn bang_addr_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Bang),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1368,7 +1368,7 @@ impl BuiltinBuilder {
 
     fn bang_bang_addr_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Bang),
                 token(TokenValue::Bang),
@@ -1379,7 +1379,7 @@ impl BuiltinBuilder {
 
     fn bang_addr_plus_reg_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Bang),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1391,7 +1391,7 @@ impl BuiltinBuilder {
 
     fn brac_addr_kets_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::BracketOpen),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1402,7 +1402,7 @@ impl BuiltinBuilder {
 
     fn brac_addr_kets_plus_reg_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::BracketOpen),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1415,7 +1415,7 @@ impl BuiltinBuilder {
 
     fn brac_addr_plus_reg_kets_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::BracketOpen),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1428,7 +1428,7 @@ impl BuiltinBuilder {
 
     fn brac_bang_addr_kets_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::BracketOpen),
                 token(TokenValue::Bang),
@@ -1440,7 +1440,7 @@ impl BuiltinBuilder {
 
     fn brac_bang_addr_plus_reg_kets_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::BracketOpen),
                 token(TokenValue::Bang),
@@ -1454,7 +1454,7 @@ impl BuiltinBuilder {
 
     fn par_addr_comma_reg_ens_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::ParenOpen),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1467,7 +1467,7 @@ impl BuiltinBuilder {
 
     fn par_addr_ens_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::ParenOpen),
                 token(TokenValue::Placeholder(self.placeholder_addr.clone())),
@@ -1478,7 +1478,7 @@ impl BuiltinBuilder {
 
     fn par_bang_addr_ens_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::ParenOpen),
                 token(TokenValue::Bang),
@@ -1490,7 +1490,7 @@ impl BuiltinBuilder {
 
     fn par_bang_addr_comma_reg_ens_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::ParenOpen),
                 token(TokenValue::Bang),
@@ -1504,7 +1504,7 @@ impl BuiltinBuilder {
 
     fn par_reg_ens_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::ParenOpen),
                 self.register_token(reg),
@@ -1515,7 +1515,7 @@ impl BuiltinBuilder {
 
     fn par_reg_ens_plus_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::ParenOpen),
                 self.register_token(reg),
@@ -1527,7 +1527,7 @@ impl BuiltinBuilder {
 
     fn pound_imm_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Pound),
                 token(TokenValue::Placeholder(self.placeholder_imm.clone())),
@@ -1537,7 +1537,7 @@ impl BuiltinBuilder {
 
     fn pound_imm2_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Pound),
                 token(TokenValue::Placeholder(self.placeholder_imm2.clone())),
@@ -1547,7 +1547,7 @@ impl BuiltinBuilder {
 
     fn pound_pound_imm_arg(&self) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![
                 token(TokenValue::Pound),
                 token(TokenValue::Pound),
@@ -1558,7 +1558,7 @@ impl BuiltinBuilder {
 
     fn reg_arg(&self, reg: Reg) -> AsmMacroArgAst {
         AsmMacroArgAst {
-            span: SrcSpan::BUILTIN,
+            span: SrcSpan::INTERNAL,
             tokens: vec![self.register_token(reg)],
         }
     }
@@ -1603,7 +1603,7 @@ impl BuiltinBuilder {
 
 fn macro_id(name: &str) -> IdentifierAst {
     IdentifierAst {
-        span: SrcSpan::BUILTIN,
+        span: SrcSpan::INTERNAL,
         name: Rc::from(name),
         kind: IdentifierKind::Standard,
     }
@@ -1611,9 +1611,9 @@ fn macro_id(name: &str) -> IdentifierAst {
 
 fn binop_expr(op: BinOpAst, lhs: ExprAst, rhs: ExprAst) -> ExprAst {
     ExprAst {
-        span: SrcSpan::BUILTIN,
+        span: SrcSpan::INTERNAL,
         node: ExprAstNode::BinOp(
-            (SrcSpan::BUILTIN, op),
+            (SrcSpan::INTERNAL, op),
             Box::new(lhs),
             Box::new(rhs),
         ),
@@ -1622,7 +1622,7 @@ fn binop_expr(op: BinOpAst, lhs: ExprAst, rhs: ExprAst) -> ExprAst {
 
 fn constant_expr(value: u8) -> ExprAst {
     ExprAst {
-        span: SrcSpan::BUILTIN,
+        span: SrcSpan::INTERNAL,
         node: ExprAstNode::IntLiteral(BigInt::from(value)),
     }
 }
@@ -1643,7 +1643,7 @@ fn high_page_addr(placeholder: &Rc<str>) -> AsmStmtAst {
 
 fn relative_addr(placeholder: &Rc<str>) -> AsmStmtAst {
     let here =
-        ExprAst { span: SrcSpan::BUILTIN, node: ExprAstNode::HereLabel };
+        ExprAst { span: SrcSpan::INTERNAL, node: ExprAstNode::HereLabel };
     let relative = binop_expr(
         BinOpAst::Sub,
         placeholder_expr(placeholder),
@@ -1668,7 +1668,7 @@ fn placeholder_u24le(placeholder: &Rc<str>) -> AsmStmtAst {
 
 fn placeholder_expr(placeholder: &Rc<str>) -> ExprAst {
     ExprAst {
-        span: SrcSpan::BUILTIN,
+        span: SrcSpan::INTERNAL,
         node: ExprAstNode::Placeholder(placeholder.clone()),
     }
 }
@@ -1690,7 +1690,7 @@ fn super_fx_link(placeholder: &Rc<str>) -> Vec<AsmStmtAst> {
         ),
     );
     let message_expr = ExprAst {
-        span: SrcSpan::BUILTIN,
+        span: SrcSpan::INTERNAL,
         node: ExprAstNode::StrLiteral(Rc::from(
             "LINK immediate value must be in the range [1, 4]",
         )),
@@ -1710,14 +1710,14 @@ fn super_fx_link(placeholder: &Rc<str>) -> Vec<AsmStmtAst> {
 
 fn int_data_stmt(int_type: AsmIntTypeAst, expr: ExprAst) -> AsmStmtAst {
     AsmStmtAst::IntData(AsmIntDataAst {
-        directive_span: SrcSpan::BUILTIN,
+        directive_span: SrcSpan::INTERNAL,
         int_type,
         expressions: vec![expr],
     })
 }
 
 fn token(value: TokenValue) -> Token {
-    Token { span: SrcSpan::BUILTIN, value }
+    Token { span: SrcSpan::INTERNAL, value }
 }
 
 //===========================================================================//
