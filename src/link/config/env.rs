@@ -155,14 +155,10 @@ impl ExprEnv for LinkTypeEnv {
 
     fn apply_function_op(
         &self,
-        func_span: SrcSpan,
+        _func_span: SrcSpan,
         arg_span: SrcSpan,
     ) -> Self::Op {
-        ObjExprOp::Apply {
-            context: self.current_src_context(),
-            func_span,
-            arg_span,
-        }
+        ObjExprOp::Apply { context: self.current_src_context(), arg_span }
     }
 
     fn binary_operation_op(

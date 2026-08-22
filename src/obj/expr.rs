@@ -101,9 +101,6 @@ pub(crate) enum ObjExprOp {
         /// The source code context in which the operation appeared.
         context: Rc<ObjSrcContext>,
         /// The span of byte offsets within the context where the function
-        /// expression appeared.
-        func_span: SrcSpan,
-        /// The span of byte offsets within the context where the function
         /// argument(s) appeared.
         arg_span: SrcSpan,
     },
@@ -190,9 +187,8 @@ impl BinaryIo for ObjExprOp {
         match u8::read_from(decoder)? {
             OP_APPLY => {
                 let context = Rc::<ObjSrcContext>::read_from(decoder)?;
-                let func_span = SrcSpan::read_from(decoder)?;
                 let arg_span = SrcSpan::read_from(decoder)?;
-                Ok(Self::Apply { context, func_span, arg_span })
+                Ok(Self::Apply { context, arg_span })
             }
             OP_BINOP => {
                 let context = Rc::<ObjSrcContext>::read_from(decoder)?;
@@ -235,10 +231,9 @@ impl BinaryIo for ObjExprOp {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         match self {
-            Self::Apply { context, func_span, arg_span } => {
+            Self::Apply { context, arg_span } => {
                 OP_APPLY.write_to(encoder)?;
                 context.write_to(encoder)?;
-                func_span.write_to(encoder)?;
                 arg_span.write_to(encoder)
             }
             Self::BinOp { context, binop, op_span, lhs_span, rhs_span } => {
@@ -347,7 +342,6 @@ mod tests {
         });
         assert_round_trips(ObjExprOp::Apply {
             context: context.clone(),
-            func_span: SrcSpan::from_byte_range(5..10),
             arg_span: SrcSpan::from_byte_range(10..15),
         });
         assert_round_trips(ObjExprOp::BinOp {

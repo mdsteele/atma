@@ -155,6 +155,7 @@ impl<'a> AdsCompiler<'a> {
         let expr_span = expr_ast.span;
         let var_type = match errs.with(self.compile_expr(expr_ast, out)).0 {
             ExprType::List(item_type) => Rc::unwrap_or_clone(item_type),
+            ExprType::Bottom | ExprType::Undefined => ExprType::Undefined,
             expr_type => {
                 errs.push(AdsError::ExprTypeError {
                     context: self.env.current_src_context(),
@@ -356,7 +357,7 @@ impl<'a> AdsCompiler<'a> {
                     }
                 }
             }
-            Some((_, ExprType::String, Err(reason))) => {
+            Some((_, ExprType::String | ExprType::Bottom, Err(reason))) => {
                 errs.push(AdsError::PathNotStatic {
                     expr_loc: self.make_loc(expr_span),
                     reason,
@@ -458,7 +459,7 @@ impl<'a> AdsCompiler<'a> {
                     });
                 }
             }
-            Some((_, ExprType::String, Err(reason))) => {
+            Some((_, ExprType::String | ExprType::Bottom, Err(reason))) => {
                 errs.push(AdsError::ProcNotStatic {
                     expr_loc: self.make_loc(expr_span),
                     reason,
@@ -500,7 +501,7 @@ impl<'a> AdsCompiler<'a> {
         let expr_span = expr_ast.span;
         let (expr_type, expr_static) =
             errs.with(self.compile_expr(expr_ast, out));
-        let pred_static = if let ExprType::Boolean = expr_type {
+        let pred_static = if expr_type.is_subtype_of(&ExprType::Boolean) {
             expr_static.ok().as_ref().map(ExprValue::unwrap_bool)
         } else {
             errs.push(AdsError::ExprTypeError {
@@ -544,13 +545,13 @@ impl<'a> AdsCompiler<'a> {
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
-        match errs.with(self.compile_expr(expr_ast, out)) {
-            (ExprType::Integer, _) => {}
-            // TODO: Allow `ExprType::Label` as well.
-            (expr_type, _) => errs.push(AdsError::MemoryAddrTypeError {
+        let expr_type = errs.with(self.compile_expr(expr_ast, out)).0;
+        // TODO: Allow `ExprType::Label` as well.
+        if !expr_type.is_subtype_of(&ExprType::Integer) {
+            errs.push(AdsError::MemoryAddrTypeError {
                 expr_loc: self.make_loc(expr_span),
                 expr_type,
-            }),
+            });
         }
         errs.result()
     }
@@ -587,7 +588,7 @@ impl<'a> AdsCompiler<'a> {
         let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
         out.push(AdsInstruction::SetMemory);
         // TODO: Allow `ExprType::Label` as well.
-        if expr_type != ExprType::Integer {
+        if !expr_type.is_subtype_of(&ExprType::Integer) {
             errs.push(AdsError::MemoryAddrTypeError {
                 expr_loc: self.make_loc(expr_span),
                 expr_type,

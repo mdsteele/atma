@@ -1,3 +1,4 @@
+use super::func::ExprFuncEvalError;
 use super::value::{ExprType, ExprValue};
 use crate::error::{Errs, SourceContext, SourceError, SrcLoc, SrcSpan};
 use crate::parse::{BinOpAst, UnOpAst};
@@ -149,11 +150,6 @@ pub enum ExprTypeError {
         name: Rc<str>,
         /// The name of the architecture under which the name is reserved.
         arch: Rc<str>,
-    },
-    /// Encountered an error while evaluating a static expression.
-    StaticEvalError {
-        /// The evaluation error.
-        error: ExprEvalError,
     },
     /// Found a tuple indexing operation with a non-static index expression.
     TupleIndexNotStatic {
@@ -339,7 +335,6 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }
-            Self::StaticEvalError { error } => error.to_source_error(path),
             Self::TupleIndexNotStatic { index_span, reason } => {
                 let message = "tuple index must be static";
                 let label = "this expression isn't static";
@@ -419,12 +414,12 @@ pub enum ExprEvalError {
         /// operation.
         rhs_span: SrcSpan,
     },
-    /// Called the built-in `%error` function with the given message string.
-    ErrorMessage {
-        /// The source code span for the `%error` function call expression.
-        span: SrcSpan,
-        /// The error message.
-        message: Rc<str>,
+    /// Encountered an error while calling a function.
+    FuncEvalError {
+        /// The source code span for the argument expression.
+        arg_span: SrcSpan,
+        /// The evaluation error.
+        error: ExprFuncEvalError,
     },
     /// Found a value of the wrong type.
     ///
@@ -460,15 +455,6 @@ pub enum ExprEvalError {
         rhs_span: SrcSpan,
         /// The value of the right-hand side of the bit shift operation.
         rhs_value: BigInt,
-    },
-    /// Tried to calculate the square root of a negative number.
-    SquareRootOfNegative {
-        /// The source code span for the entire square root expression.
-        expr_span: SrcSpan,
-        /// The source code span for the argument of the square root.
-        arg_span: SrcSpan,
-        /// The value of the argument of the square root.
-        arg_value: BigInt,
     },
     /// Tried to subtract one label from another, but the labels were in the
     /// given two different address spaces.
@@ -539,9 +525,8 @@ impl ExprEvalError {
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
-            Self::ErrorMessage { span, message } => {
-                SourceError::new(SrcLoc::new(path, span), message)
-                    .with_primary_label("")
+            Self::FuncEvalError { arg_span, error } => {
+                error.to_source_error(SrcLoc::new(path, arg_span))
             }
             Self::ModByZero { rhs_span } => {
                 let message = "modulus cannot be zero";
@@ -573,13 +558,6 @@ impl ExprEvalError {
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
-            }
-            Self::SquareRootOfNegative { expr_span, arg_span, arg_value } => {
-                let message = "square root argument must be non-negative";
-                let label =
-                    format!("the value of this expression is {arg_value}");
-                SourceError::new(SrcLoc::new(path, expr_span), message)
-                    .with_label(SrcLoc::new(path, arg_span), label)
             }
             Self::SubtractLabelsInDifferentAddrspaces {
                 op_span,

@@ -236,7 +236,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             }
         };
         let ret_type = param_and_ret.1.clone();
-        if arg_type != param_and_ret.0 {
+        if !arg_type.is_subtype_of(&param_and_ret.0) {
             let param_type = param_and_ret.1.clone();
             self.errs.push(ExprTypeError::CannotCallFuncWithType {
                 func_span,
@@ -260,9 +260,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.types.push((ret_type, Ok(result_value)));
                         return;
                     }
-                    Err(func_error) => ExprNotStaticReason::StaticEvalError {
-                        error: func_error
-                            .into_expr_eval_error(func_span, arg_span),
+                    Err(error) => ExprNotStaticReason::StaticEvalError {
+                        error: ExprEvalError::FuncEvalError {
+                            arg_span,
+                            error,
+                        },
                     },
                 }
             }
@@ -333,7 +335,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     ) {
         debug_assert!(!self.types.is_empty());
         let (pred_type, pred_static) = self.types.pop().unwrap();
-        if pred_type != ExprType::Boolean && pred_type != ExprType::Undefined {
+        if !pred_type.is_subtype_of(&ExprType::Boolean) {
             self.errs.push(ExprTypeError::CannotUseTypeAsPredicate {
                 expr_span: pred_span,
                 expr_type: pred_type,

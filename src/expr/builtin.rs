@@ -14,6 +14,21 @@ pub fn make_global_builtin_values() -> HashMap<Rc<str>, (ExprValue, ExprType)>
         add_builtin_function(func, signature.clone(), &mut builtins);
     }
 
+    // Add [(int, int) -> int] functions:
+    let signature = Rc::new((
+        ExprType::Tuple(Rc::from([ExprType::Integer, ExprType::Integer])),
+        ExprType::Integer,
+    ));
+    for func in [
+        ExprFunc::Divc,
+        ExprFunc::Divf,
+        ExprFunc::Divu,
+        ExprFunc::Divx,
+        ExprFunc::Divz,
+    ] {
+        add_builtin_function(func, signature.clone(), &mut builtins);
+    }
+
     // Add [str -> !] functions:
     let signature = Rc::new((ExprType::String, ExprType::Bottom));
     add_builtin_function(ExprFunc::Error, signature, &mut builtins);

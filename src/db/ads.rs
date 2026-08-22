@@ -82,7 +82,7 @@ impl<W: Write> AdsEnvironment<W> {
     /// execution should continue, or `Err(...)` if an error occurs.
     pub fn step(&mut self) -> Result<bool, AdsRuntimeError> {
         match &self.program.instructions[self.pc] {
-            AdsInstruction::Apply { context, func_span, arg_span } => {
+            AdsInstruction::Apply { context, arg_span } => {
                 debug_assert!(self.value_stack.len() >= 2);
                 let rhs = self.value_stack.pop().unwrap();
                 let lhs = self.value_stack.pop().unwrap();
@@ -91,8 +91,10 @@ impl<W: Write> AdsEnvironment<W> {
                     Err(error) => {
                         return Err(AdsRuntimeError::ExprEvalError {
                             context: context.clone(),
-                            error: error
-                                .into_expr_eval_error(*func_span, *arg_span),
+                            error: ExprEvalError::FuncEvalError {
+                                arg_span: *arg_span,
+                                error,
+                            },
                         });
                     }
                 }

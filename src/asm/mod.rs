@@ -665,6 +665,7 @@ impl<'a> Assembler<'a> {
             let static_value: i64 = match errs
                 .ok(self.env.typecheck_expression(expr_ast))
             {
+                Some((_, ExprType::Bottom, _)) => 0,
                 Some((mut expr, ExprType::Label, _)) => {
                     // TODO: If the label belongs to a chunk with an explicit
                     // start address, then the label's address value is static
@@ -974,7 +975,7 @@ impl<'a> Assembler<'a> {
         let expr_span = expr_ast.span;
         let (expr, expr_type, expr_static) =
             self.env.typecheck_expression(expr_ast)?;
-        if expr_type == required_type {
+        if expr_type.is_subtype_of(&required_type) {
             Ok((expr, expr_static))
         } else {
             Err(Errs::one(AsmError::DirectiveExprTypeError {

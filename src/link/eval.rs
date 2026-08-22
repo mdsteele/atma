@@ -3,7 +3,7 @@ use super::error::{LinkError, LinkResult};
 use super::types::{AbsoluteLabel, ChunkMetadata};
 use crate::addr::Addr;
 use crate::error::Errs;
-use crate::expr::{ExprLabel, ExprValue};
+use crate::expr::{ExprEvalError, ExprLabel, ExprValue};
 use crate::obj::{ObjExpr, ObjExprOp};
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -154,7 +154,7 @@ impl LinkEvalEnv {
         let mut expr_stack = Vec::<ExprValue>::new();
         for op in &expr.ops {
             match op {
-                ObjExprOp::Apply { context, func_span, arg_span } => {
+                ObjExprOp::Apply { context, arg_span } => {
                     let arg_value = pop_value(&mut expr_stack)?;
                     let func_value = pop_value(&mut expr_stack)?;
                     if let ExprValue::Function(func) = func_value {
@@ -164,9 +164,10 @@ impl LinkEvalEnv {
                                 return Err(Errs::one(
                                     LinkError::ExprEvalError {
                                         context: context.clone(),
-                                        error: error.into_expr_eval_error(
-                                            *func_span, *arg_span,
-                                        ),
+                                        error: ExprEvalError::FuncEvalError {
+                                            arg_span: *arg_span,
+                                            error,
+                                        },
                                     },
                                 ));
                             }
