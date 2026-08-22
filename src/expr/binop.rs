@@ -3,7 +3,7 @@ use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprLabel, ExprType, ExprValue};
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use crate::parse::BinOpAst;
-use num_bigint::{BigInt, BigUint};
+use num_bigint::{BigInt, BigUint, Sign};
 use num_traits::{Euclid, Pow, Signed, ToPrimitive, Zero};
 use std::cmp::Ordering;
 use std::io;
@@ -15,20 +15,21 @@ const TAG_ADD: u8 = 0x00;
 const TAG_BIT_AND: u8 = 0x01;
 const TAG_BIT_OR: u8 = 0x02;
 const TAG_BIT_XOR: u8 = 0x03;
-const TAG_CMP_EQ: u8 = 0x04;
-const TAG_CMP_LE: u8 = 0x05;
-const TAG_CMP_LT: u8 = 0x06;
-const TAG_CMP_GE: u8 = 0x07;
-const TAG_CMP_GT: u8 = 0x08;
-const TAG_CMP_NE: u8 = 0x09;
-const TAG_CONCAT: u8 = 0x0a;
-const TAG_DIV: u8 = 0x0b;
-const TAG_MOD: u8 = 0x0c;
-const TAG_MUL: u8 = 0x0d;
-const TAG_POW: u8 = 0x0e;
-const TAG_SHL: u8 = 0x0f;
-const TAG_SHR: u8 = 0x10;
-const TAG_SUB: u8 = 0x11;
+const TAG_BYTE: u8 = 0x04;
+const TAG_CMP_EQ: u8 = 0x05;
+const TAG_CMP_LE: u8 = 0x06;
+const TAG_CMP_LT: u8 = 0x07;
+const TAG_CMP_GE: u8 = 0x08;
+const TAG_CMP_GT: u8 = 0x09;
+const TAG_CMP_NE: u8 = 0x0a;
+const TAG_CONCAT: u8 = 0x0b;
+const TAG_DIV: u8 = 0x0c;
+const TAG_MOD: u8 = 0x0d;
+const TAG_MUL: u8 = 0x0e;
+const TAG_POW: u8 = 0x0f;
+const TAG_SHL: u8 = 0x10;
+const TAG_SHR: u8 = 0x11;
+const TAG_SUB: u8 = 0x12;
 
 //===========================================================================//
 
@@ -42,6 +43,8 @@ pub(crate) enum ExprBinOpEvalError {
     /// Tried to bit shift an integer left/right by the given number of bits,
     /// but the shift amount was too large.
     BitShiftOutOfRange(BigUint),
+    /// Tried to select a byte at the given negative index.
+    ByteSelectByNegative(BigInt),
     /// Tried to divide an integer, but the divisor was zero.
     DivideByZero,
     /// Tried to perform a binary operation, but one or both of the operands
@@ -77,6 +80,9 @@ impl ExprBinOpEvalError {
             }
             Self::BitShiftOutOfRange(rhs_value) => {
                 ExprEvalError::BitShiftOutOfRange { rhs_span, rhs_value }
+            }
+            Self::ByteSelectByNegative(rhs_value) => {
+                ExprEvalError::ByteSelectByNegative { rhs_span, rhs_value }
             }
             Self::DivideByZero => ExprEvalError::DivideByZero { rhs_span },
             Self::InvalidType => ExprEvalError::InvalidType {
@@ -115,6 +121,7 @@ pub(crate) enum ExprBinOp {
     BitAnd,
     BitOr,
     BitXor,
+    Byte,
     CmpEq,
     CmpLe,
     CmpLt,
@@ -170,6 +177,10 @@ impl ExprBinOp {
             }
             (BinOpAst::BitXor, ExprType::Integer, ExprType::Integer) => {
                 Ok((Self::BitXor, ExprType::Integer))
+            }
+            // TODO: support byte selection between labels and integers
+            (BinOpAst::Byte, ExprType::Integer, ExprType::Integer) => {
+                Ok((Self::Byte, ExprType::Integer))
             }
             (BinOpAst::CmpEq, t1, t2)
                 if let Some(t3) = t1.union(&t2)
@@ -298,6 +309,25 @@ impl ExprBinOp {
                 }
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs ^ rhs))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType),
+            },
+            Self::Byte => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    if let Sign::Minus = rhs.sign() {
+                        Err(ExprBinOpEvalError::ByteSelectByNegative(rhs))
+                    } else {
+                        let index = rhs.magnitude();
+                        let bytes = lhs.to_signed_bytes_le();
+                        let byte = if *index < BigUint::from(bytes.len()) {
+                            bytes[usize::try_from(index).unwrap()]
+                        } else if let Sign::Minus = lhs.sign() {
+                            0xffu8
+                        } else {
+                            0x00u8
+                        };
+                        Ok(ExprValue::Integer(BigInt::from(byte)))
+                    }
                 }
                 _ => Err(ExprBinOpEvalError::InvalidType),
             },
@@ -531,6 +561,7 @@ impl BinaryIo for ExprBinOp {
             TAG_BIT_AND => Ok(Self::BitAnd),
             TAG_BIT_OR => Ok(Self::BitOr),
             TAG_BIT_XOR => Ok(Self::BitXor),
+            TAG_BYTE => Ok(Self::Byte),
             TAG_CMP_EQ => Ok(Self::CmpEq),
             TAG_CMP_LE => Ok(Self::CmpLe),
             TAG_CMP_LT => Ok(Self::CmpLt),
@@ -561,6 +592,7 @@ impl BinaryIo for ExprBinOp {
             Self::BitAnd => TAG_BIT_AND,
             Self::BitOr => TAG_BIT_OR,
             Self::BitXor => TAG_BIT_XOR,
+            Self::Byte => TAG_BYTE,
             Self::CmpEq => TAG_CMP_EQ,
             Self::CmpLe => TAG_CMP_LE,
             Self::CmpLt => TAG_CMP_LT,
@@ -591,6 +623,14 @@ mod tests {
 
     fn int_value(value: i32) -> ExprValue {
         ExprValue::Integer(BigInt::from(value))
+    }
+
+    #[test]
+    fn eval_byte_select_by_negative() {
+        assert_eq!(
+            ExprBinOp::Byte.evaluate(int_value(1), int_value(-1)),
+            Err(ExprBinOpEvalError::ByteSelectByNegative(BigInt::from(-1)))
+        );
     }
 
     #[test]
@@ -635,6 +675,7 @@ mod tests {
         assert_round_trips(ExprBinOp::BitAnd);
         assert_round_trips(ExprBinOp::BitOr);
         assert_round_trips(ExprBinOp::BitXor);
+        assert_round_trips(ExprBinOp::Byte);
         assert_round_trips(ExprBinOp::CmpEq);
         assert_round_trips(ExprBinOp::CmpLe);
         assert_round_trips(ExprBinOp::CmpLt);

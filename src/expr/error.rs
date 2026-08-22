@@ -405,6 +405,14 @@ pub enum ExprEvalError {
         /// The value of the right-hand side of the bit shift operation.
         rhs_value: BigUint,
     },
+    /// Tried to select a byte at the given negative index.
+    ByteSelectByNegative {
+        /// The source code span for the right-hand side of the byte-select
+        /// operation.
+        rhs_span: SrcSpan,
+        /// The value of the right-hand side of the byte-select operation.
+        rhs_value: BigInt,
+    },
     /// Tried to divide an integer, but the divisor was zero.
     DivideByZero {
         /// The source code span for the right-hand side of the division
@@ -513,6 +521,13 @@ impl ExprEvalError {
             }
             Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
                 let message = "shift distance cannot be too large";
+                let label =
+                    format!("the value of this expression is {rhs_value}");
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
+            }
+            Self::ByteSelectByNegative { rhs_span, rhs_value } => {
+                let message = "byte-select index cannot be negative";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)

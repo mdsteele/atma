@@ -65,6 +65,8 @@ pub enum BinOpAst {
     BitOr,
     /// Bitwise XOR.
     BitXor,
+    /// Byte selection.
+    Byte,
     /// "Equals" comparison.
     CmpEq,
     /// "Greater-than-or-equal-to" comparison.
@@ -112,6 +114,7 @@ impl BinOpAst {
             BinOpAst::BitAnd => ("bitwise-AND", "with", false),
             BinOpAst::BitOr => ("bitwise-OR", "with", false),
             BinOpAst::BitXor => ("bitwise-XOR", "with", false),
+            BinOpAst::Byte => ("byte-select", "by", false),
             BinOpAst::CmpEq | BinOpAst::CmpNe => ("equate", "with", false),
             BinOpAst::CmpGe
             | BinOpAst::CmpGt
@@ -310,6 +313,11 @@ impl ExprAst {
                     pratt::left(BIND_BIT_SHIFT),
                     symbol(TokenValue::GreaterGreater),
                     |l, o, r, _| ExprAst::binop(BinOpAst::Shr, l, o, r),
+                ),
+                pratt::infix(
+                    pratt::left(BIND_BIT_AND),
+                    symbol(TokenValue::Bang),
+                    |l, o, r, _| ExprAst::binop(BinOpAst::Byte, l, o, r),
                 ),
                 pratt::infix(
                     pratt::left(BIND_BIT_AND),
