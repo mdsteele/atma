@@ -8,17 +8,17 @@ mod predef;
 
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
-use crate::expr::{ExprStatic, ExprType, ExprUnOp, ExprValue};
+use crate::expr::{ExprStatic, ExprType, ExprTypeError, ExprUnOp, ExprValue};
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch,
     ObjPatchData, ObjPatchIntType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
     ObjSymbol,
 };
 use crate::parse::{
-    AsmAssertAst, AsmBinaryAst, AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst,
-    AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst,
-    AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst,
-    AsmUseAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
+    AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
+    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
+    AsmModuleAst, AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmSetAst,
+    AsmStmtAst, AsmUseAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
 };
 use env::{AsmDeclValue, AsmTypeEnv};
 pub use error::{AsmError, AsmResult};
@@ -106,6 +106,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(_) => Ok(()),
             AsmStmtAst::Binary(_) => Ok(()),
+            AsmStmtAst::Cond(_) => Ok(()),
             AsmStmtAst::Declare(_) => Ok(()),
             AsmStmtAst::DefMacro(_) => Ok(()),
             AsmStmtAst::Import(id) => self.predeclare_import(id),
@@ -173,6 +174,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(assert) => self.expand_assert(assert),
             AsmStmtAst::Binary(data) => self.expand_binary_data(data),
+            AsmStmtAst::Cond(cond) => self.expand_conditional(cond),
             AsmStmtAst::Declare(decl) => self.expand_declaration(decl),
             AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
             AsmStmtAst::Import(id) => self.expand_import(id),
@@ -236,13 +238,12 @@ impl<'a> Assembler<'a> {
     fn expand_assignment(&mut self, set_ast: AsmSetAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let expr_span = set_ast.expression.span;
-        let expr_check =
-            errs.ok(self.env.typecheck_expression(set_ast.expression));
+        let (expr, expr_type, expr_static) =
+            errs.with(self.env.typecheck_expression(set_ast.expression));
         let lvalue_span = set_ast.id.span;
         let lvalue_name = set_ast.id.name.clone();
-        let lvalue_check = errs.ok(self.env.typecheck_lvalue(set_ast.id));
-        if let (Some((expr, expr_type, expr_static)), Some(lvalue_type)) =
-            (expr_check, lvalue_check)
+        if let Some(lvalue_type) =
+            errs.ok(self.env.typecheck_lvalue(set_ast.id))
         {
             if expr_type.is_subtype_of(&lvalue_type) {
                 let decl_value = match expr_static {
@@ -266,16 +267,77 @@ impl<'a> Assembler<'a> {
         errs.result()
     }
 
+    fn expand_conditional(&mut self, cond_ast: AsmCondAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let mut selected_body_ast: Option<Vec<AsmStmtAst>> = None;
+        let mut directive: &'static str = ".IF";
+        for (pred_ast, body_ast) in
+            std::iter::once(cond_ast.if_block).chain(cond_ast.elif_blocks)
+        {
+            let pred_span = pred_ast.span;
+            let mut ambiguous_predicate: bool = true;
+            match errs.with(self.env.typecheck_expression(pred_ast)) {
+                (_, ExprType::Boolean, Ok(static_pred)) => {
+                    ambiguous_predicate = false;
+                    if selected_body_ast.is_none() && static_pred.unwrap_bool()
+                    {
+                        selected_body_ast = Some(body_ast);
+                    }
+                }
+                (_, ExprType::Boolean, Err(reason)) => {
+                    // If a previous block was already selected, then this
+                    // predicate (and any future predicates) are not required
+                    // to be static, in case the previously-selected predicate
+                    // was guarding e.g. an evaluation error in this one.
+                    if selected_body_ast.is_none() {
+                        errs.push(AsmError::DirectiveExprNotStatic {
+                            directive,
+                            component: "predicate",
+                            expr_loc: self.env.make_loc(pred_span),
+                            reason,
+                        });
+                    }
+                }
+                (_, ExprType::Bottom | ExprType::Undefined, _) => {}
+                (_, pred_type, _) => {
+                    errs.push(AsmError::ExprTypeError {
+                        context: self.env.current_src_context(),
+                        error: ExprTypeError::CannotUseTypeAsPredicate {
+                            expr_span: pred_span,
+                            expr_type: pred_type,
+                        },
+                    });
+                }
+            }
+            // If no block has been selected yet, and this predicate had a type
+            // error or wasn't static, we can't know whether or not this block
+            // should have been selected.  To help avoid reporting spurious
+            // errors in that situation, select an imaginary empty block.
+            if selected_body_ast.is_none() && ambiguous_predicate {
+                selected_body_ast = Some(vec![]);
+            }
+            directive = ".ELIF";
+        }
+        if let Some(body_ast) = selected_body_ast.or(cond_ast.else_block)
+            && !body_ast.is_empty()
+        {
+            let name = format!("${:x}", self.next_anonymous_scope_number);
+            self.next_anonymous_scope_number += 1;
+            self.env.begin_scope(Rc::from(name), true);
+            errs.also(self.predeclare_statements(&body_ast));
+            errs.also(self.expand_statements(body_ast));
+            self.env.end_scope();
+        }
+        errs.result()
+    }
+
     fn expand_declaration(
         &mut self,
         declare_ast: AsmDeclareAst,
     ) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let Some((expr, expr_type, expr_static)) =
-            errs.ok(self.env.typecheck_expression(declare_ast.expression))
-        else {
-            return errs.result();
-        };
+        let (expr, expr_type, expr_static) =
+            errs.with(self.env.typecheck_expression(declare_ast.expression));
         let decl_value = match expr_static {
             Ok(static_value) => AsmDeclValue::Static(static_value),
             Err(reason) => {
@@ -592,8 +654,9 @@ impl<'a> Assembler<'a> {
         }
         for expr_ast in data_ast.expressions {
             let expr_span = expr_ast.span;
-            match errs.ok(self.env.typecheck_expression(expr_ast)) {
-                Some((_, ExprType::Integer, Ok(value))) => {
+            match errs.with(self.env.typecheck_expression(expr_ast)) {
+                (_, ExprType::Undefined, _) => {}
+                (_, ExprType::Integer, Ok(value)) => {
                     let bigint = value.unwrap_int_ref();
                     let Some(chr) = bigint.to_u32().and_then(char::from_u32)
                     else {
@@ -609,18 +672,18 @@ impl<'a> Assembler<'a> {
                             .extend_from_slice(chr.to_string().as_bytes());
                     }
                 }
-                Some((_, ExprType::String, Ok(value))) => {
+                (_, ExprType::String, Ok(value)) => {
                     if let Some(chunk_env) = self.env.current_chunk() {
                         chunk_env.data_mut().extend_from_slice(
                             value.unwrap_str_ref().as_bytes(),
                         );
                     }
                 }
-                Some((
+                (
                     _,
-                    ExprType::Integer | ExprType::String,
+                    ExprType::Bottom | ExprType::Integer | ExprType::String,
                     Err(reason),
-                )) => {
+                ) => {
                     errs.push(AsmError::DirectiveExprNotStatic {
                         directive: ".UTF8",
                         component: "value",
@@ -628,7 +691,7 @@ impl<'a> Assembler<'a> {
                         reason,
                     });
                 }
-                Some((_, expr_type, _)) => {
+                (_, expr_type, _) => {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive: ".UTF8",
                         component: "value",
@@ -637,7 +700,6 @@ impl<'a> Assembler<'a> {
                         valid_types: vec![ExprType::String, ExprType::Integer],
                     });
                 }
-                None => {}
             }
         }
         errs.result()
@@ -663,10 +725,10 @@ impl<'a> Assembler<'a> {
         for expr_ast in int_data.expressions {
             let expr_span = expr_ast.span;
             let static_value: i64 = match errs
-                .ok(self.env.typecheck_expression(expr_ast))
+                .with(self.env.typecheck_expression(expr_ast))
             {
-                Some((_, ExprType::Bottom, _)) => 0,
-                Some((mut expr, ExprType::Label, _)) => {
+                (_, ExprType::Undefined, _) => 0,
+                (mut expr, ExprType::Label, _) => {
                     // TODO: If the label belongs to a chunk with an explicit
                     // start address, then the label's address value is static
                     // and no patch is necessary.
@@ -679,7 +741,7 @@ impl<'a> Assembler<'a> {
                     self.try_add_patch(ObjPatchData::Integer(int_type, expr));
                     0
                 }
-                Some((_, ExprType::Integer, Ok(value))) => {
+                (_, ExprType::Integer, Ok(value)) => {
                     let bigint = value.unwrap_int_ref();
                     match int_type.value_in_range(bigint) {
                         Ok(value) => value,
@@ -698,12 +760,12 @@ impl<'a> Assembler<'a> {
                         }
                     }
                 }
-                Some((expr, ExprType::Integer, Err(_))) => {
+                (expr, ExprType::Integer | ExprType::Bottom, Err(_)) => {
                     let data = ObjPatchData::Integer(int_type, expr);
                     self.try_add_patch(data);
                     0
                 }
-                Some((_, expr_type, _)) => {
+                (_, expr_type, _) => {
                     errs.push(AsmError::DirectiveExprTypeError {
                         directive,
                         component: "value",
@@ -713,7 +775,6 @@ impl<'a> Assembler<'a> {
                     });
                     0
                 }
-                None => 0,
             };
             if let Some(chunk_env) = self.env.current_chunk() {
                 let data = chunk_env.data_mut();
@@ -972,20 +1033,21 @@ impl<'a> Assembler<'a> {
         expr_ast: ExprAst,
         required_type: ExprType,
     ) -> AsmResult<(ObjExpr, ExprStatic)> {
+        let mut errs = Errs::<AsmError>::new();
         let expr_span = expr_ast.span;
         let (expr, expr_type, expr_static) =
-            self.env.typecheck_expression(expr_ast)?;
-        if expr_type.is_subtype_of(&required_type) {
-            Ok((expr, expr_static))
-        } else {
-            Err(Errs::one(AsmError::DirectiveExprTypeError {
+            errs.with(self.env.typecheck_expression(expr_ast));
+        if !expr_type.is_subtype_of(&required_type) {
+            errs.push(AsmError::DirectiveExprTypeError {
                 directive,
                 component,
                 expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![required_type],
-            }))
+            });
         }
+        errs.result()?;
+        Ok((expr, expr_static))
     }
 
     fn finish(self) -> ObjFile {

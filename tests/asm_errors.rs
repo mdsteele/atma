@@ -1,7 +1,10 @@
 use atma;
 use atma::addr::AlignTryFromError;
 use atma::asm::AsmError;
-use atma::expr::ExprType;
+use atma::expr::{
+    ExprEvalError, ExprNotStaticReason, ExprType, ExprTypeError,
+};
+use atma::parse::BinOpAst;
 use num_bigint::BigInt;
 use std::assert_matches;
 use std::rc::Rc;
@@ -41,6 +44,48 @@ fn assertion_statically_failed() {
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::AssertionStaticallyFailed{ additional_message: Some(m), .. },
     ] if &**m == "oops");
+}
+
+#[test]
+fn cannot_use_type_as_predicate() {
+    let source = r#"\
+    .LET foo = -1
+    .IF foo < 0 {           ; This block will be selected, therefore...
+    } .ELIF {1}[foo] > 0 {  ; ...it's OK this isn't static (due to eval error).
+    } .ELIF foo {           ; But a non-boolean predicate is still an error.
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::ExprTypeError {
+            error: ExprTypeError::CannotUseTypeAsPredicate {
+                expr_type: ExprType::Integer,
+                ..
+            },
+            ..
+        }]
+    );
+}
+
+#[test]
+fn conditional_predicate_not_static() {
+    let source = r#"\
+    .IMPORT Foo
+    .IF &Foo <= $ff {
+        .u8 &Foo
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::DirectiveExprNotStatic {
+            directive: ".IF",
+            component: "predicate",
+            reason: ExprNotStaticReason::StaticEvalError {
+                error: ExprEvalError::AddrOfLabelUnresolved { .. },
+            },
+            ..
+        }]
+    );
 }
 
 #[test]
@@ -278,6 +323,26 @@ fn unmatched_macro_invocation() {
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::UnmatchedMacroInvocation { macro_name, arch, .. },
     ] if &**macro_name == "XCE" && &**arch == "6502");
+}
+
+#[test]
+fn variable_with_undefined_type() {
+    let source = r#"\
+    .LET foo = "1" ++ %false  ; The type of foo is ambiguous.
+    .LET bar = foo + 3        ; No error should be generated here.
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::ExprTypeError {
+            error: ExprTypeError::CannotApplyBinaryOpToTypes {
+                op: BinOpAst::Concat,
+                lhs_type: ExprType::String,
+                rhs_type: ExprType::Boolean,
+                ..
+            },
+            ..
+        }]
+    );
 }
 
 //===========================================================================//

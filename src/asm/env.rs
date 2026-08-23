@@ -232,12 +232,19 @@ impl AsmTypeEnv {
     pub fn typecheck_expression(
         &self,
         expr: ExprAst,
-    ) -> AsmResult<(ObjExpr, ExprType, ExprStatic)> {
-        let (ops, expr_type, expr_static) = ExprCompiler::new(self)
-            .typecheck(expr)
-            .map_err(|errs| self.map_type_errors(errs))?;
-        debug_assert!(!ops.is_empty());
-        Ok((ObjExpr { ops }, expr_type, expr_static))
+    ) -> ((ObjExpr, ExprType, ExprStatic), Errs<AsmError>) {
+        match ExprCompiler::new(self).typecheck(expr) {
+            Ok((ops, expr_type, expr_static)) => {
+                debug_assert!(!ops.is_empty());
+                ((ObjExpr { ops }, expr_type, expr_static), Errs::new())
+            }
+            Err(errs) => {
+                let expr = ObjExpr::from(false);
+                let expr_type = ExprType::Undefined;
+                let expr_static = Err(ExprNotStaticReason::TypeError);
+                ((expr, expr_type, expr_static), self.map_type_errors(errs))
+            }
+        }
     }
 
     pub fn typecheck_lvalue(

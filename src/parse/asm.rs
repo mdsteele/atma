@@ -43,6 +43,8 @@ pub enum AsmStmtAst {
     Assert(AsmAssertAst),
     /// A `.BINARY` directive.
     Binary(AsmBinaryAst),
+    /// An `.IF` directive.
+    Cond(AsmCondAst),
     /// A `.LET` or `.VAR` directive.
     Declare(AsmDeclareAst),
     /// A `.DEFMACRO` directive.
@@ -100,6 +102,29 @@ impl AsmStmtAst {
                         AsmStmtAst::Label(label)
                     }
                 });
+            let cond_dir = directive(".IF")
+                .ignore_then(ExprAst::parser())
+                .then(braced_stmts.clone())
+                .then(
+                    directive(".ELIF")
+                        .ignore_then(ExprAst::parser())
+                        .then(braced_stmts.clone())
+                        .repeated()
+                        .collect::<Vec<_>>(),
+                )
+                .then(
+                    directive(".ELSE")
+                        .ignore_then(braced_stmts.clone())
+                        .or_not(),
+                )
+                .then_ignore(linebreak())
+                .map(|((if_block, elif_blocks), else_block)| {
+                    AsmStmtAst::Cond(AsmCondAst {
+                        if_block,
+                        elif_blocks,
+                        else_block,
+                    })
+                });
             let def_macro_dir = directive(".DEFMACRO")
                 .ignore_then(IdentifierAst::parser())
                 .then(
@@ -107,7 +132,7 @@ impl AsmStmtAst {
                         .separated_by(symbol(TokenValue::Comma))
                         .collect::<Vec<_>>(),
                 )
-                .then(braced_stmts.clone().with_ctx(Context {
+                .then(braced_stmts.with_ctx(Context {
                     allow_placeholder_as_identifier: true,
                 }))
                 .then_ignore(linebreak())
@@ -133,6 +158,7 @@ impl AsmStmtAst {
                 label_or_named_scope,
                 AsmAssertAst::parser().map(AsmStmtAst::Assert),
                 AsmBinaryAst::parser().map(AsmStmtAst::Binary),
+                cond_dir,
                 AsmDeclareAst::parser().map(AsmStmtAst::Declare),
                 def_macro_dir,
                 import_dir,
@@ -197,6 +223,19 @@ impl AsmBinaryAst {
                 path,
             })
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a conditional directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmCondAst {
+    /// The predicate and body of the "if" block.
+    pub if_block: (ExprAst, Vec<AsmStmtAst>),
+    /// The predicate and body of each "elif" block, if any.
+    pub elif_blocks: Vec<(ExprAst, Vec<AsmStmtAst>)>,
+    /// The body of the "else" block, if any.
+    pub else_block: Option<Vec<AsmStmtAst>>,
 }
 
 //===========================================================================//
