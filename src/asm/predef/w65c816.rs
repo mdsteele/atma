@@ -1,0 +1,80 @@
+use super::build::AddrMode;
+
+//===========================================================================//
+
+pub(super) const ARCH_65C816: &str = "65C816";
+pub(super) const RES_65C816: &[&str] = &["S"];
+pub(super) const MACROS_65C816: &[(&str, u8, AddrMode)] = &[
+    ("ADC", 0x69, AddrMode::PoundPoundImm16),
+    ("BIT", 0x34, AddrMode::Addr8CommaReg("X")),
+    ("BIT", 0x3c, AddrMode::BangAddr16CommaReg("X")),
+    ("BIT", 0x89, AddrMode::PoundImm8),
+    ("BIT", 0x89, AddrMode::PoundPoundImm16),
+    ("BRA", 0x80, AddrMode::Branch),
+    // TODO: BRL opcode
+    ("COP", 0x02, AddrMode::PoundImm8),
+    ("DEC", 0x3a, AddrMode::Reg("A")),
+    ("INC", 0x1a, AddrMode::Reg("A")),
+    ("JML", 0x5c, AddrMode::BangBangAddr24),
+    ("JML", 0xdc, AddrMode::BracBangAddr16Kets),
+    ("JMP", 0x7c, AddrMode::ParBangAddr16CommaRegEns("X")),
+    ("JSL", 0x22, AddrMode::BangBangAddr24),
+    ("JSR", 0xfc, AddrMode::ParBangAddr16CommaRegEns("X")),
+    ("LDA", 0xa9, AddrMode::PoundPoundImm16),
+    ("LDA", 0xb2, AddrMode::ParAddr8Ens),
+    ("LDA", 0xa7, AddrMode::BracAddr8Kets),
+    ("LDA", 0xb7, AddrMode::BracAddr8KetsCommaReg("Y")),
+    ("LDA", 0xaf, AddrMode::BangBangAddr24),
+    ("LDA", 0xbf, AddrMode::BangBangAddr24CommaReg("X")),
+    ("LDA", 0xa3, AddrMode::Addr8CommaReg("S")),
+    ("LDA", 0xb3, AddrMode::ParAddr8CommaRegEnsCommaReg("S", "Y")),
+    ("LDX", 0xa2, AddrMode::PoundPoundImm16),
+    ("LDY", 0xa0, AddrMode::PoundPoundImm16),
+    ("MVN", 0x54, AddrMode::PoundImm8CommaPoundImm8),
+    ("MVP", 0x44, AddrMode::PoundImm8CommaPoundImm8),
+    ("PEA", 0xf4, AddrMode::BangAddr16),
+    ("PEI", 0xd4, AddrMode::ParAddr8Ens),
+    // TODO: PER opcode
+    ("PHB", 0x8b, AddrMode::Implied),
+    ("PHD", 0x0b, AddrMode::Implied),
+    ("PHK", 0x4b, AddrMode::Implied),
+    ("PHX", 0xda, AddrMode::Implied),
+    ("PHY", 0x5a, AddrMode::Implied),
+    ("PLB", 0xab, AddrMode::Implied),
+    ("PLD", 0x2b, AddrMode::Implied),
+    ("PLX", 0xfa, AddrMode::Implied),
+    ("PLY", 0x7a, AddrMode::Implied),
+    ("REP", 0xc2, AddrMode::PoundImm8),
+    ("RTL", 0x6b, AddrMode::Implied),
+    ("SEP", 0xe2, AddrMode::PoundImm8),
+    ("STA", 0x92, AddrMode::ParAddr8Ens),
+    ("STA", 0x87, AddrMode::BracAddr8Kets),
+    ("STA", 0x97, AddrMode::BracAddr8KetsCommaReg("Y")),
+    ("STA", 0x8f, AddrMode::BangBangAddr24),
+    ("STA", 0x9f, AddrMode::BangBangAddr24CommaReg("X")),
+    ("STA", 0x83, AddrMode::Addr8CommaReg("S")),
+    ("STA", 0x93, AddrMode::ParAddr8CommaRegEnsCommaReg("S", "Y")),
+    ("STP", 0xdb, AddrMode::Implied),
+    ("STZ", 0x64, AddrMode::Addr8),
+    ("STZ", 0x74, AddrMode::Addr8CommaReg("X")),
+    ("STZ", 0x9c, AddrMode::BangAddr16),
+    ("STZ", 0x9e, AddrMode::BangAddr16CommaReg("X")),
+    ("TCD", 0x5b, AddrMode::Implied),
+    ("TCS", 0x1b, AddrMode::Implied),
+    ("TDC", 0x7b, AddrMode::Implied),
+    // TODO: TRB opcode
+    // TODO: TSB opcode
+    ("TSC", 0x3b, AddrMode::Implied),
+    ("TXY", 0x9b, AddrMode::Implied),
+    ("TYX", 0xbb, AddrMode::Implied),
+    ("WAI", 0xcb, AddrMode::Implied),
+    ("WDM", 0x42, AddrMode::PoundImm8),
+    ("XBA", 0xeb, AddrMode::Implied),
+    ("XCE", 0xfb, AddrMode::Implied),
+    // TODO: Remove these redundances with 65xx macros, once the tests can pass
+    // without them:
+    ("LDA", 0xa1, AddrMode::ParAddr8CommaRegEns("X")),
+    ("STA", 0x81, AddrMode::ParAddr8CommaRegEns("X")),
+];
+
+//===========================================================================//
