@@ -24,7 +24,7 @@ pub(super) const MACROS_SM83: &[(&str, u8, AddrMode)] = &[
     ("EI", 0xfb, AddrMode::Implied),
     ("HALT", 0x76, AddrMode::Implied),
     ("JP", 0xc3, AddrMode::Addr16),
-    ("JR", 0x18, AddrMode::Branch),
+    ("JR", 0x18, AddrMode::Relative8),
     ("LD", 0x40, AddrMode::RegCommaReg("B", "B")),
     ("LD", 0x41, AddrMode::RegCommaReg("B", "C")),
     ("LD", 0x42, AddrMode::RegCommaReg("B", "D")),

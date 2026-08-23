@@ -10,8 +10,8 @@ pub(super) const MACROS_65C816: &[(&str, u8, AddrMode)] = &[
     ("BIT", 0x3c, AddrMode::BangAddr16CommaReg("X")),
     ("BIT", 0x89, AddrMode::PoundImm8),
     ("BIT", 0x89, AddrMode::PoundPoundImm16),
-    ("BRA", 0x80, AddrMode::Branch),
-    // TODO: BRL opcode
+    ("BRA", 0x80, AddrMode::Relative8),
+    ("BRL", 0x82, AddrMode::Relative16),
     ("COP", 0x02, AddrMode::PoundImm8),
     ("DEC", 0x3a, AddrMode::Reg("A")),
     ("INC", 0x1a, AddrMode::Reg("A")),
@@ -34,7 +34,7 @@ pub(super) const MACROS_65C816: &[(&str, u8, AddrMode)] = &[
     ("MVP", 0x44, AddrMode::PoundImm8CommaPoundImm8),
     ("PEA", 0xf4, AddrMode::BangAddr16),
     ("PEI", 0xd4, AddrMode::ParAddr8Ens),
-    // TODO: PER opcode
+    ("PER", 0x62, AddrMode::Relative16),
     ("PHB", 0x8b, AddrMode::Implied),
     ("PHD", 0x0b, AddrMode::Implied),
     ("PHK", 0x4b, AddrMode::Implied),

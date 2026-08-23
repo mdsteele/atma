@@ -60,8 +60,6 @@ pub(super) enum AddrMode {
     BracBangAddr16Kets,
     /// FOO [!addr + R]
     BracBangAddr16PlusRegKets(Reg),
-    /// FOO addr
-    Branch,
     /// FOO (addr, R)
     ParAddr8CommaRegEns(Reg),
     /// FOO (addr, R1), R2
@@ -114,6 +112,10 @@ pub(super) enum AddrMode {
     RegCommaPoundImm16(Reg),
     /// FOO R1, R2
     RegCommaReg(Reg, Reg),
+    /// FOO addr
+    Relative8,
+    /// FOO addr
+    Relative16,
     /// FOO #imm
     SuperFxLink,
 }
@@ -150,7 +152,8 @@ impl BuiltinBuilder {
             AddrMode::Addr8
             | AddrMode::Addr16
             | AddrMode::AddrHi
-            | AddrMode::Branch => {
+            | AddrMode::Relative8
+            | AddrMode::Relative16 => {
                 vec![self.addr_arg()]
             }
             AddrMode::Addr8CommaAddr8 => {
@@ -313,10 +316,6 @@ impl BuiltinBuilder {
                     self.pool.placeholder_u24le(PLACEHOLDER_ADDR),
                 ]
             }
-            AddrMode::Branch => vec![
-                self.pool.constant_u8(opcode_byte),
-                self.pool.relative_addr(PLACEHOLDER_ADDR),
-            ],
             AddrMode::Implied
             | AddrMode::ParRegEns(_)
             | AddrMode::ParRegEnsCommaParRegEns(_, _)
@@ -343,6 +342,14 @@ impl BuiltinBuilder {
                     self.pool.placeholder_u16le(PLACEHOLDER_IMM),
                 ]
             }
+            AddrMode::Relative8 => vec![
+                self.pool.constant_u8(opcode_byte),
+                self.pool.relative8_addr(PLACEHOLDER_ADDR),
+            ],
+            AddrMode::Relative16 => vec![
+                self.pool.constant_u8(opcode_byte),
+                self.pool.relative16_addr(PLACEHOLDER_ADDR),
+            ],
             AddrMode::SuperFxLink => {
                 super_fx_link(&mut self.pool, PLACEHOLDER_IMM)
             }

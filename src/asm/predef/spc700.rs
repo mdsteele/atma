@@ -38,16 +38,16 @@ pub(super) const MACROS_SPC700: &[(&str, u8, AddrMode)] = &[
     ("ASL", 0x1c, AddrMode::Reg("A")),
     // TODO: BBC opcode
     // TODO: BBS opcode
-    ("BCC", 0x90, AddrMode::Branch),
-    ("BCS", 0xb0, AddrMode::Branch),
-    ("BEQ", 0xf0, AddrMode::Branch),
-    ("BMI", 0x30, AddrMode::Branch),
-    ("BNE", 0xd0, AddrMode::Branch),
-    ("BPL", 0x10, AddrMode::Branch),
-    ("BRA", 0x2f, AddrMode::Branch),
+    ("BCC", 0x90, AddrMode::Relative8),
+    ("BCS", 0xb0, AddrMode::Relative8),
+    ("BEQ", 0xf0, AddrMode::Relative8),
+    ("BMI", 0x30, AddrMode::Relative8),
+    ("BNE", 0xd0, AddrMode::Relative8),
+    ("BPL", 0x10, AddrMode::Relative8),
+    ("BRA", 0x2f, AddrMode::Relative8),
     ("BRK", 0x0f, AddrMode::Implied),
-    ("BVC", 0x50, AddrMode::Branch),
-    ("BVS", 0x70, AddrMode::Branch),
+    ("BVC", 0x50, AddrMode::Relative8),
+    ("BVS", 0x70, AddrMode::Relative8),
     ("CALL", 0x3f, AddrMode::BangAddr16),
     // TODO: CBNE opcode
     // TODO: CLR1 opcode

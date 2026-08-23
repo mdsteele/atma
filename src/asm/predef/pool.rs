@@ -53,7 +53,7 @@ impl RcPool {
     }
 
     pub fn constant_u8(&mut self, value: u8) -> AsmStmtAst {
-        let expr = self.int_literal_expr(value);
+        let expr = self.int_literal_expr(i32::from(value));
         self.int_data_stmt(AsmIntTypeAst::U8, expr)
     }
 
@@ -93,7 +93,7 @@ impl RcPool {
         })
     }
 
-    pub fn int_literal_expr(&mut self, value: u8) -> ExprAst {
+    pub fn int_literal_expr(&mut self, value: i32) -> ExprAst {
         ExprAst {
             span: SrcSpan::INTERNAL,
             node: ExprAstNode::IntLiteral(BigInt::from(value)),
@@ -135,10 +135,11 @@ impl RcPool {
         self.int_data_stmt(AsmIntTypeAst::U24le, expr)
     }
 
-    pub fn relative_addr(&mut self, placeholder: &'static str) -> AsmStmtAst {
+    pub fn relative8_addr(&mut self, placeholder: &'static str) -> AsmStmtAst {
         let expr = {
             let lhs = {
                 let lhs = self.placeholder_expr(placeholder);
+                // TODO: Use a $> here-label instead of ($< + 1)
                 let rhs = {
                     let lhs = self.here_label_expr();
                     let rhs = self.int_literal_expr(1);
@@ -151,6 +152,28 @@ impl RcPool {
             self.binop_expr(BinOpAst::BitAnd, lhs, rhs)
         };
         self.int_data_stmt(AsmIntTypeAst::U8, expr)
+    }
+
+    pub fn relative16_addr(
+        &mut self,
+        placeholder: &'static str,
+    ) -> AsmStmtAst {
+        let expr = {
+            let lhs = {
+                let lhs = self.placeholder_expr(placeholder);
+                // TODO: Use a $> here-label instead of ($< + 2)
+                let rhs = {
+                    let lhs = self.here_label_expr();
+                    let rhs = self.int_literal_expr(2);
+                    self.binop_expr(BinOpAst::Add, lhs, rhs)
+                };
+                self.binop_expr(BinOpAst::Sub, lhs, rhs)
+            };
+            let rhs = self.int_literal_expr(0xffff);
+            // TODO: use .S16 instead of .U16le & $ffff
+            self.binop_expr(BinOpAst::BitAnd, lhs, rhs)
+        };
+        self.int_data_stmt(AsmIntTypeAst::U16le, expr)
     }
 
     pub fn standard_id(&mut self, name: &'static str) -> IdentifierAst {
