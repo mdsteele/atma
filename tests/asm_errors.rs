@@ -1,4 +1,3 @@
-use atma;
 use atma::addr::AlignTryFromError;
 use atma::asm::AsmError;
 use atma::expr::{

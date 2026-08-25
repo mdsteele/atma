@@ -23,7 +23,6 @@ const BIND_ADDITIVE: u16 = 8;
 const BIND_MULTIPLICATIVE: u16 = 9;
 const BIND_UNARY_PREFIX: u16 = 10;
 const BIND_EXPONENTIATE: u16 = 11;
-const BIND_UNARY_POSTFIX: u16 = 12;
 
 //===========================================================================//
 
@@ -219,6 +218,7 @@ impl ExprAst {
             enum ExprAtomSuffix {
                 Call(ExprAst),
                 Index(SrcSpan, ExprAst),
+                Length(Token),
             }
             let call_suffix = parenthesized_expr.map(ExprAtomSuffix::Call);
             let index_suffix = chumsky::prelude::group((
@@ -229,8 +229,13 @@ impl ExprAst {
             .map(|(open, index, close)| {
                 ExprAtomSuffix::Index(open.span.merged_with(close.span), index)
             });
-            let any_suffix =
-                chumsky::prelude::choice((call_suffix, index_suffix));
+            let length_suffix =
+                symbol(TokenValue::Pound).map(ExprAtomSuffix::Length);
+            let any_suffix = chumsky::prelude::choice((
+                call_suffix,
+                index_suffix,
+                length_suffix,
+            ));
             let suffixed_expr =
                 expr_atom.foldl(any_suffix.repeated(), |base, suffix| {
                     match suffix {
@@ -249,15 +254,13 @@ impl ExprAst {
                                 Box::new(index),
                             ),
                         },
+                        ExprAtomSuffix::Length(op) => {
+                            ExprAst::unop(UnOpAst::Length, op, base)
+                        }
                     }
                 });
 
             let pratt_expr = suffixed_expr.pratt((
-                pratt::postfix(
-                    BIND_UNARY_POSTFIX,
-                    symbol(TokenValue::Pound),
-                    |s, o, _| ExprAst::unop(UnOpAst::Length, o, s),
-                ),
                 pratt::infix(
                     pratt::left(BIND_EXPONENTIATE),
                     symbol(TokenValue::StarStar),
@@ -266,22 +269,22 @@ impl ExprAst {
                 pratt::prefix(
                     BIND_UNARY_PREFIX,
                     symbol(TokenValue::And),
-                    |o, s, _| ExprAst::unop(UnOpAst::AddrOf, o, s),
+                    |op, arg, _| ExprAst::unop(UnOpAst::AddrOf, op, arg),
                 ),
                 pratt::prefix(
                     BIND_UNARY_PREFIX,
                     symbol(TokenValue::Tilde),
-                    |o, s, _| ExprAst::unop(UnOpAst::BitNot, o, s),
+                    |op, arg, _| ExprAst::unop(UnOpAst::BitNot, op, arg),
                 ),
                 pratt::prefix(
                     BIND_UNARY_PREFIX,
                     symbol(TokenValue::Bang),
-                    |o, s, _| ExprAst::unop(UnOpAst::LogNot, o, s),
+                    |op, arg, _| ExprAst::unop(UnOpAst::LogNot, op, arg),
                 ),
                 pratt::prefix(
                     BIND_UNARY_PREFIX,
                     symbol(TokenValue::Minus),
-                    |o, s, _| ExprAst::unop(UnOpAst::Neg, o, s),
+                    |op, arg, _| ExprAst::unop(UnOpAst::Neg, op, arg),
                 ),
                 pratt::infix(
                     pratt::left(BIND_MULTIPLICATIVE),
@@ -419,10 +422,10 @@ impl ExprAst {
         }
     }
 
-    fn unop(unop: UnOpAst, op: Token, subexpr: ExprAst) -> ExprAst {
+    fn unop(unop: UnOpAst, op: Token, arg: ExprAst) -> ExprAst {
         ExprAst {
-            span: op.span.merged_with(subexpr.span),
-            node: ExprAstNode::UnOp((op.span, unop), Box::new(subexpr)),
+            span: op.span.merged_with(arg.span),
+            node: ExprAstNode::UnOp((op.span, unop), Box::new(arg)),
         }
     }
 }

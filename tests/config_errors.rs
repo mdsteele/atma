@@ -1,4 +1,3 @@
-use atma;
 use atma::addr::AlignTryFromError;
 use atma::expr::ExprType;
 use atma::link::{ConfigAttr, ConfigEntryKind, ConfigError, LinkConfig};
