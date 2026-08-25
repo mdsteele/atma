@@ -23,6 +23,7 @@ const BIND_ADDITIVE: u16 = 8;
 const BIND_MULTIPLICATIVE: u16 = 9;
 const BIND_UNARY_PREFIX: u16 = 10;
 const BIND_EXPONENTIATE: u16 = 11;
+const BIND_UNARY_POSTFIX: u16 = 12;
 
 //===========================================================================//
 
@@ -33,6 +34,8 @@ pub enum UnOpAst {
     AddrOf,
     /// Bitwise NOT.
     BitNot,
+    /// Length of list.
+    Length,
     /// Logical NOT.
     LogNot,
     /// Negation.
@@ -46,6 +49,7 @@ impl UnOpAst {
         match self {
             UnOpAst::AddrOf => "take address of",
             UnOpAst::BitNot => "bitwise-NOT",
+            UnOpAst::Length => "get length of",
             UnOpAst::LogNot => "logical-NOT",
             UnOpAst::Neg => "negate",
         }
@@ -249,6 +253,11 @@ impl ExprAst {
                 });
 
             let pratt_expr = suffixed_expr.pratt((
+                pratt::postfix(
+                    BIND_UNARY_POSTFIX,
+                    symbol(TokenValue::Pound),
+                    |s, o, _| ExprAst::unop(UnOpAst::Length, o, s),
+                ),
                 pratt::infix(
                     pratt::left(BIND_EXPONENTIATE),
                     symbol(TokenValue::StarStar),

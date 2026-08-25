@@ -578,13 +578,13 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     fn do_task_list_literal(&mut self, item_spans: Vec<SrcSpan>) {
         let num_items = item_spans.len();
         let (item_types, static_values) = self.pop_types(num_items);
-        let item_type = if num_items == 0 {
-            ExprType::Bottom
-        } else {
-            let item_type = item_types[0].clone();
+        let mut item_type = ExprType::Bottom;
+        if num_items > 0 {
             let first_item_span = item_spans[0];
             for (ty, span) in item_types.into_iter().zip(item_spans) {
-                if ty != item_type {
+                if let Some(unified) = item_type.union(&ty) {
+                    item_type = unified;
+                } else {
                     let error = ExprTypeError::ListItemsMustAllBeSameType {
                         first_item_span,
                         first_item_type: item_type.clone(),
@@ -595,7 +595,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     break;
                 }
             }
-            item_type
         };
         let list_static = match static_values {
             Ok(item_values) => {

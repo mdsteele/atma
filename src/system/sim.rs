@@ -57,9 +57,9 @@ impl SimSystem {
         Self { selected_processor, processors }
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_nop_cpu() -> Self {
-        let bus = crate::bus::new_open_bus(32);
+    /// Creates a new simulated system with a single `NopProc` CPU.
+    pub fn with_nop_cpu() -> Self {
+        let bus = crate::bus::new_open_bus(Addr::BITS);
         let cpu = crate::proc::NopProc::new();
         Self::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))])
     }

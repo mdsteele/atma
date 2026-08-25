@@ -74,9 +74,6 @@ pub(crate) enum AdsInstruction {
         /// subexpression appeared.
         index_span: SrcSpan,
     },
-    /// Pops the top value from the value stack (which must be a list), then
-    /// pushes the length of that list (as an integer) onto the value stack.
-    ListLength,
     /// Adds the given offset to the ADS program counter.
     Jump(isize),
     /// Pops the specified number of values from the value stack (which must

@@ -170,10 +170,6 @@ impl<W: Write> AdsEnvironment<W> {
                 let item = lhs[usize::try_from(rhs).unwrap()].clone();
                 self.value_stack.push(item);
             }
-            AdsInstruction::ListLength => {
-                let len = self.value_stack.pop().unwrap().unwrap_list().len();
-                self.value_stack.push(ExprValue::Integer(BigInt::from(len)));
-            }
             &AdsInstruction::MakeList(num_items) => {
                 debug_assert!(self.value_stack.len() >= num_items);
                 let start = self.value_stack.len() - num_items;
@@ -353,7 +349,6 @@ impl<W: Write> AdsEnvironment<W> {
 mod tests {
     use super::{AdsEnvironment, SimSystem};
     use crate::error::StrSrcCache;
-    use std::io::Write;
     use std::rc::Rc;
 
     fn make_env<'a>(
@@ -366,127 +361,12 @@ mod tests {
         AdsEnvironment::create(&mut cache, path, source, sim, output).unwrap()
     }
 
-    fn run_to_completion<W: Write>(env: &mut AdsEnvironment<W>) {
-        loop {
-            match env.step() {
-                Ok(true) => return,
-                Ok(false) => {}
-                Err(err) => panic!("{err:?}"),
-            }
-        }
-    }
-
     #[test]
     fn empty_program_finishes_in_one_step() {
         let mut output = Vec::<u8>::new();
         let mut ads = make_env("", &mut output);
         assert!(matches!(ads.step(), Ok(true)));
         assert_eq!(String::from_utf8(output).unwrap(), "");
-    }
-
-    #[test]
-    fn print_statement() {
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env("print 42\n", &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "42\n");
-    }
-
-    #[test]
-    fn when_handler() {
-        let source = "\
-          when at $0001 {\n\
-            print 2\n\
-          }\n\
-          print 1\n\
-          step\n\
-          print 3\n";
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env(source, &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n");
-    }
-
-    #[test]
-    fn when_handler_with_local_variable() {
-        let source = "\
-          var x = 1
-          when at $0001 {\n\
-            var y = 2
-            print x\n\
-            print y\n\
-          }\n\
-          var z = 3\n\
-          step\n\
-          print z\n";
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env(source, &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n");
-    }
-
-    #[test]
-    fn run_until_statement() {
-        let source = "\
-          var x = 1
-          when at $0010 {\n\
-            set x = 2
-          }\n\
-          run until at $0020
-          print x\n";
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env(source, &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "2\n");
-    }
-
-    #[test]
-    fn nested_handlers() {
-        let source = "\
-          when at $0010 {\n\
-            print 1
-            var x = 2\n
-            when at $0020 {\n\
-              print x
-              set x = 3\n
-            }\n
-            run until at $0030
-            print x
-          }\n\
-          run until at $0040
-          print 4\n";
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env(source, &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "1\n2\n3\n4\n");
-    }
-
-    #[test]
-    fn get_and_set_pc() {
-        // Unlike user-defined variables, "PC" is case-insensitive.
-        let source = "\
-          run until at $0010\n\
-          print pc\n\
-          set Pc = $0020\n\
-          print pC\n";
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env(source, &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "16\n32\n");
-    }
-
-    #[test]
-    fn mid_instruction_handler() {
-        let source = "\
-          when read $0000 {\n\
-            print pc  ; still mid-instruction, so PC has not advanced yet\n\
-          }\n\
-          step        ; read and execute the NOP at $0000\n\
-          print pc    ; now PC has advanced\n";
-        let mut output = Vec::<u8>::new();
-        let mut ads = make_env(source, &mut output);
-        run_to_completion(&mut ads);
-        assert_eq!(String::from_utf8(output).unwrap(), "0\n1\n");
     }
 }
 

@@ -7,7 +7,7 @@ use crate::bus::WatchKind;
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError,
-    ExprValue,
+    ExprUnOp, ExprValue,
 };
 use crate::parse::{
     AdsStmtAst, BreakpointAst, DeclarationKind, ExprAst, IdentifierAst,
@@ -209,7 +209,12 @@ impl<'a> AdsCompiler<'a> {
         // Add instructions to check index against sequence length:
         out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
         out.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_index));
-        out.push(AdsInstruction::ListLength);
+        out.push(AdsInstruction::UnOp {
+            context: self.env.current_src_context(),
+            unop: ExprUnOp::Length,
+            op_span: SrcSpan::INTERNAL,
+            arg_span: SrcSpan::INTERNAL,
+        });
         out.push(AdsInstruction::BinOp {
             context: self.env.current_src_context(),
             binop: ExprBinOp::CmpLt,
