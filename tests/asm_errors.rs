@@ -240,6 +240,30 @@ fn multiple_macro_placeholders() {
 }
 
 #[test]
+fn relative_address_type_error() {
+    let source = r#"\
+    .SECTION "TEST"
+        .a16r8 "elsewhere", %false
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::DirectiveExprTypeError {
+            directive: ".A16R8",
+            component: "destination address",
+            expr_type: ExprType::String,
+            valid_types,
+            ..
+        },
+        AsmError::DirectiveExprTypeError {
+            directive: ".A16R8",
+            component: "base address",
+            expr_type: ExprType::Boolean,
+            ..
+        },
+    ] if valid_types == &[ExprType::Integer, ExprType::Label]);
+}
+
+#[test]
 fn set_variable_immutable() {
     let source = r#"\
     .LET foo = 0

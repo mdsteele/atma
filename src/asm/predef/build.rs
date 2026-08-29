@@ -344,11 +344,11 @@ impl BuiltinBuilder {
             }
             AddrMode::Relative8 => vec![
                 self.pool.constant_u8(opcode_byte),
-                self.pool.relative8_addr(PLACEHOLDER_ADDR),
+                self.pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR),
             ],
             AddrMode::Relative16 => vec![
                 self.pool.constant_u8(opcode_byte),
-                self.pool.relative16_addr(PLACEHOLDER_ADDR),
+                self.pool.placeholder_addr16_rel16le(PLACEHOLDER_ADDR),
             ],
             AddrMode::SuperFxLink => {
                 super_fx_link(&mut self.pool, PLACEHOLDER_IMM)

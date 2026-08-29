@@ -21,6 +21,7 @@ pub use error::{
 };
 pub use func::{ExprFunc, ExprFuncEvalError};
 pub use label::ExprLabel;
+pub(crate) use label::SubtractLabelsError;
 pub(crate) use unop::ExprUnOp;
 pub use value::{ExprType, ExprValue};
 

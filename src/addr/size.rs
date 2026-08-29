@@ -114,6 +114,12 @@ impl TryFrom<&BigInt> for Size {
     }
 }
 
+impl From<Size> for i128 {
+    fn from(value: Size) -> i128 {
+        i128::from(value.0)
+    }
+}
+
 impl From<Size> for u128 {
     fn from(value: Size) -> u128 {
         u128::from(value.0)

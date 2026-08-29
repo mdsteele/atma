@@ -177,6 +177,12 @@ impl From<Addr> for u64 {
     }
 }
 
+impl From<Addr> for i128 {
+    fn from(value: Addr) -> i128 {
+        i128::from(value.0)
+    }
+}
+
 impl From<Addr> for u128 {
     fn from(value: Addr) -> u128 {
         u128::from(value.0)

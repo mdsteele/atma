@@ -2,13 +2,14 @@ use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::positioned::PositionedBinary;
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::Offset;
+use crate::addr::{Addr, Offset};
 use crate::error::Errs;
 use crate::expr::ExprValue;
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjPatchData,
-    ObjPatchIntType, ObjSrcLoc,
+    ObjPatchIntType, ObjPatchRelType, ObjSrcLoc,
 };
+use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -217,34 +218,112 @@ impl<'a> FilePatcher<'a> {
         {
             match patch.data {
                 ObjPatchData::Fill(size) => {
-                    let metadata = &self.context.chunk_metadata[chunk_index];
-                    write_fill_patch(start, size, metadata.fill, data);
-                    Ok(())
+                    self.apply_fill_patch(chunk_index, size, start, data)
                 }
                 ObjPatchData::Integer(int_type, expr) => {
-                    match self.eval_patch_expr(expr)? {
-                        ExprValue::Integer(bigint) => {
-                            match int_type.value_in_range(&bigint) {
-                                Ok(int) => {
-                                    write_int_patch(
-                                        int_type, start, int, data,
-                                    );
-                                    Ok(())
-                                }
-                                Err(_range) => Err(Errs::one(
-                                    LinkError::PatchValueOutOfRange {
-                                        int_type,
-                                        value: bigint,
-                                    },
-                                )),
-                            }
-                        }
-                        _ => Err(Errs::one(LinkError::PatchValueWrongType)),
-                    }
+                    self.apply_int_patch(int_type, expr, start, data)
                 }
+                ObjPatchData::Relative(rel_type, lhs, rhs) => self
+                    .apply_rel_patch(
+                        chunk_index,
+                        rel_type,
+                        lhs,
+                        rhs,
+                        start,
+                        data,
+                    ),
             }
         } else {
             Err(Errs::one(LinkError::PatchOffsetOutOfRange))
+        }
+    }
+
+    fn apply_fill_patch(
+        &self,
+        chunk_index: usize,
+        size: usize,
+        start: usize,
+        data: &mut [u8],
+    ) -> LinkResult<()> {
+        let metadata = &self.context.chunk_metadata[chunk_index];
+        write_fill_patch(metadata.fill, size, start, data);
+        Ok(())
+    }
+
+    fn apply_int_patch(
+        &self,
+        int_type: ObjPatchIntType,
+        expr: ObjExpr,
+        start: usize,
+        data: &mut [u8],
+    ) -> LinkResult<()> {
+        match self.eval_patch_expr(expr)? {
+            ExprValue::Integer(bigint) => {
+                match int_type.value_in_range(&bigint) {
+                    Ok(int) => {
+                        int_type.write_value_at(int, start, data);
+                        Ok(())
+                    }
+                    Err(_range) => {
+                        Err(Errs::one(LinkError::PatchValueOutOfRange {
+                            int_type,
+                            value: bigint,
+                        }))
+                    }
+                }
+            }
+            _ => Err(Errs::one(LinkError::PatchValueWrongType)),
+        }
+    }
+
+    fn apply_rel_patch(
+        &self,
+        chunk_index: usize,
+        rel_type: ObjPatchRelType,
+        lhs_expr: ObjExpr,
+        rhs_expr: ObjExpr,
+        start: usize,
+        data: &mut [u8],
+    ) -> LinkResult<()> {
+        let mut errs = Errs::<LinkError>::new();
+        let lhs = errs.ok(self.eval_rel_expr(chunk_index, lhs_expr));
+        let rhs = errs.ok(self.eval_rel_expr(chunk_index, rhs_expr));
+        if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
+            if lhs.space != rhs.space {
+                errs.push(LinkError::Misc);
+            } else {
+                let delta =
+                    BigInt::from(lhs.address) - BigInt::from(rhs.address);
+                match rel_type.delta_value_in_range(&delta) {
+                    Ok(delta) => rel_type.write_delta_at(delta, start, data),
+                    Err(range) => {
+                        errs.push(LinkError::RelativeAddressOutOfRange {
+                            delta,
+                            range,
+                        });
+                    }
+                }
+            }
+        }
+        errs.result()
+    }
+
+    fn eval_rel_expr(
+        &self,
+        chunk_index: usize,
+        expr: ObjExpr,
+    ) -> LinkResult<AbsoluteLabel> {
+        match self.eval_patch_expr(expr)? {
+            ExprValue::Label(label) => self.context.resolve_label(&label),
+            ExprValue::Integer(address) => {
+                let metadata = &self.context.chunk_metadata[chunk_index];
+                Ok(AbsoluteLabel {
+                    space: metadata.start.space.clone(),
+                    // TODO: validate address against addrspace bits
+                    address: Addr::wrap_bigint(&address),
+                })
+            }
+            _ => Err(Errs::one(LinkError::PatchValueWrongType)),
         }
     }
 
@@ -257,45 +336,13 @@ impl<'a> FilePatcher<'a> {
 //===========================================================================//
 
 fn write_fill_patch(
-    offset: usize,
-    size: usize,
     fill_byte: u8,
+    size: usize,
+    offset: usize,
     data: &mut [u8],
 ) {
     debug_assert!(offset + size <= data.len());
     data[offset..(offset + size)].fill(fill_byte);
-}
-
-fn write_int_patch(
-    int_type: ObjPatchIntType,
-    offset: usize,
-    value: i64,
-    data: &mut [u8],
-) {
-    debug_assert!(offset + int_type.num_bytes() <= data.len());
-    match int_type {
-        ObjPatchIntType::U8 => {
-            data[offset] = value as u8;
-        }
-        ObjPatchIntType::U16be => {
-            data[offset] = (value >> 8) as u8;
-            data[offset + 1] = value as u8;
-        }
-        ObjPatchIntType::U16le => {
-            data[offset] = value as u8;
-            data[offset + 1] = (value >> 8) as u8;
-        }
-        ObjPatchIntType::U24be => {
-            data[offset] = (value >> 16) as u8;
-            data[offset + 1] = (value >> 8) as u8;
-            data[offset + 2] = value as u8;
-        }
-        ObjPatchIntType::U24le => {
-            data[offset] = value as u8;
-            data[offset + 1] = (value >> 8) as u8;
-            data[offset + 2] = (value >> 16) as u8;
-        }
-    }
 }
 
 //===========================================================================//

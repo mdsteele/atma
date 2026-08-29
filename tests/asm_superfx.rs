@@ -6,7 +6,7 @@ fn assert_asm(source: &str, binary: &[u8]) {
     let arch = "SuperFX";
     let asm_path = Rc::<str>::from("input");
     let asm_source = Rc::<str>::from(format!(
-        ".SECTION \"TEST\", arch=\"{arch}\"\n{source}\n.END\n"
+        ".SECTION \"TEST\", arch=\"{arch}\", start=0\n{source}\n.END\n"
     ));
     let mut cache = atma::error::StrSrcCache::new();
     cache.add_source(asm_path.clone(), asm_source.clone());
@@ -80,6 +80,21 @@ fn assemble_and_reg_instructions() {
     assert_asm("AND R13", &[0x7d]);
     assert_asm("AND R14", &[0x7e]);
     assert_asm("AND R15", &[0x7f]);
+}
+
+#[test]
+fn assemble_branch_instructions() {
+    assert_asm("BCC $0012", &[0x0c, 0x10]);
+    assert_asm("BCS $0010", &[0x0d, 0x0e]);
+    assert_asm("BEQ $ff82", &[0x09, 0x80]);
+    assert_asm("BGE $0012", &[0x06, 0x10]);
+    assert_asm("BLT $0012", &[0x07, 0x10]);
+    assert_asm("BMI $fff2", &[0x0b, 0xf0]);
+    assert_asm("BNE $ff83", &[0x08, 0x81]);
+    assert_asm("BPL $0081", &[0x0a, 0x7f]);
+    assert_asm("BRA $0012", &[0x05, 0x10]);
+    assert_asm("BVC $0000", &[0x0e, 0xfe]);
+    assert_asm("BVS $ffff", &[0x0f, 0xfd]);
 }
 
 #[test]

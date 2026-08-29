@@ -6,7 +6,7 @@ fn assert_asm(source: &str, binary: &[u8]) {
     let arch = "SPC700";
     let asm_path = Rc::<str>::from("input");
     let asm_source = Rc::<str>::from(format!(
-        ".SECTION \"TEST\", arch=\"{arch}\"\n{source}\n.END\n"
+        ".SECTION \"TEST\", arch=\"{arch}\", start=0\n{source}\n.END\n"
     ));
     let mut cache = atma::error::StrSrcCache::new();
     cache.add_source(asm_path.clone(), asm_source.clone());
@@ -39,6 +39,19 @@ fn assert_asm(source: &str, binary: &[u8]) {
 }
 
 //===========================================================================//
+
+#[test]
+fn assemble_branch_instructions() {
+    assert_asm("BCC $0042", &[0x90, 0x40]);
+    assert_asm("BCS $0081", &[0xb0, 0x7f]);
+    assert_asm("BNE $ff82", &[0xd0, 0x80]);
+    assert_asm("BEQ $0002", &[0xf0, 0x00]);
+    assert_asm("BPL $0000", &[0x10, 0xfe]);
+    assert_asm("BMI $ffff", &[0x30, 0xfd]);
+    assert_asm("BRA $0003", &[0x2f, 0x01]);
+    assert_asm("BVC $0004", &[0x50, 0x02]);
+    assert_asm("BVS $ffc2", &[0x70, 0xc0]);
+}
 
 #[test]
 fn assemble_call_instructions() {

@@ -57,6 +57,8 @@ pub enum AsmStmtAst {
     Invoke(AsmInvokeAst),
     /// A label.
     Label(AsmLabelAst),
+    /// A relative address directive (e.g. `.A16R8` or `.A16R16LE`).
+    RelAddr(AsmRelAddrAst),
     /// A `.RESERVE` directive.
     Reserve(AsmReserveAst),
     /// A local scope.
@@ -162,11 +164,12 @@ impl AsmStmtAst {
                 AsmDeclareAst::parser().map(AsmStmtAst::Declare),
                 def_macro_dir,
                 import_dir,
+                AsmIntDataAst::parser().map(AsmStmtAst::IntData),
+                AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
+                AsmRelAddrAst::parser().map(AsmStmtAst::RelAddr),
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
                 section_dir,
                 AsmSetAst::parser().map(AsmStmtAst::Set),
-                AsmIntDataAst::parser().map(AsmStmtAst::IntData),
-                AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
                 AsmUseAst::parser().map(AsmStmtAst::Use),
                 AsmUtf8DataAst::parser().map(AsmStmtAst::Utf8Data),
             ))
@@ -187,8 +190,7 @@ pub struct AsmAssertAst {
 }
 
 impl AsmAssertAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmAssertAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".ASSERT")
             .ignore_then(ExprAst::parser())
             .then(
@@ -197,7 +199,7 @@ impl AsmAssertAst {
                     .or_not(),
             )
             .then_ignore(linebreak())
-            .map(|(condition, message)| AsmAssertAst { condition, message })
+            .map(|(condition, message)| Self { condition, message })
     }
 }
 
@@ -213,15 +215,11 @@ pub struct AsmBinaryAst {
 }
 
 impl AsmBinaryAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmBinaryAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".BINARY")
             .then(ExprAst::parser())
             .then_ignore(linebreak())
-            .map(|(directive_span, path)| AsmBinaryAst {
-                directive_span,
-                path,
-            })
+            .map(|(directive_span, path)| Self { directive_span, path })
     }
 }
 
@@ -250,10 +248,9 @@ pub enum AsmDataTypeAst {
 }
 
 impl AsmDataTypeAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmDataTypeAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         AsmIntTypeAst::parser()
-            .map(|(span, int_type)| AsmDataTypeAst::Int(span, int_type))
+            .map(|(span, int_type)| Self::Int(span, int_type))
     }
 }
 
@@ -272,8 +269,7 @@ pub struct AsmDeclareAst {
 }
 
 impl AsmDeclareAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmDeclareAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         // TODO: Allow declaring a tuple of identifiers/wildcards.
         chumsky::prelude::choice((
             directive(".LET").to(DeclarationKind::Let),
@@ -283,7 +279,7 @@ impl AsmDeclareAst {
         .then_ignore(symbol(TokenValue::Equals))
         .then(ExprAst::parser())
         .then_ignore(linebreak())
-        .map(|((kind, id), expression)| AsmDeclareAst {
+        .map(|((kind, id), expression)| Self {
             kind,
             id,
             expression,
@@ -318,8 +314,7 @@ pub struct AsmIntDataAst {
 }
 
 impl AsmIntDataAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmIntDataAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         AsmIntTypeAst::parser()
             .then(
                 ExprAst::parser()
@@ -328,7 +323,7 @@ impl AsmIntDataAst {
                     .collect::<Vec<_>>(),
             )
             .then_ignore(linebreak())
-            .map(|((directive_span, int_type), expressions)| AsmIntDataAst {
+            .map(|((directive_span, int_type), expressions)| Self {
                 directive_span,
                 int_type,
                 expressions,
@@ -341,6 +336,22 @@ impl AsmIntDataAst {
 /// Types of integer data directives in assembly code.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum AsmIntTypeAst {
+    /// An 8-bit signed integer.
+    S8,
+    /// A 16-bit signed integer, using the current architecture's native
+    /// endianness.
+    S16,
+    /// A 16-bit signed big-endian integer.
+    S16be,
+    /// A 16-bit signed little-endian integer.
+    S16le,
+    /// A 24-bit signed integer, using the current architecture's native
+    /// endianness.
+    S24,
+    /// A 24-bit signed big-endian integer.
+    S24be,
+    /// A 24-bit signed little-endian integer.
+    S24le,
     /// An 8-bit unsigned integer.
     U8,
     /// A 16-bit unsigned integer, using the current architecture's native
@@ -360,33 +371,64 @@ pub enum AsmIntTypeAst {
 }
 
 impl AsmIntTypeAst {
-    const ALL: &[AsmIntTypeAst] = &[
-        AsmIntTypeAst::U8,
-        AsmIntTypeAst::U16,
-        AsmIntTypeAst::U16be,
-        AsmIntTypeAst::U16le,
-        AsmIntTypeAst::U24,
-        AsmIntTypeAst::U24be,
-        AsmIntTypeAst::U24le,
+    const ALL: &[Self] = &[
+        Self::S8,
+        Self::S16,
+        Self::S16be,
+        Self::S16le,
+        Self::S24,
+        Self::S24be,
+        Self::S24le,
+        Self::U8,
+        Self::U16,
+        Self::U16be,
+        Self::U16le,
+        Self::U24,
+        Self::U24be,
+        Self::U24le,
     ];
+
+    pub(crate) fn num_bytes(self) -> u64 {
+        match self {
+            Self::S8 | Self::U8 => 1,
+            Self::S16
+            | Self::S16be
+            | Self::S16le
+            | Self::U16
+            | Self::U16be
+            | Self::U16le => 2,
+            Self::S24
+            | Self::S24be
+            | Self::S24le
+            | Self::U24
+            | Self::U24be
+            | Self::U24le => 3,
+        }
+    }
 
     pub(crate) fn directive(self) -> &'static str {
         match self {
-            AsmIntTypeAst::U8 => ".U8",
-            AsmIntTypeAst::U16 => ".U16",
-            AsmIntTypeAst::U16be => ".U16BE",
-            AsmIntTypeAst::U16le => ".U16LE",
-            AsmIntTypeAst::U24 => ".U24",
-            AsmIntTypeAst::U24be => ".U24BE",
-            AsmIntTypeAst::U24le => ".U24LE",
+            Self::S8 => ".S8",
+            Self::S16 => ".S16",
+            Self::S16be => ".S16BE",
+            Self::S16le => ".S16LE",
+            Self::S24 => ".S24",
+            Self::S24be => ".S24BE",
+            Self::S24le => ".S24LE",
+            Self::U8 => ".U8",
+            Self::U16 => ".U16",
+            Self::U16be => ".U16BE",
+            Self::U16le => ".U16LE",
+            Self::U24 => ".U24",
+            Self::U24be => ".U24BE",
+            Self::U24le => ".U24LE",
         }
     }
 
     fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], (SrcSpan, AsmIntTypeAst), Extra<'a>> + Clone
-    {
+    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
         chumsky::prelude::choice(
-            AsmIntTypeAst::ALL
+            Self::ALL
                 .iter()
                 .copied()
                 .map(|int_type| {
@@ -410,15 +452,14 @@ pub struct AsmInvokeAst {
 }
 
 impl AsmInvokeAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmInvokeAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         let macro_args = AsmMacroArgAst::parser()
             .separated_by(symbol(TokenValue::Comma))
             .collect::<Vec<_>>();
         IdentifierAst::parser()
             .then(macro_args)
             .then_ignore(linebreak())
-            .map(|(id, args)| AsmInvokeAst { id, args })
+            .map(|(id, args)| Self { id, args })
     }
 }
 
@@ -434,13 +475,12 @@ pub struct AsmLabelAst {
 }
 
 impl AsmLabelAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmLabelAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".EXPORT")
             .or_not()
             .then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::Colon))
-            .map(|(export, identifier)| AsmLabelAst {
+            .map(|(export, identifier)| Self {
                 exported: export.is_some(),
                 identifier,
             })
@@ -459,8 +499,7 @@ pub struct AsmMacroArgAst {
 }
 
 impl AsmMacroArgAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmMacroArgAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         let simple = chumsky::prelude::any().filter(|token: &Token| {
             !matches!(
                 token.value,
@@ -520,8 +559,77 @@ impl AsmMacroArgAst {
                     .unwrap()
                     .span
                     .merged_with(tokens.last().unwrap().span);
-                AsmMacroArgAst { span, tokens }
+                Self { span, tokens }
             })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a relative address directive in an assembly
+/// file.
+#[derive(Clone, Debug)]
+pub struct AsmRelAddrAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The type of relative address.
+    pub rel_type: AsmRelTypeAst,
+    /// The expression for the destination address.
+    pub dest_expr: ExprAst,
+    /// The expression for the base address.
+    pub base_expr: ExprAst,
+}
+
+impl AsmRelAddrAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        AsmRelTypeAst::parser()
+            .then(ExprAst::parser())
+            .then_ignore(symbol(TokenValue::Comma))
+            .then(ExprAst::parser())
+            .then_ignore(linebreak())
+            .map(|(((directive_span, rel_type), dest_expr), base_expr)| Self {
+                directive_span,
+                rel_type,
+                dest_expr,
+                base_expr,
+            })
+    }
+}
+
+//===========================================================================//
+
+/// Types of integer data directives in assembly code.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AsmRelTypeAst {
+    /// A 8-bit signed relative address within a 16-bit address space.
+    Addr16Rel8,
+    /// A 16-bit signed little-endian relative address within a 16-bit address
+    /// space.
+    Addr16Rel16le,
+}
+
+impl AsmRelTypeAst {
+    const ALL: &[Self] = &[Self::Addr16Rel8, Self::Addr16Rel16le];
+
+    pub(crate) fn directive(self) -> &'static str {
+        match self {
+            Self::Addr16Rel8 => ".A16R8",
+            Self::Addr16Rel16le => ".A16R16LE",
+        }
+    }
+
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+        chumsky::prelude::choice(
+            Self::ALL
+                .iter()
+                .copied()
+                .map(|int_type| {
+                    directive(int_type.directive())
+                        .map(move |span| (span, int_type))
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
@@ -540,8 +648,7 @@ pub struct AsmReserveAst {
 }
 
 impl AsmReserveAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmReserveAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".RESERVE")
             .then(
                 AsmDataTypeAst::parser().then(
@@ -551,7 +658,7 @@ impl AsmReserveAst {
                 ),
             )
             .then_ignore(linebreak())
-            .map(|(directive_span, (data_type, count))| AsmReserveAst {
+            .map(|(directive_span, (data_type, count))| Self {
                 directive_span,
                 data_type,
                 count,
@@ -597,15 +704,14 @@ pub struct AsmSetAst {
 }
 
 impl AsmSetAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmSetAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         // TODO: Support other kinds of lvalues
         directive(".SET")
             .ignore_then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::Equals))
             .then(ExprAst::parser())
             .then_ignore(linebreak())
-            .map(|(id, expression)| AsmSetAst { id, expression })
+            .map(|(id, expression)| Self { id, expression })
     }
 }
 
@@ -621,12 +727,11 @@ pub struct AsmUseAst {
 }
 
 impl AsmUseAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmUseAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".USE")
             .then(ExprAst::parser())
             .then_ignore(linebreak())
-            .map(|(directive_span, path)| AsmUseAst { directive_span, path })
+            .map(|(directive_span, path)| Self { directive_span, path })
     }
 }
 
@@ -642,8 +747,7 @@ pub struct AsmUtf8DataAst {
 }
 
 impl AsmUtf8DataAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AsmUtf8DataAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".UTF8")
             .then(
                 ExprAst::parser()
@@ -652,7 +756,7 @@ impl AsmUtf8DataAst {
                     .collect::<Vec<_>>(),
             )
             .then_ignore(linebreak())
-            .map(|(directive_span, expressions)| AsmUtf8DataAst {
+            .map(|(directive_span, expressions)| Self {
                 directive_span,
                 expressions,
             })

@@ -1,6 +1,6 @@
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
-use crate::expr::{ExprLabel, ExprType, ExprValue};
+use crate::expr::{ExprType, ExprValue, SubtractLabelsError};
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use crate::parse::BinOpAst;
 use num_bigint::{BigInt, BigUint, Sign};
@@ -109,6 +109,17 @@ impl ExprBinOpEvalError {
                     rhs_span,
                 }
             }
+        }
+    }
+}
+
+impl From<SubtractLabelsError> for ExprBinOpEvalError {
+    fn from(error: SubtractLabelsError) -> Self {
+        match error {
+            SubtractLabelsError::DifferentAddrspaces(lhs_space, rhs_space) => {
+                Self::SubtractLabelsInDifferentAddrspaces(lhs_space, rhs_space)
+            }
+            SubtractLabelsError::Unresolved => Self::SubtractLabelsUnresolved,
         }
     }
 }
@@ -416,7 +427,7 @@ impl ExprBinOp {
                     Ok(ExprValue::Label(label - int))
                 }
                 (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
-                    Ok(ExprValue::Integer(subtract_labels(&lhs, &rhs)?))
+                    Ok(ExprValue::Integer(lhs.try_subtract(&rhs)?))
                 }
                 _ => Err(ExprBinOpEvalError::InvalidType),
             },
@@ -474,7 +485,7 @@ fn compare_values(
         (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => Ok(lhs.cmp(rhs)),
         (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => Ok(lhs.cmp(rhs)),
         (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
-            match subtract_labels(lhs, rhs)?.sign() {
+            match lhs.try_subtract(rhs)?.sign() {
                 num_bigint::Sign::Minus => Ok(Ordering::Less),
                 num_bigint::Sign::NoSign => Ok(Ordering::Equal),
                 num_bigint::Sign::Plus => Ok(Ordering::Greater),
@@ -503,52 +514,6 @@ fn compare_values(
             Ok(Ordering::Equal)
         }
         _ => Err(ExprBinOpEvalError::InvalidType),
-    }
-}
-
-fn subtract_labels(
-    lhs: &ExprLabel,
-    rhs: &ExprLabel,
-) -> Result<BigInt, ExprBinOpEvalError> {
-    match (lhs, rhs) {
-        (
-            ExprLabel::AddrAbsolute { space: lhs_space, address: lhs_addr },
-            ExprLabel::AddrAbsolute { space: rhs_space, address: rhs_addr },
-        ) => {
-            if lhs_space != rhs_space {
-                Err(ExprBinOpEvalError::SubtractLabelsInDifferentAddrspaces(
-                    lhs_space.clone(),
-                    rhs_space.clone(),
-                ))
-            } else {
-                Ok(lhs_addr - rhs_addr)
-            }
-        }
-        (
-            ExprLabel::ChunkAbsolute {
-                chunk_index: lhs_index,
-                address: lhs_addr,
-            },
-            ExprLabel::ChunkAbsolute {
-                chunk_index: rhs_index,
-                address: rhs_addr,
-            },
-        ) if lhs_index == rhs_index => Ok(lhs_addr - rhs_addr),
-        (
-            ExprLabel::ChunkRelative {
-                chunk_index: lhs_index,
-                offset: lhs_offset,
-            },
-            ExprLabel::ChunkRelative {
-                chunk_index: rhs_index,
-                offset: rhs_offset,
-            },
-        ) if lhs_index == rhs_index => Ok(lhs_offset - rhs_offset),
-        (
-            ExprLabel::SymbolRelative { name: lhs_name, offset: lhs_offset },
-            ExprLabel::SymbolRelative { name: rhs_name, offset: rhs_offset },
-        ) if lhs_name == rhs_name => Ok(lhs_offset - rhs_offset),
-        _ => Err(ExprBinOpEvalError::SubtractLabelsUnresolved),
     }
 }
 

@@ -18,7 +18,7 @@ pub use expr::ObjExpr;
 pub(crate) use expr::ObjExprOp;
 pub use file::ObjFile;
 pub use import::ObjImport;
-pub use patch::{ObjPatch, ObjPatchData, ObjPatchIntType};
+pub use patch::{ObjPatch, ObjPatchData, ObjPatchIntType, ObjPatchRelType};
 pub use symbol::ObjSymbol;
 
 #[cfg(test)]

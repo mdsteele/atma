@@ -3,8 +3,8 @@ use crate::error::{Errs, SrcSpan};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmStmtAst, ExprAst, ExprAstNode, IdentifierAst,
-    IdentifierKind, ParseResult, Token, TokenValue,
+    AsmMacroArgAst, AsmRelAddrAst, AsmStmtAst, ExprAst, ExprAstNode,
+    IdentifierAst, IdentifierKind, ParseResult, Token, TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -160,6 +160,10 @@ impl<'a> MacroBuilder<'a> {
             }
             AsmStmtAst::Label(label) => {
                 errs.also(self.scan_identifier(&label.identifier));
+            }
+            AsmStmtAst::RelAddr(rel_addr) => {
+                errs.also(self.scan_expression(&rel_addr.dest_expr));
+                errs.also(self.scan_expression(&rel_addr.base_expr));
             }
             other => todo!("scan_statement {other:?}"), // TODO
         }
@@ -572,6 +576,14 @@ impl MacroExpansion {
                 exported: label.exported,
                 identifier: self.expand_identifier(&label.identifier),
             }),
+            AsmStmtAst::RelAddr(rel_addr) => {
+                AsmStmtAst::RelAddr(AsmRelAddrAst {
+                    directive_span: rel_addr.directive_span,
+                    rel_type: rel_addr.rel_type,
+                    dest_expr: self.expand_expression(&rel_addr.dest_expr),
+                    base_expr: self.expand_expression(&rel_addr.base_expr),
+                })
+            }
             other => todo!("macro expand {other:?}"), // TODO
         }
     }

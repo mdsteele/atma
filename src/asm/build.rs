@@ -4,17 +4,20 @@ use super::macros::MacroTable;
 use super::predef::make_predefined_arch_macros;
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
-use crate::expr::{ExprStatic, ExprType, ExprTypeError, ExprUnOp, ExprValue};
+use crate::expr::{
+    ExprLabel, ExprStatic, ExprType, ExprTypeError, ExprUnOp, ExprValue,
+};
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch,
-    ObjPatchData, ObjPatchIntType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
-    ObjSymbol,
+    ObjPatchData, ObjPatchIntType, ObjPatchRelType, ObjSrcContext, ObjSrcLoc,
+    ObjSrcParent, ObjSymbol,
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
     AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
-    AsmModuleAst, AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmSetAst,
-    AsmStmtAst, AsmUseAst, AsmUtf8DataAst, ExprAst, IdentifierAst,
+    AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmReserveAst, AsmScopeAst,
+    AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst, ExprAst,
+    IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -106,6 +109,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::IntData(_) => Ok(()),
             AsmStmtAst::Invoke(_) => Ok(()),
             AsmStmtAst::Label(label) => self.predeclare_label(label),
+            AsmStmtAst::RelAddr(_) => Ok(()),
             AsmStmtAst::Reserve(_) => Ok(()),
             AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
             AsmStmtAst::Section(section) => self.predeclare_section(section),
@@ -174,8 +178,9 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::IntData(data) => self.expand_int_data(data),
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
             AsmStmtAst::Label(label) => self.expand_label(label),
-            AsmStmtAst::Scope(scope) => self.expand_scope(scope),
+            AsmStmtAst::RelAddr(addr) => self.expand_rel_addr(addr),
             AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
+            AsmStmtAst::Scope(scope) => self.expand_scope(scope),
             AsmStmtAst::Section(section) => self.expand_section(section),
             AsmStmtAst::Set(set) => self.expand_assignment(set),
             AsmStmtAst::Use(file) => self.expand_use_file(file),
@@ -391,7 +396,7 @@ impl<'a> Assembler<'a> {
         let full_name =
             self.env.current_scope().prefixed(&label_ast.identifier.name);
         let loc = self.env.make_loc(label_ast.identifier.span);
-        let Some(chunk_env) = self.env.current_chunk() else {
+        let Some(chunk_env) = self.env.current_chunk_mut() else {
             return Err(Errs::one(AsmError::DirectiveNotInSection {
                 directive: "label",
                 loc,
@@ -463,7 +468,7 @@ impl<'a> Assembler<'a> {
             1
         };
         let type_size = self.data_type_size(reserve_ast.data_type);
-        if let Some(chunk_env) = self.env.current_chunk() {
+        if let Some(chunk_env) = self.env.current_chunk_mut() {
             // TODO: error on overflow
             chunk_env.add_padding((type_size * count) as usize);
         }
@@ -531,7 +536,7 @@ impl<'a> Assembler<'a> {
 
         let chunk_index = self.next_chunk_index;
         self.next_chunk_index += 1;
-        self.env.begin_chunk(chunk_index);
+        self.env.begin_chunk(chunk_index, start);
         if let Some(arch) = arch {
             self.env.set_current_arch(arch);
         }
@@ -620,7 +625,7 @@ impl<'a> Assembler<'a> {
         let path_span = data_ast.path.span;
         if let Some(path) =
             errs.ok(self.typecheck_static_path_expr(".BINARY", data_ast.path))
-            && let Some(chunk_env) = self.env.current_chunk()
+            && let Some(chunk_env) = self.env.current_chunk_mut()
         {
             let chunk_data = chunk_env.data_mut();
             match self.cache.fetch_and_write_data(&path, chunk_data) {
@@ -659,14 +664,14 @@ impl<'a> Assembler<'a> {
                         });
                         return errs.result();
                     };
-                    if let Some(chunk_env) = self.env.current_chunk() {
+                    if let Some(chunk_env) = self.env.current_chunk_mut() {
                         chunk_env
                             .data_mut()
                             .extend_from_slice(chr.to_string().as_bytes());
                     }
                 }
                 (_, ExprType::String, Ok(value)) => {
-                    if let Some(chunk_env) = self.env.current_chunk() {
+                    if let Some(chunk_env) = self.env.current_chunk_mut() {
                         chunk_env.data_mut().extend_from_slice(
                             value.unwrap_str_ref().as_bytes(),
                         );
@@ -769,45 +774,96 @@ impl<'a> Assembler<'a> {
                     0
                 }
             };
-            if let Some(chunk_env) = self.env.current_chunk() {
-                let data = chunk_env.data_mut();
-                match int_type {
-                    ObjPatchIntType::U8 => {
-                        data.push(static_value as u8);
-                    }
-                    ObjPatchIntType::U16be => {
-                        data.push((static_value >> 8) as u8);
-                        data.push(static_value as u8);
-                    }
-                    ObjPatchIntType::U16le => {
-                        data.push(static_value as u8);
-                        data.push((static_value >> 8) as u8);
-                    }
-                    ObjPatchIntType::U24be => {
-                        data.push((static_value >> 16) as u8);
-                        data.push((static_value >> 8) as u8);
-                        data.push(static_value as u8);
-                    }
-                    ObjPatchIntType::U24le => {
-                        data.push(static_value as u8);
-                        data.push((static_value >> 8) as u8);
-                        data.push((static_value >> 16) as u8);
-                    }
-                }
+            if let Some(chunk_env) = self.env.current_chunk_mut() {
+                int_type.append_value(static_value, chunk_env.data_mut());
             }
         }
         errs.result()
     }
 
+    fn expand_rel_addr(&mut self, rel_addr: AsmRelAddrAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let directive = rel_addr.rel_type.directive();
+        if self.env.current_chunk().is_none() {
+            errs.push(AsmError::DirectiveNotInSection {
+                directive,
+                loc: self.env.make_loc(rel_addr.directive_span),
+            });
+        }
+        let rel_type = self.rel_patch_type(rel_addr.rel_type);
+        let (dest_expr, dest_static) = errs.with(self.typecheck_rel_expr(
+            directive,
+            "destination address",
+            rel_addr.dest_expr,
+        ));
+        let (base_expr, base_static) = errs.with(self.typecheck_rel_expr(
+            directive,
+            "base address",
+            rel_addr.base_expr,
+        ));
+        // TODO: Error if destination is statically out of range.
+        let static_delta: i64 = if let (Some(dest_label), Some(base_label)) =
+            (dest_static, base_static)
+            && let Ok(delta_bigint) = dest_label.try_subtract(&base_label)
+            && let Ok(delta) = rel_type.delta_value_in_range(&delta_bigint)
+        {
+            delta
+        } else {
+            if let (Some(dest), Some(base)) = (dest_expr, base_expr) {
+                let data = ObjPatchData::Relative(rel_type, dest, base);
+                self.try_add_patch(data);
+            }
+            0
+        };
+        if let Some(chunk_env) = self.env.current_chunk_mut() {
+            rel_type.append_delta(static_delta, chunk_env.data_mut());
+        }
+        errs.result()
+    }
+
+    fn typecheck_rel_expr(
+        &self,
+        directive: &'static str,
+        component: &'static str,
+        expr_ast: ExprAst,
+    ) -> ((Option<ObjExpr>, Option<ExprLabel>), Errs<AsmError>) {
+        let mut errs = Errs::<AsmError>::new();
+        let expr_span = expr_ast.span;
+        let ret = match errs.with(self.env.typecheck_expression(expr_ast)) {
+            (_, ExprType::Undefined, _) => (None, None),
+            (expr, ExprType::Label, Ok(value)) => {
+                (Some(expr), Some(value.unwrap_label()))
+            }
+            (expr, ExprType::Integer, Ok(value)) => {
+                if let Some(chunk_env) = self.env.current_chunk() {
+                    let label = ExprLabel::ChunkAbsolute {
+                        chunk_index: chunk_env.chunk_index(),
+                        address: value.unwrap_int(),
+                    };
+                    (Some(expr), Some(label))
+                } else {
+                    (Some(expr), None)
+                }
+            }
+            (expr, ExprType::Integer | ExprType::Label, Err(_))
+            | (expr, ExprType::Bottom, _) => (Some(expr), None),
+            (_, expr_type, _) => {
+                errs.push(AsmError::DirectiveExprTypeError {
+                    directive,
+                    component,
+                    expr_loc: self.env.make_loc(expr_span),
+                    expr_type,
+                    valid_types: vec![ExprType::Integer, ExprType::Label],
+                });
+                (None, None)
+            }
+        };
+        (ret, errs)
+    }
+
     fn data_type_size(&self, data_type: AsmDataTypeAst) -> u64 {
         match data_type {
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U8) => 1,
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U16) => 2,
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U16be) => 2,
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U16le) => 2,
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U24) => 3,
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U24be) => 3,
-            AsmDataTypeAst::Int(_, AsmIntTypeAst::U24le) => 3,
+            AsmDataTypeAst::Int(_, int_type) => int_type.num_bytes(),
         }
     }
 
@@ -816,6 +872,19 @@ impl<'a> Assembler<'a> {
         int_type: AsmIntTypeAst,
     ) -> Option<ObjPatchIntType> {
         match int_type {
+            AsmIntTypeAst::S8 => Some(ObjPatchIntType::S8),
+            AsmIntTypeAst::S16 => self.endian_patch_type(
+                ObjPatchIntType::S16be,
+                ObjPatchIntType::S16le,
+            ),
+            AsmIntTypeAst::S16be => Some(ObjPatchIntType::S16be),
+            AsmIntTypeAst::S16le => Some(ObjPatchIntType::S16le),
+            AsmIntTypeAst::S24 => self.endian_patch_type(
+                ObjPatchIntType::S24be,
+                ObjPatchIntType::S24le,
+            ),
+            AsmIntTypeAst::S24be => Some(ObjPatchIntType::S24be),
+            AsmIntTypeAst::S24le => Some(ObjPatchIntType::S24le),
             AsmIntTypeAst::U8 => Some(ObjPatchIntType::U8),
             AsmIntTypeAst::U16 => self.endian_patch_type(
                 ObjPatchIntType::U16be,
@@ -829,6 +898,13 @@ impl<'a> Assembler<'a> {
             ),
             AsmIntTypeAst::U24be => Some(ObjPatchIntType::U24be),
             AsmIntTypeAst::U24le => Some(ObjPatchIntType::U24le),
+        }
+    }
+
+    fn rel_patch_type(&self, rel_type: AsmRelTypeAst) -> ObjPatchRelType {
+        match rel_type {
+            AsmRelTypeAst::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
+            AsmRelTypeAst::Addr16Rel16le => ObjPatchRelType::Addr16Rel16le,
         }
     }
 
@@ -961,7 +1037,7 @@ impl<'a> Assembler<'a> {
     /// chunk; it is assumed that the caller will have already flagged an error
     /// in that case.
     fn try_add_patch(&mut self, data: ObjPatchData) {
-        if let Some(chunk_env) = self.env.current_chunk() {
+        if let Some(chunk_env) = self.env.current_chunk_mut() {
             // TODO: Error instead of crash if offset is too large.
             let offset = Offset::try_from(chunk_env.total_size()).unwrap();
             chunk_env.add_patch(ObjPatch { offset, data });

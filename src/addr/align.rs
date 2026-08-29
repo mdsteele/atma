@@ -193,6 +193,13 @@ impl TryFrom<Align> for usize {
     }
 }
 
+impl From<Align> for i128 {
+    fn from(value: Align) -> i128 {
+        const_assert!(Addr::BITS < 127);
+        1i128 << value.log2()
+    }
+}
+
 impl From<Align> for u128 {
     fn from(value: Align) -> u128 {
         const_assert!(Addr::BITS < 128);

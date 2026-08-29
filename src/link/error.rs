@@ -3,6 +3,7 @@ use crate::error::{Errs, SourceError};
 use crate::expr::ExprEvalError;
 use crate::obj::{ObjPatchIntType, ObjSrcContext, ObjSrcLoc};
 use num_bigint::BigInt;
+use std::range::RangeInclusive;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -95,6 +96,14 @@ pub enum LinkError {
     /// shouldn't happen for valid object files (as the assembler should have
     /// caught the type error).
     PatchValueWrongType,
+    /// A relative address patch resulted in a delta beyond the permitted
+    /// range.
+    RelativeAddressOutOfRange {
+        /// The relative address delta.
+        delta: BigInt,
+        /// The permitted range.
+        range: RangeInclusive<i64>,
+    },
     /// A section was unable to be positioned within its memory region, given
     /// the constraints.
     SectionCannotBePlaced {

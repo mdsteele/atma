@@ -1,8 +1,9 @@
 use crate::error::SrcSpan;
 use crate::expr::ExprFunc;
 use crate::parse::{
-    AsmIntDataAst, AsmIntTypeAst, AsmStmtAst, BinOpAst, ExprAst, ExprAstNode,
-    IdentifierAst, IdentifierKind, Token, TokenValue,
+    AsmIntDataAst, AsmIntTypeAst, AsmRelAddrAst, AsmRelTypeAst, AsmStmtAst,
+    BinOpAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, Token,
+    TokenValue,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -62,7 +63,7 @@ impl RcPool {
         self.apply_expr(ExprFunc::Error, expr)
     }
 
-    pub fn here_label_expr(&mut self) -> ExprAst {
+    fn here_label_expr(&mut self) -> ExprAst {
         ExprAst { span: SrcSpan::INTERNAL, node: ExprAstNode::HereLabel }
     }
 
@@ -100,6 +101,34 @@ impl RcPool {
         }
     }
 
+    pub fn placeholder_addr16_rel8(
+        &mut self,
+        placeholder: &'static str,
+    ) -> AsmStmtAst {
+        let dest_expr = self.placeholder_expr(placeholder);
+        let base_expr = {
+            // TODO: Use $> here instead of ($< + 1)
+            let lhs = self.here_label_expr();
+            let rhs = self.int_literal_expr(1);
+            self.binop_expr(BinOpAst::Add, lhs, rhs)
+        };
+        self.rel_addr_stmt(AsmRelTypeAst::Addr16Rel8, dest_expr, base_expr)
+    }
+
+    pub fn placeholder_addr16_rel16le(
+        &mut self,
+        placeholder: &'static str,
+    ) -> AsmStmtAst {
+        let dest_expr = self.placeholder_expr(placeholder);
+        let base_expr = {
+            // TODO: Use $> here instead of ($< + 2)
+            let lhs = self.here_label_expr();
+            let rhs = self.int_literal_expr(2);
+            self.binop_expr(BinOpAst::Add, lhs, rhs)
+        };
+        self.rel_addr_stmt(AsmRelTypeAst::Addr16Rel16le, dest_expr, base_expr)
+    }
+
     pub fn placeholder_expr(&mut self, placeholder: &'static str) -> ExprAst {
         ExprAst {
             span: SrcSpan::INTERNAL,
@@ -135,45 +164,18 @@ impl RcPool {
         self.int_data_stmt(AsmIntTypeAst::U24le, expr)
     }
 
-    pub fn relative8_addr(&mut self, placeholder: &'static str) -> AsmStmtAst {
-        let expr = {
-            let lhs = {
-                let lhs = self.placeholder_expr(placeholder);
-                // TODO: Use a $> here-label instead of ($< + 1)
-                let rhs = {
-                    let lhs = self.here_label_expr();
-                    let rhs = self.int_literal_expr(1);
-                    self.binop_expr(BinOpAst::Add, lhs, rhs)
-                };
-                self.binop_expr(BinOpAst::Sub, lhs, rhs)
-            };
-            let rhs = self.int_literal_expr(0xff);
-            // TODO: use .S8 instead of .U8 & $ff
-            self.binop_expr(BinOpAst::BitAnd, lhs, rhs)
-        };
-        self.int_data_stmt(AsmIntTypeAst::U8, expr)
-    }
-
-    pub fn relative16_addr(
+    fn rel_addr_stmt(
         &mut self,
-        placeholder: &'static str,
+        rel_type: AsmRelTypeAst,
+        dest_expr: ExprAst,
+        base_expr: ExprAst,
     ) -> AsmStmtAst {
-        let expr = {
-            let lhs = {
-                let lhs = self.placeholder_expr(placeholder);
-                // TODO: Use a $> here-label instead of ($< + 2)
-                let rhs = {
-                    let lhs = self.here_label_expr();
-                    let rhs = self.int_literal_expr(2);
-                    self.binop_expr(BinOpAst::Add, lhs, rhs)
-                };
-                self.binop_expr(BinOpAst::Sub, lhs, rhs)
-            };
-            let rhs = self.int_literal_expr(0xffff);
-            // TODO: use .S16 instead of .U16le & $ffff
-            self.binop_expr(BinOpAst::BitAnd, lhs, rhs)
-        };
-        self.int_data_stmt(AsmIntTypeAst::U16le, expr)
+        AsmStmtAst::RelAddr(AsmRelAddrAst {
+            directive_span: SrcSpan::INTERNAL,
+            rel_type,
+            dest_expr,
+            base_expr,
+        })
     }
 
     pub fn standard_id(&mut self, name: &'static str) -> IdentifierAst {

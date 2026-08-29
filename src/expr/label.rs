@@ -40,6 +40,66 @@ pub enum ExprLabel {
     },
 }
 
+impl ExprLabel {
+    pub(crate) fn try_subtract(
+        &self,
+        rhs: &ExprLabel,
+    ) -> Result<BigInt, SubtractLabelsError> {
+        match (self, rhs) {
+            (
+                ExprLabel::AddrAbsolute {
+                    space: lhs_space,
+                    address: lhs_addr,
+                },
+                ExprLabel::AddrAbsolute {
+                    space: rhs_space,
+                    address: rhs_addr,
+                },
+            ) => {
+                if lhs_space != rhs_space {
+                    Err(SubtractLabelsError::DifferentAddrspaces(
+                        lhs_space.clone(),
+                        rhs_space.clone(),
+                    ))
+                } else {
+                    Ok(lhs_addr - rhs_addr)
+                }
+            }
+            (
+                ExprLabel::ChunkAbsolute {
+                    chunk_index: lhs_index,
+                    address: lhs_addr,
+                },
+                ExprLabel::ChunkAbsolute {
+                    chunk_index: rhs_index,
+                    address: rhs_addr,
+                },
+            ) if lhs_index == rhs_index => Ok(lhs_addr - rhs_addr),
+            (
+                ExprLabel::ChunkRelative {
+                    chunk_index: lhs_index,
+                    offset: lhs_offset,
+                },
+                ExprLabel::ChunkRelative {
+                    chunk_index: rhs_index,
+                    offset: rhs_offset,
+                },
+            ) if lhs_index == rhs_index => Ok(lhs_offset - rhs_offset),
+            (
+                ExprLabel::SymbolRelative {
+                    name: lhs_name,
+                    offset: lhs_offset,
+                },
+                ExprLabel::SymbolRelative {
+                    name: rhs_name,
+                    offset: rhs_offset,
+                },
+            ) if lhs_name == rhs_name => Ok(lhs_offset - rhs_offset),
+            _ => Err(SubtractLabelsError::Unresolved),
+        }
+    }
+}
+
 impl fmt::Display for ExprLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -95,6 +155,19 @@ impl ops::Sub<BigInt> for ExprLabel {
     fn sub(self, rhs: BigInt) -> Self {
         self + (-rhs)
     }
+}
+
+//===========================================================================//
+
+/// An error that can occur while subtracting one label from another.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum SubtractLabelsError {
+    /// Tried to subtract one label from another, but the labels were in the
+    /// given two different address spaces.
+    DifferentAddrspaces(Rc<str>, Rc<str>),
+    /// Tried to subtract one label from another, but the labels have not yet
+    /// been resolved and the delta is not yet known.
+    Unresolved,
 }
 
 //===========================================================================//

@@ -14,8 +14,9 @@ pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
 pub use asm::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
     AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmModuleAst, AsmReserveAst, AsmScopeAst, AsmSectionAst,
-    AsmSetAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst,
+    AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmReserveAst,
+    AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst,
+    AsmUtf8DataAst,
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};

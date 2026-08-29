@@ -100,6 +100,12 @@ impl From<Offset> for u64 {
     }
 }
 
+impl From<Offset> for i128 {
+    fn from(value: Offset) -> i128 {
+        i128::from(value.0)
+    }
+}
+
 impl From<Offset> for u128 {
     fn from(value: Offset) -> u128 {
         u128::from(value.0)

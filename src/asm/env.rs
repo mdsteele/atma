@@ -1,6 +1,6 @@
 use super::arch::ArchTree;
 use super::error::{AsmError, AsmResult};
-use crate::addr::Offset;
+use crate::addr::{Addr, Offset};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
@@ -157,13 +157,21 @@ impl AsmTypeEnv {
         errs.result()
     }
 
-    pub fn begin_chunk(&mut self, chunk_index: usize) {
-        self.chunk_stack.push(ChunkEnv::with_chunk_index(chunk_index));
+    pub fn begin_chunk(
+        &mut self,
+        chunk_index: usize,
+        start_addr: Option<Addr>,
+    ) {
+        self.chunk_stack.push(ChunkEnv::new(chunk_index, start_addr));
         debug_assert!(!self.arch_stack.is_empty());
         self.arch_stack.push(self.arch_stack.last().unwrap().clone());
     }
 
-    pub fn current_chunk(&mut self) -> Option<&mut ChunkEnv> {
+    pub fn current_chunk(&self) -> Option<&ChunkEnv> {
+        self.chunk_stack.last()
+    }
+
+    pub fn current_chunk_mut(&mut self) -> Option<&mut ChunkEnv> {
         self.chunk_stack.last_mut()
     }
 
@@ -325,12 +333,17 @@ impl ExprEnv for AsmTypeEnv {
         span: SrcSpan,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         if let Some(chunk_env) = self.chunk_stack.last() {
-            let chunk_index = chunk_env.chunk_index;
+            let chunk_index = chunk_env.chunk_index();
             let offset = BigInt::from(chunk_env.data.len());
-            let value = ExprValue::Label(ExprLabel::ChunkRelative {
-                chunk_index,
-                offset,
-            });
+            let label = if let Some(start) = chunk_env.start_addr {
+                ExprLabel::ChunkAbsolute {
+                    chunk_index,
+                    address: BigInt::from(start) + offset,
+                }
+            } else {
+                ExprLabel::ChunkRelative { chunk_index, offset }
+            };
+            let value = ExprValue::Label(label);
             let op = ObjExprOp::Push(value.clone());
             Ok((op, Ok(value)))
         } else {
@@ -422,6 +435,7 @@ impl ExprEnv for AsmTypeEnv {
 
 pub(super) struct ChunkEnv {
     chunk_index: usize,
+    start_addr: Option<Addr>,
     data: Vec<u8>,
     padding: usize,
     patches: Vec<ObjPatch>,
@@ -429,14 +443,19 @@ pub(super) struct ChunkEnv {
 }
 
 impl ChunkEnv {
-    fn with_chunk_index(chunk_index: usize) -> ChunkEnv {
+    fn new(chunk_index: usize, start_addr: Option<Addr>) -> ChunkEnv {
         ChunkEnv {
             chunk_index,
+            start_addr,
             data: Vec::new(),
             padding: 0,
             patches: Vec::new(),
             symbols: Vec::new(),
         }
+    }
+
+    pub fn chunk_index(&self) -> usize {
+        self.chunk_index
     }
 
     pub fn total_size(&self) -> usize {

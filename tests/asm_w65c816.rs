@@ -13,7 +13,7 @@ fn assert_asm(source: &str, binary: &[u8], flags: u8) {
     let arch = "65C816";
     let asm_path = Rc::<str>::from("input");
     let asm_source = Rc::<str>::from(format!(
-        ".SECTION \"TEST\", arch=\"{arch}\"\n{source}\n.END\n"
+        ".SECTION \"TEST\", arch=\"{arch}\", start=0\n{source}\n.END\n"
     ));
     let mut cache = atma::error::StrSrcCache::new();
     cache.add_source(asm_path.clone(), asm_source.clone());
@@ -60,6 +60,20 @@ fn assemble_bit_instructions() {
     assert_asm("BIT !$1234, X", &[0x3c, 0x34, 0x12], FLAG_NONE);
     assert_asm("BIT $12", &[0x24, 0x12], FLAG_NONE);
     assert_asm("BIT $12, X", &[0x34, 0x12], FLAG_NONE);
+}
+
+#[test]
+fn assemble_branch_instructions() {
+    assert_asm("BCC $0012", &[0x90, 0x10], FLAG_NONE);
+    assert_asm("BCS $0010", &[0xb0, 0x0e], FLAG_NONE);
+    assert_asm("BEQ $ff82", &[0xf0, 0x80], FLAG_NONE);
+    assert_asm("BMI $fff2", &[0x30, 0xf0], FLAG_NONE);
+    assert_asm("BNE $ff83", &[0xd0, 0x81], FLAG_NONE);
+    assert_asm("BPL $0081", &[0x10, 0x7f], FLAG_NONE);
+    assert_asm("BRA $0012", &[0x80, 0x10], FLAG_NONE);
+    assert_asm("BRL $0200", &[0x82, 0xfd, 0x01], FLAG_NONE);
+    assert_asm("BVC $0000", &[0x50, 0xfe], FLAG_NONE);
+    assert_asm("BVS $ffff", &[0x70, 0xfd], FLAG_NONE);
 }
 
 #[test]
@@ -184,7 +198,7 @@ fn assemble_pull_instructions() {
 fn assemble_push_instructions() {
     assert_asm("PEA !$1234", &[0xf4, 0x34, 0x12], FLAG_NONE);
     assert_asm("PEI ($12)", &[0xd4, 0x12], FLAG_NONE);
-    // TODO: assert_asm("PER $ffff", &[0x62, 0xfc, 0xff], FLAG_NONE);
+    assert_asm("PER $8000", &[0x62, 0xfd, 0x7f], FLAG_NONE);
     assert_asm("PHA", &[0x48], FLAG_NONE);
     assert_asm("PHB", &[0x8b], FLAG_NONE);
     assert_asm("PHD", &[0x0b], FLAG_NONE);
