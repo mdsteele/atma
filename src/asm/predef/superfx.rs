@@ -156,8 +156,8 @@ pub(super) const MACROS_SUPERFX: &[(&str, u8, AddrMode)] = &[
     ("LDW", 0x49, AddrMode::ParRegEns("R9")),
     ("LDW", 0x4a, AddrMode::ParRegEns("R10")),
     ("LDW", 0x4b, AddrMode::ParRegEns("R11")),
-    // TODO: a version of LINK that takes a label instead of an immediate
-    ("LINK", 0x91, AddrMode::SuperFxLink),
+    ("LINK", 0x91, AddrMode::SuperFxLinkRel),
+    ("LINK", 0x91, AddrMode::SuperFxLinkImm),
     ("LOB", 0x9e, AddrMode::Implied),
     ("LOOP", 0x3c, AddrMode::Implied),
     ("LSR", 0x03, AddrMode::Implied),

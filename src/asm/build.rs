@@ -905,6 +905,7 @@ impl<'a> Assembler<'a> {
         match rel_type {
             AsmRelTypeAst::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
             AsmRelTypeAst::Addr16Rel16le => ObjPatchRelType::Addr16Rel16le,
+            AsmRelTypeAst::Addr16RelLink => ObjPatchRelType::Addr16RelLink,
         }
     }
 

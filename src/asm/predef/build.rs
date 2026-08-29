@@ -4,8 +4,8 @@ use super::pool::RcPool;
 use crate::error::SrcSpan;
 use crate::obj::ObjSrcContext;
 use crate::parse::{
-    AsmDefMacroAst, AsmIntTypeAst, AsmMacroArgAst, AsmStmtAst, BinOpAst,
-    Token, TokenValue,
+    AsmDefMacroAst, AsmIntTypeAst, AsmMacroArgAst, AsmRelTypeAst, AsmStmtAst,
+    BinOpAst, Token, TokenValue,
 };
 use std::rc::Rc;
 
@@ -117,7 +117,9 @@ pub(super) enum AddrMode {
     /// FOO addr
     Relative16,
     /// FOO #imm
-    SuperFxLink,
+    SuperFxLinkImm,
+    /// FOO addr
+    SuperFxLinkRel,
 }
 
 //===========================================================================//
@@ -153,7 +155,8 @@ impl BuiltinBuilder {
             | AddrMode::Addr16
             | AddrMode::AddrHi
             | AddrMode::Relative8
-            | AddrMode::Relative16 => {
+            | AddrMode::Relative16
+            | AddrMode::SuperFxLinkRel => {
                 vec![self.addr_arg()]
             }
             AddrMode::Addr8CommaAddr8 => {
@@ -223,7 +226,7 @@ impl BuiltinBuilder {
             AddrMode::ParRegEnsCommaReg(r1, r2) => {
                 vec![self.par_reg_ens_arg(r1), self.reg_arg(r2)]
             }
-            AddrMode::PoundImm8 | AddrMode::SuperFxLink => {
+            AddrMode::PoundImm8 | AddrMode::SuperFxLinkImm => {
                 vec![self.pound_imm_arg()]
             }
             AddrMode::PoundImm8CommaPoundImm8 => {
@@ -350,8 +353,11 @@ impl BuiltinBuilder {
                 self.pool.constant_u8(opcode_byte),
                 self.pool.placeholder_addr16_rel16le(PLACEHOLDER_ADDR),
             ],
-            AddrMode::SuperFxLink => {
-                super_fx_link(&mut self.pool, PLACEHOLDER_IMM)
+            AddrMode::SuperFxLinkImm => {
+                super_fx_link_imm(&mut self.pool, PLACEHOLDER_IMM)
+            }
+            AddrMode::SuperFxLinkRel => {
+                super_fx_link_rel(&mut self.pool, PLACEHOLDER_ADDR)
             }
         };
         let definition =
@@ -600,7 +606,7 @@ impl BuiltinBuilder {
 
 //===========================================================================//
 
-fn super_fx_link(
+fn super_fx_link_imm(
     pool: &mut RcPool,
     placeholder: &'static str,
 ) -> Vec<AsmStmtAst> {
@@ -630,6 +636,24 @@ fn super_fx_link(
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
     vec![pool.int_data_stmt(AsmIntTypeAst::U8, opcode_expr)]
+}
+
+fn super_fx_link_rel(
+    pool: &mut RcPool,
+    placeholder: &'static str,
+) -> Vec<AsmStmtAst> {
+    let dest_expr = pool.placeholder_expr(placeholder);
+    let base_expr = {
+        // TODO: Use $> here instead of ($< + 1)
+        let lhs = pool.here_label_expr();
+        let rhs = pool.int_literal_expr(1);
+        pool.binop_expr(BinOpAst::Add, lhs, rhs)
+    };
+    vec![pool.rel_addr_stmt(
+        AsmRelTypeAst::Addr16RelLink,
+        dest_expr,
+        base_expr,
+    )]
 }
 
 fn token(value: TokenValue) -> Token {

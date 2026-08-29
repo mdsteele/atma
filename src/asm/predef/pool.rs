@@ -63,7 +63,7 @@ impl RcPool {
         self.apply_expr(ExprFunc::Error, expr)
     }
 
-    fn here_label_expr(&mut self) -> ExprAst {
+    pub fn here_label_expr(&mut self) -> ExprAst {
         ExprAst { span: SrcSpan::INTERNAL, node: ExprAstNode::HereLabel }
     }
 
@@ -164,7 +164,7 @@ impl RcPool {
         self.int_data_stmt(AsmIntTypeAst::U24le, expr)
     }
 
-    fn rel_addr_stmt(
+    pub fn rel_addr_stmt(
         &mut self,
         rel_type: AsmRelTypeAst,
         dest_expr: ExprAst,

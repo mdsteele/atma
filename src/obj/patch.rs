@@ -12,6 +12,7 @@ const TAG_FILL: u8 = 0xff;
 
 const TAG_A16R8: u8 = 0x80;
 const TAG_A16R16LE: u8 = 0x81;
+const TAG_A16RLINK: u8 = 0x82;
 
 const TAG_S8: u8 = 0x00;
 const TAG_S16BE: u8 = 0x01;
@@ -314,6 +315,9 @@ pub enum ObjPatchRelType {
     /// A 16-bit signed little-endian relative address within a 16-bit address
     /// space.
     Addr16Rel16le,
+    /// A 16-bit signed little-endian relative address, encoded as a SuperFX
+    /// LINK opcode.
+    Addr16RelLink,
 }
 
 impl ObjPatchRelType {
@@ -321,6 +325,14 @@ impl ObjPatchRelType {
         match self {
             Self::Addr16Rel8 => ObjPatchIntType::S8,
             Self::Addr16Rel16le => ObjPatchIntType::S16le,
+            Self::Addr16RelLink => ObjPatchIntType::U8,
+        }
+    }
+
+    fn int_value(self, delta: i64) -> i64 {
+        match self {
+            Self::Addr16RelLink => 0x90 | delta,
+            _ => delta,
         }
     }
 
@@ -333,7 +345,7 @@ impl ObjPatchRelType {
         delta: &BigInt,
     ) -> Result<i64, RangeInclusive<i64>> {
         let delta_i64 = match self {
-            Self::Addr16Rel8 | Self::Addr16Rel16le => {
+            Self::Addr16Rel8 | Self::Addr16Rel16le | Self::Addr16RelLink => {
                 let masked = delta & BigInt::from(0xffff);
                 let wrapped = u16::try_from(masked).unwrap() as i16;
                 wrapped as i64
@@ -344,7 +356,7 @@ impl ObjPatchRelType {
     }
 
     pub(crate) fn append_delta(self, delta: i64, out: &mut Vec<u8>) {
-        self.int_type().append_value(delta, out);
+        self.int_type().append_value(self.int_value(delta), out);
     }
 
     pub(crate) fn write_delta_at(
@@ -353,17 +365,21 @@ impl ObjPatchRelType {
         offset: usize,
         data: &mut [u8],
     ) {
-        self.int_type().write_value_at(delta, offset, data);
+        self.int_type().write_value_at(self.int_value(delta), offset, data);
     }
 
     fn range(self) -> RangeInclusive<i64> {
-        self.int_type().range()
+        match self {
+            Self::Addr16RelLink => RangeInclusive { start: 1, last: 4 },
+            _ => self.int_type().range(),
+        }
     }
 
     fn decode_from_byte(byte: u8) -> io::Result<Self> {
         match byte {
             TAG_A16R8 => Ok(Self::Addr16Rel8),
             TAG_A16R16LE => Ok(Self::Addr16Rel16le),
+            TAG_A16RLINK => Ok(Self::Addr16RelLink),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid ObjPatchRelType byte: {}", byte),
@@ -375,6 +391,7 @@ impl ObjPatchRelType {
         match self {
             Self::Addr16Rel8 => TAG_A16R8,
             Self::Addr16Rel16le => TAG_A16R16LE,
+            Self::Addr16RelLink => TAG_A16RLINK,
         }
     }
 }
@@ -463,6 +480,7 @@ mod tests {
     fn obj_patch_rel_type_round_trips() {
         assert_round_trips(ObjPatchRelType::Addr16Rel8);
         assert_round_trips(ObjPatchRelType::Addr16Rel16le);
+        assert_round_trips(ObjPatchRelType::Addr16RelLink);
     }
 }
 

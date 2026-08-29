@@ -606,6 +606,9 @@ pub enum AsmRelTypeAst {
     /// A 16-bit signed little-endian relative address within a 16-bit address
     /// space.
     Addr16Rel16le,
+    /// A 16-bit signed little-endian relative address, encoded as a SuperFX
+    /// LINK opcode.
+    Addr16RelLink,
 }
 
 impl AsmRelTypeAst {
@@ -615,6 +618,7 @@ impl AsmRelTypeAst {
         match self {
             Self::Addr16Rel8 => ".A16R8",
             Self::Addr16Rel16le => ".A16R16LE",
+            Self::Addr16RelLink => ".A16RLINK",
         }
     }
 
