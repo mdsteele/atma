@@ -755,7 +755,7 @@ impl Instruction {
     /// `addr` specifies the address of the start of the instruction.  `bus` is
     /// required for providing labels for addresses; if no labels are needed, a
     /// `new_open_bus` can be used.
-    pub fn format(self, addr: u16, bus: &dyn SimBus) -> String {
+    pub fn format(self, bus: &dyn SimBus, addr: u16) -> String {
         let operand = self.operand;
         match self.operation {
             Operation::AdcAI8 => format!("ADC A, ${:02x}", operand.as_i32()),
@@ -932,7 +932,7 @@ mod tests {
     fn disassemble_with_bus(code: &[u8], bus: &dyn SimBus) -> String {
         let instruction = Instruction::decode(bus, 0);
         assert_eq!(instruction.size() as usize, code.len());
-        instruction.format(0, bus)
+        instruction.format(bus, 0)
     }
 
     #[test]

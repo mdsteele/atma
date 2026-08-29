@@ -53,9 +53,15 @@ impl RcPool {
         }
     }
 
-    pub fn constant_u8(&mut self, value: u8) -> AsmStmtAst {
-        let expr = self.int_literal_expr(i32::from(value));
-        self.int_data_stmt(AsmIntTypeAst::U8, expr)
+    pub fn constant_bytes_stmt(&mut self, bytes: &[u8]) -> AsmStmtAst {
+        AsmStmtAst::IntData(AsmIntDataAst {
+            directive_span: SrcSpan::INTERNAL,
+            int_type: AsmIntTypeAst::U8,
+            expressions: bytes
+                .iter()
+                .map(|&byte| self.int_literal_expr(i32::from(byte)))
+                .collect::<Vec<_>>(),
+        })
     }
 
     pub fn error_expr(&mut self, message: &'static str) -> ExprAst {

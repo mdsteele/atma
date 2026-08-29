@@ -60,6 +60,8 @@ pub(super) enum AddrMode {
     BracBangAddr16Kets,
     /// FOO [!addr + R]
     BracBangAddr16PlusRegKets(Reg),
+    /// FOO [R]
+    BracRegKets(Reg),
     /// FOO (addr, R)
     ParAddr8CommaRegEns(Reg),
     /// FOO (addr, R1), R2
@@ -135,11 +137,11 @@ impl BuiltinBuilder {
     pub fn add_macros(
         &mut self,
         arch: &'static str,
-        macros: &[(&'static str, u8, AddrMode)],
+        macros: &[(&'static str, &[u8], AddrMode)],
     ) {
         let arch = self.pool.string(arch);
-        for &(name, opcode, addr_mode) in macros {
-            self.add_macro(&arch, name, opcode, addr_mode);
+        for &(name, prefix_bytes, addr_mode) in macros {
+            self.add_macro(&arch, name, prefix_bytes, addr_mode);
         }
     }
 
@@ -147,7 +149,7 @@ impl BuiltinBuilder {
         &mut self,
         arch: &Rc<str>,
         name: &'static str,
-        opcode_byte: u8,
+        prefix_bytes: &[u8],
         addr_mode: AddrMode,
     ) {
         let params = match addr_mode {
@@ -201,6 +203,7 @@ impl BuiltinBuilder {
             AddrMode::BracBangAddr16PlusRegKets(r1) => {
                 vec![self.brac_bang_addr_plus_reg_kets_arg(r1)]
             }
+            AddrMode::BracRegKets(r1) => vec![self.brac_reg_kets_arg(r1)],
             AddrMode::Implied => vec![],
             AddrMode::ParAddr8CommaRegEns(r1) => {
                 vec![self.par_addr_comma_reg_ens_arg(r1)]
@@ -283,16 +286,16 @@ impl BuiltinBuilder {
             | AddrMode::RegCommaAddr8PlusReg(_, _)
             | AddrMode::RegCommaBracAddr8PlusRegKets(_, _)
             | AddrMode::RegCommaBracAddr8KetsPlusReg(_, _) => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_u8(PLACEHOLDER_ADDR),
             ],
             AddrMode::Addr8CommaAddr8 => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_u8(PLACEHOLDER_ADDR2),
                 self.pool.placeholder_u8(PLACEHOLDER_ADDR),
             ],
             AddrMode::Addr8CommaPoundImm8 => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_u8(PLACEHOLDER_IMM),
                 self.pool.placeholder_u8(PLACEHOLDER_ADDR),
             ],
@@ -306,20 +309,21 @@ impl BuiltinBuilder {
             | AddrMode::ParBangAddr16Ens
             | AddrMode::RegCommaBangAddr16(_)
             | AddrMode::RegCommaBangAddr16PlusReg(_, _) => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_u16le(PLACEHOLDER_ADDR),
             ],
             AddrMode::AddrHi => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.high_page_addr(PLACEHOLDER_ADDR),
             ],
             AddrMode::BangBangAddr24 | AddrMode::BangBangAddr24CommaReg(_) => {
                 vec![
-                    self.pool.constant_u8(opcode_byte),
+                    self.pool.constant_bytes_stmt(prefix_bytes),
                     self.pool.placeholder_u24le(PLACEHOLDER_ADDR),
                 ]
             }
             AddrMode::Implied
+            | AddrMode::BracRegKets(_)
             | AddrMode::ParRegEns(_)
             | AddrMode::ParRegEnsCommaParRegEns(_, _)
             | AddrMode::ParRegEnsPlusCommaReg(_, _)
@@ -328,29 +332,29 @@ impl BuiltinBuilder {
             | AddrMode::RegCommaReg(_, _)
             | AddrMode::RegCommaParRegEns(_, _)
             | AddrMode::RegCommaParRegEnsPlus(_, _) => {
-                vec![self.pool.constant_u8(opcode_byte)]
+                vec![self.pool.constant_bytes_stmt(prefix_bytes)]
             }
             AddrMode::PoundImm8 | AddrMode::RegCommaPoundImm8(_) => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_u8(PLACEHOLDER_IMM),
             ],
             AddrMode::PoundImm8CommaPoundImm8 => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_u8(PLACEHOLDER_IMM2),
                 self.pool.placeholder_u8(PLACEHOLDER_IMM),
             ],
             AddrMode::PoundPoundImm16 | AddrMode::RegCommaPoundImm16(_) => {
                 vec![
-                    self.pool.constant_u8(opcode_byte),
+                    self.pool.constant_bytes_stmt(prefix_bytes),
                     self.pool.placeholder_u16le(PLACEHOLDER_IMM),
                 ]
             }
             AddrMode::Relative8 => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR),
             ],
             AddrMode::Relative16 => vec![
-                self.pool.constant_u8(opcode_byte),
+                self.pool.constant_bytes_stmt(prefix_bytes),
                 self.pool.placeholder_addr16_rel16le(PLACEHOLDER_ADDR),
             ],
             AddrMode::SuperFxLinkImm => {
@@ -486,6 +490,17 @@ impl BuiltinBuilder {
                 token(TokenValue::Bang),
                 self.pool.placeholder_token(PLACEHOLDER_ADDR),
                 token(TokenValue::Plus),
+                self.pool.identifier_token(reg),
+                token(TokenValue::BracketClose),
+            ],
+        }
+    }
+
+    fn brac_reg_kets_arg(&mut self, reg: Reg) -> AsmMacroArgAst {
+        AsmMacroArgAst {
+            span: SrcSpan::INTERNAL,
+            tokens: vec![
+                token(TokenValue::BracketOpen),
                 self.pool.identifier_token(reg),
                 token(TokenValue::BracketClose),
             ],

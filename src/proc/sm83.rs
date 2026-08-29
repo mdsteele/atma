@@ -1002,7 +1002,7 @@ impl SimProc for SharpSm83 {
     fn disassemble(&self, bus: &dyn SimBus, pc: Addr) -> (u32, String) {
         let pc = pc.as_u16();
         let instruction = Instruction::decode(bus, pc);
-        (instruction.size(), instruction.format(pc, bus))
+        (instruction.size(), instruction.format(bus, pc))
     }
 
     fn pc(&self) -> Addr {
