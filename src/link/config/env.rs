@@ -1,11 +1,11 @@
 use super::ConfigVariableOr;
+use super::builtin::make_config_builtin_values;
 use super::error::{ConfigError, ConfigResult};
 use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
     ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
-    make_global_builtin_values,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc};
 use crate::parse::{ExprAst, IdentifierAst, LinkConfigAst};
@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-pub(super) struct LinkDecl {
+pub(super) struct ConfigDecl {
     pub id_loc: ObjSrcLoc,
     pub var_type: ExprType,
     pub value: ConfigVariableOr<ExprValue>,
@@ -23,20 +23,20 @@ pub(super) struct LinkDecl {
 
 //===========================================================================//
 
-pub(super) struct LinkTypeEnv {
+pub(super) struct ConfigTypeEnv {
     context_stack: Vec<Rc<ObjSrcContext>>,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
     exports: HashMap<Rc<str>, ObjSrcLoc>,
     imports: HashMap<Rc<str>, ObjSrcLoc>,
-    variables: HashMap<Rc<str>, LinkDecl>,
+    variables: HashMap<Rc<str>, ConfigDecl>,
 }
 
-impl LinkTypeEnv {
-    pub fn new(root_path: Rc<str>) -> LinkTypeEnv {
+impl ConfigTypeEnv {
+    pub fn new(root_path: Rc<str>) -> ConfigTypeEnv {
         let root_context = Rc::new(ObjSrcContext::root(root_path));
-        LinkTypeEnv {
+        ConfigTypeEnv {
             context_stack: vec![root_context],
-            builtins: make_global_builtin_values(),
+            builtins: make_config_builtin_values(),
             exports: HashMap::new(),
             imports: HashMap::new(),
             variables: HashMap::new(),
@@ -69,7 +69,7 @@ impl LinkTypeEnv {
         })
     }
 
-    pub fn get_declaration(&self, name: &str) -> Option<&LinkDecl> {
+    pub fn get_declaration(&self, name: &str) -> Option<&ConfigDecl> {
         self.variables.get(name)
     }
 
@@ -80,7 +80,7 @@ impl LinkTypeEnv {
         value: ConfigVariableOr<ExprValue>,
     ) {
         let id_loc = self.make_loc(id.span);
-        let decl = LinkDecl { id_loc, var_type, value };
+        let decl = ConfigDecl { id_loc, var_type, value };
         self.variables.insert(id.name, decl);
     }
 
@@ -137,7 +137,7 @@ impl LinkTypeEnv {
     }
 }
 
-impl ExprEnv for LinkTypeEnv {
+impl ExprEnv for ConfigTypeEnv {
     type Op = ObjExprOp;
 
     fn typecheck_here_label(

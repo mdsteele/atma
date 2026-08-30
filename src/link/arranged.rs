@@ -1,4 +1,4 @@
-use super::config::{AddrspaceConfig, LinkConfig, RegionConfig};
+use super::config::{AddrspaceConfig, LinkConfig, RegionKind};
 use super::error::LinkError;
 use super::loose::{LooseChunk, LooseSection};
 use super::place::try_place;
@@ -200,8 +200,8 @@ pub(super) struct ArrangedRegion {
     /// Any padded portions of this memory region will be filled with this byte
     /// value.
     pub fill: u8,
-    /// If true, this is a BSS region; otherwise, this is a data region.
-    pub is_bss: bool,
+    /// What kind of memory region this is.
+    pub kind: RegionKind,
 }
 
 impl ArrangedRegion {
@@ -214,11 +214,10 @@ impl ArrangedRegion {
             addrspaces.insert(addrspace.name.clone(), addrspace);
         }
 
-        let mut arranged_regions = Vec::<ArrangedRegion>::with_capacity(
-            config.bss.len() + config.memory.len(),
-        );
+        let mut arranged_regions =
+            Vec::<ArrangedRegion>::with_capacity(config.regions.len());
         let mut region_name_to_index = HashMap::<Rc<str>, usize>::new();
-        let mut add_region = |region: &RegionConfig, is_bss: bool| {
+        for region in &config.regions {
             region_name_to_index
                 .insert(region.name.clone(), arranged_regions.len());
             let addrspace = addrspaces[&region.space];
@@ -229,14 +228,8 @@ impl ArrangedRegion {
                 range: region.range,
                 sections: Vec::new(),
                 fill: region.fill.unwrap_or(addrspace.fill),
-                is_bss,
+                kind: region.kind,
             });
-        };
-        for region in &config.bss {
-            add_region(region, true);
-        }
-        for region in &config.memory {
-            add_region(region, false);
         }
 
         let (sections, errs) = ArrangedSection::arrange(config, object_files);

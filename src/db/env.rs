@@ -100,12 +100,11 @@ pub(super) struct AdsTypeEnv<'a> {
 
 impl<'a> AdsTypeEnv<'a> {
     pub fn new(system: &'a SimSystem, root_path: Rc<str>) -> AdsTypeEnv<'a> {
-        let builtins = make_global_builtin_values();
         let root_context = Rc::new(AdsSrcContext::root(root_path));
         let default_proc_name = system.selected_processor_name();
         AdsTypeEnv {
             system,
-            builtins,
+            builtins: make_global_builtin_values(),
             context_stack: vec![root_context],
             frame_stack: vec![vec![AdsScope::new(0, default_proc_name)]],
         }

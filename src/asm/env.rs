@@ -32,11 +32,10 @@ pub(super) struct AsmTypeEnv {
 
 impl AsmTypeEnv {
     pub fn new(root_path: Rc<str>, arch_tree: ArchTree) -> AsmTypeEnv {
-        let builtins = make_global_builtin_values();
         let root_context = Rc::new(ObjSrcContext::root(root_path));
         AsmTypeEnv {
             arch_tree,
-            builtins,
+            builtins: make_global_builtin_values(),
             arch_stack: vec![Rc::from(ArchTree::ROOT_ARCH_NAME)],
             chunk_stack: Vec::new(),
             context_stack: vec![root_context],

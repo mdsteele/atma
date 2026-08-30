@@ -496,6 +496,7 @@ impl ConfigEntryKind {
             Self::Export => &[ConfigAttr::ExportAddr, ConfigAttr::ExportSpace],
             Self::Region => &[
                 ConfigAttr::RegionFill,
+                ConfigAttr::RegionKind,
                 ConfigAttr::RegionSize,
                 ConfigAttr::RegionSpace,
                 ConfigAttr::RegionStart,
@@ -543,6 +544,8 @@ pub enum ConfigAttr {
     ExportSpace,
     /// The `fill` attribute of a memory region entry.
     RegionFill,
+    /// The `kind` attribute of a memory region entry.
+    RegionKind,
     /// The `size` attribute of a memory region entry.
     RegionSize,
     /// The `space` attribute of a memory region entry.
@@ -577,6 +580,7 @@ impl ConfigAttr {
             | Self::ChecksumUnit => ConfigEntryKind::Checksum,
             Self::ExportAddr | Self::ExportSpace => ConfigEntryKind::Export,
             Self::RegionFill
+            | Self::RegionKind
             | Self::RegionSize
             | Self::RegionSpace
             | Self::RegionStart => ConfigEntryKind::Region,
@@ -599,6 +603,7 @@ impl ConfigAttr {
             Self::AddrspaceFill | Self::RegionFill | Self::SectionFill => {
                 "fill"
             }
+            Self::RegionKind => "kind",
             Self::SectionRegion => "region",
             Self::ChecksumSize | Self::RegionSize | Self::SectionSize => {
                 "size"

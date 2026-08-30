@@ -43,8 +43,6 @@ impl LinkConfigAst {
 pub enum LinkDirectiveAst {
     /// An `.ADDRSPACES` directive block.
     Addrspaces(Vec<LinkEntryAst>),
-    /// A `.BSS` directive block.
-    Bss(Vec<LinkEntryAst>),
     /// A `.CHECKSUMS` directive block.
     Checksums(Vec<LinkEntryAst>),
     /// An `.EXPORTS` directive block.
@@ -53,8 +51,8 @@ pub enum LinkDirectiveAst {
     Import(Vec<IdentifierAst>),
     /// A `.LET` directive.
     Let(IdentifierAst, ExprAst),
-    /// A `.MEMORY` directive block.
-    Memory(Vec<LinkEntryAst>),
+    /// A `.REGIONS` directive block.
+    Regions(Vec<LinkEntryAst>),
     /// A `.SECTIONS` directive block.
     Sections(Vec<LinkEntryAst>),
     /// A `.USE` directive.
@@ -72,9 +70,6 @@ impl LinkDirectiveAst {
         let addrspaces_dir = directive(".ADDRSPACES")
             .ignore_then(entries_block.clone())
             .map(LinkDirectiveAst::Addrspaces);
-        let bss_dir = directive(".BSS")
-            .ignore_then(entries_block.clone())
-            .map(LinkDirectiveAst::Bss);
         let checksums_dir = directive(".CHECKSUMS")
             .ignore_then(entries_block.clone())
             .map(LinkDirectiveAst::Checksums);
@@ -96,9 +91,9 @@ impl LinkDirectiveAst {
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(id, expr)| LinkDirectiveAst::Let(id, expr));
-        let memory_dir = directive(".MEMORY")
+        let regions_dir = directive(".REGIONS")
             .ignore_then(entries_block.clone())
-            .map(LinkDirectiveAst::Memory);
+            .map(LinkDirectiveAst::Regions);
         let sections_dir = directive(".SECTIONS")
             .ignore_then(entries_block)
             .map(LinkDirectiveAst::Sections);
@@ -108,12 +103,11 @@ impl LinkDirectiveAst {
             .map(LinkDirectiveAst::Use);
         chumsky::prelude::choice((
             addrspaces_dir,
-            bss_dir,
             checksums_dir,
             exports_dir,
             import_dir,
             let_dir,
-            memory_dir,
+            regions_dir,
             sections_dir,
             use_dir,
         ))

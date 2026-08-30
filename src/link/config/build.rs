@@ -1,9 +1,12 @@
+use super::builtin::{
+    ENTITY_REGION_KIND, REGION_KIND_BSS, REGION_KIND_DATA, REGION_KIND_OMIT,
+};
 use super::checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
-use super::env::LinkTypeEnv;
+use super::env::ConfigTypeEnv;
 use super::error::{ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult};
 use super::{
     AddrspaceConfig, ConfigVariableOr, ExportConfig, ImportConfig, LinkConfig,
-    RegionConfig, SectionConfig,
+    RegionConfig, RegionKind, SectionConfig,
 };
 use crate::addr::{Addr, Align, Range, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
@@ -21,7 +24,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 const ENTITY_ADDRSPACE: &str = "address space";
-const ENTITY_MEMORY: &str = "memory region";
+const ENTITY_REGION: &str = "memory region";
 const ENTITY_SECTION: &str = "section";
 
 type PrevAttrs = HashMap<Rc<str>, SrcSpan>;
@@ -30,7 +33,7 @@ type PrevAttrs = HashMap<Rc<str>, SrcSpan>;
 
 pub(super) struct ConfigBuilder<'a> {
     cache: &'a mut dyn SrcCache,
-    env: LinkTypeEnv,
+    env: ConfigTypeEnv,
     config: LinkConfig,
 }
 
@@ -41,11 +44,10 @@ impl<'a> ConfigBuilder<'a> {
     ) -> ConfigBuilder<'a> {
         ConfigBuilder {
             cache,
-            env: LinkTypeEnv::new(root_path),
+            env: ConfigTypeEnv::new(root_path),
             config: LinkConfig {
                 addrspaces: Vec::new(),
-                bss: Vec::new(),
-                memory: Vec::new(),
+                regions: Vec::new(),
                 sections: Vec::new(),
                 imports: Vec::new(),
                 variables: Vec::new(),
@@ -80,7 +82,6 @@ impl<'a> ConfigBuilder<'a> {
             LinkDirectiveAst::Addrspaces(entries) => {
                 self.visit_addrspaces_dir(entries)
             }
-            LinkDirectiveAst::Bss(entries) => self.visit_bss_dir(entries),
             LinkDirectiveAst::Checksums(entries) => {
                 self.visit_checksums_dir(entries)
             }
@@ -89,8 +90,8 @@ impl<'a> ConfigBuilder<'a> {
             }
             LinkDirectiveAst::Import(ids) => self.visit_import_dir(ids),
             LinkDirectiveAst::Let(id, expr) => self.visit_let_dir(id, expr),
-            LinkDirectiveAst::Memory(entries) => {
-                self.visit_memory_dir(entries)
+            LinkDirectiveAst::Regions(entries) => {
+                self.visit_regions_dir(entries)
             }
             LinkDirectiveAst::Sections(entries) => {
                 self.visit_sections_dir(entries)
@@ -488,26 +489,14 @@ impl<'a> ConfigBuilder<'a> {
         ConfigVariableOr::Variable(index)
     }
 
-    fn visit_bss_dir(
+    fn visit_regions_dir(
         &mut self,
         entries: Vec<LinkEntryAst>,
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
         for entry in entries {
             let region = errs.with(self.visit_region_entry(entry));
-            self.config.bss.push(region);
-        }
-        errs.result()
-    }
-
-    fn visit_memory_dir(
-        &mut self,
-        entries: Vec<LinkEntryAst>,
-    ) -> ConfigResult<()> {
-        let mut errs = Errs::<ConfigError>::new();
-        for entry in entries {
-            let region = errs.with(self.visit_region_entry(entry));
-            self.config.memory.push(region);
+            self.config.regions.push(region);
         }
         errs.result()
     }
@@ -517,11 +506,12 @@ impl<'a> ConfigBuilder<'a> {
         entry: LinkEntryAst,
     ) -> (RegionConfig, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
-        errs.also(self.declare_entry(ENTITY_MEMORY, &entry.id));
+        errs.also(self.declare_entry(ENTITY_REGION, &entry.id));
         let mut space: Option<Rc<str>> = None;
         let mut start: Option<Addr> = None;
         let mut size: Option<Size> = None;
         let mut fill: Option<u8> = None;
+        let mut kind: Option<RegionKind> = None;
         let mut prev_attrs = PrevAttrs::new();
         for (id_ast, expr_ast) in entry.attrs {
             errs.also(self.declare_attr(
@@ -532,23 +522,28 @@ impl<'a> ConfigBuilder<'a> {
             match &*id_ast.name {
                 "fill" => {
                     fill = Some(
-                        errs.ok_or_default(self.memory_fill_attr(expr_ast)),
+                        errs.ok_or_default(self.region_fill_attr(expr_ast)),
+                    )
+                }
+                "kind" => {
+                    kind = Some(
+                        errs.ok_or_default(self.region_kind_attr(expr_ast)),
                     )
                 }
                 "size" => {
                     size = Some(errs.ok_or(
-                        self.memory_size_attr(expr_ast),
+                        self.region_size_attr(expr_ast),
                         Size::from(1u32),
                     ))
                 }
                 "space" => {
                     space = Some(
-                        errs.ok_or_default(self.memory_space_attr(expr_ast)),
+                        errs.ok_or_default(self.region_space_attr(expr_ast)),
                     )
                 }
                 "start" => {
                     start = Some(
-                        errs.ok_or_default(self.memory_start_attr(expr_ast)),
+                        errs.ok_or_default(self.region_start_attr(expr_ast)),
                     )
                 }
                 _ => errs.push(ConfigError::InvalidAttrName {
@@ -612,15 +607,30 @@ impl<'a> ConfigBuilder<'a> {
             space: space.unwrap_or_default(),
             range,
             fill,
+            kind: kind.unwrap_or_default(),
         };
         (region, errs)
     }
 
-    fn memory_fill_attr(&self, expr_ast: ExprAst) -> ConfigResult<u8> {
+    fn region_fill_attr(&self, expr_ast: ExprAst) -> ConfigResult<u8> {
         self.static_fill_attr(ConfigAttr::RegionFill, expr_ast)
     }
 
-    fn memory_size_attr(&self, expr_ast: ExprAst) -> ConfigResult<Size> {
+    fn region_kind_attr(&self, expr_ast: ExprAst) -> ConfigResult<RegionKind> {
+        let kind_str = self.static_entity_attr(
+            ConfigAttr::RegionKind,
+            expr_ast,
+            ENTITY_REGION_KIND,
+        )?;
+        match &*kind_str {
+            REGION_KIND_BSS => Ok(RegionKind::Bss),
+            REGION_KIND_DATA => Ok(RegionKind::Data),
+            REGION_KIND_OMIT => Ok(RegionKind::Omit),
+            _ => unreachable!(),
+        }
+    }
+
+    fn region_size_attr(&self, expr_ast: ExprAst) -> ConfigResult<Size> {
         let expr_span = expr_ast.span;
         let bigint = self.static_int_attr(ConfigAttr::RegionSize, expr_ast)?;
         match Size::try_from(&bigint) {
@@ -633,7 +643,7 @@ impl<'a> ConfigBuilder<'a> {
         }
     }
 
-    fn memory_space_attr(&self, expr_ast: ExprAst) -> ConfigResult<Rc<str>> {
+    fn region_space_attr(&self, expr_ast: ExprAst) -> ConfigResult<Rc<str>> {
         self.static_entity_attr(
             ConfigAttr::RegionSpace,
             expr_ast,
@@ -641,7 +651,7 @@ impl<'a> ConfigBuilder<'a> {
         )
     }
 
-    fn memory_start_attr(&self, expr_ast: ExprAst) -> ConfigResult<Addr> {
+    fn region_start_attr(&self, expr_ast: ExprAst) -> ConfigResult<Addr> {
         let expr_span = expr_ast.span;
         // TODO: allow this to be a static exported label
         let bigint =
@@ -758,7 +768,7 @@ impl<'a> ConfigBuilder<'a> {
         self.static_entity_attr(
             ConfigAttr::SectionRegion,
             expr_ast,
-            ENTITY_MEMORY,
+            ENTITY_REGION,
         )
     }
 
@@ -865,27 +875,25 @@ impl<'a> ConfigBuilder<'a> {
         entity_kind: &str,
     ) -> ConfigResult<Rc<str>> {
         let expr_span = expr_ast.span;
-        match self.env.typecheck_expression(expr_ast)? {
-            (_, ExprType::Entity(kind), expr_static)
-                if &*kind == entity_kind =>
-            {
-                match expr_static {
-                    Ok(value) => Ok(value.unwrap_entity()),
-                    Err(reason) => {
-                        Err(Errs::one(ConfigError::NonStaticAttr {
-                            attribute,
-                            expr_loc: self.env.make_loc(expr_span),
-                            reason,
-                        }))
-                    }
-                }
+        let (_, expr_type, expr_static) =
+            self.env.typecheck_expression(expr_ast)?;
+        let expected_type = ExprType::Entity(Rc::from(entity_kind));
+        if expr_type.is_subtype_of(&expected_type) {
+            match expr_static {
+                Ok(value) => Ok(value.unwrap_entity()),
+                Err(reason) => Err(Errs::one(ConfigError::NonStaticAttr {
+                    attribute,
+                    expr_loc: self.env.make_loc(expr_span),
+                    reason,
+                })),
             }
-            (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
+        } else {
+            Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
                 expr_loc: self.env.make_loc(expr_span),
                 expr_type,
-                valid_types: vec![ExprType::Entity(Rc::from(entity_kind))],
-            })),
+                valid_types: vec![expected_type],
+            }))
         }
     }
 
@@ -1028,7 +1036,7 @@ impl<'a> ConfigBuilder<'a> {
         let expr_span = expr_ast.span;
         match self.env.typecheck_expression(expr_ast)? {
             (_, ExprType::Integer, Ok(value)) => Ok(value.unwrap_int()),
-            (_, ExprType::Integer, Err(reason)) => {
+            (_, ExprType::Integer | ExprType::Bottom, Err(reason)) => {
                 Err(Errs::one(ConfigError::NonStaticAttr {
                     attribute,
                     expr_loc: self.env.make_loc(expr_span),

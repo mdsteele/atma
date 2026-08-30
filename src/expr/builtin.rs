@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-pub fn make_global_builtin_values() -> HashMap<Rc<str>, (ExprValue, ExprType)>
-{
+pub(crate) fn make_global_builtin_values()
+-> HashMap<Rc<str>, (ExprValue, ExprType)> {
     let mut builtins = HashMap::<Rc<str>, (ExprValue, ExprType)>::new();
 
     // Add [int -> int] functions:

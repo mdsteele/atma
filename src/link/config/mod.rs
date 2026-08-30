@@ -1,4 +1,5 @@
 mod build;
+mod builtin;
 mod checksum;
 mod env;
 mod error;
@@ -26,12 +27,9 @@ use std::rc::Rc;
 pub struct LinkConfig {
     /// Configurations for the address spaces that memory regions exist in.
     pub addrspaces: Vec<AddrspaceConfig>,
-    /// Configurations for memory regions that padding-only sections can be
-    /// placed within, and that will not be included in the final binary.
-    pub bss: Vec<RegionConfig>,
-    /// Configurations for memory regions that data sections can be placed
-    /// within, and that will be included in the final binary.
-    pub memory: Vec<RegionConfig>,
+    /// Configurations for memory regions that sections can be placed
+    /// within.
+    pub regions: Vec<RegionConfig>,
     /// Configurations for the data sections to be linked together.
     pub sections: Vec<SectionConfig>,
     /// Names of symbols that are imported into this configuration from object
@@ -190,6 +188,26 @@ pub struct RegionConfig {
     /// with this byte value. Otherwise, they will be filled with this region's
     /// address space's fill byte.
     pub fill: Option<u8>,
+    /// What kind of memory region this is.
+    pub kind: RegionKind,
+}
+
+//===========================================================================//
+
+/// Describes a kind of memory region, and controls how that region is handled
+/// during linking.
+#[derive(Clone, Copy, Debug, Default, Hash, Eq, PartialEq)]
+pub enum RegionKind {
+    /// A memory region that contains data, and that should be included in the
+    /// final binary.  This is the default.
+    #[default]
+    Data,
+    /// A memory region that contains data, but that should not be included in
+    /// the final binary.
+    Omit,
+    /// A memory region that contains no initial data (only reserved space and
+    /// padding), and that should not be included in the final binary.
+    Bss,
 }
 
 //===========================================================================//

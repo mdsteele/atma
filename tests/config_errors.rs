@@ -1,5 +1,7 @@
 use atma::addr::AlignTryFromError;
-use atma::expr::{ExprEvalError, ExprNotStaticReason, ExprType};
+use atma::expr::{
+    ExprEvalError, ExprFuncEvalError, ExprNotStaticReason, ExprType,
+};
 use atma::link::{ConfigAttr, ConfigEntryKind, ConfigError, LinkConfig};
 use num_bigint::BigInt;
 use std::assert_matches;
@@ -35,6 +37,48 @@ fn attr_type_error() {
             ..
         },
     ] if valid_types == &[ExprType::Integer]);
+}
+
+#[test]
+fn bottom_entity_attr() {
+    let source = r#"\
+    .REGIONS {
+        RAM: space=%error("foobar"), start=$0000, size=$1000
+    }
+    "#;
+    assert_matches!(config_errors(source).as_slice(), [
+        ConfigError::NonStaticAttr {
+            attribute: ConfigAttr::RegionSpace,
+            reason: ExprNotStaticReason::StaticEvalError {
+                error: ExprEvalError::FuncEvalError {
+                    error: ExprFuncEvalError::ErrorMessage(message),
+                    ..
+                },
+            },
+            ..
+        },
+    ] if &**message == "foobar");
+}
+
+#[test]
+fn bottom_int_attr() {
+    let source = r#"\
+    .ADDRSPACES {
+        CPU: bits=%error("foobar")
+    }
+    "#;
+    assert_matches!(config_errors(source).as_slice(), [
+        ConfigError::NonStaticAttr {
+            attribute: ConfigAttr::AddrspaceBits,
+            reason: ExprNotStaticReason::StaticEvalError {
+                error: ExprEvalError::FuncEvalError {
+                    error: ExprFuncEvalError::ErrorMessage(message),
+                    ..
+                },
+            },
+            ..
+        },
+    ] if &**message == "foobar");
 }
 
 #[test]
@@ -104,7 +148,7 @@ fn invalid_alignment_value() {
     .ADDRSPACES {
         CPU: bits=16
     }
-    .MEMORY {
+    .REGIONS {
         ROM: space=CPU, start=0, size=$8000
     }
     .SECTIONS {
@@ -199,8 +243,11 @@ fn non_static_attr() {
         config_errors(source).as_slice(),
         [ConfigError::NonStaticAttr {
             attribute: ConfigAttr::AddrspaceBits,
+            reason: ExprNotStaticReason::StaticEvalError {
+                error: ExprEvalError::SubtractLabelsUnresolved { .. },
+            },
             ..
-        },]
+        }]
     );
 }
 
@@ -267,7 +314,7 @@ fn region_range_overflow() {
     .ADDRSPACES {
         CPU: bits=16
     }
-    .MEMORY {
+    .REGIONS {
         ROM: space=CPU, start=$c000, size=$8000
     }
     "#;

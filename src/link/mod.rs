@@ -15,7 +15,8 @@ pub use binary::LinkedBinary;
 pub use config::{
     AddrspaceConfig, ChecksumConfig, ChecksumFormat, ChecksumRange,
     ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult, ConfigVariableOr,
-    ExportConfig, ImportConfig, LinkConfig, RegionConfig, SectionConfig,
+    ExportConfig, ImportConfig, LinkConfig, RegionConfig, RegionKind,
+    SectionConfig,
 };
 pub use error::{LinkError, LinkResult};
 

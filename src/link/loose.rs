@@ -1,4 +1,4 @@
-use super::config::LinkConfig;
+use super::config::{LinkConfig, RegionKind};
 use super::error::LinkError;
 use super::types::ChunkId;
 use crate::addr::{Addr, Align, Size};
@@ -65,16 +65,15 @@ impl LooseSection {
         object_files: &[ObjFile],
     ) -> (Vec<LooseSection>, Errs<LinkError>) {
         let mut errs = Errs::<LinkError>::new();
-        for region in &config.bss {
-            if region.fill.is_some() {
-                errs.push(LinkError::FillByteOnBssRegion);
+        let mut bss_region_names = HashSet::<Rc<str>>::new();
+        for region in &config.regions {
+            if region.kind == RegionKind::Bss {
+                bss_region_names.insert(region.name.clone());
+                if region.fill.is_some() {
+                    errs.push(LinkError::FillByteOnBssRegion);
+                }
             }
         }
-        let bss_region_names = config
-            .bss
-            .iter()
-            .map(|region| region.name.clone())
-            .collect::<HashSet<Rc<str>>>();
         let mut loose_sections = Vec::<LooseSection>::new();
         let section_name_to_index: HashMap<Rc<str>, usize> = {
             let mut map = HashMap::new();

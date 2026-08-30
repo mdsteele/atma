@@ -1,5 +1,5 @@
 use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
-use super::config::LinkConfig;
+use super::config::{LinkConfig, RegionKind};
 use super::error::{LinkError, LinkResult};
 use super::place::try_place;
 use super::types::{AbsoluteLabel, ChunkId, ChunkMetadata};
@@ -149,8 +149,11 @@ impl PositionedRegion {
         let mut range_set = RangeInclusiveSet::<Addr>::new();
         let mut positioned_sections =
             Vec::<PositionedSection>::with_capacity(region.sections.len());
-        let region_binary_offset =
-            if region.is_bss { None } else { Some(*cumulative_offset) };
+        let region_binary_offset = if region.kind == RegionKind::Data {
+            Some(*cumulative_offset)
+        } else {
+            None
+        };
         let mut arranged_sections = region.sections;
         arranged_sections.sort_by(section_ordering);
         for section in arranged_sections {
