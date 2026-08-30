@@ -1,7 +1,8 @@
 use super::checksum::ChecksumFormat;
 use crate::addr::{Addr, Align, AlignTryFromError, Size};
-use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
+use crate::error::{Errs, SourceError, SrcCacheError, SrcLoc, SrcSpan};
 use crate::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
+use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
 use std::fmt;
@@ -21,8 +22,8 @@ pub enum ConfigError {
     AttrTypeError {
         /// The config attribute.
         attribute: ConfigAttr,
-        /// The source code span for the expresion.
-        expr_span: SrcSpan,
+        /// The source code location for the expresion.
+        expr_loc: ObjSrcLoc,
         /// The actual type of the expression.
         expr_type: ExprType,
         /// The permissible types for the expression.
@@ -34,9 +35,9 @@ pub enum ConfigError {
         entry_name: Rc<str>,
         /// The duplicated attribute name.
         attr_name: Rc<str>,
-        /// The source code span for the duplicate instance of this attribute
-        /// name.
-        attr_span: SrcSpan,
+        /// The source code location for the duplicate instance of this
+        /// attribute name.
+        attr_loc: ObjSrcLoc,
         /// The source code span for the earlier instance of this attribute
         /// name.
         prev_span: SrcSpan,
@@ -45,31 +46,35 @@ pub enum ConfigError {
     DuplicateEntryName {
         /// The duplicated entry name.
         entry_name: Rc<str>,
-        /// The source code span for the duplicate instance of this entry name.
-        entry_span: SrcSpan,
-        /// The source code span for the earlier instance of this entry name.
-        prev_span: SrcSpan,
+        /// The source code location for the duplicate instance of this entry
+        /// name.
+        entry_loc: ObjSrcLoc,
+        /// The source code location for the earlier instance of this entry
+        /// name.
+        prev_loc: ObjSrcLoc,
     },
     /// Tried to export a symbol that was already exported.
     DuplicateExport {
         /// The symbol name.
         symbol_name: Rc<str>,
-        /// The source code span for the duplicate instance of the export.
-        export_span: SrcSpan,
-        /// The source code span for the earlier instance of the export.
-        prev_span: SrcSpan,
+        /// The source code location for the duplicate instance of the export.
+        export_loc: ObjSrcLoc,
+        /// The source code location for the earlier instance of the export.
+        prev_loc: ObjSrcLoc,
     },
     /// Tried to both import and export the same symbol.
     ExportImportedSymbol {
         /// The symbol name.
         symbol_name: Rc<str>,
-        /// The source code span for the earlier import.
-        import_span: SrcSpan,
-        /// The source code span for the export.
-        export_span: SrcSpan,
+        /// The source code location for the earlier import.
+        import_loc: ObjSrcLoc,
+        /// The source code location for the export.
+        export_loc: ObjSrcLoc,
     },
     /// An expression failed to typecheck.
     ExprTypeError {
+        /// The context that the expression appeared within.
+        context: Rc<ObjSrcContext>,
         /// The typechecking error.
         error: ExprTypeError,
     },
@@ -79,9 +84,9 @@ pub enum ConfigError {
         attribute: ConfigAttr,
         /// The reason that the expression value was invalid.
         error: AlignTryFromError,
-        /// The source code span for the expression that evaluated to an
+        /// The source code location for the expression that evaluated to an
         /// invalid alignment value.
-        expr_span: SrcSpan,
+        expr_loc: ObjSrcLoc,
         /// The value of the expression.
         expr_value: BigInt,
     },
@@ -91,16 +96,16 @@ pub enum ConfigError {
         entry_kind: ConfigEntryKind,
         /// The invalid attribute name.
         attr_name: Rc<str>,
-        /// The source code span for the invalid attribute name.
-        attr_span: SrcSpan,
+        /// The source code location for the invalid attribute name.
+        attr_loc: ObjSrcLoc,
     },
     /// An checksum format attribute had an invalid value.
     InvalidChecksumFormatAttr {
         /// The checksum format attribute.
         attribute: ConfigAttr,
-        /// The source code span for the expression that evaluated to an
+        /// The source code location for the expression that evaluated to an
         /// invalid checksum format string.
-        expr_span: SrcSpan,
+        expr_loc: ObjSrcLoc,
         /// The value of the expression.
         expr_value: Rc<str>,
     },
@@ -108,13 +113,16 @@ pub enum ConfigError {
     MissingAttr {
         /// The name of the entry for which the attribute is missing.
         entry_name: Rc<str>,
-        /// The source code span for the name of the entry.
-        entry_span: SrcSpan,
+        /// The source code location for the name of the entry.
+        entry_loc: ObjSrcLoc,
         /// The missing attribute.
         attribute: ConfigAttr,
     },
     /// A config entry contained two attributes that cannot be used together.
     MutuallyExclusiveAttrs {
+        /// The source code location for the name of the entry that contains
+        /// the two mutually exclusive attributes.
+        entry_loc: ObjSrcLoc,
         /// The first attribute.
         attribute_1: ConfigAttr,
         /// The second attribute.
@@ -123,17 +131,14 @@ pub enum ConfigError {
         attr_span_1: SrcSpan,
         /// The source code span for the second attribute name.
         attr_span_2: SrcSpan,
-        /// The source code span for the name of the entry that contains the
-        /// two mutually exclusive attributes.
-        entry_span: SrcSpan,
     },
     /// A config attribute that requires a static value was given a non-static
     /// expression.
     NonStaticAttr {
         /// The config attribute.
         attribute: ConfigAttr,
-        /// The source code span for the non-static expression.
-        expr_span: SrcSpan,
+        /// The source code location for the non-static expression.
+        expr_loc: ObjSrcLoc,
         /// The reason that the expression isn't static.
         reason: ExprNotStaticReason,
     },
@@ -142,13 +147,30 @@ pub enum ConfigError {
     OutOfRangeAttr {
         /// The config attribute.
         attribute: ConfigAttr,
-        /// The source code span for the expression.
-        expr_span: SrcSpan,
+        /// The source code location for the expression.
+        expr_loc: ObjSrcLoc,
         /// The out-of-range value.
         value: BigInt,
     },
+    /// A subconfig file path was specified using a non-static string
+    /// expression.
+    PathNotStatic {
+        /// The source code location for the non-static expression.
+        expr_loc: ObjSrcLoc,
+        /// The reason that the expression isn't static.
+        reason: ExprNotStaticReason,
+    },
+    /// A subconfig file path was specified using a non-string expression.
+    PathTypeError {
+        /// The source code location for the non-string expression.
+        expr_loc: ObjSrcLoc,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
     /// An piece of the linker config failed to parse.
     ParseError {
+        /// The context that the parse error occurred within.
+        context: Rc<ObjSrcContext>,
         /// The parse error.
         error: ParseError,
     },
@@ -157,8 +179,8 @@ pub enum ConfigError {
     RegionRangeOverflow {
         /// The name of the memory region entry.
         entry_name: Rc<str>,
-        /// The source code span for the name of the memory region entry.
-        entry_span: SrcSpan,
+        /// The source code location for the name of the memory region entry.
+        entry_loc: ObjSrcLoc,
         /// The start address of the memory region.
         start: Addr,
         /// The size of the memory region.
@@ -166,18 +188,16 @@ pub enum ConfigError {
         /// The bit width of the memory region's address space.
         bits: u32,
     },
-}
-
-impl From<ExprTypeError> for ConfigError {
-    fn from(error: ExprTypeError) -> Self {
-        Self::ExprTypeError { error }
-    }
-}
-
-impl From<ParseError> for ConfigError {
-    fn from(error: ParseError) -> Self {
-        Self::ParseError { error }
-    }
+    /// Encountered an error while trying to fetch data from a file.
+    SrcCacheError {
+        /// The joined path for the source file that couldn't be fetched.
+        path: Rc<str>,
+        /// The source code location for the expression that determined the
+        /// file to be fetched.
+        path_loc: ObjSrcLoc,
+        /// The error from the source cache.
+        error: SrcCacheError,
+    },
 }
 
 impl ConfigError {
@@ -187,7 +207,7 @@ impl ConfigError {
         match self {
             Self::AttrTypeError {
                 attribute,
-                expr_span,
+                expr_loc,
                 expr_type,
                 valid_types,
             } => {
@@ -202,58 +222,69 @@ impl ConfigError {
                         .join(" or "),
                 );
                 let label = format!("this expression has type {expr_type}");
-                SourceError::new(SrcLoc::new(path, expr_span), message)
+                SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
             }
             Self::DuplicateAttrName {
                 entry_name,
                 attr_name,
-                attr_span,
+                attr_loc,
                 prev_span,
             } => {
                 let message = format!(
                     "Duplicate `{attr_name}` attribute for `{entry_name}`"
                 );
+                let path = &attr_loc.context.path;
                 let label1 = "Previously declared here";
                 let label2 = "Duplicated here";
-                SourceError::new(SrcLoc::new(path, attr_span), message)
+                SourceError::new(attr_loc.primary(), message)
                     .with_label(SrcLoc::new(path, prev_span), label1)
                     .with_primary_label(label2)
+                    .with_context(&*attr_loc.context)
             }
-            Self::DuplicateEntryName { entry_name, entry_span, prev_span } => {
+            Self::DuplicateEntryName { entry_name, entry_loc, prev_loc } => {
                 let message = format!("`{entry_name}` was already declared");
                 let label1 = "Previously declared here";
                 let label2 = "Declared again here";
-                SourceError::new(SrcLoc::new(path, entry_span), message)
-                    .with_label(SrcLoc::new(path, prev_span), label1)
+                SourceError::new(entry_loc.primary(), message)
+                    .with_label(prev_loc.primary(), label1)
+                    .with_context(&*prev_loc.context)
                     .with_primary_label(label2)
+                    .with_context(&*entry_loc.context)
             }
-            Self::DuplicateExport { symbol_name, export_span, prev_span } => {
+            Self::DuplicateExport { symbol_name, export_loc, prev_loc } => {
                 let message = format!("`{symbol_name}` was already exported");
                 let label1 = "Previously exported here";
                 let label2 = "Exported again here";
-                SourceError::new(SrcLoc::new(path, export_span), message)
-                    .with_label(SrcLoc::new(path, prev_span), label1)
+                SourceError::new(export_loc.primary(), message)
+                    .with_label(prev_loc.primary(), label1)
+                    .with_context(&*prev_loc.context)
                     .with_primary_label(label2)
+                    .with_context(&*export_loc.context)
             }
             Self::ExportImportedSymbol {
                 symbol_name,
-                import_span,
-                export_span,
+                import_loc,
+                export_loc,
             } => {
                 let message =
                     format!("`{symbol_name}` is both imported and exported");
                 let label1 = "Imported here";
                 let label2 = "Exported here";
-                SourceError::new(SrcLoc::new(path, export_span), message)
-                    .with_label(SrcLoc::new(path, import_span), label1)
+                SourceError::new(export_loc.primary(), message)
+                    .with_label(import_loc.primary(), label1)
+                    .with_context(&*import_loc.context)
                     .with_primary_label(label2)
+                    .with_context(&*export_loc.context)
             }
-            Self::ExprTypeError { error } => error.to_source_error(path),
+            Self::ExprTypeError { context, error } => {
+                error.to_source_error(&context.path).with_context(&*context)
+            }
             Self::InvalidAlignmentAttr {
                 attribute,
                 error,
-                expr_span,
+                expr_loc,
                 expr_value,
             } => {
                 let message = match error {
@@ -275,10 +306,11 @@ impl ConfigError {
                 };
                 let label =
                     format!("the value of this expression is ${expr_value:x}");
-                SourceError::new(SrcLoc::new(path, expr_span), message)
+                SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
             }
-            Self::InvalidAttrName { entry_kind, attr_name, attr_span } => {
+            Self::InvalidAttrName { entry_kind, attr_name, attr_loc } => {
                 let message =
                     format!("Invalid {entry_kind} attribute: `{attr_name}`");
                 let note = format!(
@@ -290,13 +322,14 @@ impl ConfigError {
                         .collect::<Vec<_>>()
                         .join(", "),
                 );
-                SourceError::new(SrcLoc::new(path, attr_span), message)
+                SourceError::new(attr_loc.primary(), message)
                     .with_primary_label("")
+                    .with_context(&*attr_loc.context)
                     .with_note(note)
             }
             Self::InvalidChecksumFormatAttr {
                 attribute,
-                expr_span,
+                expr_loc,
                 expr_value,
             } => {
                 let message = format!(
@@ -314,24 +347,26 @@ impl ConfigError {
                         .collect::<Vec<_>>()
                         .join(", "),
                 );
-                SourceError::new(SrcLoc::new(path, expr_span), message)
+                SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
                     .with_note(note)
             }
-            Self::MissingAttr { entry_name, entry_span, attribute } => {
+            Self::MissingAttr { entry_name, entry_loc, attribute } => {
                 let message = format!(
                     "Missing required `{}` attribute for `{entry_name}`",
                     attribute.attr_name()
                 );
-                SourceError::new(SrcLoc::new(path, entry_span), message)
+                SourceError::new(entry_loc.primary(), message)
                     .with_primary_label("")
+                    .with_context(&*entry_loc.context)
             }
             Self::MutuallyExclusiveAttrs {
+                entry_loc,
                 attribute_1,
                 attribute_2,
                 attr_span_1,
                 attr_span_2,
-                entry_span,
             } => {
                 let message = format!(
                     "a {} cannot specify both `{}` and `{}`",
@@ -339,22 +374,25 @@ impl ConfigError {
                     attribute_1.attr_name(),
                     attribute_2.attr_name()
                 );
-                SourceError::new(SrcLoc::new(path, entry_span), message)
+                let path = &entry_loc.context.path;
+                SourceError::new(entry_loc.primary(), message)
                     .with_label(SrcLoc::new(path, attr_span_1), "")
                     .with_label(SrcLoc::new(path, attr_span_2), "")
+                    .with_context(&*entry_loc.context)
             }
-            Self::NonStaticAttr { attribute, expr_span, reason } => {
+            Self::NonStaticAttr { attribute, expr_loc, reason } => {
                 let message = format!(
                     "{} `{}` attribute must be static",
                     attribute.entry_kind(),
                     attribute.attr_name()
                 );
                 let label = "this expression isn't static";
-                SourceError::new(SrcLoc::new(path, expr_span), message)
+                SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&reason.context(path))
+                    .with_context(&*expr_loc.context)
             }
-            Self::OutOfRangeAttr { attribute, expr_span, value } => {
+            Self::OutOfRangeAttr { attribute, expr_loc, value } => {
                 // TODO: provide the valid range of values
                 let message = format!(
                     "{} `{}` is out of range",
@@ -362,13 +400,34 @@ impl ConfigError {
                     attribute.attr_name()
                 );
                 let label = format!("the value of this expression is {value}");
-                SourceError::new(SrcLoc::new(path, expr_span), message)
+                SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
             }
-            Self::ParseError { error } => error.to_source_error(path),
+            Self::ParseError { context, error } => {
+                error.to_source_error(&context.path).with_context(&*context)
+            }
+            Self::PathNotStatic { expr_loc, reason } => {
+                let message = "subconfig file path must be static";
+                let label = "this expression isn't static";
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&reason.context(&expr_loc.context.path))
+                    .with_context(&*expr_loc.context)
+            }
+            Self::PathTypeError { expr_loc, expr_type } => {
+                let message = format!(
+                    "subconfig file path must be of type {}, not {expr_type}",
+                    ExprType::String
+                );
+                let label = format!("this expression has type {expr_type}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
             Self::RegionRangeOverflow {
                 entry_name,
-                entry_span,
+                entry_loc,
                 start,
                 size,
                 bits,
@@ -377,8 +436,15 @@ impl ConfigError {
                     "`{entry_name}` memory range overflows {bits}-bit address \
                      size (start=${start:x}, size=${size:x})"
                 );
-                SourceError::new(SrcLoc::new(path, entry_span), message)
+                SourceError::new(entry_loc.primary(), message)
                     .with_primary_label("")
+                    .with_context(&*entry_loc.context)
+            }
+            Self::SrcCacheError { path: other, path_loc, error } => {
+                let message = format!("error loading {other:?}: {error}");
+                SourceError::new(path_loc.primary(), message)
+                    .with_primary_label("")
+                    .with_context(&*path_loc.context)
             }
         }
     }

@@ -57,6 +57,8 @@ pub enum LinkDirectiveAst {
     Memory(Vec<LinkEntryAst>),
     /// A `.SECTIONS` directive block.
     Sections(Vec<LinkEntryAst>),
+    /// A `.USE` directive.
+    Use(ExprAst),
 }
 
 impl LinkDirectiveAst {
@@ -100,6 +102,10 @@ impl LinkDirectiveAst {
         let sections_dir = directive(".SECTIONS")
             .ignore_then(entries_block)
             .map(LinkDirectiveAst::Sections);
+        let use_dir = directive(".USE")
+            .ignore_then(ExprAst::parser())
+            .then_ignore(linebreak())
+            .map(LinkDirectiveAst::Use);
         chumsky::prelude::choice((
             addrspaces_dir,
             bss_dir,
@@ -109,6 +115,7 @@ impl LinkDirectiveAst {
             let_dir,
             memory_dir,
             sections_dir,
+            use_dir,
         ))
     }
 }

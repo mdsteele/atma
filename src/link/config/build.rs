@@ -6,15 +6,16 @@ use super::{
     RegionConfig, SectionConfig,
 };
 use crate::addr::{Addr, Align, Range, Size};
-use crate::error::{Errs, SrcSpan};
+use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{ExprType, ExprValue};
-use crate::obj::ObjExpr;
+use crate::obj::{ObjExpr, ObjSrcContext, ObjSrcLoc, ObjSrcParent};
 use crate::parse::{
     ExprAst, IdentifierAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
+use std::path::Path;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -27,15 +28,20 @@ type PrevAttrs = HashMap<Rc<str>, SrcSpan>;
 
 //===========================================================================//
 
-pub(super) struct ConfigBuilder {
+pub(super) struct ConfigBuilder<'a> {
+    cache: &'a mut dyn SrcCache,
     env: LinkTypeEnv,
     config: LinkConfig,
 }
 
-impl ConfigBuilder {
-    pub(super) fn new(src_path: Rc<str>) -> ConfigBuilder {
+impl<'a> ConfigBuilder<'a> {
+    pub(super) fn new(
+        cache: &'a mut dyn SrcCache,
+        root_path: Rc<str>,
+    ) -> ConfigBuilder<'a> {
         ConfigBuilder {
-            env: LinkTypeEnv::new(src_path),
+            cache,
+            env: LinkTypeEnv::new(root_path),
             config: LinkConfig {
                 addrspaces: Vec::new(),
                 bss: Vec::new(),
@@ -51,14 +57,19 @@ impl ConfigBuilder {
 
     pub(super) fn build(
         mut self,
-        ast: LinkConfigAst,
+        source_code: &str,
     ) -> ConfigResult<LinkConfig> {
+        let config_ast = self.env.parse_source(source_code)?;
+        self.visit_config(config_ast)?;
+        Ok(self.config)
+    }
+
+    fn visit_config(&mut self, config_ast: LinkConfigAst) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
-        for dir_ast in ast.directives {
+        for dir_ast in config_ast.directives {
             errs.also(self.visit_directive(dir_ast));
         }
-        errs.result()?;
-        Ok(self.config)
+        errs.result()
     }
 
     fn visit_directive(
@@ -84,6 +95,7 @@ impl ConfigBuilder {
             LinkDirectiveAst::Sections(entries) => {
                 self.visit_sections_dir(entries)
             }
+            LinkDirectiveAst::Use(expr) => self.visit_use_dir(expr),
         }
     }
 
@@ -127,14 +139,14 @@ impl ConfigBuilder {
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Addrspace,
                     attr_name: id_ast.name.clone(),
-                    attr_span: id_ast.span,
+                    attr_loc: self.env.make_loc(id_ast.span),
                 }),
             }
         }
         if bits.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::AddrspaceBits,
             });
         }
@@ -154,7 +166,7 @@ impl ConfigBuilder {
             Some(int) if (1..=Addr::BITS).contains(&int) => Ok(int),
             _ => Err(Errs::one(ConfigError::OutOfRangeAttr {
                 attribute: ConfigAttr::AddrspaceBits,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 value: bigint,
             })),
         }
@@ -227,14 +239,14 @@ impl ConfigBuilder {
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Checksum,
                     attr_name: id_ast.name.clone(),
-                    attr_span: id_ast.span,
+                    attr_loc: self.env.make_loc(id_ast.span),
                 }),
             }
         }
         if sum.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::ChecksumSum,
             });
         }
@@ -245,11 +257,11 @@ impl ConfigBuilder {
             (None, Some(size)) => ChecksumRange::FromSize { start, size },
             (Some(_end), Some(_size)) => {
                 errs.push(ConfigError::MutuallyExclusiveAttrs {
+                    entry_loc: self.env.make_loc(entry.id.span),
                     attribute_1: ConfigAttr::ChecksumSize,
                     attribute_2: ConfigAttr::ChecksumEnd,
                     attr_span_1: *prev_attrs.get("size").unwrap(),
                     attr_span_2: *prev_attrs.get("end").unwrap(),
-                    entry_span: entry.id.span,
                 });
                 ChecksumRange::default()
             }
@@ -316,18 +328,18 @@ impl ConfigBuilder {
         entry: LinkEntryAst,
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
-        if let Some(import_span) = self.env.get_import(&entry.id.name) {
+        if let Some(import_loc) = self.env.get_import(&entry.id.name) {
             errs.push(ConfigError::ExportImportedSymbol {
                 symbol_name: entry.id.name.clone(),
-                import_span,
-                export_span: entry.id.span,
+                import_loc,
+                export_loc: self.env.make_loc(entry.id.span),
             });
         }
-        if let Some(prev_span) = self.env.get_export(&entry.id.name) {
+        if let Some(prev_loc) = self.env.get_export(&entry.id.name) {
             errs.push(ConfigError::DuplicateExport {
                 symbol_name: entry.id.name.clone(),
-                export_span: entry.id.span,
-                prev_span,
+                export_loc: self.env.make_loc(entry.id.span),
+                prev_loc,
             });
         }
         let mut space: Option<Rc<str>> = None;
@@ -353,21 +365,21 @@ impl ConfigBuilder {
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Export,
                     attr_name: id_ast.name.clone(),
-                    attr_span: id_ast.span,
+                    attr_loc: self.env.make_loc(id_ast.span),
                 }),
             }
         }
         if space.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::ChecksumSum,
             });
         }
         if addr.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::ExportAddr,
             });
         }
@@ -394,7 +406,7 @@ impl ConfigBuilder {
                 let addr = Addr::try_from(bigint).map_err(|()| {
                     Errs::one(ConfigError::OutOfRangeAttr {
                         attribute: ConfigAttr::ExportAddr,
-                        expr_span,
+                        expr_loc: self.env.make_loc(expr_span),
                         value: bigint.clone(),
                     })
                 })?;
@@ -403,7 +415,7 @@ impl ConfigBuilder {
             (expr, ExprType::Integer, Err(_)) => Ok(self.add_variable(expr)),
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute: ConfigAttr::ExportAddr,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![ExprType::Integer],
             })),
@@ -430,11 +442,11 @@ impl ConfigBuilder {
     }
 
     fn import_symbol(&mut self, id_ast: IdentifierAst) -> ConfigResult<()> {
-        if let Some(export_span) = self.env.get_export(&id_ast.name) {
+        if let Some(export_loc) = self.env.get_export(&id_ast.name) {
             return Err(Errs::one(ConfigError::ExportImportedSymbol {
                 symbol_name: id_ast.name.clone(),
-                import_span: id_ast.span,
-                export_span,
+                import_loc: self.env.make_loc(id_ast.span),
+                export_loc,
             }));
         }
         if self.env.get_import(&id_ast.name).is_none() {
@@ -542,7 +554,7 @@ impl ConfigBuilder {
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Region,
                     attr_name: id_ast.name.clone(),
-                    attr_span: id_ast.span,
+                    attr_loc: self.env.make_loc(id_ast.span),
                 }),
             }
         }
@@ -556,7 +568,7 @@ impl ConfigBuilder {
         } else {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::RegionSpace,
             });
             Addr::BITS
@@ -565,14 +577,14 @@ impl ConfigBuilder {
         if start.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::RegionStart,
             });
         }
         if size.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::RegionSize,
             });
         }
@@ -582,7 +594,7 @@ impl ConfigBuilder {
                 _ => {
                     errs.push(ConfigError::RegionRangeOverflow {
                         entry_name: entry.id.name.clone(),
-                        entry_span: entry.id.span,
+                        entry_loc: self.env.make_loc(entry.id.span),
                         start,
                         size,
                         bits: addrspace_bits,
@@ -615,7 +627,7 @@ impl ConfigBuilder {
             Ok(size) if size > Size::ZERO => Ok(size),
             _ => Err(Errs::one(ConfigError::OutOfRangeAttr {
                 attribute: ConfigAttr::RegionSize,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 value: bigint,
             })),
         }
@@ -637,7 +649,7 @@ impl ConfigBuilder {
         Addr::try_from(&bigint).map_err(|()| {
             Errs::one(ConfigError::OutOfRangeAttr {
                 attribute: ConfigAttr::RegionStart,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 value: bigint,
             })
         })
@@ -710,14 +722,14 @@ impl ConfigBuilder {
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Section,
                     attr_name: id_ast.name.clone(),
-                    attr_span: id_ast.span,
+                    attr_loc: self.env.make_loc(id_ast.span),
                 }),
             }
         }
         if region.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
-                entry_span: entry.id.span,
+                entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::SectionRegion,
             });
         }
@@ -758,7 +770,7 @@ impl ConfigBuilder {
         Addr::try_from(&bigint).map_err(|()| {
             Errs::one(ConfigError::OutOfRangeAttr {
                 attribute: ConfigAttr::SectionStart,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 value: bigint,
             })
         })
@@ -772,7 +784,7 @@ impl ConfigBuilder {
             Ok(size) if size > Size::ZERO => Ok(size),
             _ => Err(Errs::one(ConfigError::OutOfRangeAttr {
                 attribute: ConfigAttr::SectionSize,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 value: bigint,
             })),
         }
@@ -780,6 +792,53 @@ impl ConfigBuilder {
 
     fn section_within_attr(&self, expr_ast: ExprAst) -> ConfigResult<Align> {
         self.static_align_attr(ConfigAttr::SectionWithin, expr_ast)
+    }
+
+    fn visit_use_dir(&mut self, expr_ast: ExprAst) -> ConfigResult<()> {
+        let mut errs = Errs::<ConfigError>::new();
+        let expr_span = expr_ast.span;
+        match errs.ok(self.env.typecheck_expression(expr_ast)) {
+            None => {}
+            Some((_, ExprType::String, Ok(path_value))) => {
+                let path = self.joined_path(path_value.unwrap_str_ref());
+                match self.cache.fetch_or_get_cached_utf8(&path) {
+                    Ok(source_code) => {
+                        let context = Rc::new(ObjSrcContext {
+                            path,
+                            parent: ObjSrcParent::Use(ObjSrcLoc {
+                                span: expr_span,
+                                context: self.env.current_src_context(),
+                            }),
+                        });
+                        self.env.push_src_context(context);
+                        if let Some(config_ast) =
+                            errs.ok(self.env.parse_source(source_code))
+                        {
+                            errs.also(self.visit_config(config_ast));
+                        }
+                        self.env.pop_src_context();
+                    }
+                    Err(error) => {
+                        errs.push(ConfigError::SrcCacheError {
+                            path,
+                            path_loc: self.env.make_loc(expr_span),
+                            error,
+                        });
+                    }
+                }
+            }
+            Some((_, ExprType::String | ExprType::Bottom, Err(reason))) => {
+                errs.push(ConfigError::PathNotStatic {
+                    expr_loc: self.env.make_loc(expr_span),
+                    reason,
+                })
+            }
+            Some((_, expr_type, _)) => errs.push(ConfigError::PathTypeError {
+                expr_loc: self.env.make_loc(expr_span),
+                expr_type,
+            }),
+        }
+        errs.result()
     }
 
     fn static_align_attr(
@@ -793,7 +852,7 @@ impl ConfigBuilder {
             Errs::one(ConfigError::InvalidAlignmentAttr {
                 attribute,
                 error,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_value: bigint,
             })
         })
@@ -815,7 +874,7 @@ impl ConfigBuilder {
                     Err(reason) => {
                         Err(Errs::one(ConfigError::NonStaticAttr {
                             attribute,
-                            expr_span,
+                            expr_loc: self.env.make_loc(expr_span),
                             reason,
                         }))
                     }
@@ -823,7 +882,7 @@ impl ConfigBuilder {
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![ExprType::Entity(Rc::from(entity_kind))],
             })),
@@ -875,7 +934,7 @@ impl ConfigBuilder {
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![
                     ExprType::String,
@@ -906,7 +965,7 @@ impl ConfigBuilder {
         string.parse::<ChecksumFormat>().map_err(|()| {
             Errs::one(ConfigError::InvalidChecksumFormatAttr {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_value: string.clone(),
             })
         })
@@ -922,7 +981,7 @@ impl ConfigBuilder {
         u8::try_from(&bigint).map_err(|_| {
             Errs::one(ConfigError::OutOfRangeAttr {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 value: bigint,
             })
         })
@@ -940,7 +999,7 @@ impl ConfigBuilder {
                 let uint64 = bigint.to_u64().ok_or_else(|| {
                     Errs::one(ConfigError::OutOfRangeAttr {
                         attribute,
-                        expr_span,
+                        expr_loc: self.env.make_loc(expr_span),
                         value: bigint.clone(),
                     })
                 })?;
@@ -954,7 +1013,7 @@ impl ConfigBuilder {
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![ExprType::Integer, ExprType::Label],
             })),
@@ -972,13 +1031,13 @@ impl ConfigBuilder {
             (_, ExprType::Integer, Err(reason)) => {
                 Err(Errs::one(ConfigError::NonStaticAttr {
                     attribute,
-                    expr_span,
+                    expr_loc: self.env.make_loc(expr_span),
                     reason,
                 }))
             }
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![ExprType::Integer],
             })),
@@ -998,7 +1057,7 @@ impl ConfigBuilder {
             (expr, ExprType::String, Err(_)) => Ok(self.add_variable(expr)),
             (_, expr_type, _) => Err(Errs::one(ConfigError::AttrTypeError {
                 attribute,
-                expr_span,
+                expr_loc: self.env.make_loc(expr_span),
                 expr_type,
                 valid_types: vec![ExprType::String],
             })),
@@ -1013,8 +1072,8 @@ impl ConfigBuilder {
         if let Some(decl) = self.env.get_declaration(&entry_id.name) {
             Err(Errs::one(ConfigError::DuplicateEntryName {
                 entry_name: entry_id.name.clone(),
-                entry_span: entry_id.span,
-                prev_span: decl.id_span,
+                entry_loc: self.env.make_loc(entry_id.span),
+                prev_loc: decl.id_loc.clone(),
             }))
         } else {
             let value = ExprValue::Entity(entry_id.name.clone());
@@ -1037,12 +1096,28 @@ impl ConfigBuilder {
             Err(Errs::one(ConfigError::DuplicateAttrName {
                 entry_name: entry_name.clone(),
                 attr_name: id_ast.name.clone(),
-                attr_span: id_ast.span,
+                attr_loc: self.env.make_loc(id_ast.span),
                 prev_span,
             }))
         } else {
             prev_attrs.insert(id_ast.name.clone(), id_ast.span);
             Ok(())
+        }
+    }
+
+    /// Given a relative path appearing in the current source context (e.g. in
+    /// a `use` statement), join that path to the current source file's parent
+    /// directory.
+    fn joined_path(&self, relative_path: &Rc<str>) -> Rc<str> {
+        let context = self.env.current_src_context();
+        match AsRef::<Path>::as_ref(&*context.path).parent() {
+            None => relative_path.clone(),
+            Some(base_path) => {
+                let joined = base_path.join(&**relative_path);
+                // We can safely `unwrap()` the `to_str()` here because
+                // `joined` was made from `Path`s that came from `str`s.
+                Rc::<str>::from(joined.to_str().unwrap())
+            }
         }
     }
 }

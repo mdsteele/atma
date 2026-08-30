@@ -13,7 +13,6 @@ use crate::addr::{Addr, Align, Range, Size};
 use crate::error::{Errs, SrcCache};
 use crate::expr::ExprValue;
 use crate::obj::{ObjExpr, ObjFile, ObjSrcLoc};
-use crate::parse::LinkConfigAst;
 use build::ConfigBuilder;
 pub use checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
 pub use error::{ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult};
@@ -54,12 +53,11 @@ pub struct LinkConfig {
 impl LinkConfig {
     /// Sources source code into a linker configuration.
     pub fn from_source(
-        _cache: &mut dyn SrcCache,
+        cache: &mut dyn SrcCache,
         src_path: Rc<str>,
-        source: &str,
+        source_code: &str,
     ) -> ConfigResult<LinkConfig> {
-        let ast = LinkConfigAst::parse_source(source).map_err(Errs::coerce)?;
-        ConfigBuilder::new(src_path).build(ast)
+        ConfigBuilder::new(cache, src_path).build(source_code)
     }
 
     /// Given a set of object files, patches all chunks and returns them in the

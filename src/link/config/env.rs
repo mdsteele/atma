@@ -1,5 +1,5 @@
 use super::ConfigVariableOr;
-use super::error::ConfigResult;
+use super::error::{ConfigError, ConfigResult};
 use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
@@ -7,8 +7,8 @@ use crate::expr::{
     ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
     make_global_builtin_values,
 };
-use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc, ObjSrcParent};
-use crate::parse::{ExprAst, IdentifierAst};
+use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc};
+use crate::parse::{ExprAst, IdentifierAst, LinkConfigAst};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -16,7 +16,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 pub(super) struct LinkDecl {
-    pub id_span: SrcSpan,
+    pub id_loc: ObjSrcLoc,
     pub var_type: ExprType,
     pub value: ConfigVariableOr<ExprValue>,
 }
@@ -24,20 +24,18 @@ pub(super) struct LinkDecl {
 //===========================================================================//
 
 pub(super) struct LinkTypeEnv {
-    context: Rc<ObjSrcContext>,
+    context_stack: Vec<Rc<ObjSrcContext>>,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
-    exports: HashMap<Rc<str>, SrcSpan>,
-    imports: HashMap<Rc<str>, SrcSpan>,
+    exports: HashMap<Rc<str>, ObjSrcLoc>,
+    imports: HashMap<Rc<str>, ObjSrcLoc>,
     variables: HashMap<Rc<str>, LinkDecl>,
 }
 
 impl LinkTypeEnv {
-    pub fn new(src_path: Rc<str>) -> LinkTypeEnv {
+    pub fn new(root_path: Rc<str>) -> LinkTypeEnv {
+        let root_context = Rc::new(ObjSrcContext::root(root_path));
         LinkTypeEnv {
-            context: Rc::new(ObjSrcContext {
-                path: src_path,
-                parent: ObjSrcParent::Root,
-            }),
+            context_stack: vec![root_context],
             builtins: make_global_builtin_values(),
             exports: HashMap::new(),
             imports: HashMap::new(),
@@ -45,8 +43,30 @@ impl LinkTypeEnv {
         }
     }
 
-    fn current_src_context(&self) -> Rc<ObjSrcContext> {
-        self.context.clone()
+    pub fn current_src_context(&self) -> Rc<ObjSrcContext> {
+        self.context_stack.last().unwrap().clone()
+    }
+
+    pub fn push_src_context(&mut self, context: Rc<ObjSrcContext>) {
+        self.context_stack.push(context);
+    }
+
+    pub fn pop_src_context(&mut self) {
+        debug_assert!(self.context_stack.len() >= 2);
+        self.context_stack.pop();
+    }
+
+    pub fn parse_source(
+        &self,
+        source_code: &str,
+    ) -> ConfigResult<LinkConfigAst> {
+        LinkConfigAst::parse_source(source_code).map_err(|errs| {
+            let context = self.current_src_context();
+            errs.map(|error| ConfigError::ParseError {
+                context: context.clone(),
+                error,
+            })
+        })
     }
 
     pub fn get_declaration(&self, name: &str) -> Option<&LinkDecl> {
@@ -59,13 +79,13 @@ impl LinkTypeEnv {
         var_type: ExprType,
         value: ConfigVariableOr<ExprValue>,
     ) {
-        let id_span = id.span;
-        let decl = LinkDecl { id_span, var_type, value };
+        let id_loc = self.make_loc(id.span);
+        let decl = LinkDecl { id_loc, var_type, value };
         self.variables.insert(id.name, decl);
     }
 
-    pub fn get_export(&self, name: &str) -> Option<SrcSpan> {
-        self.exports.get(name).copied()
+    pub fn get_export(&self, name: &str) -> Option<ObjSrcLoc> {
+        self.exports.get(name).cloned()
     }
 
     pub fn add_export(
@@ -74,7 +94,7 @@ impl LinkTypeEnv {
         space: Rc<str>,
         address: ConfigVariableOr<Addr>,
     ) {
-        self.exports.insert(id.name.clone(), id.span);
+        self.exports.insert(id.name.clone(), self.make_loc(id.span));
         let address_value = address.map_static(|addr| {
             ExprValue::Label(ExprLabel::AddrAbsolute {
                 space,
@@ -84,12 +104,12 @@ impl LinkTypeEnv {
         self.add_declaration(id, ExprType::Label, address_value);
     }
 
-    pub fn get_import(&self, name: &str) -> Option<SrcSpan> {
-        self.imports.get(name).copied()
+    pub fn get_import(&self, name: &str) -> Option<ObjSrcLoc> {
+        self.imports.get(name).cloned()
     }
 
     pub fn add_import(&mut self, id: IdentifierAst) {
-        self.imports.insert(id.name.clone(), id.span);
+        self.imports.insert(id.name.clone(), self.make_loc(id.span));
         let label = ExprLabel::SymbolRelative {
             name: id.name.clone(),
             offset: BigInt::ZERO,
@@ -103,8 +123,12 @@ impl LinkTypeEnv {
         expr: ExprAst,
     ) -> ConfigResult<(ObjExpr, ExprType, ExprStatic)> {
         let (ops, expr_type, expr_static) =
-            ExprCompiler::new(self).typecheck(expr).map_err(Errs::coerce)?;
-        debug_assert!(!ops.is_empty());
+            ExprCompiler::new(self).typecheck(expr).map_err(|errs| {
+                errs.map(|error| ConfigError::ExprTypeError {
+                    context: self.current_src_context(),
+                    error,
+                })
+            })?;
         Ok((ObjExpr { ops }, expr_type, expr_static))
     }
 

@@ -92,12 +92,6 @@ impl<E> Errs<E> {
     }
 
     /// Transforms a list of one type of error into a list of another type of
-    /// error, using the `From` trait.
-    pub(crate) fn coerce<F: From<E>>(self) -> Errs<F> {
-        self.into_iter().map(F::from).collect()
-    }
-
-    /// Transforms a list of one type of error into a list of another type of
     /// error, using the given function.
     pub fn map<F, O: Fn(E) -> F>(self, op: O) -> Errs<F> {
         self.into_iter().map(op).collect()

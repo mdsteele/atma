@@ -1,5 +1,5 @@
 use atma::addr::AlignTryFromError;
-use atma::expr::ExprType;
+use atma::expr::{ExprEvalError, ExprNotStaticReason, ExprType};
 use atma::link::{ConfigAttr, ConfigEntryKind, ConfigError, LinkConfig};
 use num_bigint::BigInt;
 use std::assert_matches;
@@ -230,6 +230,34 @@ fn parse_error() {
     assert_matches!(
         config_errors(source).as_slice(),
         [ConfigError::ParseError { .. }]
+    );
+}
+
+#[test]
+fn path_not_static_error() {
+    let source = r#"\
+    .IMPORT Foo
+    .USE &Foo == 0 ? "bar.alc" : "baz.alc"
+    "#;
+    assert_matches!(
+        config_errors(source).as_slice(),
+        [ConfigError::PathNotStatic {
+            reason: ExprNotStaticReason::StaticEvalError {
+                error: ExprEvalError::AddrOfLabelUnresolved { .. }
+            },
+            ..
+        }]
+    );
+}
+
+#[test]
+fn path_type_error() {
+    let source = r#"\
+    .USE %true
+    "#;
+    assert_matches!(
+        config_errors(source).as_slice(),
+        [ConfigError::PathTypeError { expr_type: ExprType::Boolean, .. }]
     );
 }
 
