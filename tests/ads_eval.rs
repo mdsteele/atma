@@ -56,6 +56,23 @@ fn byte_selection_operator() {
 }
 
 #[test]
+fn interpolation_operator() {
+    assert_eq!(
+        compile_and_run("print \"foo{}\" %% \"bar\"\n"),
+        "\"foobar\"\n"
+    );
+    assert_eq!(
+        compile_and_run("print \"{1}{}{1}\" %% (7, \"bar\")\n"),
+        "\"bar7bar\"\n"
+    );
+    assert_eq!(compile_and_run("print \"0x{:x}\" %% 250\n"), "\"0xfa\"\n");
+    assert_eq!(
+        compile_and_run("print \"{:?}\" %% \"bar\"\n"),
+        "\"\\\"bar\\\"\"\n"
+    );
+}
+
+#[test]
 fn length_operator() {
     assert_eq!(compile_and_run("print {1, 2, 4, 8, 16}#\n"), "5\n");
     assert_eq!(compile_and_run("print {{}, {1, 2}}[1]#\n"), "2\n");
@@ -116,9 +133,9 @@ fn for_loop() {
         print value
         set sum = sum + value
       }
-      print sum
+      print "sum={}" %% sum
     "#;
-    assert_eq!(compile_and_run(source), "1\n2\n3\n4\n10\n");
+    assert_eq!(compile_and_run(source), "1\n2\n3\n4\n\"sum=10\"\n");
 }
 
 //===========================================================================//

@@ -1,4 +1,5 @@
 use super::func::ExprFuncEvalError;
+use super::template::TemplateParseError;
 use super::value::{ExprType, ExprValue};
 use crate::error::{Errs, SourceContext, SourceError, SrcLoc, SrcSpan};
 use crate::parse::{BinOpAst, UnOpAst};
@@ -80,6 +81,20 @@ pub enum ExprTypeError {
         /// The expression type of the expression being indexed.
         indexed_type: ExprType,
     },
+    /// Found an interpolation operation whose argument type does not match its
+    /// template.
+    CannotInterpolateTypeIntoTemplate {
+        /// The source code span for the interpolation operator.
+        op_span: SrcSpan,
+        /// The source code span for the template expression.
+        template_span: SrcSpan,
+        /// The source code span for the argument expression.
+        arg_span: SrcSpan,
+        /// The expression type of the argument expression.
+        arg_type: ExprType,
+        /// The required expression type for the template parameter.
+        param_type: ExprType,
+    },
     /// Found a list or tuple indexing operation with an index expression of
     /// invalid type.
     CannotUseTypeAsIndex {
@@ -102,6 +117,15 @@ pub enum ExprTypeError {
         /// The type of the expression.
         expr_type: ExprType,
     },
+    /// Found an interpolation operation whose template isn't a string.
+    CannotUseTypeAsTemplate {
+        /// The source code span for the non-string expression that we tried
+        /// to use as a template.
+        template_span: SrcSpan,
+        /// The expression type of the non-string expression that we tried to
+        /// use as a template.
+        template_type: ExprType,
+    },
     /// Found a ternary condition expression whose branches don't have the same
     /// expression type.
     ConditionBranchesMustBeSameType {
@@ -113,6 +137,22 @@ pub enum ExprTypeError {
         false_branch_span: SrcSpan,
         /// The expression type of the `false` branch of the conditional.
         false_branch_type: ExprType,
+    },
+    /// Failed to parse an interpolation template string.
+    InterpolationTemplateParseError {
+        /// The source code span for the template expression.
+        template_span: SrcSpan,
+        /// The static template string value that failed to parse.
+        template_string: Rc<str>,
+        /// The parse error.
+        error: TemplateParseError,
+    },
+    /// Found a interpolation operation with a non-static template string.
+    InterpolationTemplateNotStatic {
+        /// The source code span for the template expression.
+        template_span: SrcSpan,
+        /// The reason that the template string isn't static.
+        reason: ExprNotStaticReason,
     },
     /// Found a list literal expression whose items don't all have the same
     /// expression type.
@@ -262,6 +302,21 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, bracket_span), message)
                     .with_label(SrcLoc::new(path, indexed_span), label)
             }
+            Self::CannotInterpolateTypeIntoTemplate {
+                op_span,
+                template_span,
+                arg_span,
+                arg_type,
+                param_type,
+            } => {
+                let message = "invalid argument type for template string";
+                let label1 =
+                    format!("this template requires type {param_type}");
+                let label2 = format!("this expression has type {arg_type}");
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, template_span), label1)
+                    .with_label(SrcLoc::new(path, arg_span), label2)
+            }
             Self::CannotUseTypeAsIndex { index_span, index_type } => {
                 let message = format!("cannot use {index_type} as an index");
                 let label = format!("this expression has type {index_type}");
@@ -283,6 +338,15 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, expr_span), message)
                     .with_primary_label(label)
             }
+            Self::CannotUseTypeAsTemplate { template_span, template_type } => {
+                let message = format!(
+                    "cannot use {template_type} as an interpolation template"
+                );
+                let label =
+                    format!("this expression has type {template_type}");
+                SourceError::new(SrcLoc::new(path, template_span), message)
+                    .with_primary_label(label)
+            }
             Self::ConditionBranchesMustBeSameType {
                 true_branch_span,
                 true_branch_type,
@@ -298,6 +362,24 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, branches_span), message)
                     .with_label(SrcLoc::new(path, true_branch_span), label1)
                     .with_label(SrcLoc::new(path, false_branch_span), label2)
+            }
+            Self::InterpolationTemplateParseError {
+                template_span,
+                template_string,
+                error,
+            } => {
+                let message =
+                    format!("could not parse template {template_string:?}");
+                let label = error.into_label_string();
+                SourceError::new(SrcLoc::new(path, template_span), message)
+                    .with_primary_label(label)
+            }
+            Self::InterpolationTemplateNotStatic { template_span, reason } => {
+                let message = "interpolation template must be static";
+                let label = "this expression isn't static";
+                SourceError::new(SrcLoc::new(path, template_span), message)
+                    .with_primary_label(label)
+                    .with_context(&reason.context(path))
             }
             Self::ListItemsMustAllBeSameType {
                 first_item_span,

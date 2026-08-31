@@ -149,6 +149,11 @@ impl<W: Write> AdsEnvironment<W> {
                 let value = self.value_stack[start + index].clone();
                 self.value_stack.push(value);
             }
+            AdsInstruction::Interpolate(template) => {
+                let arg = self.value_stack.pop().unwrap();
+                let string = template.format(arg).unwrap();
+                self.value_stack.push(ExprValue::String(string));
+            }
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
             }

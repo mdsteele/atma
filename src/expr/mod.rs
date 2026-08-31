@@ -7,6 +7,7 @@ mod env;
 mod error;
 mod func;
 mod label;
+mod template;
 mod unop;
 mod value;
 
@@ -22,6 +23,7 @@ pub use error::{
 pub use func::{ExprFunc, ExprFuncEvalError};
 pub use label::ExprLabel;
 pub(crate) use label::SubtractLabelsError;
+pub use template::{Template, TemplateParseError};
 pub(crate) use unop::ExprUnOp;
 pub use value::{ExprType, ExprValue};
 

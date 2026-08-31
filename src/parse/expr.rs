@@ -86,6 +86,8 @@ pub enum BinOpAst {
     Concat,
     /// Division.
     Div,
+    /// String interpolation.
+    Interp,
     /// Exponentiation.
     Pow,
     /// Logical (short-circuiting) AND.
@@ -127,6 +129,7 @@ impl BinOpAst {
             BinOpAst::Div => ("divide", "by", false),
             BinOpAst::LogAnd => ("logical-AND", "with", false),
             BinOpAst::LogOr => ("logical-OR", "with", false),
+            BinOpAst::Interp => ("interpolate", "into", true),
             BinOpAst::Mod => ("modulo", "by", false),
             BinOpAst::Mul => ("multiply", "by", false),
             BinOpAst::Pow => ("exponentiate", "by", false),
@@ -149,12 +152,12 @@ pub struct ExprAst {
 
 impl ExprAst {
     /// Parses a sequence of tokens into an expression abstract syntax tree.
-    pub fn parse(tokens: &[Token]) -> ParseResult<ExprAst> {
-        parse_tokens(ExprAst::parser(), tokens)
+    pub fn parse(tokens: &[Token]) -> ParseResult<Self> {
+        parse_tokens(Self::parser(), tokens)
     }
 
     pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone {
+    -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         chumsky::prelude::recursive(|expr| {
             let parenthesized_expr = chumsky::prelude::group((
                 symbol(TokenValue::ParenOpen),
@@ -300,6 +303,11 @@ impl ExprAst {
                     pratt::left(BIND_MULTIPLICATIVE),
                     symbol(TokenValue::Percent),
                     |l, o, r, _| ExprAst::binop(BinOpAst::Mod, l, o, r),
+                ),
+                pratt::infix(
+                    pratt::left(BIND_MULTIPLICATIVE),
+                    symbol(TokenValue::PercentPercent),
+                    |l, o, r, _| ExprAst::binop(BinOpAst::Interp, l, o, r),
                 ),
                 pratt::infix(
                     pratt::left(BIND_ADDITIVE),

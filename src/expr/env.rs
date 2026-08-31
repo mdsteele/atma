@@ -1,5 +1,6 @@
 use super::binop::ExprBinOp;
 use super::error::{ExprStatic, ExprTypeResult};
+use super::template::Template;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::SrcSpan;
@@ -60,6 +61,10 @@ pub(crate) trait ExprEnv {
 
 /// A type that represents a single operation for an expression stack machine.
 pub(crate) trait ExprOp {
+    /// Returns an operation to pop a value from the stack, interpolate it into
+    /// a template, and push the resulting string onto the stack.
+    fn interpolate(template: Template) -> Self;
+
     /// Returns an operation to push a single literal value onto the stack.
     fn literal(value: ExprValue) -> Self;
 

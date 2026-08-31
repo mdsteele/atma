@@ -147,6 +147,24 @@ pub trait BinaryIo: Sized {
     }
 }
 
+impl<T0: BinaryIo, T1: BinaryIo> BinaryIo for (T0, T1) {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let t0 = T0::read_from(decoder)?;
+        let t1 = T1::read_from(decoder)?;
+        Ok((t0, t1))
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        self.0.write_to(encoder)?;
+        self.1.write_to(encoder)
+    }
+}
+
 impl BinaryIo for bool {
     fn read_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,

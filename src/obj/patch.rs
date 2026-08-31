@@ -28,7 +28,7 @@ const TAG_U24LE: u8 = 0x09;
 //===========================================================================//
 
 /// A patch to apply to an object file during linking.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct ObjPatch {
     /// The offset from the start of the chunk to the start of the patch, in
     /// bytes.
@@ -59,7 +59,7 @@ impl BinaryIo for ObjPatch {
 //===========================================================================//
 
 /// The size and format of a given object file patch to apply.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum ObjPatchData {
     /// Fills the given number of bytes with the fill byte for this chunk.
     Fill(usize),

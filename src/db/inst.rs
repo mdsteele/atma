@@ -1,7 +1,7 @@
 use super::error::{AdsSrcContext, AdsSrcLoc};
 use crate::bus::WatchKind;
 use crate::error::SrcSpan;
-use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
+use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue, Template};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -59,6 +59,10 @@ pub(crate) enum AdsInstruction {
     /// specified frame in the call stack, and pushes the copied value onto the
     /// stack.
     GetValue(AdsFrameRef, usize),
+    /// Pops the top value from the value stack, interpolates it into the
+    /// specified template, and pushes the resulting string onto the value
+    /// stack.
+    Interpolate(Template),
     /// Pops the top two values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then pushes that list
@@ -147,6 +151,10 @@ pub(crate) enum AdsInstruction {
 }
 
 impl ExprOp for AdsInstruction {
+    fn interpolate(template: Template) -> Self {
+        Self::Interpolate(template)
+    }
+
     fn literal(value: ExprValue) -> Self {
         Self::PushValue(value)
     }

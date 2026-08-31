@@ -1,7 +1,7 @@
 use super::binary::{BinaryIo, Decoder, Encoder};
 use super::context::ObjSrcContext;
 use crate::error::SrcSpan;
-use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue};
+use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue, Template};
 use num_bigint::BigInt;
 use std::io;
 use std::rc::Rc;
@@ -11,20 +11,21 @@ use std::rc::Rc;
 const OP_APPLY: u8 = 0x00;
 const OP_BINOP: u8 = 0x01;
 const OP_GET_VALUE: u8 = 0x02;
-const OP_LIST_INDEX: u8 = 0x03;
-const OP_MAKE_LIST: u8 = 0x04;
-const OP_MAKE_TUPLE: u8 = 0x05;
-const OP_PUSH: u8 = 0x06;
-const OP_SKIP: u8 = 0x07;
-const OP_SKIP_IF: u8 = 0x08;
-const OP_SKIP_UNLESS: u8 = 0x09;
-const OP_TUPLE_ITEM: u8 = 0x0a;
-const OP_UNOP: u8 = 0x0b;
+const OP_INTERPOLATE: u8 = 0x03;
+const OP_LIST_INDEX: u8 = 0x04;
+const OP_MAKE_LIST: u8 = 0x05;
+const OP_MAKE_TUPLE: u8 = 0x06;
+const OP_PUSH: u8 = 0x07;
+const OP_SKIP: u8 = 0x08;
+const OP_SKIP_IF: u8 = 0x09;
+const OP_SKIP_UNLESS: u8 = 0x0a;
+const OP_TUPLE_ITEM: u8 = 0x0b;
+const OP_UNOP: u8 = 0x0c;
 
 //===========================================================================//
 
 /// An expression in an assembly file.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct ObjExpr {
     /// The operations to perform to evaluate the expression.  Must be
     /// nonempty.
@@ -92,7 +93,7 @@ impl From<BigInt> for ObjExpr {
 
 //===========================================================================//
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ObjExprOp {
     /// Pops the top two values from the value stack, calls the
     /// second-from-the-top value with the topmost value as an argument, then
@@ -126,6 +127,10 @@ pub(crate) enum ObjExprOp {
     /// Copies the value at the specified index in the value stack, and pushes
     /// the copied value onto the stack.
     GetValue(usize),
+    /// Pops the top value from the value stack, interpolates it into the
+    /// specified template, and pushes the resulting string onto the value
+    /// stack.
+    Interpolate(Template),
     /// Pops the top two values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then pushes that list
@@ -199,6 +204,9 @@ impl BinaryIo for ObjExprOp {
                 Ok(Self::BinOp { context, binop, op_span, lhs_span, rhs_span })
             }
             OP_GET_VALUE => Ok(Self::GetValue(usize::read_from(decoder)?)),
+            OP_INTERPOLATE => {
+                Ok(Self::Interpolate(Template::read_from(decoder)?))
+            }
             OP_LIST_INDEX => {
                 let context = Rc::<ObjSrcContext>::read_from(decoder)?;
                 let list_span = SrcSpan::read_from(decoder)?;
@@ -248,6 +256,10 @@ impl BinaryIo for ObjExprOp {
                 OP_GET_VALUE.write_to(encoder)?;
                 index.write_to(encoder)
             }
+            Self::Interpolate(template) => {
+                OP_INTERPOLATE.write_to(encoder)?;
+                template.write_to(encoder)
+            }
             Self::ListIndex { context, list_span, index_span } => {
                 OP_LIST_INDEX.write_to(encoder)?;
                 context.write_to(encoder)?;
@@ -294,6 +306,10 @@ impl BinaryIo for ObjExprOp {
 }
 
 impl ExprOp for ObjExprOp {
+    fn interpolate(template: Template) -> Self {
+        Self::Interpolate(template)
+    }
+
     fn literal(value: ExprValue) -> Self {
         Self::Push(value)
     }

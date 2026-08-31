@@ -236,6 +236,8 @@ enum TokenKind {
     ParenOpen,
     #[token("%")]
     Percent,
+    #[token("%%")]
+    PercentPercent,
     #[regex(r"%[A-Z][_A-Z0-9]*")]
     Placeholder,
     #[token("+")]
@@ -312,6 +314,7 @@ impl TokenKind {
             TokenKind::ParenClose => TokenValue::ParenClose,
             TokenKind::ParenOpen => TokenValue::ParenOpen,
             TokenKind::Percent => TokenValue::Percent,
+            TokenKind::PercentPercent => TokenValue::PercentPercent,
             TokenKind::Plus => TokenValue::Plus,
             TokenKind::PlusPlus => TokenValue::PlusPlus,
             TokenKind::Pound => TokenValue::Pound,
@@ -409,6 +412,8 @@ pub enum TokenValue {
     ParenOpen,
     /// A "`%`" symbol.
     Percent,
+    /// A "`%%`" symbol.
+    PercentPercent,
     /// A placeholder in a macro definition.
     Placeholder(Rc<str>),
     /// A "`+`" symbol.
@@ -473,6 +478,7 @@ impl TokenValue {
             TokenValue::ParenClose => "`)`",
             TokenValue::ParenOpen => "`(`",
             TokenValue::Percent => "`%`",
+            TokenValue::PercentPercent => "`%%`",
             TokenValue::Placeholder(_) => "placeholder",
             TokenValue::Plus => "`+`",
             TokenValue::PlusPlus => "`++`",
