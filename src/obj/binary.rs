@@ -221,6 +221,27 @@ impl BinaryIo for u8 {
     }
 }
 
+impl BinaryIo for u16 {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let value = BigUint::read_from(decoder)?;
+        value.to_u16().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("expected u16, found {}", value),
+            )
+        })
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        BigUint::from(*self).write_to(encoder)
+    }
+}
+
 impl BinaryIo for u32 {
     fn read_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,

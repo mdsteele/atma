@@ -61,6 +61,7 @@ fn interpolation_operator() {
         compile_and_run("print \"foo{}\" %% \"bar\"\n"),
         "\"foobar\"\n"
     );
+    assert_eq!(compile_and_run("print \"foo\" %% ()\n"), "\"foo\"\n");
     assert_eq!(
         compile_and_run("print \"{1}{}{1}\" %% (7, \"bar\")\n"),
         "\"bar7bar\"\n"
@@ -70,6 +71,12 @@ fn interpolation_operator() {
         compile_and_run("print \"{:?}\" %% \"bar\"\n"),
         "\"\\\"bar\\\"\"\n"
     );
+    assert_eq!(compile_and_run("print \"{:6}\" %% \"foo\"\n"), "\"foo   \"\n");
+    assert_eq!(compile_and_run("print \"{:4}\" %% 25\n"), "\"  25\"\n");
+    assert_eq!(compile_and_run("print \"{:+4}\" %% 25\n"), "\" +25\"\n");
+    assert_eq!(compile_and_run("print \"{:04}\" %% 25\n"), "\"0025\"\n");
+    assert_eq!(compile_and_run("print \"{:+#04x}\" %% 10\n"), "\"+$0a\"\n");
+    assert_eq!(compile_and_run("print \"{:#07b}\" %% 10\n"), "\"%001010\"\n");
 }
 
 #[test]

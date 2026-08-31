@@ -5,6 +5,7 @@ use crate::obj::{BinaryIo, Decoder, Encoder};
 use chumsky::error::Rich;
 use chumsky::inspector::SimpleState;
 use chumsky::{self, IterParser, Parser, primitive};
+use num_bigint::{BigUint, Sign};
 use std::collections::HashSet;
 use std::fmt::Write;
 use std::io;
@@ -12,11 +13,15 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-const TAG_FORMAT_DEFAULT: u8 = 0x00;
-const TAG_FORMAT_DEBUG: u8 = 0x01;
-const TAG_FORMAT_BINARY: u8 = 0x02;
-const TAG_FORMAT_LOWER_HEX: u8 = 0x03;
-const TAG_FORMAT_UPPER_HEX: u8 = 0x04;
+const FLAG_ZERO_PAD: u8 = 1 << 0;
+const FLAG_ALWAYS_SIGN: u8 = 1 << 1;
+const FLAG_ALT_FORMAT: u8 = 1 << 2;
+
+const TAG_KIND_DEFAULT: u8 = 0x00;
+const TAG_KIND_DEBUG: u8 = 0x01;
+const TAG_KIND_BINARY: u8 = 0x02;
+const TAG_KIND_LOWER_HEX: u8 = 0x03;
+const TAG_KIND_UPPER_HEX: u8 = 0x04;
 
 //===========================================================================//
 
@@ -32,7 +37,7 @@ impl Template {
         template_span: SrcSpan,
         template_string: Rc<str>,
     ) -> ExprTypeResult<Self> {
-        Self::build_internal(&template_string).map_err(|error| {
+        Self::parse(&template_string).map_err(|error| {
             Errs::one(ExprTypeError::InterpolationTemplateParseError {
                 template_span,
                 template_string,
@@ -41,10 +46,14 @@ impl Template {
         })
     }
 
-    fn build_internal(
-        template_string: &str,
-    ) -> Result<Self, TemplateParseError> {
-        let template = Self::parse(template_string)?;
+    fn parse(template_string: &str) -> Result<Self, TemplateParseError> {
+        let mut state = SimpleState(0usize);
+        let template = Self::parser()
+            .parse_with_state(template_string, &mut state)
+            .into_result()
+            .map_err(|error| {
+                TemplateParseError::ParseFailed(format!("{:?}", error))
+            })?;
         let indices = template
             .slots
             .iter()
@@ -56,16 +65,6 @@ impl Template {
             }
         }
         Ok(template)
-    }
-
-    fn parse(source: &str) -> Result<Self, TemplateParseError> {
-        let mut state = SimpleState(0usize);
-        Self::parser()
-            .parse_with_state(source, &mut state)
-            .into_result()
-            .map_err(|error| {
-                TemplateParseError::ParseFailed(format!("{:?}", error))
-            })
     }
 
     pub(super) fn typecheck(
@@ -175,7 +174,7 @@ impl BinaryIo for Template {
 #[derive(Debug, Eq, PartialEq)]
 struct Slot {
     index: usize,
-    formatter: Formatter,
+    options: FormatOptions,
 }
 
 impl Slot {
@@ -189,9 +188,11 @@ impl Slot {
             })
             .or_not()
             .then(
-                primitive::just(':').ignore_then(Formatter::parser()).or_not(),
+                primitive::just(':')
+                    .ignore_then(FormatOptions::parser())
+                    .or_not(),
             )
-            .map_with(|(index, formatter), extra| {
+            .map_with(|(index, options), extra| {
                 let index = match index {
                     Some(index) => usize::from(index),
                     None => {
@@ -201,14 +202,14 @@ impl Slot {
                         index
                     }
                 };
-                let formatter = formatter.unwrap_or_default();
-                Slot { index, formatter }
+                let options = options.unwrap_or_default();
+                Slot { index, options }
             })
             .delimited_by(primitive::just('{'), primitive::just('}'))
     }
 
     fn restrict_type(&self, items: &mut [ExprType]) {
-        self.formatter.restrict_type(&mut items[self.index])
+        self.options.restrict_type(&mut items[self.index])
     }
 
     fn format(
@@ -217,7 +218,7 @@ impl Slot {
         out: &mut String,
     ) -> Result<(), TemplateEvalError> {
         if self.index < args.len() {
-            self.formatter.format(&args[self.index], out)
+            self.options.format(&args[self.index], out)
         } else {
             Err(TemplateEvalError::SlotIndexOutOfBounds)
         }
@@ -229,8 +230,8 @@ impl BinaryIo for Slot {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         let index = usize::read_from(decoder)?;
-        let formatter = Formatter::read_from(decoder)?;
-        Ok(Self { index, formatter })
+        let options = FormatOptions::read_from(decoder)?;
+        Ok(Self { index, options })
     }
 
     fn write_to<W: io::Write>(
@@ -238,36 +239,142 @@ impl BinaryIo for Slot {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         self.index.write_to(encoder)?;
-        self.formatter.write_to(encoder)
+        self.options.write_to(encoder)
+    }
+}
+
+//===========================================================================//
+
+#[derive(Debug, Default, Eq, PartialEq)]
+struct FormatOptions {
+    flags: u8,
+    width: u16,
+    kind: FormatKind,
+}
+
+impl FormatOptions {
+    fn parser<'a>() -> impl Parser<'a, &'a str, Self, Extra<'a>> {
+        let flags_parser = primitive::group((
+            primitive::just('+').to(FLAG_ALWAYS_SIGN).or_not(),
+            primitive::just('#').to(FLAG_ALT_FORMAT).or_not(),
+            primitive::just('0').to(FLAG_ZERO_PAD).or_not(),
+        ))
+        .map(|(f1, f2, f3)| {
+            f1.unwrap_or_default()
+                | f2.unwrap_or_default()
+                | f3.unwrap_or_default()
+        });
+        let width_parser = chumsky::text::int(10)
+            .try_map(|digits: &str, span| {
+                digits
+                    .parse::<u16>()
+                    .map_err(|_| Rich::custom(span, "invalid width"))
+            })
+            .or_not()
+            .map(Option::unwrap_or_default);
+        let kind_parser =
+            FormatKind::parser().or_not().map(Option::unwrap_or_default);
+        primitive::group((flags_parser, width_parser, kind_parser))
+            .map(|(flags, width, kind)| Self { flags, width, kind })
+    }
+
+    fn restrict_type(&self, item: &mut ExprType) {
+        if 0 != self.flags & (FLAG_ZERO_PAD | FLAG_ALWAYS_SIGN) {
+            *item = ExprType::Integer;
+        }
+        self.kind.restrict_type(item);
+    }
+
+    fn format(
+        &self,
+        arg: &ExprValue,
+        out: &mut String,
+    ) -> Result<(), TemplateEvalError> {
+        let width = usize::from(self.width);
+        match arg {
+            ExprValue::String(string) => match self.kind {
+                FormatKind::Debug => {
+                    write!(out, "{:width$?}", string).unwrap();
+                }
+                _ => write!(out, "{:width$}", string).unwrap(),
+            },
+            ExprValue::Integer(int) => {
+                let mut prefix = String::new();
+                if int.sign() == Sign::Minus {
+                    prefix.push('-');
+                } else if 0 != self.flags & FLAG_ALWAYS_SIGN {
+                    prefix.push('+');
+                }
+                if 0 != self.flags & FLAG_ALT_FORMAT {
+                    prefix.push_str(self.kind.alt_prefix());
+                }
+                let magnitude = self.kind.format_uint(int.magnitude());
+                let len = prefix.len() + magnitude.len();
+                out.reserve(width.max(len));
+                if len < width {
+                    if 0 != self.flags & FLAG_ZERO_PAD {
+                        prefix.reserve(width - len);
+                        for _ in 0..(width - len) {
+                            prefix.push('0');
+                        }
+                    } else {
+                        for _ in 0..(width - len) {
+                            out.push(' ');
+                        }
+                    }
+                }
+                out.push_str(&prefix);
+                out.push_str(&magnitude);
+            }
+            other => write!(out, "{:width$}", other).unwrap(),
+        }
+        Ok(())
+    }
+}
+
+impl BinaryIo for FormatOptions {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let flags = u8::read_from(decoder)?;
+        let width = u16::read_from(decoder)?;
+        let kind = FormatKind::read_from(decoder)?;
+        Ok(Self { width, flags, kind })
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        self.flags.write_to(encoder)?;
+        self.width.write_to(encoder)?;
+        self.kind.write_to(encoder)
     }
 }
 
 //===========================================================================//
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum Formatter {
+enum FormatKind {
     #[default]
     Default,
     Debug,
     Binary,
     LowerHex,
     UpperHex,
-    // TODO: more options
 }
 
-impl Formatter {
+impl FormatKind {
     fn parser<'a>() -> impl Parser<'a, &'a str, Self, Extra<'a>> {
-        // TODO: support other format attributes (e.g. padding)
         primitive::choice((
-            primitive::just('?').to(Formatter::Debug),
-            primitive::just('b').to(Formatter::Binary),
-            primitive::just('x').to(Formatter::LowerHex),
-            primitive::just('X').to(Formatter::UpperHex),
-            primitive::empty().to(Formatter::Default),
+            primitive::just('?').to(Self::Debug),
+            primitive::just('b').to(Self::Binary),
+            primitive::just('x').to(Self::LowerHex),
+            primitive::just('X').to(Self::UpperHex),
         ))
     }
 
-    fn restrict_type(&self, item: &mut ExprType) {
+    fn restrict_type(self, item: &mut ExprType) {
         match self {
             Self::Default | Self::Debug => {}
             Self::Binary | Self::LowerHex | Self::UpperHex => {
@@ -276,50 +383,38 @@ impl Formatter {
         }
     }
 
-    fn format(
-        &self,
-        arg: &ExprValue,
-        out: &mut String,
-    ) -> Result<(), TemplateEvalError> {
+    fn alt_prefix(self) -> &'static str {
         match self {
-            Self::Default => match arg {
-                ExprValue::String(string) => {
-                    write!(out, "{}", string).unwrap()
-                }
-                other => write!(out, "{}", other).unwrap(),
-            },
-            Self::Debug => {
-                write!(out, "{}", arg).unwrap();
-            }
-            Self::Binary => match arg {
-                ExprValue::Integer(int) => write!(out, "{:b}", int).unwrap(),
-                _ => return Err(TemplateEvalError::InvalidType),
-            },
-            Self::LowerHex => match arg {
-                ExprValue::Integer(int) => write!(out, "{:x}", int).unwrap(),
-                _ => return Err(TemplateEvalError::InvalidType),
-            },
-            Self::UpperHex => match arg {
-                ExprValue::Integer(int) => write!(out, "{:X}", int).unwrap(),
-                _ => return Err(TemplateEvalError::InvalidType),
-            },
+            Self::Default => "",
+            Self::Debug => "",
+            Self::Binary => "%",
+            Self::LowerHex => "$",
+            Self::UpperHex => "$",
         }
-        Ok(())
+    }
+
+    fn format_uint(self, uint: &BigUint) -> String {
+        match self {
+            Self::Default | Self::Debug => format!("{}", uint),
+            Self::Binary => format!("{:b}", uint),
+            Self::LowerHex => format!("{:x}", uint),
+            Self::UpperHex => format!("{:X}", uint),
+        }
     }
 }
 
-impl BinaryIo for Formatter {
+impl BinaryIo for FormatKind {
     fn read_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
-            TAG_FORMAT_DEFAULT => Ok(Self::Default),
-            TAG_FORMAT_DEBUG => Ok(Self::Debug),
-            TAG_FORMAT_BINARY => Ok(Self::Binary),
-            TAG_FORMAT_LOWER_HEX => Ok(Self::LowerHex),
-            TAG_FORMAT_UPPER_HEX => Ok(Self::UpperHex),
+            TAG_KIND_DEFAULT => Ok(Self::Default),
+            TAG_KIND_DEBUG => Ok(Self::Debug),
+            TAG_KIND_BINARY => Ok(Self::Binary),
+            TAG_KIND_LOWER_HEX => Ok(Self::LowerHex),
+            TAG_KIND_UPPER_HEX => Ok(Self::UpperHex),
             byte => Err(io::Error::other(format!(
-                "unknown formatter tag: 0x{:02x}",
+                "unknown FormatKind tag: 0x{:02x}",
                 byte
             ))),
         }
@@ -330,11 +425,11 @@ impl BinaryIo for Formatter {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         let tag = match self {
-            Self::Default => TAG_FORMAT_DEFAULT,
-            Self::Debug => TAG_FORMAT_DEBUG,
-            Self::Binary => TAG_FORMAT_BINARY,
-            Self::LowerHex => TAG_FORMAT_LOWER_HEX,
-            Self::UpperHex => TAG_FORMAT_UPPER_HEX,
+            Self::Default => TAG_KIND_DEFAULT,
+            Self::Debug => TAG_KIND_DEBUG,
+            Self::Binary => TAG_KIND_BINARY,
+            Self::LowerHex => TAG_KIND_LOWER_HEX,
+            Self::UpperHex => TAG_KIND_UPPER_HEX,
         };
         tag.write_to(encoder)
     }
@@ -366,7 +461,6 @@ impl TemplateParseError {
 
 #[derive(Debug)]
 pub(crate) enum TemplateEvalError {
-    InvalidType,
     SlotIndexOutOfBounds,
 }
 
@@ -379,16 +473,23 @@ type Extra<'a> = chumsky::extra::Full<ParseError<'a>, SimpleState<usize>, ()>;
 
 #[cfg(test)]
 mod tests {
-    use super::Formatter;
+    use super::{FormatKind, Template};
     use crate::obj::assert_round_trips;
 
     #[test]
-    fn formatter_round_trips() {
-        assert_round_trips(Formatter::Default);
-        assert_round_trips(Formatter::Debug);
-        assert_round_trips(Formatter::Binary);
-        assert_round_trips(Formatter::LowerHex);
-        assert_round_trips(Formatter::UpperHex);
+    fn template_round_trip() {
+        assert_round_trips(Template::parse("").unwrap());
+        assert_round_trips(Template::parse("foobar{}baz").unwrap());
+        assert_round_trips(Template::parse("<{1:+#06x}-{:?}>").unwrap());
+    }
+
+    #[test]
+    fn format_kind_round_trip() {
+        assert_round_trips(FormatKind::Default);
+        assert_round_trips(FormatKind::Debug);
+        assert_round_trips(FormatKind::Binary);
+        assert_round_trips(FormatKind::LowerHex);
+        assert_round_trips(FormatKind::UpperHex);
     }
 }
 
