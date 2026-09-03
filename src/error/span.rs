@@ -4,7 +4,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// A span of byte offsets within a particular source code file.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct SrcLoc {
     /// The path for the source code file.
     pub path: Rc<str>,

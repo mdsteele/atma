@@ -576,9 +576,10 @@ impl ExprEvalError {
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
             Self::AddrOfLabelUnresolved { op_span, arg_span } => {
-                let message = "the address of this label is not yet known";
+                let message = "couldn't take address of unresolved label";
+                let label = "the address of this label is not yet known";
                 SourceError::new(SrcLoc::new(path, op_span), message)
-                    .with_label(SrcLoc::new(path, arg_span), "")
+                    .with_label(SrcLoc::new(path, arg_span), label)
             }
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
                 let message = "shift distance cannot be negative";
@@ -588,7 +589,7 @@ impl ExprEvalError {
                     .with_primary_label(label)
             }
             Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
-                let message = "shift distance cannot be too large";
+                let message = "shift distance cannot be this large";
                 let label =
                     format!("the value of this expression is {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
@@ -728,8 +729,11 @@ impl SourceContext for ExprNotStaticContext {
                     eval_error.loc,
                     format!("...because {}", eval_error.message),
                 );
-                let error =
-                    eval_error.labels.into_iter().fold(error, |e, label| {
+                let error = eval_error
+                    .labels
+                    .into_iter()
+                    .filter(|label| !label.message.is_empty())
+                    .fold(error, |e, label| {
                         e.with_label(label.loc, label.message)
                     });
                 eval_error

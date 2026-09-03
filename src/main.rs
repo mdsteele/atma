@@ -3,7 +3,7 @@ use atma::addr::{Addr, Align, Offset};
 use atma::asm::{AsmError, assemble_source};
 use atma::bus::WatchKind;
 use atma::db::{AdsEnvironment, AdsError};
-use atma::error::{Errs, SourceError, SrcCache, SrcCacheError};
+use atma::error::{Errs, SourceError, SrcCache, SrcCacheError, SrcLoc};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
 use atma::proc::SimBreak;
@@ -450,20 +450,22 @@ fn report_source_error(
     cache: &mut impl ariadne::Cache<Rc<str>>,
     error: SourceError,
 ) {
-    let mut colors = ariadne::ColorGenerator::new();
-    let mut builder = ariadne::Report::build(
-        ReportKind::Error,
-        (error.loc.path.clone(), error.loc.span.byte_range()),
-    )
-    .with_config(make_report_config())
-    .with_message(&error.message);
-    for label in error.labels {
-        let mut report_label =
-            Label::new((label.loc.path, label.loc.span.byte_range()));
+    let mut color_generator = ariadne::ColorGenerator::new();
+    let mut colors_by_loc = HashMap::<SrcLoc, ariadne::Color>::new();
+    let error_loc = (error.loc.path.clone(), error.loc.span.byte_range());
+    let mut builder = ariadne::Report::build(ReportKind::Error, error_loc)
+        .with_config(make_report_config())
+        .with_message(&error.message);
+    for (index, label) in error.labels.into_iter().enumerate() {
+        let color = *colors_by_loc
+            .entry(label.loc.clone())
+            .or_insert_with(|| color_generator.next());
+        let label_loc = (label.loc.path, label.loc.span.byte_range());
+        let mut report_label = Label::new(label_loc).with_order(index as i32);
         if !label.message.is_empty() {
             report_label = report_label.with_message(label.message);
         }
-        builder.add_label(report_label.with_color(colors.next()));
+        builder.add_label(report_label.with_color(color));
     }
     for note in error.notes {
         builder.add_note(note);
