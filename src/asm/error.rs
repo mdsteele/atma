@@ -178,6 +178,13 @@ pub enum AsmError {
         /// The source code location for the macro parameter.
         loc: ObjSrcLoc,
     },
+    /// A .REPEAT directive had a negative repeat count.
+    NegativeRepeatCount {
+        /// The source code location for the repeat count expression.
+        expr_loc: ObjSrcLoc,
+        /// The value of the expression.
+        expr_value: BigInt,
+    },
     /// An piece of assembly source code failed to parse.
     ParseError {
         /// The context that the parse error occurred within.
@@ -443,6 +450,14 @@ impl AsmError {
                 SourceError::new(loc.primary(), message)
                     .with_primary_label("")
                     .with_context(&*loc.context)
+            }
+            Self::NegativeRepeatCount { expr_loc, expr_value } => {
+                let message = "negative repeat count";
+                let label =
+                    format!("the value of this expression is {expr_value}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
             }
             Self::ParseError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)

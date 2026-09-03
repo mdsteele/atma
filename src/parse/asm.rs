@@ -59,6 +59,8 @@ pub enum AsmStmtAst {
     Label(AsmLabelAst),
     /// A relative address directive (e.g. `.A16R8` or `.A16R16LE`).
     RelAddr(AsmRelAddrAst),
+    /// A `.REPEAT` directive.
+    Repeat(AsmRepeatAst),
     /// A `.RESERVE` directive.
     Reserve(AsmReserveAst),
     /// A local scope.
@@ -134,7 +136,7 @@ impl AsmStmtAst {
                         .separated_by(symbol(TokenValue::Comma))
                         .collect::<Vec<_>>(),
                 )
-                .then(braced_stmts.with_ctx(Context {
+                .then(braced_stmts.clone().with_ctx(Context {
                     allow_placeholder_as_identifier: true,
                 }))
                 .then_ignore(linebreak())
@@ -145,6 +147,18 @@ impl AsmStmtAst {
                 .ignore_then(IdentifierAst::parser())
                 .then_ignore(linebreak())
                 .map(AsmStmtAst::Import);
+            let repeat_dir = directive(".REPEAT")
+                .ignore_then(
+                    IdentifierAst::parser()
+                        .then_ignore(symbol(TokenValue::ArrowLeft))
+                        .or_not(),
+                )
+                .then(ExprAst::parser())
+                .then(braced_stmts)
+                .then_ignore(linebreak())
+                .map(|((id, expression), body)| {
+                    AsmStmtAst::Repeat(AsmRepeatAst { id, expression, body })
+                });
             let section_dir = directive(".SECTION")
                 .ignore_then(ExprAst::parser())
                 .then(attributes)
@@ -167,6 +181,7 @@ impl AsmStmtAst {
                 AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
                 AsmRelAddrAst::parser().map(AsmStmtAst::RelAddr),
+                repeat_dir,
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
                 section_dir,
                 AsmSetAst::parser().map(AsmStmtAst::Set),
@@ -635,6 +650,19 @@ impl AsmRelTypeAst {
                 .collect::<Vec<_>>(),
         )
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a `.REPEAT` directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmRepeatAst {
+    /// The optional loop variable.
+    pub id: Option<IdentifierAst>,
+    /// The expression to repeat over.
+    pub expression: ExprAst,
+    /// The statements inside the repeat block.
+    pub body: Vec<AsmStmtAst>,
 }
 
 //===========================================================================//

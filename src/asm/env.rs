@@ -28,6 +28,7 @@ pub(super) struct AsmTypeEnv {
     chunk_stack: Vec<ChunkEnv>,
     context_stack: Vec<Rc<ObjSrcContext>>,
     scope_stack: Vec<AsmScopeEnv>,
+    next_anonymous_scope_number: u32,
 }
 
 impl AsmTypeEnv {
@@ -40,6 +41,7 @@ impl AsmTypeEnv {
             chunk_stack: Vec::new(),
             context_stack: vec![root_context],
             scope_stack: vec![AsmScopeEnv::root()],
+            next_anonymous_scope_number: 0,
         }
     }
 
@@ -192,7 +194,17 @@ impl AsmTypeEnv {
         *self.arch_stack.last_mut().unwrap() = arch;
     }
 
-    pub fn begin_scope(&mut self, name: Rc<str>, anonymous: bool) {
+    pub fn begin_anonymous_scope(&mut self) {
+        let name = format!("${:x}", self.next_anonymous_scope_number);
+        self.next_anonymous_scope_number += 1;
+        self.begin_scope(Rc::from(name), true);
+    }
+
+    pub fn begin_named_scope(&mut self, name: Rc<str>) {
+        self.begin_scope(name, false);
+    }
+
+    fn begin_scope(&mut self, name: Rc<str>, anonymous: bool) {
         let current_scope = self.current_scope();
         let mut decls = HashMap::<Rc<str>, AsmDecl>::new();
         if !anonymous {

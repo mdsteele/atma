@@ -46,6 +46,25 @@ fn assertion_statically_failed() {
 }
 
 #[test]
+fn cannot_use_type_as_iterator() {
+    let source = r#"\
+    .REPEAT i <- %false {
+        .u8 0
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::ExprTypeError {
+            context: _,
+            error: ExprTypeError::CannotUseTypeAsIterator {
+                expr_span: _,
+                expr_type: ExprType::Boolean,
+            },
+        }]
+    );
+}
+
+#[test]
 fn cannot_use_type_as_predicate() {
     let source = r#"\
     .LET foo = -1
@@ -240,6 +259,21 @@ fn multiple_macro_placeholders() {
 }
 
 #[test]
+fn negative_repeat_count() {
+    let source = r#"\
+    .REPEAT -5 {
+        .u8 0
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::NegativeRepeatCount {
+            expr_loc: _,
+            expr_value,
+        },
+    ] if *expr_value == BigInt::from(-5));
+}
+
+#[test]
 fn relative_address_type_error() {
     let source = r#"\
     .SECTION "TEST"
@@ -261,6 +295,27 @@ fn relative_address_type_error() {
             ..
         },
     ] if valid_types == &[ExprType::Integer, ExprType::Label]);
+}
+
+#[test]
+fn repeat_iterator_not_static() {
+    let source = r#"\
+    .IMPORT Foo
+    .REPEAT i <- &Foo {
+        .u8 i
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::DirectiveExprNotStatic {
+            directive: ".REPEAT",
+            component: "iterator",
+            expr_loc: _,
+            reason: ExprNotStaticReason::StaticEvalError {
+                error: ExprEvalError::AddrOfLabelUnresolved { .. },
+            },
+        }]
+    );
 }
 
 #[test]

@@ -2,6 +2,7 @@ use super::env::{AsmDeclValue, AsmTypeEnv};
 use super::error::{AsmError, AsmResult};
 use super::macros::MacroTable;
 use super::predef::make_predefined_arch_macros;
+use super::repeat::typecheck_iterator;
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
@@ -15,9 +16,9 @@ use crate::obj::{
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
     AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
-    AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmReserveAst, AsmScopeAst,
-    AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst, ExprAst,
-    IdentifierAst,
+    AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst,
+    AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst,
+    AsmUtf8DataAst, DeclarationKind, ExprAst, IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -49,7 +50,6 @@ pub fn assemble_source(
 struct Assembler<'a> {
     cache: &'a mut dyn SrcCache,
     macros: MacroTable,
-    next_anonymous_scope_number: u32,
     env: AsmTypeEnv,
     next_chunk_index: usize,
     chunks: BTreeMap<usize, ObjChunk>,
@@ -64,7 +64,6 @@ impl<'a> Assembler<'a> {
         Assembler {
             cache,
             macros,
-            next_anonymous_scope_number: 0,
             env: AsmTypeEnv::new(root_path, arch_tree),
             next_chunk_index: 0,
             chunks: BTreeMap::new(),
@@ -110,6 +109,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Invoke(_) => Ok(()),
             AsmStmtAst::Label(label) => self.predeclare_label(label),
             AsmStmtAst::RelAddr(_) => Ok(()),
+            AsmStmtAst::Repeat(_) => Ok(()),
             AsmStmtAst::Reserve(_) => Ok(()),
             AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
             AsmStmtAst::Section(section) => self.predeclare_section(section),
@@ -131,7 +131,7 @@ impl<'a> Assembler<'a> {
         if let Some(label_ast) = &scope_ast.label {
             let mut errs = Errs::<AsmError>::new();
             errs.also(self.predeclare_label(label_ast));
-            self.env.begin_scope(label_ast.identifier.name.clone(), false);
+            self.env.begin_named_scope(label_ast.identifier.name.clone());
             errs.also(self.predeclare_statements(&scope_ast.body));
             self.env.end_scope();
             errs.result()
@@ -179,6 +179,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
             AsmStmtAst::Label(label) => self.expand_label(label),
             AsmStmtAst::RelAddr(addr) => self.expand_rel_addr(addr),
+            AsmStmtAst::Repeat(repeat) => self.expand_repeat(repeat),
             AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
             AsmStmtAst::Scope(scope) => self.expand_scope(scope),
             AsmStmtAst::Section(section) => self.expand_section(section),
@@ -309,8 +310,8 @@ impl<'a> Assembler<'a> {
             }
             // If no block has been selected yet, and this predicate had a type
             // error or wasn't static, we can't know whether or not this block
-            // should have been selected.  To help avoid reporting spurious
-            // errors in that situation, select an imaginary empty block.
+            // should have been selected.  To avoid reporting spurious errors
+            // in later blocks, select an imaginary empty block.
             if selected_body_ast.is_none() && ambiguous_predicate {
                 selected_body_ast = Some(vec![]);
             }
@@ -319,9 +320,7 @@ impl<'a> Assembler<'a> {
         if let Some(body_ast) = selected_body_ast.or(cond_ast.else_block)
             && !body_ast.is_empty()
         {
-            let name = format!("${:x}", self.next_anonymous_scope_number);
-            self.next_anonymous_scope_number += 1;
-            self.env.begin_scope(Rc::from(name), true);
+            self.env.begin_anonymous_scope();
             errs.also(self.predeclare_statements(&body_ast));
             errs.also(self.expand_statements(body_ast));
             self.env.end_scope();
@@ -413,24 +412,40 @@ impl<'a> Assembler<'a> {
 
     fn expand_scope(&mut self, scope_ast: AsmScopeAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let (scope_name, anonymous) = match scope_ast.label {
-            Some(label_ast) => {
-                let name = label_ast.identifier.name.clone();
-                errs.also(self.expand_label(label_ast));
-                (name, false)
-            }
-            None => {
-                let name = format!("${:x}", self.next_anonymous_scope_number);
-                self.next_anonymous_scope_number += 1;
-                (Rc::<str>::from(name), true)
-            }
-        };
-        self.env.begin_scope(scope_name, anonymous);
-        if anonymous {
+        if let Some(label_ast) = scope_ast.label {
+            let name = label_ast.identifier.name.clone();
+            errs.also(self.expand_label(label_ast));
+            self.env.begin_named_scope(name);
+        } else {
+            self.env.begin_anonymous_scope();
             errs.also(self.predeclare_statements(&scope_ast.body));
         }
         errs.also(self.expand_statements(scope_ast.body));
         self.env.end_scope();
+        errs.result()
+    }
+
+    fn expand_repeat(&mut self, repeat_ast: AsmRepeatAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let expr_loc = self.env.make_loc(repeat_ast.expression.span);
+        let (_, expr_type, expr_static) =
+            errs.with(self.env.typecheck_expression(repeat_ast.expression));
+        let (item_type, iterator) =
+            errs.with(typecheck_iterator(expr_loc, expr_type, expr_static));
+        for value in iterator {
+            self.env.begin_anonymous_scope();
+            if let Some(id) = &repeat_ast.id {
+                errs.also(self.env.declare_variable(
+                    DeclarationKind::Let,
+                    id.clone(),
+                    item_type.clone(),
+                    AsmDeclValue::Static(value),
+                ));
+            }
+            errs.also(self.predeclare_statements(&repeat_ast.body));
+            errs.also(self.expand_statements(repeat_ast.body.clone()));
+            self.env.end_scope();
+        }
         errs.result()
     }
 
