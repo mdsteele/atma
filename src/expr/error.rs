@@ -571,6 +571,18 @@ pub enum ExprEvalError {
 }
 
 impl ExprEvalError {
+    /// Returns false if this evaluation error is solely due to unresolved
+    /// addresses and might therefore no longer be an issue at a later stage;
+    /// returns true if this error will definitely occur even after addresses
+    /// are resolved.
+    fn is_inevitable(&self) -> bool {
+        !matches!(
+            self,
+            Self::AddrOfLabelUnresolved { .. }
+                | Self::SubtractLabelsUnresolved { .. }
+        )
+    }
+
     /// Converts the error into a `SourceError`, using the given path for the
     /// source file containing the expression.
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
@@ -675,6 +687,9 @@ impl ExprEvalError {
 /// Describes a reason why a particular expression isn't considered static.
 #[derive(Clone, Debug)]
 pub enum ExprNotStaticReason {
+    /// Cannot statically evaluate the expression because the expression did
+    /// not typecheck successfully.
+    TypeError,
     /// No need to statically evaluate the expression, because it is an
     /// unreachable "phantom" expression that will never be evaluated and is
     /// only relevant for typechecking (e.g. the untaken branch of a
@@ -687,9 +702,6 @@ pub enum ExprNotStaticReason {
         /// evaluated.
         error: ExprEvalError,
     },
-    /// Cannot statically evaluate the expression because the expression did
-    /// not typecheck successfully.
-    TypeError,
     /// Cannot statically evaluate the expression because it depends on the
     /// value of a non-static variable.
     Variable {
@@ -706,6 +718,38 @@ impl ExprNotStaticReason {
     /// [`SourceError::with_context`].
     pub fn context(self, path: &Rc<str>) -> ExprNotStaticContext {
         ExprNotStaticContext { path: path.clone(), reason: self }
+    }
+
+    pub(crate) fn inevitable_eval_error(&self) -> Option<ExprEvalError> {
+        if let Self::StaticEvalError { error } = self
+            && error.is_inevitable()
+        {
+            Some(error.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Choses the more important of the two `ExprNotStaticReason`s to be
+    /// reported.  If the two reasons are equally important, returns `self`.
+    pub(crate) fn or(self, other: Self) -> Self {
+        match (&self, &other) {
+            (ExprNotStaticReason::TypeError, _) => self,
+            (_, ExprNotStaticReason::TypeError) => other,
+            (ExprNotStaticReason::Phantom, _) => self,
+            (_, ExprNotStaticReason::Phantom) => other,
+            (ExprNotStaticReason::StaticEvalError { error }, _)
+                if error.is_inevitable() =>
+            {
+                self
+            }
+            (_, ExprNotStaticReason::StaticEvalError { error })
+                if error.is_inevitable() =>
+            {
+                other
+            }
+            _ => self,
+        }
     }
 }
 

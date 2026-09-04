@@ -1,6 +1,8 @@
 use crate::addr::{Align, AlignTryFromError};
 use crate::error::{Errs, SourceError, SrcCacheError};
-use crate::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
+use crate::expr::{
+    ExprEvalError, ExprNotStaticReason, ExprType, ExprTypeError,
+};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::ParseError;
 use num_bigint::BigInt;
@@ -201,6 +203,15 @@ pub enum AsmError {
         path_loc: ObjSrcLoc,
         /// The error from the source cache.
         error: SrcCacheError,
+    },
+    /// Encountered a static evaluation error in an expression that would
+    /// inevitably cause linking to fail.
+    StaticEvalError {
+        /// The context that the expression appeared within.
+        context: Rc<ObjSrcContext>,
+        /// The evaluation error that would occur if the expression were to be
+        /// evaluated.
+        error: ExprEvalError,
     },
     /// Tried to declare a symbol that had already been declared.
     SymbolAlreadyDeclared {
@@ -467,6 +478,9 @@ impl AsmError {
                 SourceError::new(path_loc.primary(), message)
                     .with_primary_label("")
                     .with_context(&*path_loc.context)
+            }
+            Self::StaticEvalError { context, error } => {
+                error.to_source_error(&context.path).with_context(&*context)
             }
             Self::SymbolAlreadyDeclared { full_name, name_loc, prev_loc } => {
                 let message =

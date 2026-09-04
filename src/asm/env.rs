@@ -50,7 +50,6 @@ impl AsmTypeEnv {
     }
 
     pub fn current_src_context(&self) -> Rc<ObjSrcContext> {
-        debug_assert!(!self.context_stack.is_empty());
         self.context_stack.last().unwrap().clone()
     }
 
@@ -81,7 +80,6 @@ impl AsmTypeEnv {
         value: AsmDeclValue,
     ) -> AsmResult<()> {
         self.verify_not_builtin_or_reserved(&id)?;
-        debug_assert!(!self.scope_stack.is_empty());
         let scope = self.scope_stack.last().unwrap();
         if let Some(decl) = scope.decls.get(&id.name)
             && let AsmDeclKind::Label = decl.kind
@@ -102,17 +100,17 @@ impl AsmTypeEnv {
             expr_type,
             value,
         };
-        debug_assert!(!self.scope_stack.is_empty());
         self.scope_stack.last_mut().unwrap().decls.insert(id.name, decl);
         Ok(())
     }
 
     pub fn reassign_variable(&mut self, name: Rc<str>, value: AsmDeclValue) {
-        debug_assert!(!self.scope_stack.is_empty());
-        let scope = self.scope_stack.last_mut().unwrap();
-        debug_assert!(scope.decls.contains_key(&name));
-        let decl = scope.decls.get_mut(&name).unwrap();
-        decl.value = value;
+        for scope in self.scope_stack.iter_mut().rev() {
+            if let Some(decl) = scope.decls.get_mut(&name) {
+                decl.value = value;
+                break;
+            }
+        }
     }
 
     pub fn declare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
@@ -164,7 +162,6 @@ impl AsmTypeEnv {
         start_addr: Option<Addr>,
     ) {
         self.chunk_stack.push(ChunkEnv::new(chunk_index, start_addr));
-        debug_assert!(!self.arch_stack.is_empty());
         self.arch_stack.push(self.arch_stack.last().unwrap().clone());
     }
 
@@ -179,18 +176,15 @@ impl AsmTypeEnv {
     pub fn end_chunk(&mut self) -> ChunkEnv {
         debug_assert!(self.arch_stack.len() >= 2);
         self.arch_stack.pop();
-        debug_assert!(!self.chunk_stack.is_empty());
         self.chunk_stack.pop().unwrap()
     }
 
     pub fn current_arch(&self) -> &Rc<str> {
-        debug_assert!(!self.arch_stack.is_empty());
         self.arch_stack.last().unwrap()
     }
 
     pub fn set_current_arch(&mut self, arch: Rc<str>) {
         debug_assert!(self.arch_tree.contains_arch(&arch));
-        debug_assert!(!self.arch_stack.is_empty());
         *self.arch_stack.last_mut().unwrap() = arch;
     }
 
@@ -230,7 +224,6 @@ impl AsmTypeEnv {
     }
 
     pub fn current_scope(&self) -> &AsmScopeEnv {
-        debug_assert!(!self.scope_stack.is_empty());
         self.scope_stack.last().unwrap()
     }
 

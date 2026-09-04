@@ -6,7 +6,8 @@ use super::repeat::typecheck_iterator;
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
-    ExprLabel, ExprStatic, ExprType, ExprTypeError, ExprUnOp, ExprValue,
+    ExprLabel, ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError,
+    ExprUnOp, ExprValue,
 };
 use crate::obj::{
     ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch,
@@ -248,6 +249,9 @@ impl<'a> Assembler<'a> {
                 let decl_value = match expr_static {
                     Ok(static_value) => AsmDeclValue::Static(static_value),
                     Err(reason) => {
+                        errs.also(
+                            self.check_for_inevitable_eval_error(&reason),
+                        );
                         let variable_index = self.variables.len();
                         self.variables.push(expr);
                         AsmDeclValue::Variable(variable_index, reason)
@@ -338,6 +342,7 @@ impl<'a> Assembler<'a> {
         let decl_value = match expr_static {
             Ok(static_value) => AsmDeclValue::Static(static_value),
             Err(reason) => {
+                errs.also(self.check_for_inevitable_eval_error(&reason));
                 let variable_index = self.variables.len();
                 self.variables.push(expr);
                 AsmDeclValue::Variable(variable_index, reason)
@@ -773,7 +778,8 @@ impl<'a> Assembler<'a> {
                         }
                     }
                 }
-                (expr, ExprType::Integer | ExprType::Bottom, Err(_)) => {
+                (expr, ExprType::Integer | ExprType::Bottom, Err(reason)) => {
+                    errs.also(self.check_for_inevitable_eval_error(&reason));
                     let data = ObjPatchData::Integer(int_type, expr);
                     self.try_add_patch(data);
                     0
@@ -860,8 +866,14 @@ impl<'a> Assembler<'a> {
                     (Some(expr), None)
                 }
             }
-            (expr, ExprType::Integer | ExprType::Label, Err(_))
-            | (expr, ExprType::Bottom, _) => (Some(expr), None),
+            (
+                expr,
+                ExprType::Bottom | ExprType::Integer | ExprType::Label,
+                Err(reason),
+            ) => {
+                errs.also(self.check_for_inevitable_eval_error(&reason));
+                (Some(expr), None)
+            }
             (_, expr_type, _) => {
                 errs.push(AsmError::DirectiveExprTypeError {
                     directive,
@@ -1133,6 +1145,20 @@ impl<'a> Assembler<'a> {
         }
         errs.result()?;
         Ok((expr, expr_static))
+    }
+
+    fn check_for_inevitable_eval_error(
+        &self,
+        reason: &ExprNotStaticReason,
+    ) -> AsmResult<()> {
+        if let Some(error) = reason.inevitable_eval_error() {
+            Err(Errs::one(AsmError::StaticEvalError {
+                context: self.env.current_src_context(),
+                error,
+            }))
+        } else {
+            Ok(())
+        }
     }
 
     fn finish(self) -> ObjFile {

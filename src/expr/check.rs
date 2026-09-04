@@ -289,6 +289,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     },
                 }
             }
+            (Err(func_reason), Err(arg_reason)) => func_reason.or(arg_reason),
             (Err(reason), _) | (_, Err(reason)) => reason,
         };
         self.ops.push(self.env.apply_function_op(func_span, arg_span));
@@ -308,42 +309,35 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             return;
         }
         let op_span = binop_ast.0;
-        match self.errs.ok(ExprBinOp::typecheck(
+        let Some((binop, result_type)) = self.errs.ok(ExprBinOp::typecheck(
             binop_ast, lhs_span, lhs_type, rhs_span, rhs_type,
-        )) {
-            Some((binop, result_type)) => match (lhs_static, rhs_static) {
-                (Ok(lhs_value), Ok(rhs_value)) => {
-                    match binop.evaluate(lhs_value, rhs_value) {
-                        Ok(result_value) => {
-                            self.ops.pop().unwrap();
-                            self.ops.pop().unwrap();
-                            self.ops
-                                .push(E::Op::literal(result_value.clone()));
-                            self.types.push((result_type, Ok(result_value)));
-                        }
-                        Err(binop_error) => {
-                            self.ops.push(self.env.binary_operation_op(
-                                binop, op_span, lhs_span, rhs_span,
-                            ));
-                            let reason =
-                                ExprNotStaticReason::StaticEvalError {
-                                    error: binop_error.into_expr_eval_error(
-                                        op_span, lhs_span, rhs_span,
-                                    ),
-                                };
-                            self.types.push((result_type, Err(reason)));
-                        }
+        )) else {
+            self.types.push(UNDEFINED);
+            return;
+        };
+        let reason = match (lhs_static, rhs_static) {
+            (Ok(lhs_value), Ok(rhs_value)) => {
+                match binop.evaluate(lhs_value, rhs_value) {
+                    Ok(result_value) => {
+                        self.ops.pop().unwrap();
+                        self.ops.pop().unwrap();
+                        self.ops.push(E::Op::literal(result_value.clone()));
+                        self.types.push((result_type, Ok(result_value)));
+                        return;
                     }
+                    Err(binop_error) => ExprNotStaticReason::StaticEvalError {
+                        error: binop_error
+                            .into_expr_eval_error(op_span, lhs_span, rhs_span),
+                    },
                 }
-                (Err(reason), _) | (_, Err(reason)) => {
-                    self.ops.push(self.env.binary_operation_op(
-                        binop, op_span, lhs_span, rhs_span,
-                    ));
-                    self.types.push((result_type, Err(reason)));
-                }
-            },
-            None => self.types.push(UNDEFINED),
-        }
+            }
+            (Err(lhs_reason), Err(rhs_reason)) => lhs_reason.or(rhs_reason),
+            (Err(reason), _) | (_, Err(reason)) => reason,
+        };
+        self.ops.push(
+            self.env.binary_operation_op(binop, op_span, lhs_span, rhs_span),
+        );
+        self.types.push((result_type, Err(reason)));
     }
 
     fn do_task_cond_branch(
@@ -476,42 +470,41 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             (_, ExprType::Undefined) | (ExprType::Undefined, _) => {
                 self.types.push(UNDEFINED);
             }
-            (ExprType::List(item_type), ExprType::Integer) => {
+            (ExprType::List(item_type), ExprType::Integer)
+            | (ExprType::List(item_type), ExprType::Bottom) => {
                 let item_type = Rc::unwrap_or_clone(item_type);
-                match (lhs_static, rhs_static) {
+                let reason = match (lhs_static, rhs_static) {
                     (Ok(lhs_value), Ok(rhs_value)) => {
                         let index = rhs_value.unwrap_int();
                         let item_values = lhs_value.unwrap_list();
                         if index < BigInt::ZERO
                             || index >= BigInt::from(item_values.len())
                         {
-                            let reason =
-                                ExprNotStaticReason::StaticEvalError {
-                                    error:
-                                        ExprEvalError::ListIndexOutOfBounds {
-                                            list_span: lhs_span,
-                                            list_length: item_values.len(),
-                                            index_span: rhs_span,
-                                            index_value: index,
-                                        },
-                                };
-                            self.types.push((item_type, Err(reason)));
+                            ExprNotStaticReason::StaticEvalError {
+                                error: ExprEvalError::ListIndexOutOfBounds {
+                                    list_span: lhs_span,
+                                    list_length: item_values.len(),
+                                    index_span: rhs_span,
+                                    index_value: index,
+                                },
+                            }
                         } else {
+                            let index = usize::try_from(index).unwrap();
+                            let item_value = item_values[index].clone();
                             self.ops.pop().unwrap();
                             self.ops.pop().unwrap();
-                            let item_value = item_values
-                                [usize::try_from(index).unwrap()]
-                            .clone();
                             self.ops.push(E::Op::literal(item_value.clone()));
                             self.types.push((item_type, Ok(item_value)));
+                            return;
                         }
                     }
-                    (Err(reason), _) | (_, Err(reason)) => {
-                        let op = self.env.list_index_op(lhs_span, rhs_span);
-                        self.ops.push(op);
-                        self.types.push((item_type, Err(reason)));
+                    (Err(lhs_reason), Err(rhs_reason)) => {
+                        lhs_reason.or(rhs_reason)
                     }
-                }
+                    (Err(reason), _) | (_, Err(reason)) => reason,
+                };
+                self.ops.push(self.env.list_index_op(lhs_span, rhs_span));
+                self.types.push((item_type, Err(reason)));
             }
             (ExprType::List(_), rhs_type) => {
                 self.errs.push(ExprTypeError::CannotUseTypeAsIndex {
@@ -520,7 +513,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 });
                 self.types.push(UNDEFINED);
             }
-            (ExprType::Tuple(item_types), ExprType::Integer) => {
+            (ExprType::Tuple(item_types), ExprType::Integer)
+            | (ExprType::Tuple(item_types), ExprType::Bottom) => {
                 match rhs_static {
                     Ok(rhs_value) => {
                         self.ops.pop().unwrap();
@@ -752,15 +746,18 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (lhs_type, lhs_static) = self.types.pop().unwrap();
         self.types.push(match (lhs_type, rhs_type) {
             (ExprType::Boolean, ExprType::Boolean) => {
-                let static_value = match &lhs_static {
-                    Ok(ExprValue::Boolean(value)) => {
-                        if *value == identity {
+                let static_value = match lhs_static {
+                    Ok(value) => {
+                        if value.unwrap_bool() == identity {
                             rhs_static
                         } else {
-                            lhs_static
+                            Ok(value)
                         }
                     }
-                    _ => lhs_static,
+                    Err(lhs_reason) => match rhs_static {
+                        Ok(_) => Err(lhs_reason),
+                        Err(rhs_reason) => Err(lhs_reason.or(rhs_reason)),
+                    },
                 };
                 (ExprType::Boolean, static_value)
             }
@@ -832,35 +829,28 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
             return;
         }
         let op_span = unop_ast.0;
-        match self.errs.ok(ExprUnOp::typecheck(unop_ast, arg_span, arg_type)) {
-            Some((unop, result_type)) => match arg_static {
-                Ok(arg_value) => match unop.evaluate(arg_value) {
-                    Ok(result_value) => {
-                        self.ops.pop().unwrap();
-                        self.ops.push(E::Op::literal(result_value.clone()));
-                        self.types.push((result_type, Ok(result_value)));
-                    }
-                    Err(unop_error) => {
-                        self.ops.push(
-                            self.env
-                                .unary_operation_op(unop, op_span, arg_span),
-                        );
-                        let reason = ExprNotStaticReason::StaticEvalError {
-                            error: unop_error
-                                .into_expr_eval_error(op_span, arg_span),
-                        };
-                        self.types.push((result_type, Err(reason)));
-                    }
-                },
-                Err(reason) => {
-                    self.ops.push(
-                        self.env.unary_operation_op(unop, op_span, arg_span),
-                    );
-                    self.types.push((result_type, Err(reason)));
+        let Some((unop, result_type)) =
+            self.errs.ok(ExprUnOp::typecheck(unop_ast, arg_span, arg_type))
+        else {
+            self.types.push(UNDEFINED);
+            return;
+        };
+        let reason = match arg_static {
+            Ok(arg_value) => match unop.evaluate(arg_value) {
+                Ok(result_value) => {
+                    self.ops.pop().unwrap();
+                    self.ops.push(E::Op::literal(result_value.clone()));
+                    self.types.push((result_type, Ok(result_value)));
+                    return;
                 }
+                Err(unop_error) => ExprNotStaticReason::StaticEvalError {
+                    error: unop_error.into_expr_eval_error(op_span, arg_span),
+                },
             },
-            None => self.types.push(UNDEFINED),
-        }
+            Err(reason) => reason,
+        };
+        self.ops.push(self.env.unary_operation_op(unop, op_span, arg_span));
+        self.types.push((result_type, Err(reason)));
     }
 
     fn pop_types(
@@ -868,9 +858,23 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         num_items: usize,
     ) -> (Vec<ExprType>, Result<Vec<ExprValue>, ExprNotStaticReason>) {
         debug_assert!(num_items <= self.types.len());
-        let (item_types, static_values): (Vec<_>, Vec<ExprStatic>) =
+        let (item_types, item_statics): (Vec<_>, Vec<ExprStatic>) =
             self.types.drain((self.types.len() - num_items)..).unzip();
-        (item_types, static_values.into_iter().collect())
+        // Fold together static values, but instead of short circuiting on the
+        // first `Err`, combine `Err`s using `ExprNotStaticReason::or`.
+        #[allow(clippy::manual_try_fold)]
+        let static_values = item_statics.into_iter().fold(
+            Ok(Vec::with_capacity(num_items)),
+            |accum, item_static| match (accum, item_static) {
+                (Ok(mut values), Ok(item_value)) => {
+                    values.push(item_value);
+                    Ok(values)
+                }
+                (Ok(_), Err(reason)) | (Err(reason), Ok(_)) => Err(reason),
+                (Err(reason_1), Err(reason_2)) => Err(reason_1.or(reason_2)),
+            },
+        );
+        (item_types, static_values)
     }
 }
 

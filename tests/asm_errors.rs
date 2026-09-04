@@ -1,7 +1,8 @@
 use atma::addr::AlignTryFromError;
 use atma::asm::AsmError;
 use atma::expr::{
-    ExprEvalError, ExprNotStaticReason, ExprType, ExprTypeError,
+    ExprEvalError, ExprFuncEvalError, ExprNotStaticReason, ExprType,
+    ExprTypeError,
 };
 use atma::parse::BinOpAst;
 use num_bigint::BigInt;
@@ -353,6 +354,44 @@ fn set_variable_unknown() {
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::UnknownVariable { name, .. },
     ] if &**name == "foo");
+}
+
+#[test]
+fn static_eval_error_in_assignment() {
+    let source = r#"\
+    .VAR foo = -1
+    .IF foo != 0 {
+      .SET foo = %sqrtz(foo)
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::StaticEvalError {
+            context: _,
+            error: ExprEvalError::FuncEvalError {
+                arg_span: _,
+                error: ExprFuncEvalError::SquareRootOfNegative(value),
+            },
+        }
+    ] if *value == BigInt::from(-1));
+}
+
+#[test]
+fn static_eval_error_in_int_data() {
+    let source = r#"\
+    .IMPORT Foo
+    .SECTION "TEST"
+        ;; The `&Foo` already makes this expression not static, but we should
+        ;; prefer to report the inevitable static evaluation error.
+        .u8 {1, &Foo, 3, 4 / 0}[0]
+    .END
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::StaticEvalError {
+            context: _,
+            error: ExprEvalError::DivideByZero { rhs_span: _ },
+        }]
+    );
 }
 
 #[test]
