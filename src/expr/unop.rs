@@ -96,6 +96,9 @@ impl ExprUnOp {
             Self::AddrOf => match arg {
                 ExprValue::Label(ExprLabel::AddrAbsolute {
                     address, ..
+                })
+                | ExprValue::Label(ExprLabel::ChunkAbsolute {
+                    address, ..
                 }) => Ok(ExprValue::Integer(address)),
                 ExprValue::Label(_) => {
                     Err(ExprUnOpEvalError::AddrOfLabelUnresolved)

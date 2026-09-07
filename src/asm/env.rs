@@ -338,7 +338,7 @@ impl ExprEnv for AsmTypeEnv {
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         if let Some(chunk_env) = self.chunk_stack.last() {
             let chunk_index = chunk_env.chunk_index();
-            let offset = BigInt::from(chunk_env.data.len());
+            let offset = BigInt::from(chunk_env.total_size());
             let label = if let Some(start) = chunk_env.start_addr {
                 ExprLabel::ChunkAbsolute {
                     chunk_index,
@@ -463,7 +463,6 @@ impl ChunkEnv {
     }
 
     pub fn total_size(&self) -> usize {
-        // TODO: check for overflow
         self.data.len() + self.padding
     }
 
@@ -482,7 +481,7 @@ impl ChunkEnv {
     }
 
     pub fn add_padding(&mut self, padding: usize) {
-        // TODO: check for overflow
+        // TODO: check for overflow (counting both padding and data.len())
         self.padding += padding;
     }
 
