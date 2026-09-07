@@ -197,6 +197,8 @@ impl AsmStmtAst {
 /// The abstract syntax tree for an assertion in an assembly file.
 #[derive(Clone, Debug)]
 pub struct AsmAssertAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
     /// The boolean condition that is expected to be true.
     pub condition: ExprAst,
     /// An optional error message that should be emitted if the assertion
@@ -207,14 +209,18 @@ pub struct AsmAssertAst {
 impl AsmAssertAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".ASSERT")
-            .ignore_then(ExprAst::parser())
+            .then(ExprAst::parser())
             .then(
                 symbol(TokenValue::Comma)
                     .ignore_then(ExprAst::parser())
                     .or_not(),
             )
             .then_ignore(linebreak())
-            .map(|(condition, message)| Self { condition, message })
+            .map(|((directive_span, condition), message)| Self {
+                directive_span,
+                condition,
+                message,
+            })
     }
 }
 

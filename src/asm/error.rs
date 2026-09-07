@@ -29,14 +29,6 @@ pub enum AsmError {
         /// The name of the architecture.
         arch: Rc<str>,
     },
-    /// An assertion failed statically (without needing to wait for linking).
-    AssertionStaticallyFailed {
-        /// The source code location for the assertion condition expression
-        /// that evaluated to false.
-        condition_loc: ObjSrcLoc,
-        /// The additional message value for the assertion, if any.
-        additional_message: Option<Rc<str>>,
-    },
     /// Tried to assign to a built-in identifier.
     AssignmentToBuiltin {
         /// The source code location for the identifier that we tried to
@@ -280,19 +272,6 @@ impl AsmError {
                 SourceError::new(loc.primary(), message)
                     .with_primary_label("")
                     .with_context(&*loc.context)
-            }
-            Self::AssertionStaticallyFailed {
-                condition_loc,
-                additional_message,
-            } => {
-                let message = if let Some(additional) = additional_message {
-                    format!("Assertion failed: {additional}")
-                } else {
-                    "Assertion failed".to_string()
-                };
-                SourceError::new(condition_loc.primary(), message)
-                    .with_primary_label("")
-                    .with_context(&*condition_loc.context)
             }
             Self::AssignmentToBuiltin { loc, name } => {
                 let message =

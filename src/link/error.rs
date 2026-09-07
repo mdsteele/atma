@@ -18,11 +18,6 @@ pub type LinkResult<T> = Result<T, Errs<LinkError>>;
 pub enum LinkError {
     /// A miscellaneous error.
     Misc, // TODO: remove this
-    /// An assertion condition evaluated to false.
-    AssertionFailed {
-        /// An additional message provided by the assertion.
-        message: Option<Rc<str>>,
-    },
     /// The final binary size would be too large to create.
     BinaryTooLarge {
         /// The name of the memory region that would not fit in the final

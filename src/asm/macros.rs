@@ -555,6 +555,7 @@ impl MacroExpansion {
     fn expand_statement(&self, statement: &AsmStmtAst) -> AsmStmtAst {
         match statement {
             AsmStmtAst::Assert(assert) => AsmStmtAst::Assert(AsmAssertAst {
+                directive_span: assert.directive_span,
                 condition: self.expand_expression(&assert.condition),
                 message: assert
                     .message

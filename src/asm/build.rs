@@ -6,13 +6,14 @@ use super::repeat::typecheck_iterator;
 use crate::addr::{Addr, Align, Endianness, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
-    ExprLabel, ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError,
-    ExprUnOp, ExprValue,
+    ExprEvalError, ExprFunc, ExprFuncEvalError, ExprLabel,
+    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprUnOp,
+    ExprValue,
 };
 use crate::obj::{
-    ObjAssert, ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch,
-    ObjPatchData, ObjPatchIntType, ObjPatchRelType, ObjSrcContext, ObjSrcLoc,
-    ObjSrcParent, ObjSymbol,
+    ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch, ObjPatchData,
+    ObjPatchIntType, ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
+    ObjSymbol,
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
@@ -56,7 +57,6 @@ struct Assembler<'a> {
     chunks: BTreeMap<usize, ObjChunk>,
     imports: Vec<ObjImport>,
     variables: Vec<ObjExpr>,
-    asserts: Vec<ObjAssert>,
 }
 
 impl<'a> Assembler<'a> {
@@ -70,7 +70,6 @@ impl<'a> Assembler<'a> {
             chunks: BTreeMap::new(),
             imports: Vec::new(),
             variables: Vec::new(),
-            asserts: Vec::new(),
         }
     }
 
@@ -192,46 +191,93 @@ impl<'a> Assembler<'a> {
 
     fn expand_assert(&mut self, assert_ast: AsmAssertAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let opt_message: Option<(ObjExpr, ExprStatic)> =
-            assert_ast.message.and_then(|expr_ast| {
-                errs.ok(self.typecheck_dir_expr_as(
-                    (".ASSERT", "message"),
-                    expr_ast,
-                    ExprType::String,
-                ))
-            });
-        let condition_span = assert_ast.condition.span;
-        let condition_expr: ObjExpr = 'condition: {
-            match errs.ok(self.typecheck_dir_expr_as(
-                (".ASSERT", "condition"),
-                assert_ast.condition,
-                ExprType::Boolean,
-            )) {
-                None => return errs.result(),
-                Some((_, Ok(ExprValue::Boolean(true)))) => {
-                    return errs.result();
+        let condition = errs.ok(self.typecheck_dir_expr_as(
+            (".ASSERT", "condition"),
+            assert_ast.condition,
+            ExprType::Boolean,
+        ));
+        let (message_span, message_expr, message_static) =
+            match assert_ast.message {
+                None => {
+                    let message_span = assert_ast.directive_span;
+                    let message_value = ExprValue::from("Assertion failed");
+                    let message_expr = ObjExpr::from(message_value.clone());
+                    (message_span, message_expr, Ok(message_value))
                 }
-                Some((condition_expr, Ok(_))) => {
-                    let additional_message = match &opt_message {
-                        None => None,
-                        Some((_, Ok(value))) => {
-                            Some(value.unwrap_str_ref().clone())
+                Some(message_ast) => {
+                    let message_span = message_ast.span;
+                    match errs.ok(self.typecheck_dir_expr_as(
+                        (".ASSERT", "message"),
+                        message_ast,
+                        ExprType::String,
+                    )) {
+                        None => {
+                            let message_expr = ObjExpr::from(false);
+                            let message_static =
+                                Err(ExprNotStaticReason::TypeError);
+                            (message_span, message_expr, message_static)
                         }
-                        Some((_, Err(_))) => break 'condition condition_expr,
-                    };
-                    errs.push(AsmError::AssertionStaticallyFailed {
-                        condition_loc: self.env.make_loc(condition_span),
-                        additional_message,
-                    });
-                    return errs.result();
+                        Some((message_expr, message_static)) => {
+                            (message_span, message_expr, message_static)
+                        }
+                    }
                 }
-                Some((condition_expr, Err(_))) => condition_expr,
-            }
+            };
+        let failure_expr = {
+            let mut message_ops = message_expr.ops;
+            let mut expr = ObjExpr::from(ExprFunc::Error);
+            expr.ops.append(&mut message_ops);
+            expr.ops.push(ObjExprOp::Apply {
+                context: self.env.current_src_context(),
+                arg_span: message_span,
+            });
+            expr
         };
-        self.asserts.push(ObjAssert {
-            condition: condition_expr,
-            message: opt_message.map(|(expr, _)| expr),
-        });
+        match condition {
+            None => {} // The assertion condition failed to typecheck.
+            Some((_, Ok(ExprValue::Boolean(true)))) => {
+                // The assertion condition statically succeeded.
+            }
+            Some((_, Ok(_))) => {
+                // The assertion condition statically failed.
+                match message_static {
+                    Ok(message_value) => {
+                        // Message is statically known, so we can report the
+                        // failed assertion right now.
+                        errs.push(AsmError::StaticEvalError {
+                            context: self.env.current_src_context(),
+                            error: ExprEvalError::FuncEvalError {
+                                arg_span: message_span,
+                                error: ExprFuncEvalError::ErrorMessage(
+                                    message_value.unwrap_str(),
+                                ),
+                            },
+                        });
+                    }
+                    Err(reason) => {
+                        // Message is not statically known, so we have to wait
+                        // until link time to report the failed assertion.
+                        errs.also(
+                            self.check_for_inevitable_eval_error(&reason),
+                        );
+                        self.variables.push(failure_expr);
+                    }
+                }
+            }
+            Some((mut condition_expr, Err(reason))) => {
+                // The assertion condition can't be evaluated yet, so we have
+                // to wait until link time to check it.
+                errs.also(self.check_for_inevitable_eval_error(&reason));
+                let mut failure_ops = failure_expr.ops;
+                condition_expr.ops.push(ObjExprOp::SkipUnless(2));
+                condition_expr
+                    .ops
+                    .push(ObjExprOp::Push(ExprValue::from(true)));
+                condition_expr.ops.push(ObjExprOp::Skip(failure_ops.len()));
+                condition_expr.ops.append(&mut failure_ops);
+                self.variables.push(condition_expr);
+            }
+        }
         errs.result()
     }
 
@@ -1166,7 +1212,6 @@ impl<'a> Assembler<'a> {
             chunks: self.chunks.into_values().collect(),
             imports: self.imports,
             variables: self.variables,
-            asserts: self.asserts,
         }
     }
 }

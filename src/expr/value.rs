@@ -423,14 +423,38 @@ impl BinaryIo for ExprValue {
 }
 
 impl From<bool> for ExprValue {
-    fn from(value: bool) -> ExprValue {
-        ExprValue::Boolean(value)
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+
+impl From<ExprFunc> for ExprValue {
+    fn from(value: ExprFunc) -> Self {
+        Self::Function(value)
     }
 }
 
 impl From<BigInt> for ExprValue {
-    fn from(value: BigInt) -> ExprValue {
-        ExprValue::Integer(value)
+    fn from(value: BigInt) -> Self {
+        Self::Integer(value)
+    }
+}
+
+impl From<ExprLabel> for ExprValue {
+    fn from(value: ExprLabel) -> Self {
+        Self::Label(value)
+    }
+}
+
+impl From<Rc<str>> for ExprValue {
+    fn from(value: Rc<str>) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for ExprValue {
+    fn from(value: &str) -> Self {
+        Self::String(Rc::from(value))
     }
 }
 

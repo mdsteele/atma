@@ -1,7 +1,9 @@
 use super::binary::{BinaryIo, Decoder, Encoder};
 use super::context::ObjSrcContext;
 use crate::error::SrcSpan;
-use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue, Template};
+use crate::expr::{
+    ExprBinOp, ExprFunc, ExprOp, ExprUnOp, ExprValue, Template,
+};
 use num_bigint::BigInt;
 use std::io;
 use std::rc::Rc;
@@ -40,7 +42,7 @@ impl BinaryIo for ObjExpr {
         if ops.is_empty() {
             Err(io::Error::new(io::ErrorKind::InvalidData, "empty expression"))
         } else {
-            Ok(ObjExpr { ops })
+            Ok(Self { ops })
         }
     }
 
@@ -56,7 +58,7 @@ impl BinaryIo for ObjExpr {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Option<Self>> {
         let ops = Vec::<ObjExprOp>::read_from(decoder)?;
-        if ops.is_empty() { Ok(None) } else { Ok(Some(ObjExpr { ops })) }
+        if ops.is_empty() { Ok(None) } else { Ok(Some(Self { ops })) }
     }
 
     fn write_option_to<W: io::Write>(
@@ -74,20 +76,26 @@ impl BinaryIo for ObjExpr {
 }
 
 impl From<ExprValue> for ObjExpr {
-    fn from(value: ExprValue) -> ObjExpr {
-        ObjExpr { ops: vec![ObjExprOp::Push(value)] }
+    fn from(value: ExprValue) -> Self {
+        Self { ops: vec![ObjExprOp::Push(value)] }
     }
 }
 
 impl From<bool> for ObjExpr {
-    fn from(value: bool) -> ObjExpr {
-        ObjExpr::from(ExprValue::from(value))
+    fn from(value: bool) -> Self {
+        Self::from(ExprValue::from(value))
+    }
+}
+
+impl From<ExprFunc> for ObjExpr {
+    fn from(value: ExprFunc) -> Self {
+        Self::from(ExprValue::from(value))
     }
 }
 
 impl From<BigInt> for ObjExpr {
-    fn from(value: BigInt) -> ObjExpr {
-        ObjExpr::from(ExprValue::from(value))
+    fn from(value: BigInt) -> Self {
+        Self::from(ExprValue::from(value))
     }
 }
 

@@ -42,8 +42,14 @@ fn assertion_statically_failed() {
     .ASSERT %false, "oops"
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::AssertionStaticallyFailed{ additional_message: Some(m), .. },
-    ] if &**m == "oops");
+        AsmError::StaticEvalError{
+            context: _,
+            error: ExprEvalError::FuncEvalError {
+                arg_span: _,
+                error: ExprFuncEvalError::ErrorMessage(message),
+            },
+        },
+    ] if &**message == "oops");
 }
 
 #[test]

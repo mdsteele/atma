@@ -1,6 +1,5 @@
 //! Facilities for representing assembled object files.
 
-mod assert;
 mod binary;
 mod chunk;
 mod context;
@@ -10,7 +9,6 @@ mod import;
 mod patch;
 mod symbol;
 
-pub use assert::ObjAssert;
 pub use binary::{BinaryIo, Decoder, Encoder};
 pub use chunk::ObjChunk;
 pub use context::{ObjSrcContext, ObjSrcLoc, ObjSrcParent};

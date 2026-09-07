@@ -1,4 +1,3 @@
-use super::assert::ObjAssert;
 use super::binary::{BinaryIo, Decoder, Encoder};
 use super::chunk::ObjChunk;
 use super::expr::ObjExpr;
@@ -17,8 +16,6 @@ pub struct ObjFile {
     /// evaluated (in order) after all symbols have been resolved, and can then
     /// be used by assertion and patch expressions (or by later variables).
     pub variables: Vec<ObjExpr>,
-    /// Any assertions that must be met at link time.
-    pub asserts: Vec<ObjAssert>,
 }
 
 impl BinaryIo for ObjFile {
@@ -28,8 +25,7 @@ impl BinaryIo for ObjFile {
         let chunks = Vec::<ObjChunk>::read_from(decoder)?;
         let imports = Vec::<ObjImport>::read_from(decoder)?;
         let variables = Vec::<ObjExpr>::read_from(decoder)?;
-        let asserts = Vec::<ObjAssert>::read_from(decoder)?;
-        Ok(ObjFile { chunks, imports, variables, asserts })
+        Ok(ObjFile { chunks, imports, variables })
     }
 
     fn write_to<W: io::Write>(
@@ -39,7 +35,6 @@ impl BinaryIo for ObjFile {
         self.chunks.write_to(encoder)?;
         self.imports.write_to(encoder)?;
         self.variables.write_to(encoder)?;
-        self.asserts.write_to(encoder)?;
         Ok(())
     }
 }
