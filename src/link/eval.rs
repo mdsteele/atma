@@ -3,7 +3,7 @@ use super::error::{LinkError, LinkResult};
 use super::types::{AbsoluteLabel, ChunkMetadata};
 use crate::addr::Addr;
 use crate::error::Errs;
-use crate::expr::{ExprEvalError, ExprLabel, ExprValue};
+use crate::expr::{ExprEvalError, ExprFunc, ExprLabel, ExprValue};
 use crate::obj::{ObjExpr, ObjExprOp};
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -151,34 +151,53 @@ impl LinkEvalEnv {
         expr: &ObjExpr,
         context: &LinkSymbolContext,
     ) -> LinkResult<ExprValue> {
-        let mut expr_stack = Vec::<ExprValue>::new();
-        for op in &expr.ops {
+        ExprEvaluator::new(self, expr, context).evaluate()
+    }
+}
+
+//===========================================================================//
+
+struct ExprEvaluator<'a> {
+    env: &'a LinkEvalEnv,
+    symbol_context: &'a LinkSymbolContext<'a>,
+    ops: &'a [ObjExprOp],
+    op_index: usize,
+    value_stack: Vec<ExprValue>,
+}
+
+impl<'a> ExprEvaluator<'a> {
+    pub fn new(
+        env: &'a LinkEvalEnv,
+        expr: &'a ObjExpr,
+        symbol_context: &'a LinkSymbolContext,
+    ) -> Self {
+        Self {
+            env,
+            symbol_context,
+            ops: &expr.ops,
+            op_index: 0,
+            value_stack: Vec::new(),
+        }
+    }
+
+    pub fn evaluate(mut self) -> LinkResult<ExprValue> {
+        while self.op_index < self.ops.len() {
+            let op = &self.ops[self.op_index];
+            self.op_index += 1;
             match op {
                 ObjExprOp::Apply { context, arg_span } => {
-                    let arg_value = pop_value(&mut expr_stack)?;
-                    let func_value = pop_value(&mut expr_stack)?;
-                    if let ExprValue::Function(func) = func_value {
-                        match func.call(arg_value) {
-                            Ok(result_value) => expr_stack.push(result_value),
-                            Err(error) => {
-                                return Err(Errs::one(
-                                    LinkError::ExprEvalError {
-                                        context: context.clone(),
-                                        error: ExprEvalError::FuncEvalError {
-                                            arg_span: *arg_span,
-                                            error,
-                                        },
-                                    },
-                                ));
-                            }
-                        }
-                    } else {
-                        // Type error.  That shouldn't happen unless the
-                        // object file was corrupted.
-                        return Err(Errs::one(
-                            LinkError::MalformedPatchExpression,
-                        ));
-                    }
+                    let arg_value = self.pop_value()?;
+                    let func = self.pop_func()?;
+                    let ret_value = func.call(arg_value).map_err(|error| {
+                        Errs::one(LinkError::ExprEvalError {
+                            context: context.clone(),
+                            error: ExprEvalError::FuncEvalError {
+                                arg_span: *arg_span,
+                                error,
+                            },
+                        })
+                    })?;
+                    self.push_value(ret_value);
                 }
                 ObjExprOp::BinOp {
                     context,
@@ -187,38 +206,95 @@ impl LinkEvalEnv {
                     lhs_span,
                     rhs_span,
                 } => {
-                    let rhs = pop_value(&mut expr_stack)?;
-                    let lhs = pop_value(&mut expr_stack)?;
-                    match binop.evaluate(lhs, rhs) {
-                        Ok(result) => expr_stack.push(result),
-                        Err(error) => {
-                            return Err(Errs::one(LinkError::ExprEvalError {
+                    let rhs = self.pop_value()?;
+                    let lhs = self.pop_value()?;
+                    let ret_value =
+                        binop.evaluate(lhs, rhs).map_err(|error| {
+                            Errs::one(LinkError::ExprEvalError {
                                 context: context.clone(),
                                 error: error.into_expr_eval_error(
                                     *op_span, *lhs_span, *rhs_span,
                                 ),
-                            }));
-                        }
-                    }
+                            })
+                        })?;
+                    self.push_value(ret_value);
                 }
                 &ObjExprOp::GetValue(index) => {
-                    let value = self.get_variable(index)?;
-                    expr_stack.push(value.clone());
+                    let value = self.env.get_variable(index)?;
+                    self.push_value(value.clone());
+                }
+                ObjExprOp::Interpolate(template) => {
+                    let arg = self.pop_value()?;
+                    let string = template.format(arg).map_err(|_| {
+                        // Type error.  That shouldn't happen unless the object
+                        // file was corrupted.
+                        Errs::one(LinkError::MalformedPatchExpression)
+                    })?;
+                    self.push_value(ExprValue::String(string));
+                }
+                ObjExprOp::ListIndex { context, list_span, index_span } => {
+                    let index = self.pop_int()?;
+                    let items = self.pop_list()?;
+                    if index < BigInt::ZERO
+                        || index >= BigInt::from(items.len())
+                    {
+                        return Err(Errs::one(LinkError::ExprEvalError {
+                            context: context.clone(),
+                            error: ExprEvalError::ListIndexOutOfBounds {
+                                list_span: *list_span,
+                                list_length: items.len(),
+                                index_span: *index_span,
+                                index_value: index,
+                            },
+                        }));
+                    }
+                    let item = items[usize::try_from(index).unwrap()].clone();
+                    self.push_value(item);
+                }
+                &ObjExprOp::MakeList(num_items) => {
+                    let items = self.pop_values(num_items)?;
+                    self.push_value(ExprValue::List(Rc::from(items)));
+                }
+                &ObjExprOp::MakeTuple(num_items) => {
+                    let items = self.pop_values(num_items)?;
+                    self.push_value(ExprValue::Tuple(Rc::from(items)));
                 }
                 ObjExprOp::Push(ExprValue::Label(label)) => {
-                    let resolved = context.resolve_label(label)?;
-                    expr_stack.push(ExprValue::Label(
+                    let resolved = self.symbol_context.resolve_label(label)?;
+                    self.push_value(ExprValue::Label(
                         ExprLabel::AddrAbsolute {
                             space: resolved.space,
                             address: BigInt::from(resolved.address),
                         },
                     ));
                 }
-                ObjExprOp::Push(value) => expr_stack.push(value.clone()),
+                ObjExprOp::Push(value) => self.push_value(value.clone()),
+                &ObjExprOp::Skip(offset) => self.skip(offset)?,
+                &ObjExprOp::SkipIf(offset) => {
+                    if self.pop_bool()? {
+                        self.skip(offset)?;
+                    }
+                }
+                &ObjExprOp::SkipUnless(offset) => {
+                    if !self.pop_bool()? {
+                        self.skip(offset)?;
+                    }
+                }
+                &ObjExprOp::TupleItem(index) => {
+                    let items = self.pop_tuple()?;
+                    if index >= items.len() {
+                        // Type error.  That shouldn't happen unless the object
+                        // file was corrupted.
+                        return Err(Errs::one(
+                            LinkError::MalformedPatchExpression,
+                        ));
+                    }
+                    self.push_value(items[index].clone());
+                }
                 ObjExprOp::UnOp { context, unop, op_span, arg_span } => {
-                    let arg = pop_value(&mut expr_stack)?;
+                    let arg = self.pop_value()?;
                     match unop.evaluate(arg) {
-                        Ok(result) => expr_stack.push(result),
+                        Ok(result) => self.push_value(result),
                         Err(error) => {
                             return Err(Errs::one(LinkError::ExprEvalError {
                                 context: context.clone(),
@@ -228,25 +304,93 @@ impl LinkEvalEnv {
                         }
                     }
                 }
-                other => todo!("{other:?}"),
             }
         }
-        let value = pop_value(&mut expr_stack)?;
-        if !expr_stack.is_empty() {
+        let value = self.pop_value()?;
+        if !self.value_stack.is_empty() {
             // More than one value left on the stack at the end.  That
             // shouldn't happen unless the object file was corrupted.
             return Err(Errs::one(LinkError::MalformedPatchExpression));
         }
         Ok(value)
     }
-}
 
-fn pop_value(expr_stack: &mut Vec<ExprValue>) -> LinkResult<ExprValue> {
-    match expr_stack.pop() {
-        Some(value) => Ok(value),
-        None => {
-            // Stack underflow.  That shouldn't happen unless
-            // the object file was corrupted.
+    fn push_value(&mut self, value: ExprValue) {
+        self.value_stack.push(value);
+    }
+
+    fn pop_values(&mut self, num_items: usize) -> LinkResult<Vec<ExprValue>> {
+        if self.value_stack.len() >= num_items {
+            let start = self.value_stack.len() - num_items;
+            Ok(self.value_stack.split_off(start))
+        } else {
+            // Stack underflow.  That shouldn't happen unless the object
+            // file was corrupted.
+            Err(Errs::one(LinkError::MalformedPatchExpression))
+        }
+    }
+
+    fn pop_value(&mut self) -> LinkResult<ExprValue> {
+        match self.value_stack.pop() {
+            Some(value) => Ok(value),
+            // Stack underflow.  That shouldn't happen unless the object file
+            // was corrupted.
+            None => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        }
+    }
+
+    fn pop_bool(&mut self) -> LinkResult<bool> {
+        match self.pop_value()? {
+            ExprValue::Boolean(boolean) => Ok(boolean),
+            // Type error.  That shouldn't happen unless the object file was
+            // corrupted.
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        }
+    }
+
+    fn pop_func(&mut self) -> LinkResult<ExprFunc> {
+        match self.pop_value()? {
+            ExprValue::Function(func) => Ok(func),
+            // Type error.  That shouldn't happen unless the object file was
+            // corrupted.
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        }
+    }
+
+    fn pop_int(&mut self) -> LinkResult<BigInt> {
+        match self.pop_value()? {
+            ExprValue::Integer(bigint) => Ok(bigint),
+            // Type error.  That shouldn't happen unless the object file was
+            // corrupted.
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        }
+    }
+
+    fn pop_list(&mut self) -> LinkResult<Rc<[ExprValue]>> {
+        match self.pop_value()? {
+            ExprValue::List(items) => Ok(items),
+            // Type error.  That shouldn't happen unless the object file was
+            // corrupted.
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        }
+    }
+
+    fn pop_tuple(&mut self) -> LinkResult<Rc<[ExprValue]>> {
+        match self.pop_value()? {
+            ExprValue::Tuple(items) => Ok(items),
+            // Type error.  That shouldn't happen unless the object file was
+            // corrupted.
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        }
+    }
+
+    fn skip(&mut self, offset: usize) -> LinkResult<()> {
+        self.op_index = self.op_index.saturating_add(offset);
+        if self.op_index <= self.ops.len() {
+            Ok(())
+        } else {
+            // Op index overflow.  That shouldn't happen unless the object file
+            // was corrupted.
             Err(Errs::one(LinkError::MalformedPatchExpression))
         }
     }
