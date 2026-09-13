@@ -47,6 +47,50 @@ fn assert_asm_dis(source: &str, binary: &[u8]) {
 //===========================================================================//
 
 #[test]
+fn assemble_adc_instructions() {
+    assert_asm_dis("ADC A, #$12", &[0x88, 0x12]);
+    assert_asm_dis("ADC A, (X)", &[0x86]);
+    assert_asm_dis("ADC A, $34", &[0x84, 0x34]);
+    assert_asm_dis("ADC A, $56 + X", &[0x94, 0x56]);
+    assert_asm_dis("ADC A, !$1234", &[0x85, 0x34, 0x12]);
+    assert_asm_dis("ADC A, !$1234 + X", &[0x95, 0x34, 0x12]);
+    assert_asm_dis("ADC A, !$1234 + Y", &[0x96, 0x34, 0x12]);
+    assert_asm_dis("ADC A, [$cd + X]", &[0x87, 0xcd]);
+    assert_asm_dis("ADC A, [$ab] + Y", &[0x97, 0xab]);
+    assert_asm_dis("ADC (X), (Y)", &[0x99]);
+    assert_asm_dis("ADC $12, $34", &[0x89, 0x34, 0x12]);
+    assert_asm_dis("ADC $56, #$78", &[0x98, 0x78, 0x56]);
+}
+
+#[test]
+fn assemble_and_instructions() {
+    assert_asm_dis("AND A, #$12", &[0x28, 0x12]);
+    assert_asm_dis("AND A, (X)", &[0x26]);
+    assert_asm_dis("AND A, $34", &[0x24, 0x34]);
+    assert_asm_dis("AND A, $56 + X", &[0x34, 0x56]);
+    assert_asm_dis("AND A, !$1234", &[0x25, 0x34, 0x12]);
+    assert_asm_dis("AND A, !$1234 + X", &[0x35, 0x34, 0x12]);
+    assert_asm_dis("AND A, !$1234 + Y", &[0x36, 0x34, 0x12]);
+    assert_asm_dis("AND A, [$cd + X]", &[0x27, 0xcd]);
+    assert_asm_dis("AND A, [$ab] + Y", &[0x37, 0xab]);
+    assert_asm_dis("AND (X), (Y)", &[0x39]);
+    assert_asm_dis("AND $12, $34", &[0x29, 0x34, 0x12]);
+    assert_asm_dis("AND $56, #$78", &[0x38, 0x78, 0x56]);
+}
+
+#[test]
+fn assemble_bit_instructions() {
+    assert_asm_dis("AND1 C, $1000, 0", &[0x4a, 0x00, 0x10]);
+    assert_asm_dis("AND1 C, /$0000, 5", &[0x6a, 0x00, 0xa0]);
+    assert_asm_dis("EOR1 C, $0123, 2", &[0x8a, 0x23, 0x41]);
+    assert_asm_dis("MOV1 C, $1fff, 1", &[0xaa, 0xff, 0x3f]);
+    assert_asm_dis("MOV1 $0012, 7, C", &[0xca, 0x12, 0xe0]);
+    assert_asm_dis("NOT1 $1234, 6", &[0xea, 0x34, 0xd2]);
+    assert_asm_dis("OR1 C, $1001, 4", &[0x0a, 0x01, 0x90]);
+    assert_asm_dis("OR1 C, /$0002, 3", &[0x2a, 0x02, 0x60]);
+}
+
+#[test]
 fn assemble_branch_instructions() {
     assert_asm_dis("BCC $0042", &[0x90, 0x40]);
     assert_asm_dis("BCS $0081", &[0xb0, 0x7f]);
@@ -57,12 +101,54 @@ fn assemble_branch_instructions() {
     assert_asm_dis("BRA $0003", &[0x2f, 0x01]);
     assert_asm_dis("BVC $0004", &[0x50, 0x02]);
     assert_asm_dis("BVS $ffc2", &[0x70, 0xc0]);
+    assert_asm_dis("CBNE $12, $0037", &[0x2e, 0x12, 0x34]);
+    assert_asm_dis("CBNE $56 + X, $007b", &[0xde, 0x56, 0x78]);
+    assert_asm_dis("DBNZ Y, $0014", &[0xfe, 0x12]);
+    assert_asm_dis("DBNZ $34, $0015", &[0x6e, 0x34, 0x12]);
 }
 
 #[test]
 fn assemble_call_instructions() {
     assert_asm_dis("CALL !$1234", &[0x3f, 0x34, 0x12]);
     assert_asm_dis("PCALL $ff37", &[0x4f, 0x37]);
+}
+
+#[test]
+fn assemble_cmp_instructions() {
+    assert_asm_dis("CMP A, #$12", &[0x68, 0x12]);
+    assert_asm_dis("CMP A, (X)", &[0x66]);
+    assert_asm_dis("CMP A, $34", &[0x64, 0x34]);
+    assert_asm_dis("CMP A, $56 + X", &[0x74, 0x56]);
+    assert_asm_dis("CMP A, !$1234", &[0x65, 0x34, 0x12]);
+    assert_asm_dis("CMP A, !$1234 + X", &[0x75, 0x34, 0x12]);
+    assert_asm_dis("CMP A, !$1234 + Y", &[0x76, 0x34, 0x12]);
+    assert_asm_dis("CMP A, [$cd + X]", &[0x67, 0xcd]);
+    assert_asm_dis("CMP A, [$ab] + Y", &[0x77, 0xab]);
+    assert_asm_dis("CMP (X), (Y)", &[0x79]);
+    assert_asm_dis("CMP $12, $34", &[0x69, 0x34, 0x12]);
+    assert_asm_dis("CMP $56, #$78", &[0x78, 0x78, 0x56]);
+    assert_asm_dis("CMP X, #$12", &[0xc8, 0x12]);
+    assert_asm_dis("CMP X, $34", &[0x3e, 0x34]);
+    assert_asm_dis("CMP X, !$1234", &[0x1e, 0x34, 0x12]);
+    assert_asm_dis("CMP Y, #$12", &[0xad, 0x12]);
+    assert_asm_dis("CMP Y, $34", &[0x7e, 0x34]);
+    assert_asm_dis("CMP Y, !$1234", &[0x5e, 0x34, 0x12]);
+}
+
+#[test]
+fn assemble_eor_instructions() {
+    assert_asm_dis("EOR A, #$12", &[0x48, 0x12]);
+    assert_asm_dis("EOR A, (X)", &[0x46]);
+    assert_asm_dis("EOR A, $34", &[0x44, 0x34]);
+    assert_asm_dis("EOR A, $56 + X", &[0x54, 0x56]);
+    assert_asm_dis("EOR A, !$1234", &[0x45, 0x34, 0x12]);
+    assert_asm_dis("EOR A, !$1234 + X", &[0x55, 0x34, 0x12]);
+    assert_asm_dis("EOR A, !$1234 + Y", &[0x56, 0x34, 0x12]);
+    assert_asm_dis("EOR A, [$cd + X]", &[0x47, 0xcd]);
+    assert_asm_dis("EOR A, [$ab] + Y", &[0x57, 0xab]);
+    assert_asm_dis("EOR (X), (Y)", &[0x59]);
+    assert_asm_dis("EOR $12, $34", &[0x49, 0x34, 0x12]);
+    assert_asm_dis("EOR $56, #$78", &[0x58, 0x78, 0x56]);
 }
 
 #[test]
@@ -85,14 +171,12 @@ fn assemble_inc_dec_instructions() {
     assert_asm_dis("DEC $12", &[0x8b, 0x12]);
     assert_asm_dis("DEC $34 + X", &[0x9b, 0x34]);
     assert_asm_dis("DEC !$1234", &[0x8c, 0x34, 0x12]);
-    assert_asm_dis("DECW $56", &[0x1a, 0x56]);
     assert_asm_dis("INC A", &[0xbc]);
     assert_asm_dis("INC X", &[0x3d]);
     assert_asm_dis("INC Y", &[0xfc]);
     assert_asm_dis("INC $12", &[0xab, 0x12]);
     assert_asm_dis("INC $34 + X", &[0xbb, 0x34]);
     assert_asm_dis("INC !$1234", &[0xac, 0x34, 0x12]);
-    assert_asm_dis("INCW $56", &[0x3a, 0x56]);
 }
 
 #[test]
@@ -162,6 +246,22 @@ fn assemble_move_instructions() {
 }
 
 #[test]
+fn assemble_or_instructions() {
+    assert_asm_dis("OR A, #$12", &[0x08, 0x12]);
+    assert_asm_dis("OR A, (X)", &[0x06]);
+    assert_asm_dis("OR A, $34", &[0x04, 0x34]);
+    assert_asm_dis("OR A, $56 + X", &[0x14, 0x56]);
+    assert_asm_dis("OR A, !$1234", &[0x05, 0x34, 0x12]);
+    assert_asm_dis("OR A, !$1234 + X", &[0x15, 0x34, 0x12]);
+    assert_asm_dis("OR A, !$1234 + Y", &[0x16, 0x34, 0x12]);
+    assert_asm_dis("OR A, [$cd + X]", &[0x07, 0xcd]);
+    assert_asm_dis("OR A, [$ab] + Y", &[0x17, 0xab]);
+    assert_asm_dis("OR (X), (Y)", &[0x19]);
+    assert_asm_dis("OR $12, $34", &[0x09, 0x34, 0x12]);
+    assert_asm_dis("OR $56, #$78", &[0x18, 0x78, 0x56]);
+}
+
+#[test]
 fn assemble_push_pop_instructions() {
     assert_asm_dis("PUSH A", &[0x2d]);
     assert_asm_dis("PUSH X", &[0x4d]);
@@ -186,6 +286,22 @@ fn assemble_rotate_instructions() {
 }
 
 #[test]
+fn assemble_sbc_instructions() {
+    assert_asm_dis("SBC A, #$12", &[0xa8, 0x12]);
+    assert_asm_dis("SBC A, (X)", &[0xa6]);
+    assert_asm_dis("SBC A, $34", &[0xa4, 0x34]);
+    assert_asm_dis("SBC A, $56 + X", &[0xb4, 0x56]);
+    assert_asm_dis("SBC A, !$1234", &[0xa5, 0x34, 0x12]);
+    assert_asm_dis("SBC A, !$1234 + X", &[0xb5, 0x34, 0x12]);
+    assert_asm_dis("SBC A, !$1234 + Y", &[0xb6, 0x34, 0x12]);
+    assert_asm_dis("SBC A, [$cd + X]", &[0xa7, 0xcd]);
+    assert_asm_dis("SBC A, [$ab] + Y", &[0xb7, 0xab]);
+    assert_asm_dis("SBC (X), (Y)", &[0xb9]);
+    assert_asm_dis("SBC $12, $34", &[0xa9, 0x34, 0x12]);
+    assert_asm_dis("SBC $56, #$78", &[0xb8, 0x78, 0x56]);
+}
+
+#[test]
 fn assemble_shift_instructions() {
     assert_asm_dis("ASL A", &[0x1c]);
     assert_asm_dis("ASL $12", &[0x0b, 0x12]);
@@ -195,6 +311,23 @@ fn assemble_shift_instructions() {
     assert_asm_dis("LSR $12", &[0x4b, 0x12]);
     assert_asm_dis("LSR $34 + X", &[0x5b, 0x34]);
     assert_asm_dis("LSR !$1234", &[0x4c, 0x34, 0x12]);
+}
+
+#[test]
+fn assemble_tclr1_tset1_instructions() {
+    assert_asm_dis("TCLR1 !$1234", &[0x4e, 0x34, 0x12]);
+    assert_asm_dis("TSET1 !$5678", &[0x0e, 0x78, 0x56]);
+}
+
+#[test]
+fn assemble_word_instructions() {
+    assert_asm_dis("ADDW YA, $12", &[0x7a, 0x12]);
+    assert_asm_dis("CMPW YA, $34", &[0x5a, 0x34]);
+    assert_asm_dis("DECW $56", &[0x1a, 0x56]);
+    assert_asm_dis("INCW $78", &[0x3a, 0x78]);
+    assert_asm_dis("MOVW YA, $9a", &[0xba, 0x9a]);
+    assert_asm_dis("MOVW $bc, YA", &[0xda, 0xbc]);
+    assert_asm_dis("SUBW YA, $de", &[0x9a, 0xde]);
 }
 
 //===========================================================================//

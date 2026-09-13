@@ -12,6 +12,9 @@ use std::rc::Rc;
 //===========================================================================//
 
 pub(super) struct MacroTable {
+    // Maps from signatures to lists of definitions.  Each definition list is
+    // sorted such that the _last_ matching definition is the one that should
+    // be used.
     definitions: HashMap<MacroSignature, Vec<MacroDefinition>>,
 }
 
@@ -84,8 +87,18 @@ impl MacroTable {
             name: normalize_macro_name(&def_macro_ast.id.name),
             num_args,
         };
-        self.definitions.entry(signature).or_default().push(definition);
+        self.insert(signature, definition);
         Ok(())
+    }
+
+    fn insert(
+        &mut self,
+        signature: MacroSignature,
+        definition: MacroDefinition,
+    ) {
+        let defs = self.definitions.entry(signature).or_default();
+        defs.push(definition);
+        defs.sort_by_key(MacroDefinition::specificity);
     }
 }
 
@@ -356,6 +369,10 @@ struct MacroDefinition {
 }
 
 impl MacroDefinition {
+    pub fn specificity(&self) -> Vec<usize> {
+        self.params.iter().map(MacroParameter::specificity).collect::<Vec<_>>()
+    }
+
     pub fn try_expand(
         &self,
         context: &Rc<ObjSrcContext>,
@@ -382,16 +399,25 @@ enum MacroParameter {
 }
 
 impl MacroParameter {
+    pub fn specificity(&self) -> usize {
+        match self {
+            Self::Exact { pattern } => pattern.len(),
+            Self::Placeholder { prefix, suffix, .. } => {
+                prefix.len() + suffix.len()
+            }
+        }
+    }
+
     pub fn try_match<'a>(
         &self,
         arg: &'a AsmMacroArgAst,
     ) -> MacroResult<MacroArgument<'a>> {
         match self {
-            MacroParameter::Exact { pattern } => {
+            Self::Exact { pattern } => {
                 try_match_tokens(&arg.tokens, pattern)?;
                 Ok(MacroArgument::Exact)
             }
-            MacroParameter::Placeholder { prefix, kind, name, suffix } => {
+            Self::Placeholder { prefix, kind, name, suffix } => {
                 if arg.tokens.len() <= prefix.len() + suffix.len() {
                     return Err(MacroError::FailedToMatchPattern);
                 }

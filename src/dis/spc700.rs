@@ -45,6 +45,10 @@ pub enum AddrMode {
     Relative,
     /// Operate on the absolute 16-bit address following the opcode.
     Absolute,
+    /// Operate on the Nth bit of the byte stored at address M, where M is the
+    /// lower 13 bits of the 16-bit argument following the opcode, and N is the
+    /// upper 3 bits.
+    AbsoluteBit,
     /// Operate on a the absolute 16-bit address following the opcode, offset
     /// by index X.
     XIndexedAbsolute,
@@ -89,6 +93,10 @@ impl AddrMode {
             AddrMode::Immediate => Operand::Immediate(next_byte(bus, pc)),
             AddrMode::Relative => Operand::Relative(next_byte(bus, pc) as i8),
             AddrMode::Absolute => Operand::Absolute(next_word(bus, pc)),
+            AddrMode::AbsoluteBit => {
+                let word = next_word(bus, pc);
+                Operand::AbsoluteBit(word & 0x1fff, (word >> 13) as u8)
+            }
             AddrMode::XIndexedAbsolute => {
                 Operand::XIndexedAbsolute(next_word(bus, pc))
             }
@@ -141,6 +149,9 @@ pub enum Operand {
     Relative(i8),
     /// Operate on the given absolute address.
     Absolute(u16),
+    /// Operate on the specified bit (0-7) of the byte stored at the given
+    /// 13-bit absolute address.
+    AbsoluteBit(u16, u8),
     /// Operate on the given absolute address, offset by index X.
     XIndexedAbsolute(u16),
     /// Operate on the given absolute address, offset by index Y.
@@ -177,6 +188,7 @@ impl Operand {
             Operand::Immediate(_) => 1,
             Operand::Relative(_) => 1,
             Operand::Absolute(_) => 2,
+            Operand::AbsoluteBit(_, _) => 2,
             Operand::XIndexedAbsolute(_) => 2,
             Operand::YIndexedAbsolute(_) => 2,
             Operand::XIndexedAbsoluteIndirect(_) => 2,
@@ -203,6 +215,9 @@ impl Operand {
             }
             Operand::Absolute(addr) => {
                 format!("!{}", format_address(bus, addr))
+            }
+            Operand::AbsoluteBit(addr, bit) => {
+                format!("{}, {bit}", format_address(bus, addr))
             }
             Operand::XIndexedAbsolute(addr) => {
                 format!("!{} + X", format_address(bus, addr))
@@ -269,6 +284,12 @@ pub enum Mnemonic<ADDR> {
     AdcAAddr(ADDR),
     /// Add the byte at the second address to the first address with carry.
     AdcAddrAddr(ADDR, ADDR),
+    /// Add the word at the specified address to the YA register.
+    Addw(ADDR),
+    /// AND the specified bit in memory into the C flag.
+    And1(ADDR),
+    /// AND the inverse of the the specified bit in memory into the C flag.
+    And1Inv(ADDR),
     /// Bitwise-AND the byte at the specified address into the A register.
     AndAAddr(ADDR),
     /// Bitwise-AND the byte at the second address into the first address.
@@ -277,6 +298,12 @@ pub enum Mnemonic<ADDR> {
     AslA,
     /// Arithmetically shift the byte at the specified address left by one bit.
     AslAddr(ADDR),
+    /// Branch to the second address if the specified bit (0-7) is cleared in
+    /// the byte at the first address.
+    Bbc(ADDR, u8, ADDR),
+    /// Branch to the second address if the specified bit (0-7) is set in the
+    /// byte at the first address.
+    Bbs(ADDR, u8, ADDR),
     /// Branch to the specified address if the carry flag is clear.
     Bcc(ADDR),
     /// Branch to the specified address if the carry flag is set.
@@ -302,6 +329,8 @@ pub enum Mnemonic<ADDR> {
     /// Compare the A register to the byte at the first address, and branch to
     /// the second address if they're not equal.
     Cbne(ADDR, ADDR),
+    /// Clear the specified bit (0-7) in the byte at the specified address.
+    Clr1(u8, ADDR),
     /// Clear the carry flag.
     Clrc,
     /// Clear the direct page flag (making page 0 the direct page).
@@ -314,6 +343,8 @@ pub enum Mnemonic<ADDR> {
     /// Compare the contents of the specified register to the byte at the
     /// specified address.
     CmpRegAddr(Reg, ADDR),
+    /// Compare the YA register to the word at the specified address.
+    Cmpw(ADDR),
     /// Decimal adjust for addition.
     Daa,
     /// Decimal adjust for subtraction.
@@ -336,6 +367,9 @@ pub enum Mnemonic<ADDR> {
     Div,
     /// Enable interrupts.
     Ei,
+    /// XOR the specified bit in memory with the carry flag, and store the
+    /// result in the carry flag.
+    Eor1(ADDR),
     /// Bitwise-XOR the byte at the specified address into the A register.
     EorAAddr(ADDR),
     /// Bitwise-XOR the byte at the second address into the first address.
@@ -352,6 +386,10 @@ pub enum Mnemonic<ADDR> {
     LsrA,
     /// Logically shift the byte at the specified address right by one bit.
     LsrAddr(ADDR),
+    /// Copy the carry flag into the specified bit in memory.
+    Mov1AddrC(ADDR),
+    /// Copy the specified bit in memory into the carry flag.
+    Mov1CAddr(ADDR),
     /// Copy the byte at the second address to the first address.
     MovAddrAddr(ADDR, ADDR),
     /// Copy the contents of the specified register to the specified address.
@@ -360,12 +398,22 @@ pub enum Mnemonic<ADDR> {
     MovRegAddr(Reg, ADDR),
     /// Copy the contents of the second register into the first register.
     MovRegReg(Reg, Reg),
+    /// Copy the contents of the YA register to the specified address.
+    MovwAddrYa(ADDR),
+    /// Copy the word at the specified address into the YA register.
+    MovwYaAddr(ADDR),
     /// Multiply Y by A into YA.
     Mul,
     /// No-op.
     Nop,
+    /// Invert the specified bit in memory.
+    Not1(ADDR),
     /// Invert the carry flag.
     Notc,
+    /// OR the specified bit in memory into the C flag.
+    Or1(ADDR),
+    /// OR the inverse of the specified bit in memory into the C flag.
+    Or1Inv(ADDR),
     /// Bitwise-OR the byte at the specified address into the A register.
     OrAAddr(ADDR),
     /// Bitwise-OR the byte at the second address into the first address.
@@ -394,6 +442,8 @@ pub enum Mnemonic<ADDR> {
     /// Subtract the byte at the second address from the first address with
     /// borrow.
     SbcAddrAddr(ADDR, ADDR),
+    /// Set the specified bit (0-7) in the byte at the specified address.
+    Set1(u8, ADDR),
     /// Set the carry flag.
     Setc,
     /// Set the direct page flag (making page 1 the direct page).
@@ -402,9 +452,19 @@ pub enum Mnemonic<ADDR> {
     Sleep,
     /// Stop the processor.
     Stop,
+    /// Subtract the word at the specified address from the YA register.
+    Subw(ADDR),
     /// Call the subroutine pointed to by the address stored in memory starting
     /// at the specified high page address.
     Tcall(u8),
+    /// Set the N and Z flags as if comparing the accumulator to the byte at
+    /// the specified address, then set that byte to the bitwise AND of itself
+    /// and the complement of the accumulator.
+    Tclr1(ADDR),
+    /// Set the N and Z flags as if comparing the accumulator to the byte at
+    /// the specified address, then set that byte to the bitwise OR of itself
+    /// and the accumulator.
+    Tset1(ADDR),
     /// Exchange the upper and lower nibbles of the A register.
     Xcn,
 }
@@ -451,6 +511,72 @@ impl Operation {
             0xd1 => Operation::Tcall(0xc4),
             0xe1 => Operation::Tcall(0xc2),
             0xf1 => Operation::Tcall(0xc0),
+
+            0x02 => Operation::Set1(0, AddrMode::DirectPage),
+            0x12 => Operation::Clr1(0, AddrMode::DirectPage),
+            0x22 => Operation::Set1(1, AddrMode::DirectPage),
+            0x32 => Operation::Clr1(1, AddrMode::DirectPage),
+            0x42 => Operation::Set1(2, AddrMode::DirectPage),
+            0x52 => Operation::Clr1(2, AddrMode::DirectPage),
+            0x62 => Operation::Set1(3, AddrMode::DirectPage),
+            0x72 => Operation::Clr1(3, AddrMode::DirectPage),
+            0x82 => Operation::Set1(4, AddrMode::DirectPage),
+            0x92 => Operation::Clr1(4, AddrMode::DirectPage),
+            0xa2 => Operation::Set1(5, AddrMode::DirectPage),
+            0xb2 => Operation::Clr1(5, AddrMode::DirectPage),
+            0xc2 => Operation::Set1(6, AddrMode::DirectPage),
+            0xd2 => Operation::Clr1(6, AddrMode::DirectPage),
+            0xe2 => Operation::Set1(7, AddrMode::DirectPage),
+            0xf2 => Operation::Clr1(7, AddrMode::DirectPage),
+
+            0x03 => {
+                Operation::Bbs(AddrMode::DirectPage, 0, AddrMode::Relative)
+            }
+            0x13 => {
+                Operation::Bbc(AddrMode::DirectPage, 0, AddrMode::Relative)
+            }
+            0x23 => {
+                Operation::Bbs(AddrMode::DirectPage, 1, AddrMode::Relative)
+            }
+            0x33 => {
+                Operation::Bbc(AddrMode::DirectPage, 1, AddrMode::Relative)
+            }
+            0x43 => {
+                Operation::Bbs(AddrMode::DirectPage, 2, AddrMode::Relative)
+            }
+            0x53 => {
+                Operation::Bbc(AddrMode::DirectPage, 2, AddrMode::Relative)
+            }
+            0x63 => {
+                Operation::Bbs(AddrMode::DirectPage, 3, AddrMode::Relative)
+            }
+            0x73 => {
+                Operation::Bbc(AddrMode::DirectPage, 3, AddrMode::Relative)
+            }
+            0x83 => {
+                Operation::Bbs(AddrMode::DirectPage, 4, AddrMode::Relative)
+            }
+            0x93 => {
+                Operation::Bbc(AddrMode::DirectPage, 4, AddrMode::Relative)
+            }
+            0xa3 => {
+                Operation::Bbs(AddrMode::DirectPage, 5, AddrMode::Relative)
+            }
+            0xb3 => {
+                Operation::Bbc(AddrMode::DirectPage, 5, AddrMode::Relative)
+            }
+            0xc3 => {
+                Operation::Bbs(AddrMode::DirectPage, 6, AddrMode::Relative)
+            }
+            0xd3 => {
+                Operation::Bbc(AddrMode::DirectPage, 6, AddrMode::Relative)
+            }
+            0xe3 => {
+                Operation::Bbs(AddrMode::DirectPage, 7, AddrMode::Relative)
+            }
+            0xf3 => {
+                Operation::Bbc(AddrMode::DirectPage, 7, AddrMode::Relative)
+            }
 
             0x04 => Operation::OrAAddr(AddrMode::DirectPage),
             0x14 => Operation::OrAAddr(AddrMode::XIndexedDirectPage),
@@ -636,8 +762,21 @@ impl Operation {
                 Operation::MovRegAddr(Reg::X, AddrMode::YIndexedDirectPage)
             }
 
+            0x0a => Operation::Or1(AddrMode::AbsoluteBit),
             0x1a => Operation::Decw(AddrMode::DirectPage),
+            0x2a => Operation::Or1Inv(AddrMode::AbsoluteBit),
             0x3a => Operation::Incw(AddrMode::DirectPage),
+            0x4a => Operation::And1(AddrMode::AbsoluteBit),
+            0x5a => Operation::Cmpw(AddrMode::DirectPage),
+            0x6a => Operation::And1Inv(AddrMode::AbsoluteBit),
+            0x7a => Operation::Addw(AddrMode::DirectPage),
+            0x8a => Operation::Eor1(AddrMode::AbsoluteBit),
+            0x9a => Operation::Subw(AddrMode::DirectPage),
+            0xaa => Operation::Mov1CAddr(AddrMode::AbsoluteBit),
+            0xba => Operation::MovwYaAddr(AddrMode::DirectPage),
+            0xca => Operation::Mov1AddrC(AddrMode::AbsoluteBit),
+            0xda => Operation::MovwAddrYa(AddrMode::DirectPage),
+            0xea => Operation::Not1(AddrMode::AbsoluteBit),
             0xfa => Operation::MovAddrAddr(
                 AddrMode::DirectPage,
                 AddrMode::DirectPage,
@@ -698,9 +837,11 @@ impl Operation {
             0xed => Operation::Notc,
             0xfd => Operation::MovRegReg(Reg::Y, Reg::A),
 
+            0x0e => Operation::Tset1(AddrMode::Absolute),
             0x1e => Operation::CmpRegAddr(Reg::X, AddrMode::Absolute),
             0x2e => Operation::Cbne(AddrMode::DirectPage, AddrMode::Relative),
             0x3e => Operation::CmpRegAddr(Reg::X, AddrMode::DirectPage),
+            0x4e => Operation::Tclr1(AddrMode::Absolute),
             0x5e => Operation::CmpRegAddr(Reg::Y, AddrMode::Absolute),
             0x6e => {
                 Operation::DbnzAddr(AddrMode::DirectPage, AddrMode::Relative)
@@ -737,8 +878,6 @@ impl Operation {
             0xdf => Operation::Daa,
             0xef => Operation::Sleep,
             0xff => Operation::Stop,
-
-            _ => todo!("opcode=0x{opcode:02x}"),
         }
     }
 }
@@ -783,6 +922,9 @@ impl Instruction {
             | Instruction::Tcall(_)
             | Instruction::Xcn => 1,
             Instruction::AdcAAddr(operand)
+            | Instruction::Addw(operand)
+            | Instruction::And1(operand)
+            | Instruction::And1Inv(operand)
             | Instruction::AndAAddr(operand)
             | Instruction::AslAddr(operand)
             | Instruction::Bcc(operand)
@@ -795,24 +937,40 @@ impl Instruction {
             | Instruction::Bvc(operand)
             | Instruction::Bvs(operand)
             | Instruction::Call(operand)
+            | Instruction::Clr1(_, operand)
             | Instruction::CmpRegAddr(_, operand)
+            | Instruction::Cmpw(operand)
             | Instruction::DbnzY(operand)
             | Instruction::DecAddr(operand)
             | Instruction::Decw(operand)
+            | Instruction::Eor1(operand)
             | Instruction::EorAAddr(operand)
             | Instruction::IncAddr(operand)
             | Instruction::Incw(operand)
             | Instruction::Jmp(operand)
             | Instruction::LsrAddr(operand)
+            | Instruction::Mov1AddrC(operand)
             | Instruction::MovAddrReg(operand, _)
+            | Instruction::Mov1CAddr(operand)
+            | Instruction::MovRegAddr(_, operand)
+            | Instruction::MovwAddrYa(operand)
+            | Instruction::MovwYaAddr(operand)
+            | Instruction::Not1(operand)
+            | Instruction::Or1(operand)
+            | Instruction::Or1Inv(operand)
             | Instruction::OrAAddr(operand)
             | Instruction::Pcall(operand)
-            | Instruction::MovRegAddr(_, operand)
             | Instruction::RolAddr(operand)
             | Instruction::RorAddr(operand)
-            | Instruction::SbcAAddr(operand) => 1 + operand.size(),
+            | Instruction::SbcAAddr(operand)
+            | Instruction::Set1(_, operand)
+            | Instruction::Subw(operand)
+            | Instruction::Tclr1(operand)
+            | Instruction::Tset1(operand) => 1 + operand.size(),
             Instruction::AdcAddrAddr(op1, op2)
             | Instruction::AndAddrAddr(op1, op2)
+            | Instruction::Bbc(op1, _, op2)
+            | Instruction::Bbs(op1, _, op2)
             | Instruction::Cbne(op1, op2)
             | Instruction::CmpAddrAddr(op1, op2)
             | Instruction::DbnzAddr(op1, op2)
@@ -837,6 +995,11 @@ impl Instruction {
                     mode1.decode(bus, pc.wrapping_add(op2.size() as u16));
                 Instruction::AdcAddrAddr(op1, op2)
             }
+            Operation::Addw(mode) => Instruction::Addw(mode.decode(bus, pc)),
+            Operation::And1(mode) => Instruction::And1(mode.decode(bus, pc)),
+            Operation::And1Inv(mode) => {
+                Instruction::And1Inv(mode.decode(bus, pc))
+            }
             Operation::AndAAddr(mode) => {
                 Instruction::AndAAddr(mode.decode(bus, pc))
             }
@@ -849,6 +1012,18 @@ impl Instruction {
             Operation::AslA => Instruction::AslA,
             Operation::AslAddr(mode) => {
                 Instruction::AslAddr(mode.decode(bus, pc))
+            }
+            Operation::Bbc(mode1, bit, mode2) => {
+                let op1 = mode1.decode(bus, pc);
+                let op2 =
+                    mode2.decode(bus, pc.wrapping_add(op1.size() as u16));
+                Instruction::Bbc(op1, bit, op2)
+            }
+            Operation::Bbs(mode1, bit, mode2) => {
+                let op1 = mode1.decode(bus, pc);
+                let op2 =
+                    mode2.decode(bus, pc.wrapping_add(op1.size() as u16));
+                Instruction::Bbs(op1, bit, op2)
             }
             Operation::Bcc(mode) => Instruction::Bcc(mode.decode(bus, pc)),
             Operation::Bcs(mode) => Instruction::Bcs(mode.decode(bus, pc)),
@@ -867,6 +1042,9 @@ impl Instruction {
                     mode2.decode(bus, pc.wrapping_add(op1.size() as u16));
                 Instruction::Cbne(op1, op2)
             }
+            Operation::Clr1(bit, mode) => {
+                Instruction::Clr1(bit, mode.decode(bus, pc))
+            }
             Operation::Clrc => Instruction::Clrc,
             Operation::Clrp => Instruction::Clrp,
             Operation::Clrv => Instruction::Clrv,
@@ -879,6 +1057,7 @@ impl Instruction {
             Operation::CmpRegAddr(reg, mode) => {
                 Instruction::CmpRegAddr(reg, mode.decode(bus, pc))
             }
+            Operation::Cmpw(mode) => Instruction::Cmpw(mode.decode(bus, pc)),
             Operation::Daa => Instruction::Daa,
             Operation::Das => Instruction::Das,
             Operation::DbnzAddr(mode1, mode2) => {
@@ -896,6 +1075,7 @@ impl Instruction {
             Operation::Di => Instruction::Di,
             Operation::Div => Instruction::Div,
             Operation::Ei => Instruction::Ei,
+            Operation::Eor1(mode) => Instruction::Eor1(mode.decode(bus, pc)),
             Operation::EorAAddr(mode) => {
                 Instruction::EorAAddr(mode.decode(bus, pc))
             }
@@ -915,6 +1095,12 @@ impl Instruction {
             Operation::LsrAddr(mode) => {
                 Instruction::LsrAddr(mode.decode(bus, pc))
             }
+            Operation::Mov1AddrC(mode) => {
+                Instruction::Mov1AddrC(mode.decode(bus, pc))
+            }
+            Operation::Mov1CAddr(mode) => {
+                Instruction::Mov1CAddr(mode.decode(bus, pc))
+            }
             Operation::MovAddrAddr(mode1, mode2) => {
                 let op2 = mode2.decode(bus, pc);
                 let op1 =
@@ -928,9 +1114,20 @@ impl Instruction {
                 Instruction::MovRegAddr(reg, mode.decode(bus, pc))
             }
             Operation::MovRegReg(r1, r2) => Instruction::MovRegReg(r1, r2),
+            Operation::MovwAddrYa(mode) => {
+                Instruction::MovwAddrYa(mode.decode(bus, pc))
+            }
+            Operation::MovwYaAddr(mode) => {
+                Instruction::MovwYaAddr(mode.decode(bus, pc))
+            }
             Operation::Mul => Instruction::Mul,
             Operation::Nop => Instruction::Nop,
+            Operation::Not1(mode) => Instruction::Not1(mode.decode(bus, pc)),
             Operation::Notc => Instruction::Notc,
+            Operation::Or1(mode) => Instruction::Or1(mode.decode(bus, pc)),
+            Operation::Or1Inv(mode) => {
+                Instruction::Or1Inv(mode.decode(bus, pc))
+            }
             Operation::OrAAddr(mode) => {
                 Instruction::OrAAddr(mode.decode(bus, pc))
             }
@@ -962,11 +1159,17 @@ impl Instruction {
                     mode1.decode(bus, pc.wrapping_add(op2.size() as u16));
                 Instruction::SbcAddrAddr(op1, op2)
             }
+            Operation::Set1(bit, mode) => {
+                Instruction::Set1(bit, mode.decode(bus, pc))
+            }
             Operation::Setc => Instruction::Setc,
             Operation::Setp => Instruction::Setp,
             Operation::Sleep => Instruction::Sleep,
             Operation::Stop => Instruction::Stop,
+            Operation::Subw(mode) => Instruction::Subw(mode.decode(bus, pc)),
             Operation::Tcall(hp) => Instruction::Tcall(hp),
+            Operation::Tclr1(mode) => Instruction::Tclr1(mode.decode(bus, pc)),
+            Operation::Tset1(mode) => Instruction::Tset1(mode.decode(bus, pc)),
             Operation::Xcn => Instruction::Xcn,
         }
     }
@@ -986,6 +1189,15 @@ impl Instruction {
                 op1.format(bus, next),
                 op2.format(bus, next)
             ),
+            Instruction::Addw(op) => {
+                format!("ADDW YA, {}", op.format(bus, next))
+            }
+            Instruction::And1(op) => {
+                format!("AND1 C, {}", op.format(bus, next))
+            }
+            Instruction::And1Inv(op) => {
+                format!("AND1 C, /{}", op.format(bus, next))
+            }
             Instruction::AndAAddr(op) => {
                 format!("AND A, {}", op.format(bus, next))
             }
@@ -998,6 +1210,16 @@ impl Instruction {
             Instruction::AslAddr(op) => {
                 format!("ASL {}", op.format(bus, next))
             }
+            Instruction::Bbc(op1, bit, op2) => format!(
+                "BBC {}, {bit}, {}",
+                op1.format(bus, next),
+                op2.format(bus, next)
+            ),
+            Instruction::Bbs(op1, bit, op2) => format!(
+                "BBS {}, {bit}, {}",
+                op1.format(bus, next),
+                op2.format(bus, next)
+            ),
             Instruction::Bcc(op) => format!("BCC {}", op.format(bus, next)),
             Instruction::Bcs(op) => format!("BCS {}", op.format(bus, next)),
             Instruction::Beq(op) => format!("BEQ {}", op.format(bus, next)),
@@ -1014,6 +1236,9 @@ impl Instruction {
                 op1.format(bus, next),
                 op2.format(bus, next)
             ),
+            Instruction::Clr1(bit, op) => {
+                format!("CLR1 {bit}, {}", op.format(bus, next))
+            }
             Instruction::Clrc => "CLRC".to_string(),
             Instruction::Clrp => "CLRP".to_string(),
             Instruction::Clrv => "CLRV".to_string(),
@@ -1025,6 +1250,9 @@ impl Instruction {
                 op1.format(bus, next),
                 op2.format(bus, next)
             ),
+            Instruction::Cmpw(op) => {
+                format!("CMPW YA, {}", op.format(bus, next))
+            }
             Instruction::Daa => "DAA A".to_string(),
             Instruction::Das => "DAS A".to_string(),
             Instruction::DbnzAddr(op1, op2) => format!(
@@ -1043,6 +1271,9 @@ impl Instruction {
             Instruction::Di => "DI".to_string(),
             Instruction::Div => "DIV YA, X".to_string(),
             Instruction::Ei => "EI".to_string(),
+            Instruction::Eor1(op) => {
+                format!("EOR1 C, {}", op.format(bus, next))
+            }
             Instruction::EorAAddr(op) => {
                 format!("EOR A, {}", op.format(bus, next))
             }
@@ -1061,6 +1292,12 @@ impl Instruction {
             Instruction::LsrAddr(op) => {
                 format!("LSR {}", op.format(bus, next))
             }
+            Instruction::Mov1AddrC(op) => {
+                format!("MOV1 {}, C", op.format(bus, next))
+            }
+            Instruction::Mov1CAddr(op) => {
+                format!("MOV1 C, {}", op.format(bus, next))
+            }
             Instruction::MovAddrAddr(op1, op2) => format!(
                 "MOV {}, {}",
                 op1.format(bus, next),
@@ -1073,9 +1310,20 @@ impl Instruction {
                 format!("MOV {reg}, {}", op.format(bus, next))
             }
             Instruction::MovRegReg(r1, r2) => format!("MOV {r1}, {r2}"),
+            Instruction::MovwAddrYa(op) => {
+                format!("MOVW {}, YA", op.format(bus, next))
+            }
+            Instruction::MovwYaAddr(op) => {
+                format!("MOVW YA, {}", op.format(bus, next))
+            }
             Instruction::Mul => "MUL YA".to_string(),
             Instruction::Nop => "NOP".to_string(),
+            Instruction::Not1(op) => format!("NOT1 {}", op.format(bus, next)),
             Instruction::Notc => "NOTC".to_string(),
+            Instruction::Or1(op) => format!("OR1 C, {}", op.format(bus, next)),
+            Instruction::Or1Inv(op) => {
+                format!("OR1 C, /{}", op.format(bus, next))
+            }
             Instruction::OrAAddr(op) => {
                 format!("OR A, {}", op.format(bus, next))
             }
@@ -1107,16 +1355,28 @@ impl Instruction {
                 op1.format(bus, next),
                 op2.format(bus, next)
             ),
+            Instruction::Set1(bit, op) => {
+                format!("SET1 {bit}, {}", op.format(bus, next))
+            }
             Instruction::Setc => "SETC".to_string(),
             Instruction::Setp => "SETP".to_string(),
             Instruction::Sleep => "SLEEP".to_string(),
             Instruction::Stop => "STOP".to_string(),
+            Instruction::Subw(op) => {
+                format!("SUBW YA, {}", op.format(bus, next))
+            }
             Instruction::Tcall(hp) => {
                 format!(
                     "TCALL [{}]",
                     Operand::Absolute(0xff00 | u16::from(hp))
                         .format(bus, next)
                 )
+            }
+            Instruction::Tclr1(op) => {
+                format!("TCLR1 {}", op.format(bus, next))
+            }
+            Instruction::Tset1(op) => {
+                format!("TSET1 {}", op.format(bus, next))
             }
             Instruction::Xcn => "XCN A".to_string(),
         }
@@ -1190,6 +1450,42 @@ mod tests {
     }
 
     #[test]
+    fn disassemble_bbc() {
+        assert_eq!(disassemble(&[0x13, 0x12, 0x31]), "BBC $12, 0, $0034");
+        assert_eq!(disassemble(&[0x33, 0x56, 0x75]), "BBC $56, 1, $0078");
+        assert_eq!(disassemble(&[0x53, 0x9a, 0xfc]), "BBC $9a, 2, $ffff");
+        assert_eq!(disassemble(&[0x73, 0xbc, 0xfd]), "BBC $bc, 3, $0000");
+        assert_eq!(disassemble(&[0x93, 0x12, 0x31]), "BBC $12, 4, $0034");
+        assert_eq!(disassemble(&[0xb3, 0x56, 0x75]), "BBC $56, 5, $0078");
+        assert_eq!(disassemble(&[0xd3, 0x9a, 0xfc]), "BBC $9a, 6, $ffff");
+        assert_eq!(disassemble(&[0xf3, 0xbc, 0xfd]), "BBC $bc, 7, $0000");
+    }
+
+    #[test]
+    fn disassemble_bbs() {
+        assert_eq!(disassemble(&[0x03, 0x12, 0x31]), "BBS $12, 0, $0034");
+        assert_eq!(disassemble(&[0x23, 0x56, 0x75]), "BBS $56, 1, $0078");
+        assert_eq!(disassemble(&[0x43, 0x9a, 0xfc]), "BBS $9a, 2, $ffff");
+        assert_eq!(disassemble(&[0x63, 0xbc, 0xfd]), "BBS $bc, 3, $0000");
+        assert_eq!(disassemble(&[0x83, 0x12, 0x31]), "BBS $12, 4, $0034");
+        assert_eq!(disassemble(&[0xa3, 0x56, 0x75]), "BBS $56, 5, $0078");
+        assert_eq!(disassemble(&[0xc3, 0x9a, 0xfc]), "BBS $9a, 6, $ffff");
+        assert_eq!(disassemble(&[0xe3, 0xbc, 0xfd]), "BBS $bc, 7, $0000");
+    }
+
+    #[test]
+    fn disassemble_bit() {
+        assert_eq!(disassemble(&[0x4a, 0x00, 0x10]), "AND1 C, $1000, 0");
+        assert_eq!(disassemble(&[0x6a, 0x00, 0xa0]), "AND1 C, /$0000, 5");
+        assert_eq!(disassemble(&[0x8a, 0x23, 0x41]), "EOR1 C, $0123, 2");
+        assert_eq!(disassemble(&[0xaa, 0xff, 0x3f]), "MOV1 C, $1fff, 1");
+        assert_eq!(disassemble(&[0xca, 0x12, 0xe0]), "MOV1 $0012, 7, C");
+        assert_eq!(disassemble(&[0xea, 0x34, 0xd2]), "NOT1 $1234, 6");
+        assert_eq!(disassemble(&[0x0a, 0x01, 0x90]), "OR1 C, $1001, 4");
+        assert_eq!(disassemble(&[0x2a, 0x02, 0x60]), "OR1 C, /$0002, 3");
+    }
+
+    #[test]
     fn disassemble_branch() {
         assert_eq!(disassemble(&[0x90, 0x40]), "BCC $0042");
         assert_eq!(disassemble(&[0xb0, 0x7f]), "BCS $0081");
@@ -1227,6 +1523,18 @@ mod tests {
             disassemble_with_label(&[0xde, 0x56, 0x78], 0x007b, "foo"),
             "CBNE $56 + X, foo"
         );
+    }
+
+    #[test]
+    fn disassemble_clr1() {
+        assert_eq!(disassemble(&[0x12, 0x12]), "CLR1 0, $12");
+        assert_eq!(disassemble(&[0x32, 0x56]), "CLR1 1, $56");
+        assert_eq!(disassemble(&[0x52, 0x9a]), "CLR1 2, $9a");
+        assert_eq!(disassemble(&[0x72, 0xbc]), "CLR1 3, $bc");
+        assert_eq!(disassemble(&[0x92, 0x12]), "CLR1 4, $12");
+        assert_eq!(disassemble(&[0xb2, 0x56]), "CLR1 5, $56");
+        assert_eq!(disassemble(&[0xd2, 0x9a]), "CLR1 6, $9a");
+        assert_eq!(disassemble(&[0xf2, 0xbc]), "CLR1 7, $bc");
     }
 
     #[test]
@@ -1273,7 +1581,6 @@ mod tests {
         assert_eq!(disassemble(&[0x8b, 0x12]), "DEC $12");
         assert_eq!(disassemble(&[0x9b, 0x34]), "DEC $34 + X");
         assert_eq!(disassemble(&[0x8c, 0x34, 0x12]), "DEC !$1234");
-        assert_eq!(disassemble(&[0x1a, 0x56]), "DECW $56");
     }
 
     #[test]
@@ -1312,7 +1619,6 @@ mod tests {
         assert_eq!(disassemble(&[0xab, 0x12]), "INC $12");
         assert_eq!(disassemble(&[0xbb, 0x34]), "INC $34 + X");
         assert_eq!(disassemble(&[0xac, 0x34, 0x12]), "INC !$1234");
-        assert_eq!(disassemble(&[0x3a, 0x56]), "INCW $56");
     }
 
     #[test]
@@ -1455,15 +1761,31 @@ mod tests {
     }
 
     #[test]
-    fn disassemble_rotate() {
+    fn disassemble_rol() {
         assert_eq!(disassemble(&[0x3c]), "ROL A");
         assert_eq!(disassemble(&[0x2b, 0x12]), "ROL $12");
         assert_eq!(disassemble(&[0x3b, 0x34]), "ROL $34 + X");
         assert_eq!(disassemble(&[0x2c, 0x34, 0x12]), "ROL !$1234");
+    }
+
+    #[test]
+    fn disassemble_ror() {
         assert_eq!(disassemble(&[0x7c]), "ROR A");
         assert_eq!(disassemble(&[0x6b, 0x12]), "ROR $12");
         assert_eq!(disassemble(&[0x7b, 0x34]), "ROR $34 + X");
         assert_eq!(disassemble(&[0x6c, 0x34, 0x12]), "ROR !$1234");
+    }
+
+    #[test]
+    fn disassemble_set1() {
+        assert_eq!(disassemble(&[0x02, 0x12]), "SET1 0, $12");
+        assert_eq!(disassemble(&[0x22, 0x56]), "SET1 1, $56");
+        assert_eq!(disassemble(&[0x42, 0x9a]), "SET1 2, $9a");
+        assert_eq!(disassemble(&[0x62, 0xbc]), "SET1 3, $bc");
+        assert_eq!(disassemble(&[0x82, 0x12]), "SET1 4, $12");
+        assert_eq!(disassemble(&[0xa2, 0x56]), "SET1 5, $56");
+        assert_eq!(disassemble(&[0xc2, 0x9a]), "SET1 6, $9a");
+        assert_eq!(disassemble(&[0xe2, 0xbc]), "SET1 7, $bc");
     }
 
     #[test]
@@ -1488,6 +1810,23 @@ mod tests {
             disassemble_with_label(&[0x51], 0xffd4, "foo"),
             "TCALL [!foo]"
         );
+    }
+
+    #[test]
+    fn disassemble_tclr1_tset1() {
+        assert_eq!(disassemble(&[0x4e, 0x34, 0x12]), "TCLR1 !$1234");
+        assert_eq!(disassemble(&[0x0e, 0x78, 0x56]), "TSET1 !$5678");
+    }
+
+    #[test]
+    fn disassemble_word() {
+        assert_eq!(disassemble(&[0x7a, 0x12]), "ADDW YA, $12");
+        assert_eq!(disassemble(&[0x5a, 0x34]), "CMPW YA, $34");
+        assert_eq!(disassemble(&[0x1a, 0x56]), "DECW $56");
+        assert_eq!(disassemble(&[0x3a, 0x78]), "INCW $78");
+        assert_eq!(disassemble(&[0xba, 0x9a]), "MOVW YA, $9a");
+        assert_eq!(disassemble(&[0xda, 0xbc]), "MOVW $bc, YA");
+        assert_eq!(disassemble(&[0x9a, 0xde]), "SUBW YA, $de");
     }
 }
 

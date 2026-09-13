@@ -31,7 +31,8 @@ pub(super) const MACROS_SPC700: &[(&str, &[u8], AddrMode)] = &[
     ("AND", &[0x37], AddrMode::RegCommaBracAddr8KetsPlusReg("A", "Y")),
     ("AND", &[0x38], AddrMode::Addr8CommaPoundImm8),
     ("AND", &[0x39], AddrMode::ParRegEnsCommaParRegEns("X", "Y")),
-    // TODO: AND1 opcode
+    ("AND1", &[0x4a], AddrMode::RegCommaAddr13CommaBit("C")),
+    ("AND1", &[0x6a], AddrMode::RegCommaSlashAddr13CommaBit("C")),
     ("ASL", &[0x0b], AddrMode::Addr8),
     ("ASL", &[0x0c], AddrMode::BangAddr16),
     ("ASL", &[0x1b], AddrMode::Addr8PlusReg("X")),
@@ -49,7 +50,8 @@ pub(super) const MACROS_SPC700: &[(&str, &[u8], AddrMode)] = &[
     ("BVC", &[0x50], AddrMode::Relative8),
     ("BVS", &[0x70], AddrMode::Relative8),
     ("CALL", &[0x3f], AddrMode::BangAddr16),
-    // TODO: CBNE opcode
+    ("CBNE", &[0x2e], AddrMode::Addr8CommaRelative8),
+    ("CBNE", &[0xde], AddrMode::Addr8PlusRegCommaRelative8("X")),
     // TODO: CLR1 opcode
     ("CLRC", &[0x60], AddrMode::Implied),
     ("CLRP", &[0x20], AddrMode::Implied),
@@ -75,7 +77,8 @@ pub(super) const MACROS_SPC700: &[(&str, &[u8], AddrMode)] = &[
     ("CMPW", &[0x5a], AddrMode::RegCommaAddr8("YA")),
     ("DAA", &[0xdf], AddrMode::Reg("A")),
     ("DAS", &[0xbe], AddrMode::Reg("A")),
-    // TODO: DBNZ opcode
+    ("DBNZ", &[0x6e], AddrMode::Addr8CommaRelative8),
+    ("DBNZ", &[0xfe], AddrMode::RegCommaRelative8("Y")),
     ("DEC", &[0x8b], AddrMode::Addr8),
     ("DEC", &[0x1d], AddrMode::Reg("X")),
     ("DEC", &[0x8c], AddrMode::BangAddr16),
@@ -99,7 +102,7 @@ pub(super) const MACROS_SPC700: &[(&str, &[u8], AddrMode)] = &[
     ("EOR", &[0x57], AddrMode::RegCommaBracAddr8KetsPlusReg("A", "Y")),
     ("EOR", &[0x58], AddrMode::Addr8CommaPoundImm8),
     ("EOR", &[0x59], AddrMode::ParRegEnsCommaParRegEns("X", "Y")),
-    // TODO: EOR1 opcode
+    ("EOR1", &[0x8a], AddrMode::RegCommaAddr13CommaBit("C")),
     ("INC", &[0xab], AddrMode::Addr8),
     ("INC", &[0x3d], AddrMode::Reg("X")),
     ("INC", &[0xac], AddrMode::BangAddr16),
@@ -154,12 +157,13 @@ pub(super) const MACROS_SPC700: &[(&str, &[u8], AddrMode)] = &[
     ("MOV", &[0x9d], AddrMode::RegCommaReg("X", "SP")),
     ("MOV", &[0xbd], AddrMode::RegCommaReg("SP", "X")),
     ("MOV", &[0xdd], AddrMode::RegCommaReg("A", "Y")),
-    // TODO: MOV1 opcode
+    ("MOV1", &[0xaa], AddrMode::RegCommaAddr13CommaBit("C")),
+    ("MOV1", &[0xca], AddrMode::Addr13CommaBitCommaReg("C")),
     ("MOVW", &[0xba], AddrMode::RegCommaAddr8("YA")),
     ("MOVW", &[0xda], AddrMode::Addr8CommaReg("YA")),
     ("MUL", &[0xcf], AddrMode::Reg("YA")),
     ("NOP", &[0x00], AddrMode::Implied),
-    // TODO: NOT1 opcode
+    ("NOT1", &[0xea], AddrMode::Addr13CommaBit),
     ("NOTC", &[0xed], AddrMode::Implied),
     ("OR", &[0x04], AddrMode::RegCommaAddr8("A")),
     ("OR", &[0x05], AddrMode::RegCommaBangAddr16("A")),
@@ -173,7 +177,8 @@ pub(super) const MACROS_SPC700: &[(&str, &[u8], AddrMode)] = &[
     ("OR", &[0x17], AddrMode::RegCommaBracAddr8KetsPlusReg("A", "Y")),
     ("OR", &[0x18], AddrMode::Addr8CommaPoundImm8),
     ("OR", &[0x19], AddrMode::ParRegEnsCommaParRegEns("X", "Y")),
-    // TODO: OR1 opcode
+    ("OR1", &[0x0a], AddrMode::RegCommaAddr13CommaBit("C")),
+    ("OR1", &[0x2a], AddrMode::RegCommaSlashAddr13CommaBit("C")),
     ("PCALL", &[0x4f], AddrMode::AddrHi),
     ("POP", &[0x8e], AddrMode::Reg("PSW")),
     ("POP", &[0xae], AddrMode::Reg("A")),

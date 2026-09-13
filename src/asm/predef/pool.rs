@@ -74,7 +74,7 @@ impl RcPool {
     }
 
     pub fn high_page_addr(&mut self, placeholder: &'static str) -> AsmStmtAst {
-        // TODO: error unless address in [0xff00, 0xffff]
+        // TODO: error unless address in range [0xff00, 0xffff]
         let lhs = self.placeholder_expr(placeholder);
         let rhs = self.int_literal_expr(0xff);
         let expr = self.binop_expr(BinOpAst::BitAnd, lhs, rhs);
@@ -105,6 +105,25 @@ impl RcPool {
             span: SrcSpan::INTERNAL,
             node: ExprAstNode::IntLiteral(BigInt::from(value)),
         }
+    }
+
+    pub fn placeholder_addr13le_bit(
+        &mut self,
+        addr_placeholder: &'static str,
+        bit_placeholder: &'static str,
+    ) -> AsmStmtAst {
+        let expr = {
+            // TODO: error unless address in range [0x0000, 0x1fff]
+            let lhs = self.placeholder_expr(addr_placeholder);
+            let rhs = {
+                // TODO: error unless bit in range [0, 7]
+                let lhs = self.placeholder_expr(bit_placeholder);
+                let rhs = self.int_literal_expr(13);
+                self.binop_expr(BinOpAst::Shl, lhs, rhs)
+            };
+            self.binop_expr(BinOpAst::BitOr, lhs, rhs)
+        };
+        self.int_data_stmt(AsmIntTypeAst::U16le, expr)
     }
 
     pub fn placeholder_addr16_rel8(

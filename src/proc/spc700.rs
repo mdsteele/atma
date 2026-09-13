@@ -194,6 +194,7 @@ impl Spc700 {
                 self.microcode.push(Microcode::SetTemp);
                 self.microcode.push(Microcode::ReadAtPc);
             }
+            AddrMode::AbsoluteBit => todo!(),
             AddrMode::XIndexedAbsolute => {
                 self.microcode.push(Microcode::MakeAddrAbs);
                 self.microcode.push(Microcode::Read);
