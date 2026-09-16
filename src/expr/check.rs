@@ -8,7 +8,7 @@ use super::template::Template;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::{Errs, SrcSpan};
-use crate::parse::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};
+use crate::parse::{BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, UnOpAst};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -197,8 +197,8 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::Expr(*pred_ast));
             }
             ExprAstNode::HereLabel => self.push_here_label(subexpr.span),
-            ExprAstNode::Identifier(id) => {
-                self.push_identifier(subexpr.span, id);
+            ExprAstNode::Identifier(compound) => {
+                self.push_identifier(subexpr.span, compound);
             }
             ExprAstNode::Index(index_span, lhs_ast, rhs_ast) => {
                 self.tasks.push(Task::Index(
@@ -221,7 +221,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 ));
                 self.tasks.extend(item_asts.into_iter().rev().map(Task::Expr));
             }
-            ExprAstNode::Placeholder(_) => unreachable!(),
             ExprAstNode::StrLiteral(string) => {
                 self.push_primitive_literal(
                     ExprType::String,
@@ -448,7 +447,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         }
     }
 
-    fn push_identifier(&mut self, span: SrcSpan, name: Rc<str>) {
+    fn push_identifier(&mut self, span: SrcSpan, compound: CompoundIdAst) {
+        let names =
+            compound.ids.into_iter().map(|id| id.name).collect::<Vec<_>>();
+        let name = Rc::<str>::from(names.join("::"));
         match self.errs.ok(self.env.typecheck_identifier(span, &name)) {
             Some((op, id_type, id_static)) => {
                 self.ops.push(op);

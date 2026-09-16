@@ -188,6 +188,8 @@ enum TokenKind {
     Caret,
     #[token(":")]
     Colon,
+    #[token("::")]
+    ColonColon,
     #[token(",")]
     Comma,
     #[regex(r"\.[_A-Za-z][_A-Za-z0-9]*")]
@@ -284,6 +286,7 @@ impl TokenKind {
             TokenKind::Builtin => TokenValue::Builtin(Rc::from(lexer.slice())),
             TokenKind::Caret => TokenValue::Caret,
             TokenKind::Colon => TokenValue::Colon,
+            TokenKind::ColonColon => TokenValue::ColonColon,
             TokenKind::Comma => TokenValue::Comma,
             TokenKind::Directive => {
                 TokenValue::Directive(Rc::from(lexer.slice()))
@@ -366,6 +369,8 @@ pub enum TokenValue {
     Caret,
     /// A "`:`" symbol.
     Colon,
+    /// A "`::`" symbol.
+    ColonColon,
     /// A "`,`" symbol.
     Comma,
     /// An assembler directive.
@@ -455,6 +460,7 @@ impl TokenValue {
             TokenValue::Builtin(_) => "builtin",
             TokenValue::Caret => "`^`",
             TokenValue::Colon => "`:`",
+            TokenValue::ColonColon => "`::`",
             TokenValue::Comma => "`,`",
             TokenValue::Directive(_) => "directive",
             TokenValue::DollarDown => "`$v`",

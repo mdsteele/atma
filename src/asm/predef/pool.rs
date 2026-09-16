@@ -2,8 +2,8 @@ use crate::error::SrcSpan;
 use crate::expr::ExprFunc;
 use crate::parse::{
     AsmIntDataAst, AsmIntTypeAst, AsmRelAddrAst, AsmRelTypeAst, AsmStmtAst,
-    BinOpAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, Token,
-    TokenValue,
+    BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, IdentifierAst,
+    IdentifierKind, Token, TokenValue,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -30,7 +30,9 @@ impl RcPool {
             node: ExprAstNode::Apply(
                 Box::new(ExprAst {
                     span: SrcSpan::INTERNAL,
-                    node: ExprAstNode::Identifier(self.string(func.name())),
+                    node: ExprAstNode::Identifier(CompoundIdAst {
+                        ids: vec![self.builtin_id(func.name())],
+                    }),
                 }),
                 Box::new(arg),
             ),
@@ -51,6 +53,10 @@ impl RcPool {
                 Box::new(rhs),
             ),
         }
+    }
+
+    fn builtin_id(&mut self, name: &'static str) -> IdentifierAst {
+        self.identifier_ast(name, IdentifierKind::Builtin)
     }
 
     pub fn constant_bytes_stmt(&mut self, bytes: &[u8]) -> AsmStmtAst {
@@ -79,6 +85,18 @@ impl RcPool {
         let rhs = self.int_literal_expr(0xff);
         let expr = self.binop_expr(BinOpAst::BitAnd, lhs, rhs);
         self.int_data_stmt(AsmIntTypeAst::U8, expr)
+    }
+
+    fn identifier_ast(
+        &mut self,
+        name: &'static str,
+        kind: IdentifierKind,
+    ) -> IdentifierAst {
+        IdentifierAst {
+            span: SrcSpan::INTERNAL,
+            name: self.string(name),
+            kind,
+        }
     }
 
     pub fn identifier_token(&mut self, name: &'static str) -> Token {
@@ -157,8 +175,14 @@ impl RcPool {
     pub fn placeholder_expr(&mut self, placeholder: &'static str) -> ExprAst {
         ExprAst {
             span: SrcSpan::INTERNAL,
-            node: ExprAstNode::Placeholder(self.string(placeholder)),
+            node: ExprAstNode::Identifier(CompoundIdAst {
+                ids: vec![self.placeholder_id(placeholder)],
+            }),
         }
+    }
+
+    fn placeholder_id(&mut self, name: &'static str) -> IdentifierAst {
+        self.identifier_ast(name, IdentifierKind::Placeholder)
     }
 
     pub fn placeholder_token(&mut self, placeholder: &'static str) -> Token {
@@ -204,11 +228,7 @@ impl RcPool {
     }
 
     pub fn standard_id(&mut self, name: &'static str) -> IdentifierAst {
-        IdentifierAst {
-            span: SrcSpan::INTERNAL,
-            name: self.string(name),
-            kind: IdentifierKind::Standard,
-        }
+        self.identifier_ast(name, IdentifierKind::Standard)
     }
 
     pub fn str_literal_expr(&mut self, value: &'static str) -> ExprAst {

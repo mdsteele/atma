@@ -72,6 +72,20 @@ impl AsmTypeEnv {
         })
     }
 
+    pub fn check_for_inevitable_eval_error(
+        &self,
+        reason: &ExprNotStaticReason,
+    ) -> AsmResult<()> {
+        if let Some(error) = reason.inevitable_eval_error() {
+            Err(Errs::one(AsmError::StaticEvalError {
+                context: self.current_src_context(),
+                error,
+            }))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn declare_variable(
         &mut self,
         kind: DeclarationKind,
@@ -480,12 +494,22 @@ impl ChunkEnv {
         &mut self.data
     }
 
-    pub fn add_padding(&mut self, padding: usize) {
+    pub fn append_padding(&mut self, padding: usize) -> AsmResult<()> {
         // TODO: check for overflow (counting both padding and data.len())
         self.padding += padding;
+        Ok(())
     }
 
-    pub fn add_patch(&mut self, patch: ObjPatch) {
+    pub fn append_patch(&mut self, data: ObjPatchData) -> AsmResult<()> {
+        let old_size = self.total_size();
+        // TODO: Error instead of crash if offset is too large.
+        let offset = Offset::try_from(old_size).unwrap();
+        self.data_mut().resize(old_size + data.num_bytes(), 0u8);
+        self.add_patch(ObjPatch { offset, data });
+        Ok(())
+    }
+
+    fn add_patch(&mut self, patch: ObjPatch) {
         self.patches.push(patch);
     }
 

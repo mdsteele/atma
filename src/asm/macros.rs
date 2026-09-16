@@ -3,8 +3,9 @@ use crate::error::{Errs, SrcSpan};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmRelAddrAst, AsmStmtAst, ExprAst, ExprAstNode,
-    IdentifierAst, IdentifierKind, ParseResult, Token, TokenValue,
+    AsmMacroArgAst, AsmRelAddrAst, AsmStmtAst, CompoundIdAst, ExprAst,
+    ExprAstNode, IdentifierAst, IdentifierKind, ParseResult, Token,
+    TokenValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -166,13 +167,18 @@ impl<'a> MacroBuilder<'a> {
                 }
             }
             AsmStmtAst::Import(id) => {
-                errs.also(self.scan_identifier(id));
+                errs.also(
+                    self.scan_identifier(id, PlaceholderKind::Identifier),
+                );
             }
             AsmStmtAst::IntData(int_data) => {
                 errs.also(self.scan_expressions(&int_data.expressions));
             }
             AsmStmtAst::Label(label) => {
-                errs.also(self.scan_identifier(&label.identifier));
+                errs.also(self.scan_identifier(
+                    &label.identifier,
+                    PlaceholderKind::Identifier,
+                ));
             }
             AsmStmtAst::RelAddr(rel_addr) => {
                 errs.also(self.scan_expression(&rel_addr.dest_expr));
@@ -194,18 +200,18 @@ impl<'a> MacroBuilder<'a> {
     fn scan_expression(&mut self, expression: &ExprAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         match &expression.node {
-            ExprAstNode::Placeholder(name) => {
-                errs.also(self.unify_placeholder(
-                    expression.span,
-                    name,
-                    PlaceholderKind::Expression,
-                ));
-            }
             ExprAstNode::BoolLiteral(_)
             | ExprAstNode::HereLabel
-            | ExprAstNode::Identifier(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => {}
+            ExprAstNode::Identifier(compound) => {
+                errs.also(
+                    self.scan_compound_id(
+                        compound,
+                        PlaceholderKind::Expression,
+                    ),
+                );
+            }
             ExprAstNode::UnOp(_, subexpr) => {
                 errs.also(self.scan_expression(subexpr));
             }
@@ -230,15 +236,31 @@ impl<'a> MacroBuilder<'a> {
         errs.result()
     }
 
+    fn scan_compound_id(
+        &mut self,
+        compound: &CompoundIdAst,
+        mut requirement: PlaceholderKind,
+    ) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        if compound.ids.len() > 1 {
+            requirement.unify_with(PlaceholderKind::Identifier);
+        }
+        for id in &compound.ids {
+            errs.also(self.scan_identifier(id, requirement));
+        }
+        errs.result()
+    }
+
     fn scan_identifier(
         &mut self,
         identifier: &IdentifierAst,
+        requirement: PlaceholderKind,
     ) -> AsmResult<()> {
         match identifier.kind {
             IdentifierKind::Placeholder => self.unify_placeholder(
                 identifier.span,
                 &identifier.name,
-                PlaceholderKind::Identifier,
+                requirement,
             ),
             _ => Ok(()),
         }
@@ -514,7 +536,9 @@ impl MacroSubstitution {
             MacroSubstitution::Expression(expr) => expr.clone(),
             MacroSubstitution::Identifier(id) => ExprAst {
                 span: id.span,
-                node: ExprAstNode::Identifier(id.name.clone()),
+                node: ExprAstNode::Identifier(CompoundIdAst {
+                    ids: vec![id.clone()],
+                }),
             },
         }
     }
@@ -638,7 +662,6 @@ impl MacroExpansion {
             },
             ExprAstNode::BoolLiteral(_)
             | ExprAstNode::HereLabel
-            | ExprAstNode::Identifier(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => expression.clone(),
             ExprAstNode::Conditional(pred, lhs, rhs) => ExprAst {
@@ -649,6 +672,22 @@ impl MacroExpansion {
                     Box::from(self.expand_expression(rhs)),
                 ),
             },
+            ExprAstNode::Identifier(compound) => {
+                if compound.ids.len() == 1
+                    && compound.ids[0].kind == IdentifierKind::Placeholder
+                    && let Some(substitution) =
+                        self.subs.get(&compound.ids[0].name)
+                {
+                    substitution.unwrap_expression()
+                } else {
+                    ExprAst {
+                        span: expression.span,
+                        node: ExprAstNode::Identifier(
+                            self.expand_compound_id(compound),
+                        ),
+                    }
+                }
+            }
             ExprAstNode::Index(index_span, lhs, rhs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::Index(
@@ -661,13 +700,6 @@ impl MacroExpansion {
                 span: expression.span,
                 node: ExprAstNode::ListLiteral(self.expand_expressions(exprs)),
             },
-            ExprAstNode::Placeholder(name) => {
-                if let Some(substitution) = self.subs.get(name) {
-                    substitution.unwrap_expression()
-                } else {
-                    expression.clone()
-                }
-            }
             ExprAstNode::TupleLiteral(exprs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::TupleLiteral(
@@ -681,6 +713,16 @@ impl MacroExpansion {
                     Box::from(self.expand_expression(subexpr)),
                 ),
             },
+        }
+    }
+
+    fn expand_compound_id(&self, compound: &CompoundIdAst) -> CompoundIdAst {
+        CompoundIdAst {
+            ids: compound
+                .ids
+                .iter()
+                .map(|id| self.expand_identifier(id))
+                .collect(),
         }
     }
 

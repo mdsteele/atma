@@ -1,26 +1,25 @@
 use super::env::{AsmDeclValue, AsmTypeEnv};
 use super::error::{AsmError, AsmResult};
+use super::int_data::{assemble_int_data, int_patch_type};
 use super::macros::MacroTable;
 use super::predef::make_predefined_arch_macros;
 use super::repeat::typecheck_iterator;
-use crate::addr::{Addr, Align, Endianness, Offset, Size};
+use crate::addr::{Addr, Align, Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
     ExprEvalError, ExprFunc, ExprFuncEvalError, ExprLabel,
-    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprUnOp,
-    ExprValue,
+    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprValue,
 };
 use crate::obj::{
-    ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatch, ObjPatchData,
-    ObjPatchIntType, ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
-    ObjSymbol,
+    ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatchData,
+    ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent, ObjSymbol,
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
-    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
-    AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst,
-    AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst,
-    AsmUtf8DataAst, DeclarationKind, ExprAst, IdentifierAst,
+    AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst,
+    AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst, AsmScopeAst,
+    AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst,
+    DeclarationKind, ExprAst, IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -258,7 +257,7 @@ impl<'a> Assembler<'a> {
                         // Message is not statically known, so we have to wait
                         // until link time to report the failed assertion.
                         errs.also(
-                            self.check_for_inevitable_eval_error(&reason),
+                            self.env.check_for_inevitable_eval_error(&reason),
                         );
                         self.variables.push(failure_expr);
                     }
@@ -267,7 +266,7 @@ impl<'a> Assembler<'a> {
             Some((mut condition_expr, Err(reason))) => {
                 // The assertion condition can't be evaluated yet, so we have
                 // to wait until link time to check it.
-                errs.also(self.check_for_inevitable_eval_error(&reason));
+                errs.also(self.env.check_for_inevitable_eval_error(&reason));
                 let mut failure_ops = failure_expr.ops;
                 condition_expr.ops.push(ObjExprOp::SkipUnless(2));
                 condition_expr
@@ -296,7 +295,7 @@ impl<'a> Assembler<'a> {
                     Ok(static_value) => AsmDeclValue::Static(static_value),
                     Err(reason) => {
                         errs.also(
-                            self.check_for_inevitable_eval_error(&reason),
+                            self.env.check_for_inevitable_eval_error(&reason),
                         );
                         let variable_index = self.variables.len();
                         self.variables.push(expr);
@@ -388,7 +387,7 @@ impl<'a> Assembler<'a> {
         let decl_value = match expr_static {
             Ok(static_value) => AsmDeclValue::Static(static_value),
             Err(reason) => {
-                errs.also(self.check_for_inevitable_eval_error(&reason));
+                errs.also(self.env.check_for_inevitable_eval_error(&reason));
                 let variable_index = self.variables.len();
                 self.variables.push(expr);
                 AsmDeclValue::Variable(variable_index, reason)
@@ -535,8 +534,7 @@ impl<'a> Assembler<'a> {
         };
         let type_size = self.data_type_size(reserve_ast.data_type);
         if let Some(chunk_env) = self.env.current_chunk_mut() {
-            // TODO: error on overflow
-            chunk_env.add_padding((type_size * count) as usize);
+            errs.also(chunk_env.append_padding((type_size * count) as usize));
         }
         errs.result()
     }
@@ -653,11 +651,6 @@ impl<'a> Assembler<'a> {
                             context: self.env.current_src_context(),
                         }),
                     });
-                    // TODO: Isolate the environment somehow here; variables
-                    // from the parent source file should not be visible to the
-                    // child source file, nor vice-versa; only handlers
-                    // declared in the child source file should affect the
-                    // parent source file.
                     self.env.push_src_context(context);
                     if let Some(module) =
                         errs.ok(self.env.parse_source(source_code))
@@ -778,7 +771,8 @@ impl<'a> Assembler<'a> {
                 loc: self.env.make_loc(int_data.directive_span),
             });
         }
-        let Some(int_type) = self.int_patch_type(int_data.int_type) else {
+        let Some(int_type) = int_patch_type(&self.env, int_data.int_type)
+        else {
             errs.push(AsmError::ArchHasNoEndianness {
                 directive,
                 loc: self.env.make_loc(int_data.directive_span),
@@ -787,63 +781,12 @@ impl<'a> Assembler<'a> {
             return errs.result();
         };
         for expr_ast in int_data.expressions {
-            let expr_span = expr_ast.span;
-            let static_value: i64 = match errs
-                .with(self.env.typecheck_expression(expr_ast))
-            {
-                (_, ExprType::Undefined, _) => 0,
-                (mut expr, ExprType::Label, _) => {
-                    // TODO: If the label belongs to a chunk with an explicit
-                    // start address, then the label's address value is static
-                    // and no patch is necessary.
-                    expr.ops.push(ObjExprOp::UnOp {
-                        context: self.env.current_src_context(),
-                        unop: ExprUnOp::AddrOf,
-                        op_span: expr_span,
-                        arg_span: expr_span,
-                    });
-                    self.try_add_patch(ObjPatchData::Integer(int_type, expr));
-                    0
-                }
-                (_, ExprType::Integer, Ok(value)) => {
-                    let bigint = value.unwrap_int_ref();
-                    match int_type.value_in_range(bigint) {
-                        Ok(value) => value,
-                        Err(range) => {
-                            errs.push(AsmError::DirectiveExprOutOfRange {
-                                directive,
-                                component: "value",
-                                expr_loc: self.env.make_loc(expr_span),
-                                expr_value: bigint.clone(),
-                                valid_range: RangeInclusive {
-                                    start: BigInt::from(range.start),
-                                    last: BigInt::from(range.last),
-                                },
-                            });
-                            0
-                        }
-                    }
-                }
-                (expr, ExprType::Integer | ExprType::Bottom, Err(reason)) => {
-                    errs.also(self.check_for_inevitable_eval_error(&reason));
-                    let data = ObjPatchData::Integer(int_type, expr);
-                    self.try_add_patch(data);
-                    0
-                }
-                (_, expr_type, _) => {
-                    errs.push(AsmError::DirectiveExprTypeError {
-                        directive,
-                        component: "value",
-                        expr_loc: self.env.make_loc(expr_span),
-                        expr_type,
-                        valid_types: vec![ExprType::Integer, ExprType::Label],
-                    });
-                    0
-                }
-            };
-            if let Some(chunk_env) = self.env.current_chunk_mut() {
-                int_type.append_value(static_value, chunk_env.data_mut());
-            }
+            errs.also(assemble_int_data(
+                &mut self.env,
+                directive,
+                int_type,
+                expr_ast,
+            ));
         }
         errs.result()
     }
@@ -869,22 +812,22 @@ impl<'a> Assembler<'a> {
             rel_addr.base_expr,
         ));
         // TODO: Error if destination is statically out of range.
-        let static_delta: i64 = if let (Some(dest_label), Some(base_label)) =
+        if let (Some(dest_label), Some(base_label)) =
             (dest_static, base_static)
             && let Ok(delta_bigint) = dest_label.try_subtract(&base_label)
             && let Ok(delta) = rel_type.delta_value_in_range(&delta_bigint)
         {
-            delta
-        } else {
-            if let (Some(dest), Some(base)) = (dest_expr, base_expr) {
-                let data = ObjPatchData::Relative(rel_type, dest, base);
-                self.try_add_patch(data);
+            if let Some(chunk_env) = self.env.current_chunk_mut() {
+                rel_type.append_delta(delta, chunk_env.data_mut());
             }
-            0
+        } else {
+            if let (Some(dest), Some(base)) = (dest_expr, base_expr)
+                && let Some(chunk_env) = self.env.current_chunk_mut()
+            {
+                let data = ObjPatchData::Relative(rel_type, dest, base);
+                errs.also(chunk_env.append_patch(data));
+            }
         };
-        if let Some(chunk_env) = self.env.current_chunk_mut() {
-            rel_type.append_delta(static_delta, chunk_env.data_mut());
-        }
         errs.result()
     }
 
@@ -917,7 +860,7 @@ impl<'a> Assembler<'a> {
                 ExprType::Bottom | ExprType::Integer | ExprType::Label,
                 Err(reason),
             ) => {
-                errs.also(self.check_for_inevitable_eval_error(&reason));
+                errs.also(self.env.check_for_inevitable_eval_error(&reason));
                 (Some(expr), None)
             }
             (_, expr_type, _) => {
@@ -940,58 +883,11 @@ impl<'a> Assembler<'a> {
         }
     }
 
-    fn int_patch_type(
-        &self,
-        int_type: AsmIntTypeAst,
-    ) -> Option<ObjPatchIntType> {
-        match int_type {
-            AsmIntTypeAst::S8 => Some(ObjPatchIntType::S8),
-            AsmIntTypeAst::S16 => self.endian_patch_type(
-                ObjPatchIntType::S16be,
-                ObjPatchIntType::S16le,
-            ),
-            AsmIntTypeAst::S16be => Some(ObjPatchIntType::S16be),
-            AsmIntTypeAst::S16le => Some(ObjPatchIntType::S16le),
-            AsmIntTypeAst::S24 => self.endian_patch_type(
-                ObjPatchIntType::S24be,
-                ObjPatchIntType::S24le,
-            ),
-            AsmIntTypeAst::S24be => Some(ObjPatchIntType::S24be),
-            AsmIntTypeAst::S24le => Some(ObjPatchIntType::S24le),
-            AsmIntTypeAst::U8 => Some(ObjPatchIntType::U8),
-            AsmIntTypeAst::U16 => self.endian_patch_type(
-                ObjPatchIntType::U16be,
-                ObjPatchIntType::U16le,
-            ),
-            AsmIntTypeAst::U16be => Some(ObjPatchIntType::U16be),
-            AsmIntTypeAst::U16le => Some(ObjPatchIntType::U16le),
-            AsmIntTypeAst::U24 => self.endian_patch_type(
-                ObjPatchIntType::U24be,
-                ObjPatchIntType::U24le,
-            ),
-            AsmIntTypeAst::U24be => Some(ObjPatchIntType::U24be),
-            AsmIntTypeAst::U24le => Some(ObjPatchIntType::U24le),
-        }
-    }
-
     fn rel_patch_type(&self, rel_type: AsmRelTypeAst) -> ObjPatchRelType {
         match rel_type {
             AsmRelTypeAst::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
             AsmRelTypeAst::Addr16Rel16le => ObjPatchRelType::Addr16Rel16le,
             AsmRelTypeAst::Addr16RelLink => ObjPatchRelType::Addr16RelLink,
-        }
-    }
-
-    fn endian_patch_type(
-        &self,
-        be_type: ObjPatchIntType,
-        le_type: ObjPatchIntType,
-    ) -> Option<ObjPatchIntType> {
-        let arch = self.env.current_arch();
-        match self.env.arch_tree().native_endianness(arch) {
-            Some(Endianness::BigEndian) => Some(be_type),
-            Some(Endianness::LittleEndian) => Some(le_type),
-            None => None,
         }
     }
 
@@ -1106,18 +1002,6 @@ impl<'a> Assembler<'a> {
         }
     }
 
-    /// Attempts to add an `ObjPatch` to the current chunk starting at the
-    /// current end of its static data. Does nothing if there is no current
-    /// chunk; it is assumed that the caller will have already flagged an error
-    /// in that case.
-    fn try_add_patch(&mut self, data: ObjPatchData) {
-        if let Some(chunk_env) = self.env.current_chunk_mut() {
-            // TODO: Error instead of crash if offset is too large.
-            let offset = Offset::try_from(chunk_env.total_size()).unwrap();
-            chunk_env.add_patch(ObjPatch { offset, data });
-        }
-    }
-
     fn typecheck_static_path_expr(
         &mut self,
         directive: &'static str,
@@ -1191,20 +1075,6 @@ impl<'a> Assembler<'a> {
         }
         errs.result()?;
         Ok((expr, expr_static))
-    }
-
-    fn check_for_inevitable_eval_error(
-        &self,
-        reason: &ExprNotStaticReason,
-    ) -> AsmResult<()> {
-        if let Some(error) = reason.inevitable_eval_error() {
-            Err(Errs::one(AsmError::StaticEvalError {
-                context: self.env.current_src_context(),
-                error,
-            }))
-        } else {
-            Ok(())
-        }
     }
 
     fn finish(self) -> ObjFile {

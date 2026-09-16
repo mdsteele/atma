@@ -405,16 +405,25 @@ mod tests {
     };
     use crate::error::SrcSpan;
     use crate::expr::ExprNotStaticReason;
-    use crate::parse::{ExprAst, ExprAstNode, IdentifierAst, IdentifierKind};
+    use crate::parse::{
+        CompoundIdAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind,
+    };
     use num_bigint::BigInt;
     use std::assert_matches;
     use std::ops::Range;
     use std::rc::Rc;
 
     fn id_ast(name: &str, range: Range<usize>) -> ExprAst {
+        let span = SrcSpan::from_byte_range(range);
         ExprAst {
-            span: SrcSpan::from_byte_range(range),
-            node: ExprAstNode::Identifier(Rc::from(name)),
+            span,
+            node: ExprAstNode::Identifier(CompoundIdAst {
+                ids: vec![IdentifierAst {
+                    span,
+                    name: Rc::from(name),
+                    kind: IdentifierKind::Standard,
+                }],
+            }),
         }
     }
 

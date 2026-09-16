@@ -20,7 +20,7 @@ pub use asm::{
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};
-pub use id::{DeclarationKind, IdentifierAst, IdentifierKind};
+pub use id::{CompoundIdAst, DeclarationKind, IdentifierAst, IdentifierKind};
 pub use lex::{LexerError, Token, TokenLexer, TokenValue};
 pub use link::{LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
 pub use lvalue::{LValueAst, LValueAstNode};

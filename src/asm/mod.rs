@@ -4,6 +4,7 @@ mod arch;
 mod build;
 mod env;
 mod error;
+mod int_data;
 mod macros;
 mod predef;
 mod repeat;

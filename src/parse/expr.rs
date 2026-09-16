@@ -2,7 +2,7 @@
 
 use super::atom::{Extra, parse_tokens, symbol};
 use super::error::ParseResult;
-use super::id::{IdentifierAst, IdentifierKind};
+use super::id::CompoundIdAst;
 use super::lex::{Token, TokenValue};
 use crate::error::SrcSpan;
 use chumsky::{self, IterParser, Parser, pratt};
@@ -195,16 +195,13 @@ impl ExprAst {
             let here_label = symbol(TokenValue::DollarLeft).map(|token| {
                 ExprAst { span: token.span, node: ExprAstNode::HereLabel }
             });
-            let identifier = IdentifierAst::parser().map(|id| ExprAst {
-                span: id.span,
-                node: match id.kind {
-                    IdentifierKind::Standard | IdentifierKind::Builtin => {
-                        ExprAstNode::Identifier(id.name)
-                    }
-                    IdentifierKind::Placeholder => {
-                        ExprAstNode::Placeholder(id.name)
-                    }
+            let identifier = CompoundIdAst::parser().map(|compound| ExprAst {
+                span: {
+                    let first = compound.ids.first().unwrap();
+                    let last = compound.ids.last().unwrap();
+                    first.span.merged_with(last.span)
                 },
+                node: ExprAstNode::Identifier(compound),
             });
 
             let expr_atom = chumsky::prelude::choice((
@@ -454,15 +451,13 @@ pub enum ExprAstNode {
     /// A "here" label.
     HereLabel,
     /// An identifier.
-    Identifier(Rc<str>),
+    Identifier(CompoundIdAst),
     /// An indexing operation (e.g. into a list).
     Index(SrcSpan, Box<ExprAst>, Box<ExprAst>),
     /// An integer literal.
     IntLiteral(BigInt),
     /// A list literal.
     ListLiteral(Vec<ExprAst>),
-    /// A macro placeholder.
-    Placeholder(Rc<str>),
     /// A string literal.
     StrLiteral(Rc<str>),
     /// A tuple literal.
@@ -527,6 +522,7 @@ fn str_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
 mod tests {
     use super::super::atom::tokenize;
     use super::super::error::ParseResult;
+    use super::super::id::{CompoundIdAst, IdentifierAst, IdentifierKind};
     use super::{BinOpAst, ExprAst, ExprAstNode};
     use crate::error::SrcSpan;
     use num_bigint::BigInt;
@@ -551,10 +547,23 @@ mod tests {
     #[test]
     fn identifier() {
         assert_eq!(
-            parse("foo"),
+            parse("foo::bar"),
             Ok(ExprAst {
-                span: SrcSpan::from_byte_range(0..3),
-                node: ExprAstNode::Identifier(Rc::from("foo")),
+                span: SrcSpan::from_byte_range(0..8),
+                node: ExprAstNode::Identifier(CompoundIdAst {
+                    ids: vec![
+                        IdentifierAst {
+                            span: SrcSpan::from_byte_range(0..3),
+                            name: Rc::from("foo"),
+                            kind: IdentifierKind::Standard,
+                        },
+                        IdentifierAst {
+                            span: SrcSpan::from_byte_range(5..8),
+                            name: Rc::from("bar"),
+                            kind: IdentifierKind::Standard,
+                        },
+                    ],
+                }),
             })
         );
     }
