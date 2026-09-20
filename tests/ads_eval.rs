@@ -44,6 +44,11 @@ fn print_statement() {
 }
 
 #[test]
+fn bitwise_operators() {
+    assert_eq!(compile_and_run("print %1010_0000 | $ab_0d & 2_55\n"), "173\n");
+}
+
+#[test]
 fn byte_selection_operator() {
     assert_eq!(compile_and_run("print $090507 ! 0\n"), "7\n");
     assert_eq!(compile_and_run("print $090507 ! 1\n"), "5\n");

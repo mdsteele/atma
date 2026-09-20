@@ -87,14 +87,21 @@ fn backslash_callback(
 
 fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     debug_assert!(lex.slice().starts_with("%"));
-    let digits: Vec<u8> =
-        lex.slice()[1..].chars().map(|chr| chr as u8 - b'0').collect();
+    let digits: Vec<u8> = lex.slice()[1..]
+        .chars()
+        .filter(|chr| *chr != '_')
+        .map(|chr| chr as u8 - b'0')
+        .collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 2).unwrap()
 }
 
 fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
-    let digits: Vec<u8> =
-        lex.slice().chars().map(|chr| chr as u8 - b'0').collect();
+    let digits: Vec<u8> = lex
+        .slice()
+        .chars()
+        .filter(|chr| *chr != '_')
+        .map(|chr| chr as u8 - b'0')
+        .collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 10).unwrap()
 }
 
@@ -102,6 +109,7 @@ fn hex_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     debug_assert!(lex.slice().starts_with("$"));
     let digits: Vec<u8> = lex.slice()[1..]
         .chars()
+        .filter(|chr| *chr != '_')
         .map(|chr| {
             let byte = chr as u8;
             match byte {
@@ -214,9 +222,9 @@ enum TokenKind {
     GreaterThan,
     #[regex(r"[A-Za-z][_A-Za-z0-9]*|_[_A-Za-z0-9]+")]
     Identifier,
-    #[regex(r"%[01]+", binary_literal_callback)]
-    #[regex(r"[0-9]+", decimal_literal_callback)]
-    #[regex(r"\$[0-9A-Fa-f]+", hex_literal_callback)]
+    #[regex(r"%[01]+(_[01]+)*", binary_literal_callback)]
+    #[regex(r"[0-9]+(_[0-9]+)*", decimal_literal_callback)]
+    #[regex(r"\$[0-9A-Fa-f]+(_[0-9A-Fa-f]+)*", hex_literal_callback)]
     IntLiteral(BigInt),
     #[token("<=")]
     LessEquals,
