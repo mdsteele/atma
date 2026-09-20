@@ -72,8 +72,9 @@ impl MacroTable {
     ) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let num_args = def_macro_ast.params.len();
-        let mut builder = errs.with(MacroBuilder::with_params(
+        let mut builder = errs.with(MacroBuilder::new(
             context,
+            &def_macro_ast.id.name,
             def_macro_ast.params,
             reserved,
         ));
@@ -114,8 +115,9 @@ struct MacroBuilder<'a> {
 }
 
 impl<'a> MacroBuilder<'a> {
-    fn with_params(
+    fn new(
         context: Rc<ObjSrcContext>,
+        macro_name: &'a Rc<str>,
         params: Vec<AsmMacroArgAst>,
         reserved: &'a HashSet<Rc<str>>,
     ) -> (MacroBuilder<'a>, Errs<AsmError>) {
@@ -126,6 +128,7 @@ impl<'a> MacroBuilder<'a> {
                 if let TokenValue::Placeholder(name) = &token.value {
                     if let Some(&prev_span) = placeholders.get(name) {
                         errs.push(AsmError::DuplicateMacroPlaceholder {
+                            macro_name: macro_name.clone(),
                             placeholder_name: name.clone(),
                             placeholder_loc: ObjSrcLoc {
                                 span: token.span,

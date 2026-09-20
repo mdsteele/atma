@@ -114,6 +114,34 @@ fn conditional_predicate_not_static() {
 }
 
 #[test]
+fn data_count_type_error() {
+    let source = r#"\
+    .STRUCT Foo {
+        Bar : .u8, "3"
+    }
+    .SECTION "TEST"
+        .reserve .u16le, %true
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::DirectiveExprTypeError {
+            directive: ".STRUCT field",
+            component: "count",
+            expr_loc: _,
+            expr_type: ExprType::String,
+            valid_types: valid1,
+        },
+        AsmError::DirectiveExprTypeError {
+            directive: ".RESERVE",
+            component: "count",
+            expr_loc: _,
+            expr_type: ExprType::Boolean,
+            valid_types: valid2,
+        },
+    ] if valid1 == &[ExprType::Integer] && valid2 == &[ExprType::Integer]);
+}
+
+#[test]
 fn decl_name_is_builtin() {
     let source = r#"\
     .IMPORT %sqrtz
@@ -121,6 +149,18 @@ fn decl_name_is_builtin() {
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::AssignmentToBuiltin { name, .. },
     ] if &**name == "%sqrtz");
+}
+
+#[test]
+fn declare_import_as_struct() {
+    let source = r#"\
+    .IMPORT Foo
+    .STRUCT Foo {
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::NameAlreadyDeclared { full_name, .. },
+    ] if &**full_name == "Foo");
 }
 
 #[test]
@@ -134,7 +174,7 @@ fn declare_label_as_variable() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::SymbolAlreadyDeclared { full_name, .. },
+        AsmError::NameAlreadyDeclared { full_name, .. },
     ] if &**full_name == "foo::bar");
 }
 
@@ -203,8 +243,13 @@ fn duplicate_macro_placeholder() {
     }
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::DuplicateMacroPlaceholder { placeholder_name, .. },
-    ] if &**placeholder_name == "%BAR");
+        AsmError::DuplicateMacroPlaceholder {
+            macro_name,
+            placeholder_name,
+            placeholder_loc: _,
+            prev_loc: _,
+        },
+    ] if &**macro_name == "FOO" && &**placeholder_name == "%BAR");
 }
 
 #[test]
@@ -401,6 +446,50 @@ fn static_eval_error_in_int_data() {
 }
 
 #[test]
+fn struct_with_builtin_name() {
+    let source = r#"\
+    .STRUCT %foo {
+        %bar : .u8, 2
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::AssignmentToBuiltin { loc: _, name: name1 },
+        AsmError::AssignmentToBuiltin { loc: _, name: name2 },
+    ] if &**name1 == "%foo" && &**name2 == "%bar");
+}
+
+#[test]
+fn struct_with_duplicate_field_name() {
+    let source = r#"\
+    .STRUCT Foo {
+        Bar : .u8
+        Bar : .u8
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::DuplicateStructField {
+            struct_name,
+            field_name,
+            field_loc: _,
+            prev_loc: _,
+        },
+    ] if &**struct_name == "Foo" && &**field_name == "Bar");
+}
+
+#[test]
+fn struct_already_declared() {
+    let source = r#"\
+    .STRUCT Foo {
+    }
+    .STRUCT Foo {
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::NameAlreadyDeclared { full_name, .. },
+    ] if &**full_name == "Foo");
+}
+
+#[test]
 fn symbol_already_declared() {
     let source = r#"\
     .SECTION "TEST"
@@ -409,7 +498,7 @@ fn symbol_already_declared() {
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::SymbolAlreadyDeclared { full_name, .. },
+        AsmError::NameAlreadyDeclared { full_name, .. },
     ] if &**full_name == "foo");
 }
 
@@ -432,8 +521,24 @@ fn unknown_macro_placeholder() {
     }
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
-        AsmError::UnknownMacroPlaceholder { name, .. },
+        AsmError::UnknownMacroPlaceholder { name, loc: _ },
     ] if &**name == "%BAZ");
+}
+
+#[test]
+fn unknown_struct() {
+    let source = r#"\
+    .STRUCT Foo {
+        Bar : Baz, 2
+    }
+    .SECTION "TEST"
+        .reserve Blarg
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::UnknownStruct { name: name1, loc: _ },
+        AsmError::UnknownStruct { name: name2, loc: _ },
+    ] if &**name1 == "Baz" && &**name2 == "Blarg");
 }
 
 #[test]

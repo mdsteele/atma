@@ -7,6 +7,7 @@ use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::{DeclarationKind, IdentifierAst};
 use super::lex::{Token, TokenValue};
+use crate::addr::Size;
 use crate::error::SrcSpan;
 use chumsky::{self, IterParser, Parser};
 
@@ -69,6 +70,8 @@ pub enum AsmStmtAst {
     Section(AsmSectionAst),
     /// A `.SET` directive.
     Set(AsmSetAst),
+    /// A `.STRUCT` definition directive.
+    Struct(AsmStructAst),
     /// A `.USE` directive.
     Use(AsmUseAst),
     /// A `.UTF8` directive.
@@ -185,6 +188,7 @@ impl AsmStmtAst {
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
                 section_dir,
                 AsmSetAst::parser().map(AsmStmtAst::Set),
+                AsmStructAst::parser().map(AsmStmtAst::Struct),
                 AsmUseAst::parser().map(AsmStmtAst::Use),
                 AsmUtf8DataAst::parser().map(AsmStmtAst::Utf8Data),
             ))
@@ -265,13 +269,17 @@ pub struct AsmCondAst {
 pub enum AsmDataTypeAst {
     /// An integer data type.
     Int(SrcSpan, AsmIntTypeAst),
-    // TODO: Struct(IdentifierAst),
+    /// A reference to a struct type.
+    Struct(IdentifierAst),
 }
 
 impl AsmDataTypeAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        AsmIntTypeAst::parser()
-            .map(|(span, int_type)| Self::Int(span, int_type))
+        chumsky::prelude::choice((
+            AsmIntTypeAst::parser()
+                .map(|(span, int_type)| Self::Int(span, int_type)),
+            IdentifierAst::parser().map(Self::Struct),
+        ))
     }
 }
 
@@ -409,21 +417,21 @@ impl AsmIntTypeAst {
         Self::U24le,
     ];
 
-    pub(crate) fn num_bytes(self) -> u64 {
+    pub(crate) fn size(self) -> Size {
         match self {
-            Self::S8 | Self::U8 => 1,
+            Self::S8 | Self::U8 => Size::from(1u32),
             Self::S16
             | Self::S16be
             | Self::S16le
             | Self::U16
             | Self::U16be
-            | Self::U16le => 2,
+            | Self::U16le => Size::from(2u32),
             Self::S24
             | Self::S24be
             | Self::S24le
             | Self::U24
             | Self::U24be
-            | Self::U24le => 3,
+            | Self::U24le => Size::from(3u32),
         }
     }
 
@@ -750,6 +758,60 @@ impl AsmSetAst {
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(id, expression)| Self { id, expression })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for defining a struct type in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmStructAst {
+    /// The name of the struct type.
+    pub id: IdentifierAst,
+    /// The fields of the struct.
+    pub fields: Vec<AsmStructFieldAst>,
+}
+
+impl AsmStructAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        directive(".STRUCT")
+            .ignore_then(IdentifierAst::parser())
+            .then_ignore(symbol(TokenValue::BraceOpen))
+            .then_ignore(linebreak())
+            .then(AsmStructFieldAst::parser().repeated().collect::<Vec<_>>())
+            .then_ignore(symbol(TokenValue::BraceClose))
+            .then_ignore(linebreak())
+            .map(|(id, fields)| Self { id, fields })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree one field of a struct type in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmStructFieldAst {
+    /// The name of the field.
+    pub id: IdentifierAst,
+    /// The type of data stored in the field.
+    pub data_type: AsmDataTypeAst,
+    /// Optionally, how many instances of the data type to reserve space for
+    /// (rather than the default of one).
+    pub count: Option<ExprAst>,
+}
+
+impl AsmStructFieldAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        IdentifierAst::parser()
+            .then_ignore(symbol(TokenValue::Colon))
+            .then(
+                AsmDataTypeAst::parser().then(
+                    symbol(TokenValue::Comma)
+                        .ignore_then(ExprAst::parser())
+                        .or_not(),
+                ),
+            )
+            .then_ignore(linebreak())
+            .map(|(id, (data_type, count))| Self { id, data_type, count })
     }
 }
 

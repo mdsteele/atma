@@ -118,6 +118,8 @@ pub enum AsmError {
     },
     /// A macro definnition included two placeholders with the same name.
     DuplicateMacroPlaceholder {
+        /// The name of the macro.
+        macro_name: Rc<str>,
         /// The duplicated placeholder name.
         placeholder_name: Rc<str>,
         /// The source code location for the duplicate instance of this
@@ -125,6 +127,19 @@ pub enum AsmError {
         placeholder_loc: ObjSrcLoc,
         /// The source code location for the earlier instance of this
         /// placeholder name.
+        prev_loc: ObjSrcLoc,
+    },
+    /// A struct definnition included two fields with the same name.
+    DuplicateStructField {
+        /// The name of the struct.
+        struct_name: Rc<str>,
+        /// The duplicated field name.
+        field_name: Rc<str>,
+        /// The source code location for the duplicate instance of this field
+        /// name.
+        field_loc: ObjSrcLoc,
+        /// The source code location for the earlier instance of this field
+        /// name.
         prev_loc: ObjSrcLoc,
     },
     /// An expression failed to typecheck.
@@ -172,6 +187,16 @@ pub enum AsmError {
         /// The source code location for the macro parameter.
         loc: ObjSrcLoc,
     },
+    /// Tried to declare a name that conflicts with an existing declaration.
+    NameAlreadyDeclared {
+        /// The fully-qualified name.
+        full_name: Rc<str>,
+        /// The source code location for the duplicate declaration of the
+        /// symbol.
+        name_loc: ObjSrcLoc,
+        /// The source code location for the earlier declaration of the symbol.
+        prev_loc: ObjSrcLoc,
+    },
     /// A .REPEAT directive had a negative repeat count.
     NegativeRepeatCount {
         /// The source code location for the repeat count expression.
@@ -205,16 +230,6 @@ pub enum AsmError {
         /// evaluated.
         error: ExprEvalError,
     },
-    /// Tried to declare a symbol that had already been declared.
-    SymbolAlreadyDeclared {
-        /// The fully-qualified name of the symbol.
-        full_name: Rc<str>,
-        /// The source code location for the duplicate declaration of the
-        /// symbol.
-        name_loc: ObjSrcLoc,
-        /// The source code location for the earlier declaration of the symbol.
-        prev_loc: ObjSrcLoc,
-    },
     /// Tried to switch to an architecture that was never defined.
     UnknownArch {
         /// The name of the undefined architecture.
@@ -228,6 +243,13 @@ pub enum AsmError {
         /// The name of the undefined placeholder.
         name: Rc<str>,
         /// The source code location for the placeholder.
+        loc: ObjSrcLoc,
+    },
+    /// Tried to use an undeclared struct name as a type specifier.
+    UnknownStruct {
+        /// The name of the undefined struct.
+        name: Rc<str>,
+        /// The source code location for the name.
         loc: ObjSrcLoc,
     },
     /// Tried to modify a variable that was never declared.
@@ -375,12 +397,13 @@ impl AsmError {
                     .with_context(&*attr_loc.context)
             }
             Self::DuplicateMacroPlaceholder {
+                macro_name,
                 placeholder_name,
                 placeholder_loc,
                 prev_loc,
             } => {
                 let message = format!(
-                    "Duplicate `{placeholder_name}` macro placeholder"
+                    "Duplicate `{placeholder_name}` placeholder in macro `{macro_name}`"
                 );
                 let label1 = "Previously declared here";
                 let label2 = "Duplicated here";
@@ -388,6 +411,22 @@ impl AsmError {
                     .with_label(prev_loc.primary(), label1)
                     .with_primary_label(label2)
                     .with_context(&*placeholder_loc.context)
+            }
+            Self::DuplicateStructField {
+                struct_name,
+                field_name,
+                field_loc,
+                prev_loc,
+            } => {
+                let message = format!(
+                    "Duplicate `{field_name}` field in struct `{struct_name}`"
+                );
+                let label1 = "Previously declared here";
+                let label2 = "Duplicated here";
+                SourceError::new(field_loc.primary(), message)
+                    .with_label(prev_loc.primary(), label1)
+                    .with_primary_label(label2)
+                    .with_context(&*field_loc.context)
             }
             Self::ExprTypeError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
@@ -441,6 +480,15 @@ impl AsmError {
                     .with_primary_label("")
                     .with_context(&*loc.context)
             }
+            Self::NameAlreadyDeclared { full_name, name_loc, prev_loc } => {
+                let message = format!("`{full_name}` was already declared");
+                let label1 = "previously declared here";
+                let label2 = "redeclared here";
+                SourceError::new(name_loc.primary(), message)
+                    .with_label(prev_loc.primary(), label1)
+                    .with_primary_label(label2)
+                    .with_context(&*name_loc.context)
+            }
             Self::NegativeRepeatCount { expr_loc, expr_value } => {
                 let message = "negative repeat count";
                 let label =
@@ -461,16 +509,6 @@ impl AsmError {
             Self::StaticEvalError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
             }
-            Self::SymbolAlreadyDeclared { full_name, name_loc, prev_loc } => {
-                let message =
-                    format!("symbol `{full_name}` was already declared");
-                let label1 = "previously declared here";
-                let label2 = "redeclared here";
-                SourceError::new(name_loc.primary(), message)
-                    .with_label(prev_loc.primary(), label1)
-                    .with_primary_label(label2)
-                    .with_context(&*name_loc.context)
-            }
             Self::UnknownArch { arch, loc } => {
                 let message =
                     format!("the `{arch}` architecture was never defined");
@@ -481,9 +519,17 @@ impl AsmError {
                     .with_context(&*loc.context)
             }
             Self::UnknownMacroPlaceholder { name, loc } => {
-                let message = format!("Undeclared placeholder: `{name}`");
+                let message = format!("undeclared placeholder: `{name}`");
+                let label = "not part of the macro signature";
                 SourceError::new(loc.primary(), message)
-                    .with_primary_label("")
+                    .with_primary_label(label)
+                    .with_context(&*loc.context)
+            }
+            Self::UnknownStruct { name, loc } => {
+                let message = format!("no such struct: `{name}`");
+                let label = "this was never declared";
+                SourceError::new(loc.primary(), message)
+                    .with_primary_label(label)
                     .with_context(&*loc.context)
             }
             Self::UnknownVariable { name, loc } => {

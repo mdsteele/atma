@@ -18,8 +18,8 @@ use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
     AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst,
     AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst, AsmScopeAst,
-    AsmSectionAst, AsmSetAst, AsmStmtAst, AsmUseAst, AsmUtf8DataAst,
-    DeclarationKind, ExprAst, IdentifierAst,
+    AsmSectionAst, AsmSetAst, AsmStmtAst, AsmStructAst, AsmUseAst,
+    AsmUtf8DataAst, DeclarationKind, ExprAst, IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -113,6 +113,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
             AsmStmtAst::Section(section) => self.predeclare_section(section),
             AsmStmtAst::Set(_) => Ok(()),
+            AsmStmtAst::Struct(_) => Ok(()),
             AsmStmtAst::Use(_) => Ok(()),
             AsmStmtAst::Utf8Data(_) => Ok(()),
         }
@@ -168,23 +169,24 @@ impl<'a> Assembler<'a> {
     /// data.
     fn expand_statement(&mut self, statement: AsmStmtAst) -> AsmResult<()> {
         match statement {
-            AsmStmtAst::Assert(assert) => self.expand_assert(assert),
-            AsmStmtAst::Binary(data) => self.expand_binary_data(data),
-            AsmStmtAst::Cond(cond) => self.expand_conditional(cond),
-            AsmStmtAst::Declare(decl) => self.expand_declaration(decl),
-            AsmStmtAst::DefMacro(def) => self.expand_macro_definition(def),
+            AsmStmtAst::Assert(ast) => self.expand_assert(ast),
+            AsmStmtAst::Binary(ast) => self.expand_binary_data(ast),
+            AsmStmtAst::Cond(ast) => self.expand_conditional(ast),
+            AsmStmtAst::Declare(ast) => self.expand_declaration(ast),
+            AsmStmtAst::DefMacro(ast) => self.expand_macro_definition(ast),
             AsmStmtAst::Import(id) => self.expand_import(id),
-            AsmStmtAst::IntData(data) => self.expand_int_data(data),
-            AsmStmtAst::Invoke(invoke) => self.expand_macro_invocation(invoke),
-            AsmStmtAst::Label(label) => self.expand_label(label),
-            AsmStmtAst::RelAddr(addr) => self.expand_rel_addr(addr),
-            AsmStmtAst::Repeat(repeat) => self.expand_repeat(repeat),
-            AsmStmtAst::Reserve(reserve) => self.expand_reserve(reserve),
-            AsmStmtAst::Scope(scope) => self.expand_scope(scope),
-            AsmStmtAst::Section(section) => self.expand_section(section),
-            AsmStmtAst::Set(set) => self.expand_assignment(set),
-            AsmStmtAst::Use(file) => self.expand_use_file(file),
-            AsmStmtAst::Utf8Data(data) => self.expand_utf8_data(data),
+            AsmStmtAst::IntData(ast) => self.expand_int_data(ast),
+            AsmStmtAst::Invoke(ast) => self.expand_macro_invocation(ast),
+            AsmStmtAst::Label(ast) => self.expand_label(ast),
+            AsmStmtAst::RelAddr(ast) => self.expand_rel_addr(ast),
+            AsmStmtAst::Repeat(ast) => self.expand_repeat(ast),
+            AsmStmtAst::Reserve(ast) => self.expand_reserve(ast),
+            AsmStmtAst::Scope(ast) => self.expand_scope(ast),
+            AsmStmtAst::Section(ast) => self.expand_section(ast),
+            AsmStmtAst::Set(ast) => self.expand_assignment(ast),
+            AsmStmtAst::Struct(ast) => self.expand_struct(ast),
+            AsmStmtAst::Use(ast) => self.expand_use_file(ast),
+            AsmStmtAst::Utf8Data(ast) => self.expand_utf8_data(ast),
         }
     }
 
@@ -507,34 +509,21 @@ impl<'a> Assembler<'a> {
                 loc: self.env.make_loc(reserve_ast.directive_span),
             });
         }
-        let count: u64 = if let Some(expr_ast) = reserve_ast.count {
-            let expr_span = expr_ast.span;
-            let Some(value) = errs.ok(self.typecheck_static_dir_expr_as(
-                (".RESERVE", "count"),
-                expr_ast,
-                ExprType::Integer,
-            )) else {
-                return errs.result();
-            };
-            match value.unwrap_int_ref().to_u64() {
-                Some(count) => count,
-                None => {
-                    errs.push(AsmError::DirectiveExprOutOfRange {
-                        directive: ".RESERVE",
-                        component: "count",
-                        expr_loc: self.env.make_loc(expr_span),
-                        expr_value: value.unwrap_int_ref().clone(),
-                        valid_range: bigint_range(u64::MIN, u64::MAX),
-                    });
-                    return errs.result();
-                }
-            }
-        } else {
-            1
+        let type_size = errs
+            .ok(self.env.data_type_size(reserve_ast.data_type))
+            .unwrap_or_default();
+        let Some(count) = errs.ok(self.typecheck_data_type_count(
+            ".RESERVE",
+            "count",
+            reserve_ast.count,
+        )) else {
+            return errs.result();
         };
-        let type_size = self.data_type_size(reserve_ast.data_type);
         if let Some(chunk_env) = self.env.current_chunk_mut() {
-            errs.also(chunk_env.append_padding((type_size * count) as usize));
+            // TODO: handle overflow
+            errs.also(chunk_env.append_padding(
+                usize::try_from(type_size).unwrap() * (count as usize),
+            ));
         }
         errs.result()
     }
@@ -600,7 +589,7 @@ impl<'a> Assembler<'a> {
 
         let chunk_index = self.next_chunk_index;
         self.next_chunk_index += 1;
-        self.env.begin_chunk(chunk_index, start);
+        self.env.begin_chunk(chunk_index, start, fill);
         if let Some(arch) = arch {
             self.env.set_current_arch(arch);
         }
@@ -626,6 +615,50 @@ impl<'a> Assembler<'a> {
             debug_assert!(!self.chunks.contains_key(&chunk_index));
             self.chunks.insert(chunk_index, chunk);
         }
+        errs.result()
+    }
+
+    fn expand_struct(&mut self, struct_ast: AsmStructAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        errs.also(self.env.verify_not_builtin_or_reserved(&struct_ast.id));
+        let mut prev_fields = HashMap::<Rc<str>, SrcSpan>::new();
+        let mut fields: Vec<(IdentifierAst, Offset)> =
+            Vec::with_capacity(struct_ast.fields.len());
+        let mut size = Size::ZERO;
+        for field_ast in struct_ast.fields {
+            errs.also(self.env.verify_not_builtin_or_reserved(&field_ast.id));
+            if let Some(prev_span) = prev_fields
+                .insert(field_ast.id.name.clone(), field_ast.id.span)
+            {
+                errs.push(AsmError::DuplicateStructField {
+                    struct_name: struct_ast.id.name.clone(),
+                    field_name: field_ast.id.name.clone(),
+                    field_loc: self.env.make_loc(field_ast.id.span),
+                    prev_loc: self.env.make_loc(prev_span),
+                });
+            } else {
+                let field_offset = match Offset::try_from(u128::from(size)) {
+                    Ok(offset) => offset,
+                    Err(()) => {
+                        eprintln!("TODO: report overflow error");
+                        Offset::MAX
+                    }
+                };
+                fields.push((field_ast.id, field_offset));
+            }
+            let field_size = errs
+                .ok(self.typecheck_data_array_size(
+                    ".STRUCT field",
+                    field_ast.data_type,
+                    field_ast.count,
+                ))
+                .unwrap_or_default();
+            size = size.checked_add(field_size).unwrap_or_else(|| {
+                eprintln!("TODO: report overflow error");
+                Size::MAX
+            });
+        }
+        errs.also(self.env.declare_struct(struct_ast.id, fields, size));
         errs.result()
     }
 
@@ -877,12 +910,6 @@ impl<'a> Assembler<'a> {
         (ret, errs)
     }
 
-    fn data_type_size(&self, data_type: AsmDataTypeAst) -> u64 {
-        match data_type {
-            AsmDataTypeAst::Int(_, int_type) => int_type.num_bytes(),
-        }
-    }
-
     fn rel_patch_type(&self, rel_type: AsmRelTypeAst) -> ObjPatchRelType {
         match rel_type {
             AsmRelTypeAst::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
@@ -1031,8 +1058,49 @@ impl<'a> Assembler<'a> {
         }
     }
 
+    fn typecheck_data_array_size(
+        &self,
+        directive: &'static str,
+        data_type: AsmDataTypeAst,
+        count_expr: Option<ExprAst>,
+    ) -> AsmResult<Size> {
+        let type_size = self.env.data_type_size(data_type)?;
+        let count =
+            self.typecheck_data_type_count(directive, "count", count_expr)?;
+        // TODO: error on overflow
+        Ok(Size::try_from(u128::from(type_size) * u128::from(count)).unwrap())
+    }
+
+    fn typecheck_data_type_count(
+        &self,
+        directive: &'static str,
+        component: &'static str,
+        count_expr: Option<ExprAst>,
+    ) -> AsmResult<u64> {
+        if let Some(expr_ast) = count_expr {
+            let expr_span = expr_ast.span;
+            let expr_value = self.typecheck_static_dir_expr_as(
+                (directive, component),
+                expr_ast,
+                ExprType::Integer,
+            )?;
+            let expr_value = expr_value.unwrap_int();
+            expr_value.to_u64().ok_or_else(|| {
+                Errs::one(AsmError::DirectiveExprOutOfRange {
+                    directive,
+                    component,
+                    expr_loc: self.env.make_loc(expr_span),
+                    expr_value,
+                    valid_range: bigint_range(u64::MIN, u64::MAX),
+                })
+            })
+        } else {
+            Ok(1)
+        }
+    }
+
     fn typecheck_static_dir_expr_as(
-        &mut self,
+        &self,
         (directive, component): (&'static str, &'static str),
         expr_ast: ExprAst,
         required_type: ExprType,
@@ -1055,7 +1123,7 @@ impl<'a> Assembler<'a> {
     }
 
     fn typecheck_dir_expr_as(
-        &mut self,
+        &self,
         (directive, component): (&'static str, &'static str),
         expr_ast: ExprAst,
         required_type: ExprType,

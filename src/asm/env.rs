@@ -1,6 +1,6 @@
 use super::arch::ArchTree;
 use super::error::{AsmError, AsmResult};
-use crate::addr::{Addr, Offset};
+use crate::addr::{Addr, Offset, Size};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
@@ -12,8 +12,8 @@ use crate::obj::{
     ObjSymbol,
 };
 use crate::parse::{
-    AsmLabelAst, AsmModuleAst, DeclarationKind, ExprAst, IdentifierAst,
-    IdentifierKind,
+    AsmDataTypeAst, AsmLabelAst, AsmModuleAst, DeclarationKind, ExprAst,
+    IdentifierAst, IdentifierKind,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -96,10 +96,10 @@ impl AsmTypeEnv {
         self.verify_not_builtin_or_reserved(&id)?;
         let scope = self.scope_stack.last().unwrap();
         if let Some(decl) = scope.decls.get(&id.name)
-            && let AsmDeclKind::Label = decl.kind
+            && let AsmDeclKind::Fixed = decl.kind
         {
             let full_name = scope.prefixed(&id.name);
-            return Err(Errs::one(AsmError::SymbolAlreadyDeclared {
+            return Err(Errs::one(AsmError::NameAlreadyDeclared {
                 full_name,
                 name_loc: self.make_loc(id.span),
                 prev_loc: decl.id_loc.clone(),
@@ -107,8 +107,8 @@ impl AsmTypeEnv {
         }
         let decl = AsmDecl {
             kind: match kind {
-                DeclarationKind::Let => AsmDeclKind::Constant,
-                DeclarationKind::Var => AsmDeclKind::Variable,
+                DeclarationKind::Let => AsmDeclKind::Rebindable,
+                DeclarationKind::Var => AsmDeclKind::Settable,
             },
             id_loc: self.make_loc(id.span),
             expr_type,
@@ -143,7 +143,7 @@ impl AsmTypeEnv {
         let mut qualified_name: Rc<str> = id_ast.name.clone();
         for scope in self.scope_stack.iter_mut().rev() {
             if let Some(prev_decl) = scope.decls.get(&qualified_name) {
-                errs.push(AsmError::SymbolAlreadyDeclared {
+                errs.push(AsmError::NameAlreadyDeclared {
                     full_name: full_name.clone(),
                     name_loc: id_loc,
                     prev_loc: prev_decl.id_loc.clone(),
@@ -155,7 +155,7 @@ impl AsmTypeEnv {
                 offset: BigInt::ZERO,
             };
             let decl = AsmDecl {
-                kind: AsmDeclKind::Label,
+                kind: AsmDeclKind::Fixed,
                 id_loc: id_loc.clone(),
                 expr_type: ExprType::Label,
                 value: AsmDeclValue::Static(ExprValue::Label(label_value)),
@@ -174,8 +174,13 @@ impl AsmTypeEnv {
         &mut self,
         chunk_index: usize,
         start_addr: Option<Addr>,
+        fill_byte: Option<u8>,
     ) {
-        self.chunk_stack.push(ChunkEnv::new(chunk_index, start_addr));
+        self.chunk_stack.push(ChunkEnv::new(
+            chunk_index,
+            start_addr,
+            fill_byte,
+        ));
         self.arch_stack.push(self.arch_stack.last().unwrap().clone());
     }
 
@@ -217,11 +222,9 @@ impl AsmTypeEnv {
         let mut decls = HashMap::<Rc<str>, AsmDecl>::new();
         if !anonymous {
             let prefix = format!("{name}::");
-            for (label_name, decl) in current_scope.decls.iter() {
-                if let AsmDeclKind::Label = decl.kind
-                    && label_name.starts_with(&prefix)
-                {
-                    let stripped_name = Rc::from(&label_name[prefix.len()..]);
+            for (decl_name, decl) in current_scope.decls.iter() {
+                if decl_name.starts_with(&prefix) {
+                    let stripped_name = Rc::from(&decl_name[prefix.len()..]);
                     decls.insert(stripped_name, decl.clone());
                 }
             }
@@ -229,7 +232,12 @@ impl AsmTypeEnv {
         let full_prefix =
             Rc::from(format!("{}{name}::", current_scope.full_prefix));
         let name = if anonymous { None } else { Some(name) };
-        self.scope_stack.push(AsmScopeEnv { name, full_prefix, decls });
+        self.scope_stack.push(AsmScopeEnv {
+            name,
+            full_prefix,
+            decls,
+            structs: HashMap::new(),
+        });
     }
 
     pub fn is_at_top_level(&self) -> bool {
@@ -253,6 +261,55 @@ impl AsmTypeEnv {
             }
         }
         None
+    }
+
+    fn look_up_struct(&self, name: &str) -> Option<&AsmStructDef> {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(decl) = scope.structs.get(name) {
+                return Some(decl);
+            }
+        }
+        None
+    }
+
+    pub fn declare_struct(
+        &mut self,
+        struct_id: IdentifierAst,
+        fields: Vec<(IdentifierAst, Offset)>,
+        size: Size,
+    ) -> AsmResult<()> {
+        let scope = self.scope_stack.last().unwrap();
+        let full_name = scope.prefixed(&struct_id.name);
+        if let Some(prev) = self.look_up_decl(&full_name) {
+            Err(Errs::one(AsmError::NameAlreadyDeclared {
+                full_name,
+                name_loc: self.make_loc(struct_id.span),
+                prev_loc: prev.id_loc.clone(),
+            }))
+        } else {
+            let context = self.current_src_context();
+            let scope = self.scope_stack.last_mut().unwrap();
+            scope.define_struct(context, struct_id, fields, size);
+            Ok(())
+        }
+    }
+
+    pub fn data_type_size(
+        &self,
+        data_type: AsmDataTypeAst,
+    ) -> AsmResult<Size> {
+        match data_type {
+            AsmDataTypeAst::Int(_, int_type) => Ok(int_type.size()),
+            AsmDataTypeAst::Struct(id) => {
+                match self.look_up_struct(&id.name) {
+                    Some(def) => Ok(def.size),
+                    None => Err(Errs::one(AsmError::UnknownStruct {
+                        name: id.name,
+                        loc: self.make_loc(id.span),
+                    })),
+                }
+            }
+        }
     }
 
     pub fn typecheck_expression(
@@ -280,8 +337,8 @@ impl AsmTypeEnv {
         self.verify_not_builtin_or_reserved(&lvalue)?;
         if let Some(decl) = self.look_up_decl(&lvalue.name) {
             match decl.kind {
-                AsmDeclKind::Variable => Ok(decl.expr_type.clone()),
-                AsmDeclKind::Constant | AsmDeclKind::Label => {
+                AsmDeclKind::Settable => Ok(decl.expr_type.clone()),
+                AsmDeclKind::Rebindable | AsmDeclKind::Fixed => {
                     Err(Errs::one(AsmError::CannotModifyConstant {
                         name: lvalue.name,
                         lvalue_loc: self.make_loc(lvalue.span),
@@ -297,7 +354,7 @@ impl AsmTypeEnv {
         }
     }
 
-    fn verify_not_builtin_or_reserved(
+    pub fn verify_not_builtin_or_reserved(
         &self,
         id_ast: &IdentifierAst,
     ) -> AsmResult<()> {
@@ -454,6 +511,7 @@ impl ExprEnv for AsmTypeEnv {
 pub(super) struct ChunkEnv {
     chunk_index: usize,
     start_addr: Option<Addr>,
+    fill_byte: Option<u8>,
     data: Vec<u8>,
     padding: usize,
     patches: Vec<ObjPatch>,
@@ -461,10 +519,15 @@ pub(super) struct ChunkEnv {
 }
 
 impl ChunkEnv {
-    fn new(chunk_index: usize, start_addr: Option<Addr>) -> ChunkEnv {
+    fn new(
+        chunk_index: usize,
+        start_addr: Option<Addr>,
+        fill_byte: Option<u8>,
+    ) -> ChunkEnv {
         ChunkEnv {
             chunk_index,
             start_addr,
+            fill_byte,
             data: Vec::new(),
             padding: 0,
             patches: Vec::new(),
@@ -482,13 +545,15 @@ impl ChunkEnv {
 
     pub fn data_mut(&mut self) -> &mut Vec<u8> {
         if self.padding > 0 {
-            // TODO: If chunk has explicit fill byte, then no need for patch.
-            self.add_patch(ObjPatch {
-                // TODO: check for overflow
-                offset: Offset::try_from(self.data.len()).unwrap(),
-                data: ObjPatchData::Fill(self.padding),
+            let fill_byte = self.fill_byte.unwrap_or_else(|| {
+                self.add_patch(ObjPatch {
+                    // TODO: check for overflow
+                    offset: Offset::try_from(self.data.len()).unwrap(),
+                    data: ObjPatchData::Fill(self.padding),
+                });
+                0u8
             });
-            self.data.resize(self.data.len() + self.padding, 0u8);
+            self.data.resize(self.data.len() + self.padding, fill_byte);
             self.padding = 0;
         }
         &mut self.data
@@ -544,12 +609,19 @@ pub(super) struct AsmScopeEnv {
     full_prefix: Rc<str>,
     /// The symbols and variables/constants currently visible in this scope.
     decls: HashMap<Rc<str>, AsmDecl>,
+    /// The struct types defined in this scope.
+    structs: HashMap<Rc<str>, AsmStructDef>,
 }
 
 impl AsmScopeEnv {
     /// Creates a root scope.
     pub fn root() -> Self {
-        Self { name: None, full_prefix: Rc::from(""), decls: HashMap::new() }
+        Self {
+            name: None,
+            full_prefix: Rc::from(""),
+            decls: HashMap::new(),
+            structs: HashMap::new(),
+        }
     }
 
     pub fn prefixed(&self, name: &Rc<str>) -> Rc<str> {
@@ -558,6 +630,58 @@ impl AsmScopeEnv {
         } else {
             Rc::from(format!("{}{name}", self.full_prefix))
         }
+    }
+
+    fn define_struct(
+        &mut self,
+        context: Rc<ObjSrcContext>,
+        struct_id: IdentifierAst,
+        fields: Vec<(IdentifierAst, Offset)>,
+        size: Size,
+    ) {
+        for (field_id, offset) in fields {
+            let field_name =
+                Rc::from(format!("{}::{}", struct_id.name, field_id.name));
+            let span = field_id.span;
+            let offset_value = ExprValue::Integer(BigInt::from(offset));
+            let field_decl = AsmDecl {
+                kind: AsmDeclKind::Fixed,
+                id_loc: ObjSrcLoc { span, context: context.clone() },
+                expr_type: ExprType::Integer,
+                value: AsmDeclValue::Static(offset_value),
+            };
+            debug_assert!(!self.decls.contains_key(&field_name));
+            self.decls.insert(field_name, field_decl);
+        }
+
+        let size_name = Rc::from(format!("{}::%size", struct_id.name));
+        let size_value = ExprValue::Integer(BigInt::from(size));
+        let size_decl = AsmDecl {
+            kind: AsmDeclKind::Fixed,
+            id_loc: ObjSrcLoc {
+                span: struct_id.span,
+                context: context.clone(),
+            },
+            expr_type: ExprType::Integer,
+            value: AsmDeclValue::Static(size_value),
+        };
+        debug_assert!(!self.decls.contains_key(&size_name));
+        self.decls.insert(size_name, size_decl);
+
+        let struct_value = ExprValue::Entity(struct_id.name.clone());
+        let struct_decl = AsmDecl {
+            kind: AsmDeclKind::Fixed,
+            id_loc: ObjSrcLoc {
+                span: struct_id.span,
+                context: context.clone(),
+            },
+            expr_type: ExprType::Entity(Rc::from("struct")),
+            value: AsmDeclValue::Static(struct_value),
+        };
+        debug_assert!(!self.decls.contains_key(&struct_id.name));
+        self.decls.insert(struct_id.name.clone(), struct_decl);
+        debug_assert!(!self.structs.contains_key(&struct_id.name));
+        self.structs.insert(struct_id.name, AsmStructDef { size });
     }
 }
 
@@ -575,9 +699,14 @@ struct AsmDecl {
 
 #[derive(Clone, Copy)]
 enum AsmDeclKind {
-    Constant,
-    Variable,
-    Label,
+    /// A declaration that cannot be rebound or mutated.
+    Fixed,
+    /// A declaration that can be rebound (to a new `Rebindable` or
+    /// `Settable`), but that cannot be mutated.
+    Rebindable,
+    /// A declaration that can be rebound (to a new `Rebindable` or
+    /// `Settable`) or mutated in place.
+    Settable,
 }
 
 //===========================================================================//
@@ -586,6 +715,12 @@ enum AsmDeclKind {
 pub(super) enum AsmDeclValue {
     Static(ExprValue),
     Variable(usize, ExprNotStaticReason),
+}
+
+//===========================================================================//
+
+struct AsmStructDef {
+    size: Size,
 }
 
 //===========================================================================//

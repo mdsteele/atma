@@ -33,6 +33,12 @@ impl Size {
         }
     }
 
+    /// Adds two `Size`s together, returning `None` if overflow occurred.
+    pub fn checked_add(self, rhs: Size) -> Option<Size> {
+        let sum = self.0.checked_add(rhs.0)?;
+        if sum <= Self::MAX_INTERNAL { Some(Size(sum)) } else { None }
+    }
+
     // This is *internal-only*, and will need to be removed if we ever increase
     // `Addr::BITS` to 64.
     pub(crate) fn into_u64(self) -> u64 {
@@ -183,6 +189,24 @@ impl fmt::LowerHex for Size {
 impl fmt::UpperHex for Size {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         self.0.fmt(f)
+    }
+}
+
+//===========================================================================//
+
+#[cfg(test)]
+mod tests {
+    use super::Size;
+
+    #[test]
+    fn checked_add() {
+        assert_eq!(
+            Size::from(1u8).checked_add(Size::from(2u8)),
+            Some(Size::from(3u8))
+        );
+        assert_eq!(Size::MAX.checked_add(Size::ZERO), Some(Size::MAX));
+        assert_eq!(Size::MAX.checked_add(Size::from(1u8)), None);
+        assert_eq!(Size::MAX.checked_add(Size::MAX), None);
     }
 }
 

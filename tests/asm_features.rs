@@ -46,4 +46,26 @@ fn static_here_address() {
     assert_eq!(static_data(assemble(source)), vec![0x01, 0x11]);
 }
 
+#[test]
+fn struct_field_offsets() {
+    let source = r#"\
+    .STRUCT sFoo {
+        Bar_u8_arr3 : .u8, 3
+        Baz_u16     : .u16
+        Blarg_u8    : .u8
+    }
+    .SECTION "TEST", fill=$ab
+        .reserve sFoo
+        .u8 sFoo::Bar_u8_arr3
+        .u8 sFoo::Baz_u16
+        .u8 sFoo::Blarg_u8
+        .u8 sFoo::%size
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0x00, 0x03, 0x05, 0x06]
+    );
+}
+
 //===========================================================================//
