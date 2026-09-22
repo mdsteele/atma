@@ -1,8 +1,8 @@
 use super::atom::{Extra, symbol};
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
-use super::lex::{Token, TokenValue};
 use crate::error::SrcSpan;
+use crate::lex::{Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 use std::rc::Rc;
 

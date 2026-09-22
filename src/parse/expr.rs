@@ -3,8 +3,8 @@
 use super::atom::{Extra, parse_tokens, symbol};
 use super::error::ParseResult;
 use super::id::CompoundIdAst;
-use super::lex::{Token, TokenValue};
 use crate::error::SrcSpan;
+use crate::lex::{Token, TokenValue};
 use chumsky::{self, IterParser, Parser, pratt};
 use num_bigint::BigInt;
 use std::rc::Rc;

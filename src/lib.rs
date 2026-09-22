@@ -11,6 +11,7 @@ pub mod db;
 pub mod dis;
 pub mod error;
 pub mod expr;
+pub mod lex;
 pub mod link;
 pub mod obj;
 pub mod parse;

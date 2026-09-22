@@ -2,10 +2,11 @@ use super::super::arch::ArchTree;
 use super::super::macros::MacroTable;
 use super::pool::RcPool;
 use crate::error::SrcSpan;
+use crate::lex::{Token, TokenValue};
 use crate::obj::ObjSrcContext;
 use crate::parse::{
     AsmDefMacroAst, AsmIntTypeAst, AsmMacroArgAst, AsmRelTypeAst, AsmStmtAst,
-    BinOpAst, Token, TokenValue,
+    BinOpAst,
 };
 use std::rc::Rc;
 

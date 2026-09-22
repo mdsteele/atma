@@ -6,7 +6,6 @@ mod atom;
 mod error;
 mod expr;
 mod id;
-mod lex;
 mod link;
 mod lvalue;
 
@@ -21,7 +20,6 @@ pub use asm::{
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};
 pub use id::{CompoundIdAst, DeclarationKind, IdentifierAst, IdentifierKind};
-pub use lex::{LexerError, Token, TokenLexer, TokenValue};
 pub use link::{LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
 pub use lvalue::{LValueAst, LValueAstNode};
 

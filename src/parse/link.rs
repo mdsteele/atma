@@ -6,7 +6,7 @@ use super::atom::{
 use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
-use super::lex::{Token, TokenValue};
+use crate::lex::{Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//

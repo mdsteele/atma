@@ -1,6 +1,6 @@
 use super::error::{ParseError, ParseResult};
-use super::lex::{Token, TokenLexer, TokenValue};
 use crate::error::{Errs, SrcSpan};
+use crate::lex::{Token, TokenLexer, TokenValue};
 use chumsky::{self, Parser};
 use std::rc::Rc;
 

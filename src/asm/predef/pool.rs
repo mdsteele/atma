@@ -1,9 +1,10 @@
 use crate::error::SrcSpan;
 use crate::expr::ExprFunc;
+use crate::lex::{Token, TokenValue};
 use crate::parse::{
     AsmIntDataAst, AsmIntTypeAst, AsmRelAddrAst, AsmRelTypeAst, AsmStmtAst,
     BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, IdentifierAst,
-    IdentifierKind, Token, TokenValue,
+    IdentifierKind,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;

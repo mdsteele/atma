@@ -1,10 +1,11 @@
 //! Facilities for parsing Atma Debugger Script.
 
 use super::atom::{Extra, keyword, linebreak, parse_tokens, symbol, tokenize};
+use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::{DeclarationKind, IdentifierAst};
 use super::lvalue::LValueAst;
-use crate::parse::{ParseResult, Token, TokenValue};
+use crate::lex::{Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//

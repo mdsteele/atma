@@ -1,11 +1,11 @@
 use super::error::{AsmError, AsmResult};
 use crate::error::{Errs, SrcSpan};
+use crate::lex::{Token, TokenValue};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
     AsmMacroArgAst, AsmRelAddrAst, AsmStmtAst, CompoundIdAst, ExprAst,
-    ExprAstNode, IdentifierAst, IdentifierKind, ParseResult, Token,
-    TokenValue,
+    ExprAstNode, IdentifierAst, IdentifierKind, ParseResult,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;

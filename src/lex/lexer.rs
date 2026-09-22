@@ -1,68 +1,10 @@
-use crate::error::{SourceError, SrcLoc, SrcSpan};
+use super::error::{LexerError, LogosLexerError};
+use super::string::{hex_digit_value, unescape_string_literal};
+use super::token::{Token, TokenValue};
+use crate::error::SrcSpan;
 use logos::{self, Logos};
 use num_bigint::{BigInt, Sign};
 use std::rc::Rc;
-
-//===========================================================================//
-
-/// An error encountered while tokenizing a source code file.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LexerError {
-    /// Found a backslash escaping another backslash.
-    BackslashBeforeBackslash(SrcSpan, SrcSpan),
-    /// Found a stray backslash at the end of the source file.
-    BackslashBeforeEof(SrcSpan),
-    /// Found a backslash escaping a token that's ineligable for escaping.
-    BackslashBeforeToken(SrcSpan, Token),
-    /// Found a character sequence that couldn't be recognized as a valid
-    /// token.
-    UnrecognizedToken(SrcSpan, Rc<str>),
-}
-
-impl LexerError {
-    /// Converts the error into a `SourceError`, using the given path for the
-    /// source file being lexed.
-    pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
-        match self {
-            LexerError::BackslashBeforeBackslash(first_span, _second_span) => {
-                let message =
-                    "unexpected backslash before backslash".to_string();
-                SourceError::new(SrcLoc::new(path, first_span), message)
-                    .with_primary_label("")
-            }
-            LexerError::BackslashBeforeEof(backslash_span) => {
-                let message = "unexpected backslash before EOF".to_string();
-                SourceError::new(SrcLoc::new(path, backslash_span), message)
-                    .with_primary_label("")
-            }
-            LexerError::BackslashBeforeToken(backslash_span, token) => {
-                let message = format!(
-                    "unexpected backslash before {}",
-                    token.value.name()
-                );
-                SourceError::new(SrcLoc::new(path, backslash_span), message)
-                    .with_primary_label("")
-            }
-            LexerError::UnrecognizedToken(span, text) => {
-                let message =
-                    format!("unrecognized token: '{}'", text.escape_debug());
-                SourceError::new(SrcLoc::new(path, span), message)
-                    .with_primary_label("")
-            }
-        }
-    }
-}
-
-// TODO: This implementation exists only to make `logos` happy.  It would be
-// better to remove it.
-impl Default for LexerError {
-    fn default() -> LexerError {
-        LexerError::UnrecognizedToken(
-            SrcSpan::from_byte_range(0..0),
-            Rc::from(""),
-        )
-    }
-}
 
 //===========================================================================//
 
@@ -110,47 +52,28 @@ fn hex_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     let digits: Vec<u8> = lex.slice()[1..]
         .chars()
         .filter(|chr| *chr != '_')
-        .map(|chr| {
-            let byte = chr as u8;
-            match byte {
-                b'A'..=b'F' => (byte - b'A') + 10,
-                b'a'..=b'f' => (byte - b'a') + 10,
-                _ => byte - b'0',
-            }
-        })
+        .map(|chr| hex_digit_value(chr).unwrap())
         .collect();
     BigInt::from_radix_be(Sign::Plus, &digits, 16).unwrap()
 }
 
-fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
-    if lexer.extras.backslash.is_some() {
-        lexer.extras.backslash = None;
+fn newline_callback(lex: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
+    if lex.extras.backslash.is_some() {
+        lex.extras.backslash = None;
         logos::Filter::Skip
     } else {
         logos::Filter::Emit(())
     }
 }
 
-fn string_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> Rc<str> {
+fn string_literal_callback(
+    lex: &mut logos::Lexer<TokenKind>,
+) -> Result<Rc<str>, LexerError> {
     debug_assert!(lex.slice().starts_with("\""));
     debug_assert!(lex.slice().ends_with("\""));
-    let mut string = String::new();
-    let mut backslash = false;
-    for chr in lex.slice()[1..(lex.slice().len() - 1)].chars() {
-        if backslash {
-            string.push(match chr {
-                'n' => '\n',
-                't' => '\t',
-                _ => chr, // TODO return error for invalid escape
-            });
-            backslash = false;
-        } else if chr == '\\' {
-            backslash = true;
-        } else {
-            string.push(chr);
-        }
-    }
-    Rc::from(string)
+    let contents = &lex.slice()["\"".len()..(lex.slice().len() - "\"".len())];
+    let contents_start = lex.span().start + "\"".len();
+    unescape_string_literal(contents, contents_start)
 }
 
 fn error_callback(lexer: &mut logos::Lexer<TokenKind>) -> LexerError {
@@ -159,8 +82,10 @@ fn error_callback(lexer: &mut logos::Lexer<TokenKind>) -> LexerError {
     LexerError::UnrecognizedToken(span, text)
 }
 
+//===========================================================================//
+
 #[derive(Debug, Eq, Logos, PartialEq)]
-#[logos(error(LexerError, callback = error_callback))]
+#[logos(error(LogosLexerError, callback = error_callback))]
 #[logos(extras = LexerState)]
 #[logos(skip r"[ \t]+")] // whitespace
 #[logos(skip(r";[^\n]*", allow_greedy = true))] // comments
@@ -348,179 +273,6 @@ impl TokenKind {
 
 //===========================================================================//
 
-/// The contents of a single lexical token.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TokenValue {
-    /// A "`&`" symbol.
-    And,
-    /// A "`&&`" symbol.
-    AndAnd,
-    /// A "`<-`" symbol.
-    ArrowLeft,
-    /// A "`!`" symbol.
-    Bang,
-    /// A "`!=`" symbol.
-    BangEquals,
-    /// An boolean literal.
-    BoolLiteral(bool),
-    /// A "`}`" symbol.
-    BraceClose,
-    /// A "`{`" symbol.
-    BraceOpen,
-    /// A "`]`" symbol.
-    BracketClose,
-    /// A "`[`" symbol.
-    BracketOpen,
-    /// A built-in constant.
-    Builtin(Rc<str>),
-    /// A "`^`" symbol.
-    Caret,
-    /// A "`:`" symbol.
-    Colon,
-    /// A "`::`" symbol.
-    ColonColon,
-    /// A "`,`" symbol.
-    Comma,
-    /// An assembler directive.
-    Directive(Rc<str>),
-    /// A "`$v`" symbol.
-    DollarDown,
-    /// A "`$<`" symbol.
-    DollarLeft,
-    /// A "`$>`" symbol.
-    DollarRight,
-    /// A "`$^`" symbol.
-    DollarUp,
-    /// A "`==`" symbol.
-    EqualsEquals,
-    /// A "`=`" symbol.
-    Equals,
-    /// A "`>=`" symbol.
-    GreaterEquals,
-    /// A "`>>`" symbol.
-    GreaterGreater,
-    /// A "`>`" symbol.
-    GreaterThan,
-    /// An identifier or keyword.
-    Identifier(Rc<str>),
-    /// An integer literal.
-    IntLiteral(BigInt),
-    /// A "`<=`" symbol.
-    LessEquals,
-    /// A "`<<`" symbol.
-    LessLess,
-    /// A "`<`" symbol.
-    LessThan,
-    /// A linebreak (that wasn't suppressed, e.g. by a backslash).
-    Linebreak,
-    /// A "`-`" symbol.
-    Minus,
-    /// A "`|`" symbol.
-    Or,
-    /// A "`||`" symbol.
-    OrOr,
-    /// A "`)`" symbol.
-    ParenClose,
-    /// A "`(`" symbol.
-    ParenOpen,
-    /// A "`%`" symbol.
-    Percent,
-    /// A "`%%`" symbol.
-    PercentPercent,
-    /// A placeholder in a macro definition.
-    Placeholder(Rc<str>),
-    /// A "`+`" symbol.
-    Plus,
-    /// A "`++`" symbol.
-    PlusPlus,
-    /// A "`#`" symbol.
-    Pound,
-    /// A "`?`" symbol.
-    Question,
-    /// A "`/`" symbol.
-    Slash,
-    /// A "`*`" symbol.
-    Star,
-    /// A "`**`" symbol.
-    StarStar,
-    /// A string literal.
-    StrLiteral(Rc<str>),
-    /// A "`~`" symbol.
-    Tilde,
-    /// A "`_`" symbol.
-    Underscore,
-}
-
-impl TokenValue {
-    /// Returns the human-readable name for this kind of token.
-    pub fn name(&self) -> &'static str {
-        match &self {
-            TokenValue::And => "`&`",
-            TokenValue::AndAnd => "`&&`",
-            TokenValue::ArrowLeft => "`<-`",
-            TokenValue::Bang => "`!`",
-            TokenValue::BangEquals => "`!=`",
-            TokenValue::BoolLiteral(_) => "boolean literal",
-            TokenValue::BraceClose => "`}`",
-            TokenValue::BraceOpen => "`{`",
-            TokenValue::BracketClose => "`]`",
-            TokenValue::BracketOpen => "`[`",
-            TokenValue::Builtin(_) => "builtin",
-            TokenValue::Caret => "`^`",
-            TokenValue::Colon => "`:`",
-            TokenValue::ColonColon => "`::`",
-            TokenValue::Comma => "`,`",
-            TokenValue::Directive(_) => "directive",
-            TokenValue::DollarDown => "`$v`",
-            TokenValue::DollarLeft => "`$<`",
-            TokenValue::DollarRight => "`$>`",
-            TokenValue::DollarUp => "`$^`",
-            TokenValue::EqualsEquals => "`==`",
-            TokenValue::Equals => "`=`",
-            TokenValue::GreaterEquals => "`>=`",
-            TokenValue::GreaterGreater => "`>>`",
-            TokenValue::GreaterThan => "`>`",
-            TokenValue::Identifier(_) => "identifier",
-            TokenValue::IntLiteral(_) => "integer literal",
-            TokenValue::LessEquals => "`<=`",
-            TokenValue::LessLess => "`<<`",
-            TokenValue::LessThan => "`<`",
-            TokenValue::Linebreak => "linebreak",
-            TokenValue::Minus => "`-`",
-            TokenValue::Or => "`|`",
-            TokenValue::OrOr => "`||`",
-            TokenValue::ParenClose => "`)`",
-            TokenValue::ParenOpen => "`(`",
-            TokenValue::Percent => "`%`",
-            TokenValue::PercentPercent => "`%%`",
-            TokenValue::Placeholder(_) => "placeholder",
-            TokenValue::Plus => "`+`",
-            TokenValue::PlusPlus => "`++`",
-            TokenValue::Pound => "`#`",
-            TokenValue::Question => "`?`",
-            TokenValue::Slash => "`/`",
-            TokenValue::Star => "`*`",
-            TokenValue::StarStar => "`**`",
-            TokenValue::StrLiteral(_) => "string literal",
-            TokenValue::Tilde => "`~`",
-            TokenValue::Underscore => "`_`",
-        }
-    }
-}
-
-//===========================================================================//
-
-/// A single lexical token, including location information.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Token {
-    /// The locaiton in the file of the start of the token.
-    pub span: SrcSpan,
-    /// The contents of the token.
-    pub value: TokenValue,
-}
-
-//===========================================================================//
-
 /// A lexer for tokenizing an input file.
 pub struct TokenLexer<'a> {
     lexer: logos::Lexer<'a, TokenKind>,
@@ -545,7 +297,7 @@ impl<'a> Iterator for TokenLexer<'a> {
                 None
             }
             Some(Ok(kind)) => Some(kind.into_token(&self.lexer)),
-            Some(Err(error)) => Some(Err(error)),
+            Some(Err(error)) => Some(Err(error.0)),
         }
     }
 }
@@ -577,6 +329,16 @@ mod tests {
         panic!("no error occurred");
     }
 
+    fn assert_invalid_escape(input: &str, range: Range<usize>, escape: &str) {
+        assert_eq!(
+            expect_error(input),
+            LexerError::InvalidStringEscape(
+                SrcSpan::from_byte_range(range),
+                Rc::from(escape)
+            )
+        );
+    }
+
     #[test]
     fn empty_input() {
         assert_eq!(read_all(""), vec![]);
@@ -602,9 +364,9 @@ mod tests {
     #[test]
     fn binary_literal() {
         assert_eq!(
-            read_all("%11010100"),
+            read_all("%1101_0100"),
             vec![token(
-                0..9,
+                0..10,
                 TokenValue::IntLiteral(BigInt::from(0b11010100))
             )]
         );
@@ -633,16 +395,16 @@ mod tests {
     #[test]
     fn decimal_literal() {
         assert_eq!(
-            read_all("12345"),
-            vec![token(0..5, TokenValue::IntLiteral(BigInt::from(12345)))]
+            read_all("12_345"),
+            vec![token(0..6, TokenValue::IntLiteral(BigInt::from(12345)))]
         );
     }
 
     #[test]
     fn hex_literal() {
         assert_eq!(
-            read_all("$f0FA9a"),
-            vec![token(0..7, TokenValue::IntLiteral(BigInt::from(0xf0fa9a)))]
+            read_all("$00f0_FA9a"),
+            vec![token(0..10, TokenValue::IntLiteral(BigInt::from(0xf0fa9a)))]
         );
     }
 
@@ -666,6 +428,18 @@ mod tests {
                 0..13,
                 TokenValue::StrLiteral(Rc::from("foo\n\t\\\""))
             )]
+        );
+        assert_eq!(
+            read_all("\"\\0\""),
+            vec![token(0..4, TokenValue::StrLiteral(Rc::from("\0")))]
+        );
+        assert_eq!(
+            read_all("\"\\x7f\""),
+            vec![token(0..6, TokenValue::StrLiteral(Rc::from("\x7f")))]
+        );
+        assert_eq!(
+            read_all("\"\\u{1F602}\""),
+            vec![token(0..11, TokenValue::StrLiteral(Rc::from("\u{1F602}")))]
         );
     }
 
@@ -727,6 +501,17 @@ mod tests {
                 token(4..7, TokenValue::Identifier(Rc::from("foo")))
             )
         );
+    }
+
+    #[test]
+    fn invalid_string_escape() {
+        assert_invalid_escape("\"foo\\qbar\"", 4..6, "\\q");
+        assert_invalid_escape("\"bar\\x3\"", 4..7, "\\x3");
+        assert_invalid_escape("\"\\x5g\"", 1..5, "\\x5g");
+        assert_invalid_escape("\"\\u\"", 1..3, "\\u");
+        assert_invalid_escape("\"ab\\u{\"", 3..6, "\\u{");
+        assert_invalid_escape("\"baz\\u{33\"", 4..9, "\\u{33");
+        assert_invalid_escape("\"foo\\u{3g}bar\"", 4..10, "\\u{3g}");
     }
 
     #[test]

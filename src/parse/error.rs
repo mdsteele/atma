@@ -1,5 +1,5 @@
-use super::lex::LexerError;
 use crate::error::{Errs, SourceError, SrcLoc, SrcSpan};
+use crate::lex::LexerError;
 use std::rc::Rc;
 
 //===========================================================================//

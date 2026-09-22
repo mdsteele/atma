@@ -2,8 +2,8 @@
 
 use super::atom::{Context, Extra, parse_tokens, symbol};
 use super::error::ParseResult;
-use super::lex::{Token, TokenValue};
 use crate::error::SrcSpan;
+use crate::lex::{Token, TokenValue};
 use chumsky::{self, ConfigParser, IterParser, Parser};
 use std::rc::Rc;
 
