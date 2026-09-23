@@ -31,10 +31,11 @@ impl ChecksumConfig {
         binary: &mut LinkedBinary,
         eval_env: &LinkEvalEnv,
     ) -> LinkResult<()> {
-        let sum_formats = resolve_formats(self.sum_formats.clone(), eval_env)?;
+        let sum_formats =
+            resolve_sum_formats(self.sum_formats.clone(), eval_env)?;
         let sums_size: u64 =
             sum_formats.iter().map(|format| u64::from(format.size())).sum();
-        let unit_format = resolve_format(self.unit_format, eval_env)?;
+        let unit_format = resolve_unit_format(self.unit_format, eval_env)?;
         let Some(offset) = binary.get_symbol_offset(&self.name) else {
             return Err(Errs::one(LinkError::Misc)); // TODO: error details
         };
@@ -78,17 +79,19 @@ impl ChecksumConfig {
     }
 }
 
-fn resolve_format(
+fn resolve_unit_format(
     variable: ConfigVariableOr<ChecksumFormat>,
     eval_env: &LinkEvalEnv,
 ) -> LinkResult<ChecksumFormat> {
     eval_env.resolve(variable, |value| match value {
         ExprValue::String(string) => parse_format(string),
-        _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+            message: Rc::from("checksum unit format is not a string"),
+        })),
     })
 }
 
-fn resolve_formats(
+fn resolve_sum_formats(
     variable: ConfigVariableOr<Rc<[ChecksumFormat]>>,
     eval_env: &LinkEvalEnv,
 ) -> LinkResult<Rc<[ChecksumFormat]>> {
@@ -105,16 +108,20 @@ fn resolve_formats(
                             formats.push(format);
                         }
                     }
-                    _ => {
-                        errs.push(LinkError::MalformedPatchExpression);
-                    }
+                    _ => errs.push(LinkError::MalformedPatchExpression {
+                        message: Rc::from(
+                            "checksum sum format item is not a string",
+                        ),
+                    }),
                 }
             }
             errs.result()?;
             debug_assert_eq!(formats.len(), formats.capacity());
             Ok(Rc::from(formats.into_boxed_slice()))
         }
-        _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+            message: Rc::from("checksum sum format is not a string or list"),
+        })),
     })
 }
 
@@ -146,7 +153,9 @@ fn resolve_range(
             // symbols, not exported symbols.
             Err(Errs::one(LinkError::Misc))
         }
-        _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+        _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+            message: Rc::from("checksum range is not an integer or label"),
+        })),
     })
 }
 

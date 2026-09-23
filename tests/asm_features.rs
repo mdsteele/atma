@@ -36,6 +36,56 @@ fn compound_id_for_named_scope() {
 }
 
 #[test]
+fn enum_automatic_values() {
+    let source = r#"\
+    .ENUM eFoobar {
+        Foo
+        Bar
+        Baz
+    }
+    .ASSERT eFoobar::Foo == 0
+    .ASSERT eFoobar::Bar == 1
+    .ASSERT eFoobar::Baz == 2
+    .ASSERT eFoobar::%values == {0, 1, 2}
+    "#;
+    assert!(assemble(source).variables.is_empty());
+}
+
+#[test]
+fn enum_manual_values() {
+    let source = r#"\
+    .ENUM eFoobar {
+        Foo = 3
+        Bar
+        Baz = Bar - Foo
+    }
+    .ASSERT eFoobar::Foo == 3
+    .ASSERT eFoobar::Bar == 4
+    .ASSERT eFoobar::Baz == 1
+    .ASSERT eFoobar::%values == {3, 4, 1}
+    "#;
+    assert!(assemble(source).variables.is_empty());
+}
+
+#[test]
+fn label_references() {
+    let source = r#"\
+    .SECTION "TEST"
+        .u16le Foo::Bar
+    Foo: {
+        .u16le Foo
+        .u16le Bar
+    Bar:
+        .u16le Bar
+        .u16le Foo
+    }
+        .u16le Foo::Bar
+    .END
+    "#;
+    assemble(source);
+}
+
+#[test]
 fn static_here_address() {
     let source = r#"\
     .SECTION "TEST", start=$10

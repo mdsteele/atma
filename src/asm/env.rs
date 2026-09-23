@@ -86,17 +86,16 @@ impl AsmTypeEnv {
         }
     }
 
-    pub fn declare_variable(
+    fn add_declaration(
         &mut self,
-        kind: DeclarationKind,
-        id: IdentifierAst,
+        kind: AsmDeclKind,
+        id: &IdentifierAst,
         expr_type: ExprType,
         value: AsmDeclValue,
     ) -> AsmResult<()> {
-        self.verify_not_builtin_or_reserved(&id)?;
         let scope = self.scope_stack.last().unwrap();
         if let Some(decl) = scope.decls.get(&id.name)
-            && let AsmDeclKind::Fixed = decl.kind
+            && (decl.kind == AsmDeclKind::Fixed || kind == AsmDeclKind::Fixed)
         {
             let full_name = scope.prefixed(&id.name);
             return Err(Errs::one(AsmError::NameAlreadyDeclared {
@@ -105,17 +104,51 @@ impl AsmTypeEnv {
                 prev_loc: decl.id_loc.clone(),
             }));
         }
-        let decl = AsmDecl {
-            kind: match kind {
-                DeclarationKind::Let => AsmDeclKind::Rebindable,
-                DeclarationKind::Var => AsmDeclKind::Settable,
-            },
-            id_loc: self.make_loc(id.span),
-            expr_type,
-            value,
-        };
-        self.scope_stack.last_mut().unwrap().decls.insert(id.name, decl);
+        let id_loc = self.make_loc(id.span);
+        let decl = AsmDecl { kind, id_loc, expr_type, value };
+        let scope = self.scope_stack.last_mut().unwrap();
+        scope.decls.insert(id.name.clone(), decl);
         Ok(())
+    }
+
+    pub fn declare_fixed_value(
+        &mut self,
+        id: &IdentifierAst,
+        expr_type: ExprType,
+        value: AsmDeclValue,
+    ) -> AsmResult<()> {
+        self.verify_not_builtin_or_reserved(id)?;
+        self.add_declaration(AsmDeclKind::Fixed, id, expr_type, value)
+    }
+
+    pub fn declare_enum_values(
+        &mut self,
+        enum_id_span: SrcSpan,
+        values: Vec<ExprValue>,
+    ) -> AsmResult<()> {
+        let id = IdentifierAst {
+            span: enum_id_span,
+            name: Rc::from("%values"),
+            kind: IdentifierKind::Builtin,
+        };
+        let expr_type = ExprType::List(Rc::from(ExprType::Integer));
+        let value = AsmDeclValue::Static(ExprValue::List(Rc::from(values)));
+        self.add_declaration(AsmDeclKind::Fixed, &id, expr_type, value)
+    }
+
+    pub fn declare_variable(
+        &mut self,
+        kind: DeclarationKind,
+        id: &IdentifierAst,
+        expr_type: ExprType,
+        value: AsmDeclValue,
+    ) -> AsmResult<()> {
+        self.verify_not_builtin_or_reserved(id)?;
+        let asm_decl_kind = match kind {
+            DeclarationKind::Let => AsmDeclKind::Rebindable,
+            DeclarationKind::Var => AsmDeclKind::Settable,
+        };
+        self.add_declaration(asm_decl_kind, id, expr_type, value)
     }
 
     pub fn reassign_variable(&mut self, name: Rc<str>, value: AsmDeclValue) {
@@ -136,38 +169,12 @@ impl AsmTypeEnv {
     }
 
     fn declare_symbol(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
-        let mut errs = Errs::<AsmError>::new();
-        self.verify_not_builtin_or_reserved(id_ast)?;
-        let full_name = self.current_scope().prefixed(&id_ast.name);
-        let id_loc = self.make_loc(id_ast.span);
-        let mut qualified_name: Rc<str> = id_ast.name.clone();
-        for scope in self.scope_stack.iter_mut().rev() {
-            if let Some(prev_decl) = scope.decls.get(&qualified_name) {
-                errs.push(AsmError::NameAlreadyDeclared {
-                    full_name: full_name.clone(),
-                    name_loc: id_loc,
-                    prev_loc: prev_decl.id_loc.clone(),
-                });
-                break;
-            }
-            let label_value = ExprLabel::SymbolRelative {
-                name: full_name.clone(),
-                offset: BigInt::ZERO,
-            };
-            let decl = AsmDecl {
-                kind: AsmDeclKind::Fixed,
-                id_loc: id_loc.clone(),
-                expr_type: ExprType::Label,
-                value: AsmDeclValue::Static(ExprValue::Label(label_value)),
-            };
-            scope.decls.insert(qualified_name.clone(), decl);
-            if let Some(name) = &scope.name {
-                qualified_name = Rc::from(format!("{name}::{qualified_name}"));
-            } else {
-                break;
-            }
-        }
-        errs.result()
+        let label = ExprLabel::SymbolRelative {
+            name: self.current_scope().prefixed(&id_ast.name),
+            offset: BigInt::ZERO,
+        };
+        let value = AsmDeclValue::Static(ExprValue::Label(label));
+        self.declare_fixed_value(id_ast, ExprType::Label, value)
     }
 
     pub fn begin_chunk(
@@ -250,8 +257,14 @@ impl AsmTypeEnv {
     }
 
     pub fn end_scope(&mut self) {
-        debug_assert!(self.scope_stack.len() >= 2);
-        self.scope_stack.pop();
+        let inner = self.scope_stack.pop().unwrap();
+        let outer = self.scope_stack.last_mut().unwrap();
+        if let Some(inner_name) = inner.name {
+            for (decl_name, decl) in inner.decls {
+                let prefixed_name = format!("{inner_name}::{decl_name}");
+                outer.decls.insert(Rc::from(prefixed_name), decl);
+            }
+        }
     }
 
     fn look_up_decl(&self, name: &str) -> Option<&AsmDecl> {
@@ -697,7 +710,7 @@ struct AsmDecl {
 
 //===========================================================================//
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum AsmDeclKind {
     /// A declaration that cannot be rebound or mutated.
     Fixed,

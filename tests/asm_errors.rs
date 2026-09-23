@@ -253,6 +253,23 @@ fn duplicate_macro_placeholder() {
 }
 
 #[test]
+fn enum_with_duplicate_field_name() {
+    let source = r#"\
+    .Enum Foo {
+        Bar
+        Bar
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::NameAlreadyDeclared {
+            full_name,
+            name_loc: _,
+            prev_loc: _,
+        },
+    ] if &**full_name == "Foo::Bar");
+}
+
+#[test]
 fn invalid_alignment_value() {
     let source = r#"\
     .SECTION "TEST", align=$18

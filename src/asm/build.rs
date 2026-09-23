@@ -16,10 +16,10 @@ use crate::obj::{
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
-    AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst, AsmModuleAst,
-    AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst, AsmScopeAst,
-    AsmSectionAst, AsmSetAst, AsmStmtAst, AsmStructAst, AsmUseAst,
-    AsmUtf8DataAst, DeclarationKind, ExprAst, IdentifierAst,
+    AsmDefMacroAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
+    AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst,
+    AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst, AsmStructAst,
+    AsmUseAst, AsmUtf8DataAst, DeclarationKind, ExprAst, IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -103,6 +103,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Cond(_) => Ok(()),
             AsmStmtAst::Declare(_) => Ok(()),
             AsmStmtAst::DefMacro(_) => Ok(()),
+            AsmStmtAst::Enum(_) => Ok(()),
             AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::IntData(_) => Ok(()),
             AsmStmtAst::Invoke(_) => Ok(()),
@@ -174,6 +175,7 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Cond(ast) => self.expand_conditional(ast),
             AsmStmtAst::Declare(ast) => self.expand_declaration(ast),
             AsmStmtAst::DefMacro(ast) => self.expand_macro_definition(ast),
+            AsmStmtAst::Enum(ast) => self.expand_enum(ast),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::IntData(ast) => self.expand_int_data(ast),
             AsmStmtAst::Invoke(ast) => self.expand_macro_invocation(ast),
@@ -397,10 +399,47 @@ impl<'a> Assembler<'a> {
         };
         errs.also(self.env.declare_variable(
             declare_ast.kind,
-            declare_ast.id,
+            &declare_ast.id,
             expr_type,
             decl_value,
         ));
+        errs.result()
+    }
+
+    fn expand_enum(&mut self, enum_ast: AsmEnumAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        errs.also(self.env.declare_fixed_value(
+            &enum_ast.id,
+            ExprType::Entity(Rc::from("enum")),
+            AsmDeclValue::Static(ExprValue::Entity(enum_ast.id.name.clone())),
+        ));
+        self.env.begin_named_scope(enum_ast.id.name);
+        let mut field_values = Vec::<ExprValue>::new();
+        let mut field_value = BigInt::from(-1);
+        for field_ast in enum_ast.fields {
+            if let Some(expr_ast) = field_ast.expression {
+                field_value = errs
+                    .ok(self.typecheck_static_dir_expr_as(
+                        (".ENUM", "value"),
+                        expr_ast,
+                        ExprType::Integer,
+                    ))
+                    .map(|value| value.unwrap_int())
+                    .unwrap_or_default()
+            } else {
+                field_value += 1;
+            };
+            errs.also(self.env.declare_fixed_value(
+                &field_ast.id,
+                ExprType::Integer,
+                AsmDeclValue::Static(ExprValue::Integer(field_value.clone())),
+            ));
+            field_values.push(ExprValue::Integer(field_value.clone()));
+        }
+        errs.also(
+            self.env.declare_enum_values(enum_ast.id.span, field_values),
+        );
+        self.env.end_scope();
         errs.result()
     }
 
@@ -489,7 +528,7 @@ impl<'a> Assembler<'a> {
             if let Some(id) = &repeat_ast.id {
                 errs.also(self.env.declare_variable(
                     DeclarationKind::Let,
-                    id.clone(),
+                    id,
                     item_type.clone(),
                     AsmDeclValue::Static(value),
                 ));
@@ -537,7 +576,7 @@ impl<'a> Assembler<'a> {
                 section_ast.name,
                 ExprType::String,
             ))
-            .map(|value| value.unwrap_str_ref().clone());
+            .map(|value| value.unwrap_str());
 
         let mut align: Option<Align> = None;
         let mut arch: Option<Rc<str>> = None;
@@ -743,53 +782,59 @@ impl<'a> Assembler<'a> {
             });
         }
         for expr_ast in data_ast.expressions {
-            let expr_span = expr_ast.span;
-            match errs.with(self.env.typecheck_expression(expr_ast)) {
-                (_, ExprType::Undefined, _) => {}
-                (_, ExprType::Integer, Ok(value)) => {
-                    let bigint = value.unwrap_int_ref();
-                    let Some(chr) = bigint.to_u32().and_then(char::from_u32)
-                    else {
-                        errs.push(AsmError::InvalidUnicodeScalarValue {
-                            expr_loc: self.env.make_loc(expr_span),
-                            expr_value: bigint.clone(),
-                        });
-                        return errs.result();
-                    };
-                    if let Some(chunk_env) = self.env.current_chunk_mut() {
-                        chunk_env
-                            .data_mut()
-                            .extend_from_slice(chr.to_string().as_bytes());
-                    }
-                }
-                (_, ExprType::String, Ok(value)) => {
-                    if let Some(chunk_env) = self.env.current_chunk_mut() {
-                        chunk_env.data_mut().extend_from_slice(
-                            value.unwrap_str_ref().as_bytes(),
-                        );
-                    }
-                }
-                (
-                    _,
-                    ExprType::Bottom | ExprType::Integer | ExprType::String,
-                    Err(reason),
-                ) => {
-                    errs.push(AsmError::DirectiveExprNotStatic {
-                        directive: ".UTF8",
-                        component: "value",
+            errs.also(self.expand_utf8_data_expr(expr_ast));
+        }
+        errs.result()
+    }
+
+    fn expand_utf8_data_expr(&mut self, expr_ast: ExprAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let expr_span = expr_ast.span;
+        match errs.with(self.env.typecheck_expression(expr_ast)) {
+            (_, ExprType::Undefined, _) => {}
+            (_, ExprType::Integer, Ok(value)) => {
+                let bigint = value.unwrap_int_ref();
+                let Some(chr) = bigint.to_u32().and_then(char::from_u32)
+                else {
+                    errs.push(AsmError::InvalidUnicodeScalarValue {
                         expr_loc: self.env.make_loc(expr_span),
-                        reason,
+                        expr_value: bigint.clone(),
                     });
+                    return errs.result();
+                };
+                if let Some(chunk_env) = self.env.current_chunk_mut() {
+                    chunk_env
+                        .data_mut()
+                        .extend_from_slice(chr.to_string().as_bytes());
                 }
-                (_, expr_type, _) => {
-                    errs.push(AsmError::DirectiveExprTypeError {
-                        directive: ".UTF8",
-                        component: "value",
-                        expr_loc: self.env.make_loc(expr_span),
-                        expr_type,
-                        valid_types: vec![ExprType::String, ExprType::Integer],
-                    });
+            }
+            (_, ExprType::String, Ok(value)) => {
+                if let Some(chunk_env) = self.env.current_chunk_mut() {
+                    chunk_env
+                        .data_mut()
+                        .extend_from_slice(value.unwrap_str_ref().as_bytes());
                 }
+            }
+            (
+                _,
+                ExprType::Bottom | ExprType::Integer | ExprType::String,
+                Err(reason),
+            ) => {
+                errs.push(AsmError::DirectiveExprNotStatic {
+                    directive: ".UTF8",
+                    component: "value",
+                    expr_loc: self.env.make_loc(expr_span),
+                    reason,
+                });
+            }
+            (_, expr_type, _) => {
+                errs.push(AsmError::DirectiveExprTypeError {
+                    directive: ".UTF8",
+                    component: "value",
+                    expr_loc: self.env.make_loc(expr_span),
+                    expr_type,
+                    valid_types: vec![ExprType::String, ExprType::Integer],
+                });
             }
         }
         errs.result()
@@ -797,29 +842,21 @@ impl<'a> Assembler<'a> {
 
     fn expand_int_data(&mut self, int_data: AsmIntDataAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let directive = int_data.int_type.directive();
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
-                directive,
+                directive: int_data.int_type.directive(),
                 loc: self.env.make_loc(int_data.directive_span),
             });
         }
-        let Some(int_type) = int_patch_type(&self.env, int_data.int_type)
-        else {
-            errs.push(AsmError::ArchHasNoEndianness {
-                directive,
-                loc: self.env.make_loc(int_data.directive_span),
-                arch: self.env.current_arch().clone(),
-            });
-            return errs.result();
-        };
-        for expr_ast in int_data.expressions {
-            errs.also(assemble_int_data(
-                &mut self.env,
-                directive,
-                int_type,
-                expr_ast,
-            ));
+        if let Some(int_type) = errs.ok(int_patch_type(&self.env, &int_data)) {
+            for expr_ast in int_data.expressions {
+                errs.also(assemble_int_data(
+                    &mut self.env,
+                    int_data.int_type.directive(),
+                    int_type,
+                    expr_ast,
+                ));
+            }
         }
         errs.result()
     }

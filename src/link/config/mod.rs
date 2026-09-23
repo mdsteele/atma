@@ -106,7 +106,9 @@ impl LinkConfig {
         let symbol_addr =
             eval_env.resolve(export.address, |value| match value {
                 ExprValue::Integer(bigint) => Ok(Addr::wrap_bigint(bigint)),
-                _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+                _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+                    message: Rc::from("link export addr is not an integer"),
+                })),
             })?;
         let absolute_label = AbsoluteLabel {
             space: export.space.clone(),

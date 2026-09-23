@@ -4,7 +4,7 @@ use crate::addr::Endianness;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{ExprLabel, ExprType, ExprUnOp};
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatchData, ObjPatchIntType};
-use crate::parse::{AsmIntTypeAst, ExprAst};
+use crate::parse::{AsmIntDataAst, AsmIntTypeAst, ExprAst};
 use num_bigint::BigInt;
 use std::range::RangeInclusive;
 
@@ -133,52 +133,61 @@ impl Default for IntDataValue {
 
 pub(super) fn int_patch_type(
     env: &AsmTypeEnv,
-    int_type: AsmIntTypeAst,
-) -> Option<ObjPatchIntType> {
-    match int_type {
-        AsmIntTypeAst::S8 => Some(ObjPatchIntType::S8),
+    int_data_ast: &AsmIntDataAst,
+) -> AsmResult<ObjPatchIntType> {
+    match int_data_ast.int_type {
+        AsmIntTypeAst::S8 => Ok(ObjPatchIntType::S8),
         AsmIntTypeAst::S16 => endian_patch_type(
             env,
+            int_data_ast,
             ObjPatchIntType::S16be,
             ObjPatchIntType::S16le,
         ),
-        AsmIntTypeAst::S16be => Some(ObjPatchIntType::S16be),
-        AsmIntTypeAst::S16le => Some(ObjPatchIntType::S16le),
+        AsmIntTypeAst::S16be => Ok(ObjPatchIntType::S16be),
+        AsmIntTypeAst::S16le => Ok(ObjPatchIntType::S16le),
         AsmIntTypeAst::S24 => endian_patch_type(
             env,
+            int_data_ast,
             ObjPatchIntType::S24be,
             ObjPatchIntType::S24le,
         ),
-        AsmIntTypeAst::S24be => Some(ObjPatchIntType::S24be),
-        AsmIntTypeAst::S24le => Some(ObjPatchIntType::S24le),
-        AsmIntTypeAst::U8 => Some(ObjPatchIntType::U8),
+        AsmIntTypeAst::S24be => Ok(ObjPatchIntType::S24be),
+        AsmIntTypeAst::S24le => Ok(ObjPatchIntType::S24le),
+        AsmIntTypeAst::U8 => Ok(ObjPatchIntType::U8),
         AsmIntTypeAst::U16 => endian_patch_type(
             env,
+            int_data_ast,
             ObjPatchIntType::U16be,
             ObjPatchIntType::U16le,
         ),
-        AsmIntTypeAst::U16be => Some(ObjPatchIntType::U16be),
-        AsmIntTypeAst::U16le => Some(ObjPatchIntType::U16le),
+        AsmIntTypeAst::U16be => Ok(ObjPatchIntType::U16be),
+        AsmIntTypeAst::U16le => Ok(ObjPatchIntType::U16le),
         AsmIntTypeAst::U24 => endian_patch_type(
             env,
+            int_data_ast,
             ObjPatchIntType::U24be,
             ObjPatchIntType::U24le,
         ),
-        AsmIntTypeAst::U24be => Some(ObjPatchIntType::U24be),
-        AsmIntTypeAst::U24le => Some(ObjPatchIntType::U24le),
+        AsmIntTypeAst::U24be => Ok(ObjPatchIntType::U24be),
+        AsmIntTypeAst::U24le => Ok(ObjPatchIntType::U24le),
     }
 }
 
 fn endian_patch_type(
     env: &AsmTypeEnv,
+    int_data_ast: &AsmIntDataAst,
     be_type: ObjPatchIntType,
     le_type: ObjPatchIntType,
-) -> Option<ObjPatchIntType> {
+) -> AsmResult<ObjPatchIntType> {
     let arch = env.current_arch();
     match env.arch_tree().native_endianness(arch) {
-        Some(Endianness::BigEndian) => Some(be_type),
-        Some(Endianness::LittleEndian) => Some(le_type),
-        None => None,
+        Some(Endianness::BigEndian) => Ok(be_type),
+        Some(Endianness::LittleEndian) => Ok(le_type),
+        None => Err(Errs::one(AsmError::ArchHasNoEndianness {
+            directive: int_data_ast.int_type.directive(),
+            loc: env.make_loc(int_data_ast.directive_span),
+            arch: env.current_arch().clone(),
+        })),
     }
 }
 

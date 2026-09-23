@@ -12,10 +12,11 @@ mod lvalue;
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
 pub use asm::{
     AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
-    AsmDefMacroAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst,
-    AsmReserveAst, AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst,
-    AsmStructAst, AsmStructFieldAst, AsmUseAst, AsmUtf8DataAst,
+    AsmDefMacroAst, AsmEnumAst, AsmEnumFieldAst, AsmIntDataAst, AsmIntTypeAst,
+    AsmInvokeAst, AsmLabelAst, AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst,
+    AsmRelTypeAst, AsmRepeatAst, AsmReserveAst, AsmScopeAst, AsmSectionAst,
+    AsmSetAst, AsmStmtAst, AsmStructAst, AsmStructFieldAst, AsmUseAst,
+    AsmUtf8DataAst,
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, UnOpAst};

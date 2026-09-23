@@ -44,6 +44,8 @@ pub enum AsmStmtAst {
     Assert(AsmAssertAst),
     /// A `.BINARY` directive.
     Binary(AsmBinaryAst),
+    /// An `.ENUM` definition directive.
+    Enum(AsmEnumAst),
     /// An `.IF` directive.
     Cond(AsmCondAst),
     /// A `.LET` or `.VAR` directive.
@@ -180,6 +182,7 @@ impl AsmStmtAst {
                 cond_dir,
                 AsmDeclareAst::parser().map(AsmStmtAst::Declare),
                 def_macro_dir,
+                AsmEnumAst::parser().map(AsmStmtAst::Enum),
                 import_dir,
                 AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
@@ -327,6 +330,54 @@ pub struct AsmDefMacroAst {
     pub params: Vec<AsmMacroArgAst>,
     /// The statements inside the macro body.
     pub body: Vec<AsmStmtAst>,
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for defining an enum type in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmEnumAst {
+    /// The name of the enum type.
+    pub id: IdentifierAst,
+    /// The fields of the enum.
+    pub fields: Vec<AsmEnumFieldAst>,
+}
+
+impl AsmEnumAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        directive(".ENUM")
+            .ignore_then(IdentifierAst::parser())
+            .then_ignore(symbol(TokenValue::BraceOpen))
+            .then_ignore(linebreak())
+            .then(AsmEnumFieldAst::parser().repeated().collect::<Vec<_>>())
+            .then_ignore(symbol(TokenValue::BraceClose))
+            .then_ignore(linebreak())
+            .map(|(id, fields)| Self { id, fields })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree one field of an enum type in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmEnumFieldAst {
+    /// The name of the field.
+    pub id: IdentifierAst,
+    /// The (optional) expression for the field.
+    pub expression: Option<ExprAst>,
+}
+
+impl AsmEnumFieldAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        IdentifierAst::parser()
+            .then(
+                symbol(TokenValue::Equals)
+                    .ignore_then(ExprAst::parser())
+                    .or_not(),
+            )
+            .then_ignore(linebreak())
+            .map(|(id, expression)| Self { id, expression })
+    }
 }
 
 //===========================================================================//

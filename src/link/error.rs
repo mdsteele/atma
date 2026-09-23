@@ -74,7 +74,10 @@ pub enum LinkError {
     /// A patch's expression was malformed in some way (e.g. stack
     /// underflow). This shouldn't happen for valid object files (as the
     /// assembler should have generated a valid expression).
-    MalformedPatchExpression,
+    MalformedPatchExpression {
+        /// A message indicating the nature of the error.
+        message: Rc<str>,
+    },
     /// A patch's offset/size was out of range for the size of the chunk
     /// data. This shouldn't happen for valid object files (as the assembler
     /// should have generated a valid patch offset).

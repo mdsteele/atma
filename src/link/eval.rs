@@ -41,7 +41,9 @@ impl<'a> LinkSymbolContext<'a> {
                     // Reference to a chunk that doesn't exist in this object
                     // file.
                     return Err(Errs::one(
-                        LinkError::MalformedPatchExpression,
+                        LinkError::MalformedPatchExpression {
+                            message: Rc::from("ChunkAbsolute: no such chunk"),
+                        },
                     ));
                 }
                 let metadata = &self.chunk_metadata[chunk_index];
@@ -56,7 +58,9 @@ impl<'a> LinkSymbolContext<'a> {
                     // Reference to a chunk that doesn't exist in this object
                     // file.
                     return Err(Errs::one(
-                        LinkError::MalformedPatchExpression,
+                        LinkError::MalformedPatchExpression {
+                            message: Rc::from("ChunkRelative: no such chunk"),
+                        },
                     ));
                 }
                 let metadata = &self.chunk_metadata[chunk_index];
@@ -68,7 +72,11 @@ impl<'a> LinkSymbolContext<'a> {
                     None => {
                         // Reference to a symbol not declared in this object
                         // file.
-                        Err(Errs::one(LinkError::MalformedPatchExpression))
+                        let message =
+                            format!("SymbolRelative: no such symbol: {name}");
+                        Err(Errs::one(LinkError::MalformedPatchExpression {
+                            message: Rc::from(message),
+                        }))
                     }
                     Some(None) => {
                         // Imported symbol that was never exported; an error
@@ -125,7 +133,9 @@ impl LinkEvalEnv {
         } else {
             // Invalid variable index.  That shouldn't happen if
             // unless the object file was corrupted.
-            Err(Errs::one(LinkError::MalformedPatchExpression))
+            Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("invalid variable index"),
+            }))
         }
     }
 
@@ -228,7 +238,9 @@ impl<'a> ExprEvaluator<'a> {
                     let string = template.format(arg).map_err(|_| {
                         // Type error.  That shouldn't happen unless the object
                         // file was corrupted.
-                        Errs::one(LinkError::MalformedPatchExpression)
+                        Errs::one(LinkError::MalformedPatchExpression {
+                            message: Rc::from("Interpolate type error"),
+                        })
                     })?;
                     self.push_value(ExprValue::String(string));
                 }
@@ -286,7 +298,9 @@ impl<'a> ExprEvaluator<'a> {
                         // Type error.  That shouldn't happen unless the object
                         // file was corrupted.
                         return Err(Errs::one(
-                            LinkError::MalformedPatchExpression,
+                            LinkError::MalformedPatchExpression {
+                                message: Rc::from("TupleItem index error"),
+                            },
                         ));
                     }
                     self.push_value(items[index].clone());
@@ -310,7 +324,9 @@ impl<'a> ExprEvaluator<'a> {
         if !self.value_stack.is_empty() {
             // More than one value left on the stack at the end.  That
             // shouldn't happen unless the object file was corrupted.
-            return Err(Errs::one(LinkError::MalformedPatchExpression));
+            return Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("more than one expr stack item"),
+            }));
         }
         Ok(value)
     }
@@ -326,7 +342,9 @@ impl<'a> ExprEvaluator<'a> {
         } else {
             // Stack underflow.  That shouldn't happen unless the object
             // file was corrupted.
-            Err(Errs::one(LinkError::MalformedPatchExpression))
+            Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_values stack underflow"),
+            }))
         }
     }
 
@@ -335,7 +353,9 @@ impl<'a> ExprEvaluator<'a> {
             Some(value) => Ok(value),
             // Stack underflow.  That shouldn't happen unless the object file
             // was corrupted.
-            None => Err(Errs::one(LinkError::MalformedPatchExpression)),
+            None => Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_value stack underflow"),
+            })),
         }
     }
 
@@ -344,7 +364,9 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::Boolean(boolean) => Ok(boolean),
             // Type error.  That shouldn't happen unless the object file was
             // corrupted.
-            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_bool type error"),
+            })),
         }
     }
 
@@ -353,7 +375,9 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::Function(func) => Ok(func),
             // Type error.  That shouldn't happen unless the object file was
             // corrupted.
-            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_func type error"),
+            })),
         }
     }
 
@@ -362,7 +386,9 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::Integer(bigint) => Ok(bigint),
             // Type error.  That shouldn't happen unless the object file was
             // corrupted.
-            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_int type error"),
+            })),
         }
     }
 
@@ -371,7 +397,9 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::List(items) => Ok(items),
             // Type error.  That shouldn't happen unless the object file was
             // corrupted.
-            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_list type error"),
+            })),
         }
     }
 
@@ -380,7 +408,9 @@ impl<'a> ExprEvaluator<'a> {
             ExprValue::Tuple(items) => Ok(items),
             // Type error.  That shouldn't happen unless the object file was
             // corrupted.
-            _ => Err(Errs::one(LinkError::MalformedPatchExpression)),
+            _ => Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("pop_tuple type error"),
+            })),
         }
     }
 
@@ -391,7 +421,9 @@ impl<'a> ExprEvaluator<'a> {
         } else {
             // Op index overflow.  That shouldn't happen unless the object file
             // was corrupted.
-            Err(Errs::one(LinkError::MalformedPatchExpression))
+            Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("skip index overflow"),
+            }))
         }
     }
 }
