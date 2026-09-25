@@ -91,6 +91,30 @@ fn assemble_bit_instructions() {
 }
 
 #[test]
+fn assemble_bbc_instructions() {
+    assert_asm_dis("BBC $12, 0, $0034", &[0x13, 0x12, 0x31]);
+    assert_asm_dis("BBC $56, 1, $0078", &[0x33, 0x56, 0x75]);
+    assert_asm_dis("BBC $9a, 2, $ffff", &[0x53, 0x9a, 0xfc]);
+    assert_asm_dis("BBC $bc, 3, $0000", &[0x73, 0xbc, 0xfd]);
+    assert_asm_dis("BBC $12, 4, $0034", &[0x93, 0x12, 0x31]);
+    assert_asm_dis("BBC $56, 5, $0078", &[0xb3, 0x56, 0x75]);
+    assert_asm_dis("BBC $9a, 6, $ffff", &[0xd3, 0x9a, 0xfc]);
+    assert_asm_dis("BBC $bc, 7, $0000", &[0xf3, 0xbc, 0xfd]);
+}
+
+#[test]
+fn assemble_bbs_instructions() {
+    assert_asm_dis("BBS $12, 0, $0034", &[0x03, 0x12, 0x31]);
+    assert_asm_dis("BBS $56, 1, $0078", &[0x23, 0x56, 0x75]);
+    assert_asm_dis("BBS $9a, 2, $ffff", &[0x43, 0x9a, 0xfc]);
+    assert_asm_dis("BBS $bc, 3, $0000", &[0x63, 0xbc, 0xfd]);
+    assert_asm_dis("BBS $12, 4, $0034", &[0x83, 0x12, 0x31]);
+    assert_asm_dis("BBS $56, 5, $0078", &[0xa3, 0x56, 0x75]);
+    assert_asm_dis("BBS $9a, 6, $ffff", &[0xc3, 0x9a, 0xfc]);
+    assert_asm_dis("BBS $bc, 7, $0000", &[0xe3, 0xbc, 0xfd]);
+}
+
+#[test]
 fn assemble_branch_instructions() {
     assert_asm_dis("BCC $0042", &[0x90, 0x40]);
     assert_asm_dis("BCS $0081", &[0xb0, 0x7f]);
@@ -111,6 +135,34 @@ fn assemble_branch_instructions() {
 fn assemble_call_instructions() {
     assert_asm_dis("CALL !$1234", &[0x3f, 0x34, 0x12]);
     assert_asm_dis("PCALL $ff37", &[0x4f, 0x37]);
+    assert_asm_dis("TCALL 0", &[0x01]);
+    assert_asm_dis("TCALL 1", &[0x11]);
+    assert_asm_dis("TCALL 2", &[0x21]);
+    assert_asm_dis("TCALL 3", &[0x31]);
+    assert_asm_dis("TCALL 4", &[0x41]);
+    assert_asm_dis("TCALL 5", &[0x51]);
+    assert_asm_dis("TCALL 6", &[0x61]);
+    assert_asm_dis("TCALL 7", &[0x71]);
+    assert_asm_dis("TCALL 8", &[0x81]);
+    assert_asm_dis("TCALL 9", &[0x91]);
+    assert_asm_dis("TCALL 10", &[0xa1]);
+    assert_asm_dis("TCALL 11", &[0xb1]);
+    assert_asm_dis("TCALL 12", &[0xc1]);
+    assert_asm_dis("TCALL 13", &[0xd1]);
+    assert_asm_dis("TCALL 14", &[0xe1]);
+    assert_asm_dis("TCALL 15", &[0xf1]);
+}
+
+#[test]
+fn assemble_clr1_instructions() {
+    assert_asm_dis("CLR1 $12, 0", &[0x12, 0x12]);
+    assert_asm_dis("CLR1 $56, 1", &[0x32, 0x56]);
+    assert_asm_dis("CLR1 $9a, 2", &[0x52, 0x9a]);
+    assert_asm_dis("CLR1 $bc, 3", &[0x72, 0xbc]);
+    assert_asm_dis("CLR1 $12, 4", &[0x92, 0x12]);
+    assert_asm_dis("CLR1 $56, 5", &[0xb2, 0x56]);
+    assert_asm_dis("CLR1 $9a, 6", &[0xd2, 0x9a]);
+    assert_asm_dis("CLR1 $bc, 7", &[0xf2, 0xbc]);
 }
 
 #[test]
@@ -299,6 +351,18 @@ fn assemble_sbc_instructions() {
     assert_asm_dis("SBC (X), (Y)", &[0xb9]);
     assert_asm_dis("SBC $12, $34", &[0xa9, 0x34, 0x12]);
     assert_asm_dis("SBC $56, #$78", &[0xb8, 0x78, 0x56]);
+}
+
+#[test]
+fn assemble_set1_instructions() {
+    assert_asm_dis("SET1 $12, 0", &[0x02, 0x12]);
+    assert_asm_dis("SET1 $56, 1", &[0x22, 0x56]);
+    assert_asm_dis("SET1 $9a, 2", &[0x42, 0x9a]);
+    assert_asm_dis("SET1 $bc, 3", &[0x62, 0xbc]);
+    assert_asm_dis("SET1 $12, 4", &[0x82, 0x12]);
+    assert_asm_dis("SET1 $56, 5", &[0xa2, 0x56]);
+    assert_asm_dis("SET1 $9a, 6", &[0xc2, 0x9a]);
+    assert_asm_dis("SET1 $bc, 7", &[0xe2, 0xbc]);
 }
 
 #[test]

@@ -1,3 +1,4 @@
+mod addrmode;
 mod build;
 mod mos6502;
 mod pool;

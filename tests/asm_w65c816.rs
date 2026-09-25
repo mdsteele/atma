@@ -66,6 +66,10 @@ fn assemble_bit_instructions() {
     assert_asm_dis("BIT !$1234, X", &[0x3c, 0x34, 0x12], FLAG_NONE);
     assert_asm_dis("BIT $12", &[0x24, 0x12], FLAG_NONE);
     assert_asm_dis("BIT $12, X", &[0x34, 0x12], FLAG_NONE);
+    assert_asm_dis("TRB !$1234", &[0x1c, 0x34, 0x12], FLAG_NONE);
+    assert_asm_dis("TRB $12", &[0x14, 0x12], FLAG_NONE);
+    assert_asm_dis("TSB !$1234", &[0x0c, 0x34, 0x12], FLAG_NONE);
+    assert_asm_dis("TSB $12", &[0x04, 0x12], FLAG_NONE);
 }
 
 #[test]

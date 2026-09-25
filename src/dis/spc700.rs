@@ -1237,7 +1237,7 @@ impl Instruction {
                 op2.format(bus, next)
             ),
             Instruction::Clr1(bit, op) => {
-                format!("CLR1 {bit}, {}", op.format(bus, next))
+                format!("CLR1 {}, {bit}", op.format(bus, next))
             }
             Instruction::Clrc => "CLRC".to_string(),
             Instruction::Clrp => "CLRP".to_string(),
@@ -1356,7 +1356,7 @@ impl Instruction {
                 op2.format(bus, next)
             ),
             Instruction::Set1(bit, op) => {
-                format!("SET1 {bit}, {}", op.format(bus, next))
+                format!("SET1 {}, {bit}", op.format(bus, next))
             }
             Instruction::Setc => "SETC".to_string(),
             Instruction::Setp => "SETP".to_string(),
@@ -1366,11 +1366,7 @@ impl Instruction {
                 format!("SUBW YA, {}", op.format(bus, next))
             }
             Instruction::Tcall(hp) => {
-                format!(
-                    "TCALL [{}]",
-                    Operand::Absolute(0xff00 | u16::from(hp))
-                        .format(bus, next)
-                )
+                format!("TCALL {}", 0xdeu8.wrapping_sub(hp) >> 1)
             }
             Instruction::Tclr1(op) => {
                 format!("TCLR1 {}", op.format(bus, next))
@@ -1527,14 +1523,14 @@ mod tests {
 
     #[test]
     fn disassemble_clr1() {
-        assert_eq!(disassemble(&[0x12, 0x12]), "CLR1 0, $12");
-        assert_eq!(disassemble(&[0x32, 0x56]), "CLR1 1, $56");
-        assert_eq!(disassemble(&[0x52, 0x9a]), "CLR1 2, $9a");
-        assert_eq!(disassemble(&[0x72, 0xbc]), "CLR1 3, $bc");
-        assert_eq!(disassemble(&[0x92, 0x12]), "CLR1 4, $12");
-        assert_eq!(disassemble(&[0xb2, 0x56]), "CLR1 5, $56");
-        assert_eq!(disassemble(&[0xd2, 0x9a]), "CLR1 6, $9a");
-        assert_eq!(disassemble(&[0xf2, 0xbc]), "CLR1 7, $bc");
+        assert_eq!(disassemble(&[0x12, 0x12]), "CLR1 $12, 0");
+        assert_eq!(disassemble(&[0x32, 0x56]), "CLR1 $56, 1");
+        assert_eq!(disassemble(&[0x52, 0x9a]), "CLR1 $9a, 2");
+        assert_eq!(disassemble(&[0x72, 0xbc]), "CLR1 $bc, 3");
+        assert_eq!(disassemble(&[0x92, 0x12]), "CLR1 $12, 4");
+        assert_eq!(disassemble(&[0xb2, 0x56]), "CLR1 $56, 5");
+        assert_eq!(disassemble(&[0xd2, 0x9a]), "CLR1 $9a, 6");
+        assert_eq!(disassemble(&[0xf2, 0xbc]), "CLR1 $bc, 7");
     }
 
     #[test]
@@ -1778,38 +1774,34 @@ mod tests {
 
     #[test]
     fn disassemble_set1() {
-        assert_eq!(disassemble(&[0x02, 0x12]), "SET1 0, $12");
-        assert_eq!(disassemble(&[0x22, 0x56]), "SET1 1, $56");
-        assert_eq!(disassemble(&[0x42, 0x9a]), "SET1 2, $9a");
-        assert_eq!(disassemble(&[0x62, 0xbc]), "SET1 3, $bc");
-        assert_eq!(disassemble(&[0x82, 0x12]), "SET1 4, $12");
-        assert_eq!(disassemble(&[0xa2, 0x56]), "SET1 5, $56");
-        assert_eq!(disassemble(&[0xc2, 0x9a]), "SET1 6, $9a");
-        assert_eq!(disassemble(&[0xe2, 0xbc]), "SET1 7, $bc");
+        assert_eq!(disassemble(&[0x02, 0x12]), "SET1 $12, 0");
+        assert_eq!(disassemble(&[0x22, 0x56]), "SET1 $56, 1");
+        assert_eq!(disassemble(&[0x42, 0x9a]), "SET1 $9a, 2");
+        assert_eq!(disassemble(&[0x62, 0xbc]), "SET1 $bc, 3");
+        assert_eq!(disassemble(&[0x82, 0x12]), "SET1 $12, 4");
+        assert_eq!(disassemble(&[0xa2, 0x56]), "SET1 $56, 5");
+        assert_eq!(disassemble(&[0xc2, 0x9a]), "SET1 $9a, 6");
+        assert_eq!(disassemble(&[0xe2, 0xbc]), "SET1 $bc, 7");
     }
 
     #[test]
     fn disassemble_tcall() {
-        assert_eq!(disassemble(&[0x01]), "TCALL [!$ffde]");
-        assert_eq!(disassemble(&[0x11]), "TCALL [!$ffdc]");
-        assert_eq!(disassemble(&[0x21]), "TCALL [!$ffda]");
-        assert_eq!(disassemble(&[0x31]), "TCALL [!$ffd8]");
-        assert_eq!(disassemble(&[0x41]), "TCALL [!$ffd6]");
-        assert_eq!(disassemble(&[0x51]), "TCALL [!$ffd4]");
-        assert_eq!(disassemble(&[0x61]), "TCALL [!$ffd2]");
-        assert_eq!(disassemble(&[0x71]), "TCALL [!$ffd0]");
-        assert_eq!(disassemble(&[0x81]), "TCALL [!$ffce]");
-        assert_eq!(disassemble(&[0x91]), "TCALL [!$ffcc]");
-        assert_eq!(disassemble(&[0xa1]), "TCALL [!$ffca]");
-        assert_eq!(disassemble(&[0xb1]), "TCALL [!$ffc8]");
-        assert_eq!(disassemble(&[0xc1]), "TCALL [!$ffc6]");
-        assert_eq!(disassemble(&[0xd1]), "TCALL [!$ffc4]");
-        assert_eq!(disassemble(&[0xe1]), "TCALL [!$ffc2]");
-        assert_eq!(disassemble(&[0xf1]), "TCALL [!$ffc0]");
-        assert_eq!(
-            disassemble_with_label(&[0x51], 0xffd4, "foo"),
-            "TCALL [!foo]"
-        );
+        assert_eq!(disassemble(&[0x01]), "TCALL 0");
+        assert_eq!(disassemble(&[0x11]), "TCALL 1");
+        assert_eq!(disassemble(&[0x21]), "TCALL 2");
+        assert_eq!(disassemble(&[0x31]), "TCALL 3");
+        assert_eq!(disassemble(&[0x41]), "TCALL 4");
+        assert_eq!(disassemble(&[0x51]), "TCALL 5");
+        assert_eq!(disassemble(&[0x61]), "TCALL 6");
+        assert_eq!(disassemble(&[0x71]), "TCALL 7");
+        assert_eq!(disassemble(&[0x81]), "TCALL 8");
+        assert_eq!(disassemble(&[0x91]), "TCALL 9");
+        assert_eq!(disassemble(&[0xa1]), "TCALL 10");
+        assert_eq!(disassemble(&[0xb1]), "TCALL 11");
+        assert_eq!(disassemble(&[0xc1]), "TCALL 12");
+        assert_eq!(disassemble(&[0xd1]), "TCALL 13");
+        assert_eq!(disassemble(&[0xe1]), "TCALL 14");
+        assert_eq!(disassemble(&[0xf1]), "TCALL 15");
     }
 
     #[test]
