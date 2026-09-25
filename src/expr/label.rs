@@ -41,6 +41,15 @@ pub enum ExprLabel {
 }
 
 impl ExprLabel {
+    pub(crate) fn into_absolute_address(self) -> Option<BigInt> {
+        match self {
+            ExprLabel::AddrAbsolute { address, .. }
+            | ExprLabel::ChunkAbsolute { address, .. } => Some(address),
+            ExprLabel::ChunkRelative { .. }
+            | ExprLabel::SymbolRelative { .. } => None,
+        }
+    }
+
     pub(crate) fn try_subtract(
         &self,
         rhs: &ExprLabel,

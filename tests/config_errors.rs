@@ -290,7 +290,7 @@ fn path_not_static_error() {
         config_errors(source).as_slice(),
         [ConfigError::PathNotStatic {
             reason: ExprNotStaticReason::StaticEvalError {
-                error: ExprEvalError::AddrOfLabelUnresolved { .. }
+                error: ExprEvalError::LabelAddressUnresolved { .. }
             },
             ..
         }]

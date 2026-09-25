@@ -106,7 +106,7 @@ fn conditional_predicate_not_static() {
             directive: ".IF",
             component: "predicate",
             reason: ExprNotStaticReason::StaticEvalError {
-                error: ExprEvalError::AddrOfLabelUnresolved { .. },
+                error: ExprEvalError::LabelAddressUnresolved { .. },
             },
             ..
         }]
@@ -381,7 +381,7 @@ fn repeat_iterator_not_static() {
             component: "iterator",
             expr_loc: _,
             reason: ExprNotStaticReason::StaticEvalError {
-                error: ExprEvalError::AddrOfLabelUnresolved { .. },
+                error: ExprEvalError::LabelAddressUnresolved { .. },
             },
         }]
     );

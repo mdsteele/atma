@@ -1,6 +1,6 @@
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
-use crate::expr::{ExprLabel, ExprType, ExprValue};
+use crate::expr::{ExprType, ExprValue};
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use crate::parse::UnOpAst;
 use num_bigint::BigInt;
@@ -18,15 +18,15 @@ const TAG_NEG: u8 = 0x03;
 /// An error that can occur while evaluating an [ExprUnOp] on an [ExprValue].
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum ExprUnOpEvalError {
-    /// Tried to get the address of a label, but the label has not yet been
-    /// resolved and its address is not yet known.
-    AddrOfLabelUnresolved,
     /// Tried to perform a unary operation, but the operand had the wrong type
     /// at runtime.
     ///
     /// This should normally be prevented by static typechecking, but can occur
     /// due to e.g. a corrupted object file.
     InvalidType,
+    /// Tried to get the integer address of a label, but the label has not yet
+    /// been resolved and its address is not yet known.
+    LabelAddressUnresolved,
 }
 
 impl ExprUnOpEvalError {
@@ -37,8 +37,11 @@ impl ExprUnOpEvalError {
         arg_span: SrcSpan,
     ) -> ExprEvalError {
         match self {
-            Self::AddrOfLabelUnresolved => {
-                ExprEvalError::AddrOfLabelUnresolved { op_span, arg_span }
+            Self::LabelAddressUnresolved => {
+                ExprEvalError::LabelAddressUnresolved {
+                    op_span,
+                    label_span: arg_span,
+                }
             }
             Self::InvalidType => ExprEvalError::InvalidType { span: arg_span },
         }
@@ -94,14 +97,11 @@ impl ExprUnOp {
     ) -> Result<ExprValue, ExprUnOpEvalError> {
         match self {
             Self::AddrOf => match arg {
-                ExprValue::Label(ExprLabel::AddrAbsolute {
-                    address, ..
-                })
-                | ExprValue::Label(ExprLabel::ChunkAbsolute {
-                    address, ..
-                }) => Ok(ExprValue::Integer(address)),
-                ExprValue::Label(_) => {
-                    Err(ExprUnOpEvalError::AddrOfLabelUnresolved)
+                ExprValue::Label(label) => {
+                    match label.into_absolute_address() {
+                        Some(address) => Ok(ExprValue::Integer(address)),
+                        None => Err(ExprUnOpEvalError::LabelAddressUnresolved),
+                    }
                 }
                 _ => Err(ExprUnOpEvalError::InvalidType),
             },

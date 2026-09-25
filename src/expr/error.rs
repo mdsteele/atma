@@ -456,14 +456,6 @@ impl ExprTypeError {
 /// An error encountered while evaluating an expression.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExprEvalError {
-    /// Tried to get the address of a label, but the label has not yet been
-    /// resolved and its address is not yet known.
-    AddrOfLabelUnresolved {
-        /// The source code span for the address-of operator.
-        op_span: SrcSpan,
-        /// The source code span for the argument of the address-of operation.
-        arg_span: SrcSpan,
-    },
     /// Tried to bit shift an integer left/right by the given number of bits,
     /// but the shift amount was negative.
     BitShiftByNegative {
@@ -511,6 +503,15 @@ pub enum ExprEvalError {
     InvalidType {
         /// The source code span for the value expression.
         span: SrcSpan,
+    },
+    /// Tried to get and/or operate on the address of a label, but the label
+    /// has not yet been resolved and its address is not yet known.
+    LabelAddressUnresolved {
+        /// The source code span for the operator that required the label's
+        /// address.
+        op_span: SrcSpan,
+        /// The source code span for the unresolved label expression.
+        label_span: SrcSpan,
     },
     /// Tried to index into a list, but the index was out of bounds.
     ListIndexOutOfBounds {
@@ -578,7 +579,7 @@ impl ExprEvalError {
     fn is_inevitable(&self) -> bool {
         !matches!(
             self,
-            Self::AddrOfLabelUnresolved { .. }
+            Self::LabelAddressUnresolved { .. }
                 | Self::SubtractLabelsUnresolved { .. }
         )
     }
@@ -587,12 +588,6 @@ impl ExprEvalError {
     /// source file containing the expression.
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
-            Self::AddrOfLabelUnresolved { op_span, arg_span } => {
-                let message = "couldn't take address of unresolved label";
-                let label = "the address of this label is not yet known";
-                SourceError::new(SrcLoc::new(path, op_span), message)
-                    .with_label(SrcLoc::new(path, arg_span), label)
-            }
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
                 let message = "shift distance cannot be negative";
                 let label =
@@ -622,6 +617,12 @@ impl ExprEvalError {
             }
             Self::FuncEvalError { arg_span, error } => {
                 error.to_source_error(SrcLoc::new(path, arg_span))
+            }
+            Self::LabelAddressUnresolved { op_span, label_span } => {
+                let message = "couldn't get address of unresolved label";
+                let label = "the address of this label is not yet known";
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, label_span), label)
             }
             Self::ModByZero { rhs_span } => {
                 let message = "modulus cannot be zero";

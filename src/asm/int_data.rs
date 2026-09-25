@@ -2,7 +2,7 @@ use super::env::AsmTypeEnv;
 use super::error::{AsmError, AsmResult};
 use crate::addr::Endianness;
 use crate::error::{Errs, SrcSpan};
-use crate::expr::{ExprLabel, ExprType, ExprUnOp};
+use crate::expr::{ExprType, ExprUnOp};
 use crate::obj::{ObjExpr, ObjExprOp, ObjPatchData, ObjPatchIntType};
 use crate::parse::{AsmIntDataAst, AsmIntTypeAst, ExprAst};
 use num_bigint::BigInt;
@@ -21,15 +21,11 @@ pub(super) fn assemble_int_data(
     let int_data_value = match errs.with(env.typecheck_expression(expr_ast)) {
         (_, ExprType::Undefined, _) => IntDataValue::default(),
         (expr, ExprType::Label, Ok(static_value)) => {
-            match static_value.unwrap_label() {
-                ExprLabel::AddrAbsolute { address, .. }
-                | ExprLabel::ChunkAbsolute { address, .. } => {
-                    errs.with(IntDataValue::integer_static(
-                        env, directive, int_type, expr_span, address,
-                    ))
-                }
-                ExprLabel::ChunkRelative { .. }
-                | ExprLabel::SymbolRelative { .. } => {
+            match static_value.unwrap_label().into_absolute_address() {
+                Some(address) => errs.with(IntDataValue::integer_static(
+                    env, directive, int_type, expr_span, address,
+                )),
+                None => {
                     IntDataValue::label_patch(env, int_type, expr_span, expr)
                 }
             }

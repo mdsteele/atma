@@ -1,6 +1,6 @@
 use super::error::{ExprEvalError, ExprTypeError, ExprTypeResult};
 use crate::error::{Errs, SrcSpan};
-use crate::expr::{ExprType, ExprValue, SubtractLabelsError};
+use crate::expr::{ExprLabel, ExprType, ExprValue, SubtractLabelsError};
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use crate::parse::BinOpAst;
 use num_bigint::{BigInt, BigUint, Sign};
@@ -52,7 +52,10 @@ pub(crate) enum ExprBinOpEvalError {
     ///
     /// This should normally be prevented by static typechecking, but can occur
     /// due to e.g. a corrupted object file.
-    InvalidType,
+    InvalidType(BinOpSide),
+    /// Tried to perform an operation on the integer address of a label, but
+    /// the label has not yet been resolved and its address is not yet known.
+    LabelAddressUnresolved(BinOpSide),
     /// Tried to modulo an integer, but the modulus was zero.
     ModByZero,
     /// Tried to exponentiate an integer with the given exponent, but the
@@ -62,7 +65,7 @@ pub(crate) enum ExprBinOpEvalError {
     /// given two different address spaces.
     SubtractLabelsInDifferentAddrspaces(Rc<str>, Rc<str>),
     /// Tried to subtract one label from another, but the labels have not yet
-    /// been resolved and the delta is not yet known.
+    /// been resolved relative to each other, and the delta is not yet known.
     SubtractLabelsUnresolved,
 }
 
@@ -85,9 +88,15 @@ impl ExprBinOpEvalError {
                 ExprEvalError::ByteSelectByNegative { rhs_span, rhs_value }
             }
             Self::DivideByZero => ExprEvalError::DivideByZero { rhs_span },
-            Self::InvalidType => ExprEvalError::InvalidType {
-                span: lhs_span.merged_with(rhs_span),
+            Self::InvalidType(side) => ExprEvalError::InvalidType {
+                span: side.span(lhs_span, rhs_span),
             },
+            Self::LabelAddressUnresolved(side) => {
+                ExprEvalError::LabelAddressUnresolved {
+                    op_span,
+                    label_span: side.span(lhs_span, rhs_span),
+                }
+            }
             Self::ModByZero => ExprEvalError::ModByZero { rhs_span },
             Self::PowNegativeExponent(rhs_value) => {
                 ExprEvalError::PowNegativeExponent { rhs_span, rhs_value }
@@ -120,6 +129,25 @@ impl From<SubtractLabelsError> for ExprBinOpEvalError {
                 Self::SubtractLabelsInDifferentAddrspaces(lhs_space, rhs_space)
             }
             SubtractLabelsError::Unresolved => Self::SubtractLabelsUnresolved,
+        }
+    }
+}
+
+//===========================================================================//
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BinOpSide {
+    Lhs,
+    Rhs,
+    Both,
+}
+
+impl BinOpSide {
+    fn span(self, lhs_span: SrcSpan, rhs_span: SrcSpan) -> SrcSpan {
+        match self {
+            Self::Lhs => lhs_span,
+            Self::Rhs => rhs_span,
+            Self::Both => lhs_span.merged_with(rhs_span),
         }
     }
 }
@@ -189,8 +217,10 @@ impl ExprBinOp {
             (BinOpAst::BitXor, ExprType::Integer, ExprType::Integer) => {
                 Ok((Self::BitXor, ExprType::Integer))
             }
-            // TODO: support byte selection between labels and integers
             (BinOpAst::Byte, ExprType::Integer, ExprType::Integer) => {
+                Ok((Self::Byte, ExprType::Integer))
+            }
+            (BinOpAst::Byte, ExprType::Label, ExprType::Integer) => {
                 Ok((Self::Byte, ExprType::Integer))
             }
             (BinOpAst::CmpEq, t1, t2)
@@ -295,7 +325,7 @@ impl ExprBinOp {
                 | (ExprValue::Label(label), ExprValue::Integer(int)) => {
                     Ok(ExprValue::Label(label + int))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::BitAnd => match (lhs, rhs) {
                 (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
@@ -304,7 +334,7 @@ impl ExprBinOp {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs & rhs))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::BitOr => match (lhs, rhs) {
                 (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
@@ -313,7 +343,7 @@ impl ExprBinOp {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs | rhs))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::BitXor => match (lhs, rhs) {
                 (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
@@ -322,27 +352,9 @@ impl ExprBinOp {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs ^ rhs))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
-            Self::Byte => match (lhs, rhs) {
-                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
-                    if let Sign::Minus = rhs.sign() {
-                        Err(ExprBinOpEvalError::ByteSelectByNegative(rhs))
-                    } else {
-                        let index = rhs.magnitude();
-                        let bytes = lhs.to_signed_bytes_le();
-                        let byte = if *index < BigUint::from(bytes.len()) {
-                            bytes[usize::try_from(index).unwrap()]
-                        } else if let Sign::Minus = lhs.sign() {
-                            0xffu8
-                        } else {
-                            0x00u8
-                        };
-                        Ok(ExprValue::Integer(BigInt::from(byte)))
-                    }
-                }
-                _ => Err(ExprBinOpEvalError::InvalidType),
-            },
+            Self::Byte => byte_select_value(lhs, rhs),
             Self::CmpEq => Ok(ExprValue::Boolean(
                 compare_values(&lhs, &rhs)? == Ordering::Equal,
             )),
@@ -368,7 +380,7 @@ impl ExprBinOp {
                 (ExprValue::String(lhs), ExprValue::String(rhs)) => {
                     Ok(ExprValue::String(Rc::from([lhs, rhs].concat())))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Div => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
@@ -378,7 +390,7 @@ impl ExprBinOp {
                         Ok(ExprValue::Integer(lhs.div_euclid(&rhs)))
                     }
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Mod => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
@@ -388,13 +400,13 @@ impl ExprBinOp {
                         Ok(ExprValue::Integer(lhs.rem_euclid(&rhs)))
                     }
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Mul => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs * rhs))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Pow => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
@@ -404,21 +416,21 @@ impl ExprBinOp {
                         Ok(ExprValue::Integer(lhs.pow(rhs.magnitude())))
                     }
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Shl => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     let shift = Self::get_bit_shift_amount(rhs)?;
                     Ok(ExprValue::Integer(lhs << shift))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Shr => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     let shift = Self::get_bit_shift_amount(rhs)?;
                     Ok(ExprValue::Integer(lhs >> shift))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Sub => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
@@ -430,7 +442,7 @@ impl ExprBinOp {
                 (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
                     Ok(ExprValue::Integer(lhs.try_subtract(&rhs)?))
                 }
-                _ => Err(ExprBinOpEvalError::InvalidType),
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
         }
     }
@@ -476,8 +488,8 @@ fn is_ordered_type(expr_type: &ExprType) -> bool {
 ///
 /// This will return an error if the values are of incompatible types, or if
 /// they are of a non-ordered type (i.e. one for which `is_ordered_type`
-/// returns false), or if they are labels in different address spaces, or they
-/// are unresolved labels that cannot be compared yet.
+/// returns false), or if they are labels in different address spaces, or if
+/// they are unresolved labels that cannot be compared yet.
 fn compare_values(
     lhs_value: &ExprValue,
     rhs_value: &ExprValue,
@@ -504,7 +516,7 @@ fn compare_values(
         (ExprValue::String(lhs), ExprValue::String(rhs)) => Ok(lhs.cmp(rhs)),
         (ExprValue::Tuple(lhs_items), ExprValue::Tuple(rhs_items)) => {
             if lhs_items.len() != rhs_items.len() {
-                return Err(ExprBinOpEvalError::InvalidType);
+                return Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both));
             }
             for (lhs, rhs) in lhs_items.iter().zip(rhs_items.iter()) {
                 match compare_values(lhs, rhs)? {
@@ -514,7 +526,7 @@ fn compare_values(
             }
             Ok(Ordering::Equal)
         }
-        _ => Err(ExprBinOpEvalError::InvalidType),
+        _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
     }
 }
 
@@ -576,6 +588,47 @@ impl BinaryIo for ExprBinOp {
         };
         tag.write_to(encoder)
     }
+}
+
+//===========================================================================//
+
+fn byte_select_bigint(lhs: &BigInt, rhs: &BigUint) -> u8 {
+    let bytes = lhs.to_signed_bytes_le();
+    if *rhs < BigUint::from(bytes.len()) {
+        bytes[usize::try_from(rhs).unwrap()]
+    } else if let Sign::Minus = lhs.sign() {
+        0xffu8
+    } else {
+        0x00u8
+    }
+}
+
+fn byte_select_value(
+    lhs: ExprValue,
+    rhs: ExprValue,
+) -> Result<ExprValue, ExprBinOpEvalError> {
+    let ExprValue::Integer(rhs) = rhs else {
+        return Err(ExprBinOpEvalError::InvalidType(BinOpSide::Rhs));
+    };
+    let lhs: BigInt = match lhs {
+        ExprValue::Integer(bigint) => bigint,
+        ExprValue::Label(label) => label_address(BinOpSide::Lhs, label)?,
+        _ => return Err(ExprBinOpEvalError::InvalidType(BinOpSide::Lhs)),
+    };
+    if let Sign::Minus = rhs.sign() {
+        return Err(ExprBinOpEvalError::ByteSelectByNegative(rhs));
+    }
+    let byte = byte_select_bigint(&lhs, rhs.magnitude());
+    Ok(ExprValue::Integer(BigInt::from(byte)))
+}
+
+fn label_address(
+    side: BinOpSide,
+    label: ExprLabel,
+) -> Result<BigInt, ExprBinOpEvalError> {
+    label
+        .into_absolute_address()
+        .ok_or(ExprBinOpEvalError::LabelAddressUnresolved(side))
 }
 
 //===========================================================================//
