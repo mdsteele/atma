@@ -4,8 +4,8 @@ use crate::lex::{Token, TokenValue};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmRelAddrAst, AsmStmtAst, CompoundIdAst, ExprAst,
-    ExprAstNode, IdentifierAst, IdentifierKind, ParseResult,
+    AsmMacroArgAst, AsmRelAddrAst, AsmRepeatAst, AsmStmtAst, CompoundIdAst,
+    ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, ParseResult,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -177,6 +177,19 @@ impl<'a> MacroBuilder<'a> {
             AsmStmtAst::IntData(int_data) => {
                 errs.also(self.scan_expressions(&int_data.expressions));
             }
+            AsmStmtAst::Invoke(invoke) => {
+                errs.also(
+                    self.scan_identifier(
+                        &invoke.id,
+                        PlaceholderKind::Identifier,
+                    ),
+                );
+                for arg in &invoke.args {
+                    for token in &arg.tokens {
+                        errs.also(self.scan_token(token));
+                    }
+                }
+            }
             AsmStmtAst::Label(label) => {
                 errs.also(self.scan_identifier(
                     &label.identifier,
@@ -186,6 +199,15 @@ impl<'a> MacroBuilder<'a> {
             AsmStmtAst::RelAddr(rel_addr) => {
                 errs.also(self.scan_expression(&rel_addr.dest_expr));
                 errs.also(self.scan_expression(&rel_addr.base_expr));
+            }
+            AsmStmtAst::Repeat(repeat) => {
+                if let Some(id) = &repeat.id {
+                    errs.also(
+                        self.scan_identifier(id, PlaceholderKind::Identifier),
+                    );
+                }
+                errs.also(self.scan_expression(&repeat.expression));
+                errs.also(self.scan_statements(&repeat.body));
             }
             other => todo!("scan_statement {other:?}"), // TODO
         }
@@ -264,6 +286,17 @@ impl<'a> MacroBuilder<'a> {
                 identifier.span,
                 &identifier.name,
                 requirement,
+            ),
+            _ => Ok(()),
+        }
+    }
+
+    fn scan_token(&mut self, token: &Token) -> AsmResult<()> {
+        match &token.value {
+            TokenValue::Placeholder(name) => self.unify_placeholder(
+                token.span,
+                name,
+                PlaceholderKind::default(),
             ),
             _ => Ok(()),
         }
@@ -512,32 +545,39 @@ enum MacroArgument<'a> {
 
 //===========================================================================//
 
-enum MacroSubstitution {
-    Expression(ExprAst),
-    Identifier(IdentifierAst),
+enum MacroSubstitution<'a> {
+    Expression(&'a [Token], ExprAst),
+    Identifier(&'a [Token], IdentifierAst),
 }
 
-impl MacroSubstitution {
+impl<'a> MacroSubstitution<'a> {
     fn parse_tokens(
         kind: PlaceholderKind,
-        tokens: &[Token],
-    ) -> ParseResult<MacroSubstitution> {
+        tokens: &'a [Token],
+    ) -> ParseResult<Self> {
         match kind {
             PlaceholderKind::Expression => {
                 let expr = ExprAst::parse(tokens)?;
-                Ok(MacroSubstitution::Expression(expr))
+                Ok(MacroSubstitution::Expression(tokens, expr))
             }
             PlaceholderKind::Identifier => {
                 let id = IdentifierAst::parse(tokens)?;
-                Ok(MacroSubstitution::Identifier(id))
+                Ok(MacroSubstitution::Identifier(tokens, id))
             }
+        }
+    }
+
+    fn tokens(&self) -> &[Token] {
+        match self {
+            MacroSubstitution::Expression(tokens, _) => tokens,
+            MacroSubstitution::Identifier(tokens, _) => tokens,
         }
     }
 
     fn unwrap_expression(&self) -> ExprAst {
         match self {
-            MacroSubstitution::Expression(expr) => expr.clone(),
-            MacroSubstitution::Identifier(id) => ExprAst {
+            MacroSubstitution::Expression(_, expr) => expr.clone(),
+            MacroSubstitution::Identifier(_, id) => ExprAst {
                 span: id.span,
                 node: ExprAstNode::Identifier(CompoundIdAst {
                     ids: vec![id.clone()],
@@ -548,7 +588,7 @@ impl MacroSubstitution {
 
     fn unwrap_identifier(&self) -> IdentifierAst {
         match self {
-            MacroSubstitution::Identifier(id) => id.clone(),
+            MacroSubstitution::Identifier(_, id) => id.clone(),
             _ => panic!("unwrap_identifier"),
         }
     }
@@ -556,16 +596,16 @@ impl MacroSubstitution {
 
 //===========================================================================//
 
-struct MacroExpansion {
-    subs: HashMap<Rc<str>, MacroSubstitution>,
+struct MacroExpansion<'a> {
+    subs: HashMap<Rc<str>, MacroSubstitution<'a>>,
 }
 
-impl MacroExpansion {
+impl<'a> MacroExpansion<'a> {
     fn try_match(
         context: &Rc<ObjSrcContext>,
         params: &[MacroParameter],
-        args: &[AsmMacroArgAst],
-    ) -> MacroResult<MacroExpansion> {
+        args: &'a [AsmMacroArgAst],
+    ) -> MacroResult<Self> {
         if args.len() != params.len() {
             return Err(MacroError::FailedToMatchPattern);
         }
@@ -626,6 +666,10 @@ impl MacroExpansion {
                         .expand_expressions(&int_data.expressions),
                 })
             }
+            AsmStmtAst::Invoke(invoke) => AsmStmtAst::Invoke(AsmInvokeAst {
+                id: self.expand_identifier(&invoke.id),
+                args: self.expand_macro_args(&invoke.args),
+            }),
             AsmStmtAst::Label(label) => AsmStmtAst::Label(AsmLabelAst {
                 exported: label.exported,
                 identifier: self.expand_identifier(&label.identifier),
@@ -638,6 +682,11 @@ impl MacroExpansion {
                     base_expr: self.expand_expression(&rel_addr.base_expr),
                 })
             }
+            AsmStmtAst::Repeat(repeat) => AsmStmtAst::Repeat(AsmRepeatAst {
+                id: repeat.id.as_ref().map(|id| self.expand_identifier(id)),
+                expression: self.expand_expression(&repeat.expression),
+                body: self.expand_statements(&repeat.body),
+            }),
             other => todo!("macro expand {other:?}"), // TODO
         }
     }
@@ -717,6 +766,28 @@ impl MacroExpansion {
                 ),
             },
         }
+    }
+
+    fn expand_macro_args(
+        &self,
+        args: &[AsmMacroArgAst],
+    ) -> Vec<AsmMacroArgAst> {
+        args.iter().map(|arg| self.expand_macro_arg(arg)).collect()
+    }
+
+    fn expand_macro_arg(&self, arg: &AsmMacroArgAst) -> AsmMacroArgAst {
+        let mut tokens = Vec::<Token>::new();
+        for token in &arg.tokens {
+            match &token.value {
+                TokenValue::Placeholder(name)
+                    if let Some(sub) = self.subs.get(name) =>
+                {
+                    tokens.extend(sub.tokens().iter().cloned());
+                }
+                _ => tokens.push(token.clone()),
+            }
+        }
+        AsmMacroArgAst { span: arg.span, tokens }
     }
 
     fn expand_compound_id(&self, compound: &CompoundIdAst) -> CompoundIdAst {
