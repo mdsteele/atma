@@ -1,7 +1,7 @@
 use super::value::ExprValue;
 use crate::error::{SourceError, SrcLoc};
 use crate::obj::{BinaryIo, Decoder, Encoder};
-use num_bigint::BigInt;
+use num_bigint::{BigInt, BigUint};
 use num_integer::Integer;
 use num_traits::Euclid;
 use std::fmt;
@@ -17,7 +17,10 @@ const TAG_DIVU: u8 = 3;
 const TAG_DIVX: u8 = 4;
 const TAG_DIVZ: u8 = 5;
 const TAG_ERROR: u8 = 6;
-const TAG_SQRTZ: u8 = 7;
+const TAG_LOG2C: u8 = 7;
+const TAG_LOG2F: u8 = 8;
+const TAG_LOG2X: u8 = 9;
+const TAG_SQRTZ: u8 = 10;
 
 //===========================================================================//
 
@@ -47,9 +50,15 @@ pub enum ExprFunc {
     Divz,
     /// Takes a string message and fails evaluation with that message.
     Error,
-    // TODO: log2c (ceiling of base-2 logarithm)
-    // TODO: log2f (floor of base-2 logarithm)
-    // TODO: log2x (exact base-2 logarithm)
+    /// Ceiling of base-2 logarithm; takes an integer and returns its base-2
+    /// logarithm, rounding towards positive infinity.
+    Log2c,
+    /// Floor of base-2 logarithm; takes an integer and returns its base-2
+    /// logarithm, rounding towards negative infinity.
+    Log2f,
+    /// Exact base-2 logarithm; takes an integer and returns its base-2
+    /// logarithm, failing evaluation if the integer isn't a power of 2.
+    Log2x,
     // TODO: modc (ceiling modulo)
     // TODO: modf (floor modulo)
     // TODO: modu (Euclidian modulo)
@@ -95,6 +104,23 @@ impl ExprFunc {
                 Ok(ExprValue::Integer(lhs / rhs))
             }
             Self::Error => Err(ExprFuncEvalError::ErrorMessage(get_str(arg)?)),
+            Self::Log2c => {
+                let arg = get_log_arg(arg)?;
+                let log = (arg - BigUint::ONE).bits();
+                Ok(ExprValue::Integer(BigInt::from(log)))
+            }
+            Self::Log2f => {
+                let arg = get_log_arg(arg)?;
+                Ok(ExprValue::Integer(BigInt::from(arg.bits() - 1)))
+            }
+            Self::Log2x => {
+                let arg = get_log_arg(arg)?;
+                if arg.count_ones() != 1 {
+                    Err(ExprFuncEvalError::InexactLogarithm(2, arg))
+                } else {
+                    Ok(ExprValue::Integer(BigInt::from(arg.bits() - 1)))
+                }
+            }
             Self::Sqrtz => {
                 let arg = get_int(arg)?;
                 if arg >= BigInt::ZERO {
@@ -116,6 +142,9 @@ impl ExprFunc {
             Self::Divx => "%divx",
             Self::Divz => "%divz",
             Self::Error => "%error",
+            Self::Log2c => "%log2c",
+            Self::Log2f => "%log2f",
+            Self::Log2x => "%log2x",
             Self::Sqrtz => "%sqrtz",
         }
     }
@@ -133,6 +162,9 @@ impl BinaryIo for ExprFunc {
             TAG_DIVX => Ok(ExprFunc::Divx),
             TAG_DIVZ => Ok(ExprFunc::Divz),
             TAG_ERROR => Ok(ExprFunc::Error),
+            TAG_LOG2C => Ok(ExprFunc::Log2c),
+            TAG_LOG2F => Ok(ExprFunc::Log2f),
+            TAG_LOG2X => Ok(ExprFunc::Log2x),
             TAG_SQRTZ => Ok(ExprFunc::Sqrtz),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -153,6 +185,9 @@ impl BinaryIo for ExprFunc {
             Self::Divx => TAG_DIVX,
             Self::Divz => TAG_DIVZ,
             Self::Error => TAG_ERROR,
+            Self::Log2c => TAG_LOG2C,
+            Self::Log2f => TAG_LOG2F,
+            Self::Log2x => TAG_LOG2X,
             Self::Sqrtz => TAG_SQRTZ,
         };
         tag.write_to(encoder)
@@ -177,12 +212,17 @@ pub enum ExprFuncEvalError {
     /// Requested an exact division result, but the dividend is not a multiple
     /// of the divisor.
     InexactDivision(BigInt, BigInt),
+    /// Requested an exact logarithm result, but the argument is not a power of
+    /// the base.
+    InexactLogarithm(u8, BigUint),
     /// Received a value of the wrong type.
     ///
     /// This shouldn't normally happen unless an object file has been
     /// corrupted, since ATMA normally performs static typechecking before
     /// evaluation.
     InvalidArgumentType(ExprValue),
+    /// Tried to calculate the logarithm of a non-positive number.
+    LogarithmOfNonPositive(BigInt),
     /// Tried to calculate the square root of a negative number.
     SquareRootOfNegative(BigInt),
 }
@@ -206,9 +246,23 @@ impl ExprFuncEvalError {
                 // TODO: add hint about other division functions
                 SourceError::new(arg_loc, message).with_primary_label("")
             }
+            Self::InexactLogarithm(base, argument) => {
+                let message = format!(
+                    "logarithm is inexact: {argument} is not a power of \
+                     {base}"
+                );
+                // TODO: add hint about other logarithm functions
+                SourceError::new(arg_loc, message).with_primary_label("")
+            }
             Self::InvalidArgumentType(_arg_value) => {
                 SourceError::new(arg_loc, "invalid argument type")
                     .with_primary_label("")
+            }
+            Self::LogarithmOfNonPositive(arg_value) => {
+                let message = "logarithm argument must be greater than zero";
+                let label =
+                    format!("the value of this expression is {arg_value}");
+                SourceError::new(arg_loc, message).with_primary_label(label)
             }
             Self::SquareRootOfNegative(arg_value) => {
                 let message = "square root argument must be non-negative";
@@ -227,10 +281,9 @@ fn get_div_pair(
 ) -> Result<(BigInt, BigInt), ExprFuncEvalError> {
     let (lhs, rhs) = get_int_pair(input)?;
     if rhs == BigInt::ZERO {
-        Err(ExprFuncEvalError::DivideByZero)
-    } else {
-        Ok((lhs, rhs))
+        return Err(ExprFuncEvalError::DivideByZero);
     }
+    Ok((lhs, rhs))
 }
 
 fn get_int(input: ExprValue) -> Result<BigInt, ExprFuncEvalError> {
@@ -259,6 +312,14 @@ fn get_int_pair(
     }
 }
 
+fn get_log_arg(input: ExprValue) -> Result<BigUint, ExprFuncEvalError> {
+    let arg = get_int(input)?;
+    if arg <= BigInt::ZERO {
+        return Err(ExprFuncEvalError::LogarithmOfNonPositive(arg));
+    }
+    Ok(arg.into_parts().1)
+}
+
 fn get_str(input: ExprValue) -> Result<Rc<str>, ExprFuncEvalError> {
     match input {
         ExprValue::String(string) => Ok(string),
@@ -273,7 +334,7 @@ mod tests {
     use super::{ExprFunc, ExprFuncEvalError};
     use crate::expr::ExprValue;
     use crate::obj::assert_round_trips;
-    use num_bigint::BigInt;
+    use num_bigint::{BigInt, BigUint};
     use std::rc::Rc;
 
     fn int_value(value: i32) -> ExprValue {
@@ -289,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    fn call_cbrtz() {
+    fn call_cbrtz_func() {
         let func = ExprFunc::Cbrtz;
         assert_eq!(func.call(int_value(0)), Ok(int_value(0)));
         assert_eq!(func.call(int_value(63)), Ok(int_value(3)));
@@ -305,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn call_divc() {
+    fn call_divc_func() {
         let func = ExprFunc::Divc;
         assert_eq!(func.call(int_pair(5, 3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(6, 3)), Ok(int_value(2)));
@@ -319,14 +380,10 @@ mod tests {
         assert_eq!(func.call(int_pair(-5, -3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-6, -3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-7, -3)), Ok(int_value(3)));
-        assert_eq!(
-            func.call(int_value(3)),
-            Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
-        );
     }
 
     #[test]
-    fn call_divf() {
+    fn call_divf_func() {
         let func = ExprFunc::Divf;
         assert_eq!(func.call(int_pair(5, 3)), Ok(int_value(1)));
         assert_eq!(func.call(int_pair(6, 3)), Ok(int_value(2)));
@@ -340,14 +397,10 @@ mod tests {
         assert_eq!(func.call(int_pair(-5, -3)), Ok(int_value(1)));
         assert_eq!(func.call(int_pair(-6, -3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-7, -3)), Ok(int_value(2)));
-        assert_eq!(
-            func.call(int_value(3)),
-            Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
-        );
     }
 
     #[test]
-    fn call_divu() {
+    fn call_divu_func() {
         let func = ExprFunc::Divu;
         assert_eq!(func.call(int_pair(5, 3)), Ok(int_value(1)));
         assert_eq!(func.call(int_pair(6, 3)), Ok(int_value(2)));
@@ -361,14 +414,10 @@ mod tests {
         assert_eq!(func.call(int_pair(-5, -3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-6, -3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-7, -3)), Ok(int_value(3)));
-        assert_eq!(
-            func.call(int_value(3)),
-            Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
-        );
     }
 
     #[test]
-    fn call_divx() {
+    fn call_divx_func() {
         let func = ExprFunc::Divx;
         assert_eq!(func.call(int_pair(6, 3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-6, 3)), Ok(int_value(-2)));
@@ -381,14 +430,10 @@ mod tests {
                 BigInt::from(3)
             ))
         );
-        assert_eq!(
-            func.call(int_value(3)),
-            Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
-        );
     }
 
     #[test]
-    fn call_divz() {
+    fn call_divz_func() {
         let func = ExprFunc::Divz;
         assert_eq!(func.call(int_pair(5, 3)), Ok(int_value(1)));
         assert_eq!(func.call(int_pair(6, 3)), Ok(int_value(2)));
@@ -402,14 +447,30 @@ mod tests {
         assert_eq!(func.call(int_pair(-5, -3)), Ok(int_value(1)));
         assert_eq!(func.call(int_pair(-6, -3)), Ok(int_value(2)));
         assert_eq!(func.call(int_pair(-7, -3)), Ok(int_value(2)));
-        assert_eq!(
-            func.call(int_value(3)),
-            Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
-        );
     }
 
     #[test]
-    fn call_error() {
+    fn division_errors() {
+        for func in [
+            ExprFunc::Divc,
+            ExprFunc::Divf,
+            ExprFunc::Divu,
+            ExprFunc::Divx,
+            ExprFunc::Divz,
+        ] {
+            assert_eq!(
+                func.call(int_pair(37, 0)),
+                Err(ExprFuncEvalError::DivideByZero)
+            );
+            assert_eq!(
+                func.call(int_value(3)),
+                Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
+            );
+        }
+    }
+
+    #[test]
+    fn call_error_func() {
         let func = ExprFunc::Error;
         assert_eq!(
             func.call(str_value("foobar")),
@@ -422,7 +483,60 @@ mod tests {
     }
 
     #[test]
-    fn call_sqrtz() {
+    fn call_log2c_func() {
+        let func = ExprFunc::Log2c;
+        assert_eq!(func.call(int_value(1)), Ok(int_value(0)));
+        assert_eq!(func.call(int_value(2)), Ok(int_value(1)));
+        assert_eq!(func.call(int_value(3)), Ok(int_value(2)));
+        assert_eq!(func.call(int_value(4)), Ok(int_value(2)));
+        assert_eq!(func.call(int_value(5)), Ok(int_value(3)));
+    }
+
+    #[test]
+    fn call_log2f_func() {
+        let func = ExprFunc::Log2f;
+        assert_eq!(func.call(int_value(1)), Ok(int_value(0)));
+        assert_eq!(func.call(int_value(2)), Ok(int_value(1)));
+        assert_eq!(func.call(int_value(3)), Ok(int_value(1)));
+        assert_eq!(func.call(int_value(4)), Ok(int_value(2)));
+        assert_eq!(func.call(int_value(5)), Ok(int_value(2)));
+    }
+
+    #[test]
+    fn call_log2x_func() {
+        let func = ExprFunc::Log2x;
+        assert_eq!(func.call(int_value(1)), Ok(int_value(0)));
+        assert_eq!(func.call(int_value(2)), Ok(int_value(1)));
+        assert_eq!(func.call(int_value(4)), Ok(int_value(2)));
+        assert_eq!(func.call(int_value(0x400)), Ok(int_value(10)));
+        assert_eq!(
+            func.call(int_value(3)),
+            Err(ExprFuncEvalError::InexactLogarithm(2, BigUint::from(3u32)))
+        );
+    }
+
+    #[test]
+    fn logarithm_errors() {
+        for func in [ExprFunc::Log2c, ExprFunc::Log2f, ExprFunc::Log2x] {
+            assert_eq!(
+                func.call(int_value(0)),
+                Err(ExprFuncEvalError::LogarithmOfNonPositive(BigInt::ZERO))
+            );
+            assert_eq!(
+                func.call(int_value(-3)),
+                Err(ExprFuncEvalError::LogarithmOfNonPositive(BigInt::from(
+                    -3
+                )))
+            );
+            assert_eq!(
+                func.call(str_value("0")),
+                Err(ExprFuncEvalError::InvalidArgumentType(str_value("0")))
+            );
+        }
+    }
+
+    #[test]
+    fn call_sqrtz_func() {
         let func = ExprFunc::Sqrtz;
         assert_eq!(func.call(int_value(0)), Ok(int_value(0)));
         assert_eq!(func.call(int_value(24)), Ok(int_value(4)));
@@ -447,6 +561,9 @@ mod tests {
         assert_round_trips(ExprFunc::Divx);
         assert_round_trips(ExprFunc::Divz);
         assert_round_trips(ExprFunc::Error);
+        assert_round_trips(ExprFunc::Log2c);
+        assert_round_trips(ExprFunc::Log2f);
+        assert_round_trips(ExprFunc::Log2x);
         assert_round_trips(ExprFunc::Sqrtz);
     }
 }

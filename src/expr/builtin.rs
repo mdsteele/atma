@@ -10,7 +10,13 @@ pub(crate) fn make_global_builtin_values()
 
     // Add [int -> int] functions:
     let signature = Rc::new((ExprType::Integer, ExprType::Integer));
-    for func in [ExprFunc::Cbrtz, ExprFunc::Sqrtz] {
+    for func in [
+        ExprFunc::Cbrtz,
+        ExprFunc::Log2c,
+        ExprFunc::Log2f,
+        ExprFunc::Log2x,
+        ExprFunc::Sqrtz,
+    ] {
         add_builtin_function(func, signature.clone(), &mut builtins);
     }
 
