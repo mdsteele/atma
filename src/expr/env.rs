@@ -4,6 +4,7 @@ use super::template::Template;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::SrcSpan;
+use crate::parse::HereLabelKind;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -15,6 +16,7 @@ pub(crate) trait ExprEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
+        kind: HereLabelKind,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)>;
 
     fn typecheck_identifier(

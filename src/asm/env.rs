@@ -13,7 +13,7 @@ use crate::obj::{
 };
 use crate::parse::{
     AsmDataTypeAst, AsmLabelAst, AsmModuleAst, DeclarationKind, ExprAst,
-    IdentifierAst, IdentifierKind,
+    HereLabelKind, IdentifierAst, IdentifierKind,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -225,6 +225,9 @@ impl AsmTypeEnv {
     }
 
     fn begin_scope(&mut self, name: Rc<str>, anonymous: bool) {
+        if let Some(chunk) = self.chunk_stack.last_mut() {
+            chunk.begin_zone();
+        }
         let current_scope = self.current_scope();
         let mut decls = HashMap::<Rc<str>, AsmDecl>::new();
         if !anonymous {
@@ -264,6 +267,9 @@ impl AsmTypeEnv {
                 let prefixed_name = format!("{inner_name}::{decl_name}");
                 outer.decls.insert(Rc::from(prefixed_name), decl);
             }
+        }
+        if let Some(chunk) = self.chunk_stack.last_mut() {
+            chunk.end_zone();
         }
     }
 
@@ -419,10 +425,18 @@ impl ExprEnv for AsmTypeEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
+        kind: HereLabelKind,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         if let Some(chunk_env) = self.chunk_stack.last() {
             let chunk_index = chunk_env.chunk_index();
-            let offset = BigInt::from(chunk_env.total_size());
+            let offset = match kind {
+                HereLabelKind::StmtStart => {
+                    BigInt::from(chunk_env.total_size())
+                }
+                HereLabelKind::ZoneStart => {
+                    BigInt::from(chunk_env.current_zone().start_offset)
+                }
+            };
             let label = if let Some(start) = chunk_env.start_addr {
                 ExprLabel::ChunkAbsolute {
                     chunk_index,
@@ -435,7 +449,7 @@ impl ExprEnv for AsmTypeEnv {
             let op = ObjExprOp::Push(value.clone());
             Ok((op, Ok(value)))
         } else {
-            Err(Errs::one(ExprTypeError::RelativeLabelOutsideOfAnySection {
+            Err(Errs::one(ExprTypeError::HereLabelOutsideOfAnySection {
                 span,
             }))
         }
@@ -529,6 +543,7 @@ pub(super) struct ChunkEnv {
     padding: usize,
     patches: Vec<ObjPatch>,
     symbols: Vec<ObjSymbol>,
+    zone_stack: Vec<ZoneEnv>,
 }
 
 impl ChunkEnv {
@@ -545,6 +560,7 @@ impl ChunkEnv {
             padding: 0,
             patches: Vec::new(),
             symbols: Vec::new(),
+            zone_stack: vec![ZoneEnv::with_offset(Offset::ZERO)],
         }
     }
 
@@ -559,7 +575,7 @@ impl ChunkEnv {
     pub fn data_mut(&mut self) -> &mut Vec<u8> {
         if self.padding > 0 {
             let fill_byte = self.fill_byte.unwrap_or_else(|| {
-                self.add_patch(ObjPatch {
+                self.patches.push(ObjPatch {
                     // TODO: check for overflow
                     offset: Offset::try_from(self.data.len()).unwrap(),
                     data: ObjPatchData::Fill(self.padding),
@@ -583,16 +599,27 @@ impl ChunkEnv {
         // TODO: Error instead of crash if offset is too large.
         let offset = Offset::try_from(old_size).unwrap();
         self.data_mut().resize(old_size + data.num_bytes(), 0u8);
-        self.add_patch(ObjPatch { offset, data });
+        self.patches.push(ObjPatch { offset, data });
         Ok(())
-    }
-
-    fn add_patch(&mut self, patch: ObjPatch) {
-        self.patches.push(patch);
     }
 
     pub fn add_symbol(&mut self, symbol: ObjSymbol) {
         self.symbols.push(symbol);
+    }
+
+    fn current_zone(&self) -> &ZoneEnv {
+        self.zone_stack.last().unwrap()
+    }
+
+    fn begin_zone(&mut self) {
+        // TODO: handle overflow
+        let offset = Offset::try_from(self.total_size()).unwrap();
+        self.zone_stack.push(ZoneEnv::with_offset(offset));
+    }
+
+    fn end_zone(&mut self) {
+        debug_assert!(self.zone_stack.len() >= 2);
+        self.zone_stack.pop();
     }
 
     pub fn finish(self) -> FinishedChunk {
@@ -601,6 +628,25 @@ impl ChunkEnv {
             patches: Box::from(self.patches),
             symbols: Box::from(self.symbols),
         }
+    }
+}
+
+//===========================================================================//
+
+/// A "zone" refers either to a chunk, or to a scope within a chunk.  Nesting
+/// one chunk syntactically inside another does not create a new scope, but it
+/// does create a new zone.  Zones are what e.g. `$^` here-labels refer to.
+struct ZoneEnv {
+    /// The offset, relative to the start of the current chunk, for the start
+    /// of this zone.
+    start_offset: Offset,
+}
+
+impl ZoneEnv {
+    /// Returns a new `ZoneEnv` with the given start offset relative to the
+    /// start of the current chunk.
+    fn with_offset(start_offset: Offset) -> Self {
+        Self { start_offset }
     }
 }
 

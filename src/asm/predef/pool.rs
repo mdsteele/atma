@@ -3,8 +3,8 @@ use crate::expr::ExprFunc;
 use crate::lex::{Token, TokenValue};
 use crate::parse::{
     AsmIntDataAst, AsmIntTypeAst, AsmRelAddrAst, AsmRelTypeAst, AsmStmtAst,
-    BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, IdentifierAst,
-    IdentifierKind,
+    BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, HereLabelKind,
+    IdentifierAst, IdentifierKind,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -76,8 +76,11 @@ impl RcPool {
         self.apply_expr(ExprFunc::Error, expr)
     }
 
-    pub fn here_label_expr(&mut self) -> ExprAst {
-        ExprAst { span: SrcSpan::INTERNAL, node: ExprAstNode::HereLabel }
+    pub fn stmt_start_label_expr(&mut self) -> ExprAst {
+        ExprAst {
+            span: SrcSpan::INTERNAL,
+            node: ExprAstNode::HereLabel(HereLabelKind::StmtStart),
+        }
     }
 
     pub fn high_page_addr(&mut self, placeholder: &'static str) -> AsmStmtAst {
@@ -133,7 +136,7 @@ impl RcPool {
         let dest_expr = self.placeholder_expr(placeholder);
         let base_expr = {
             // TODO: Use $> here instead of ($< + 1)
-            let lhs = self.here_label_expr();
+            let lhs = self.stmt_start_label_expr();
             let rhs = self.int_literal_expr(1);
             self.binop_expr(BinOpAst::Add, lhs, rhs)
         };
@@ -147,7 +150,7 @@ impl RcPool {
         let dest_expr = self.placeholder_expr(placeholder);
         let base_expr = {
             // TODO: Use $> here instead of ($< + 2)
-            let lhs = self.here_label_expr();
+            let lhs = self.stmt_start_label_expr();
             let rhs = self.int_literal_expr(2);
             self.binop_expr(BinOpAst::Add, lhs, rhs)
         };

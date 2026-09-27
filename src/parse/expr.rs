@@ -26,6 +26,20 @@ const BIND_EXPONENTIATE: u16 = 11;
 
 //===========================================================================//
 
+/// A kind of "here" label.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HereLabelKind {
+    // TODO: StmtEnd (`$>`)
+    /// Refers to the start of the current statement.
+    StmtStart,
+    // TODO: ZoneEnd (`$v`)
+    /// Refers to the start of the current zone (that is, the start of the
+    /// current scope, or the start of the current chunk, whichever is closer).
+    ZoneStart,
+}
+
+//===========================================================================//
+
 /// A unary operation on an expression in an abstract syntax tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnOpAst {
@@ -192,9 +206,16 @@ impl ExprAst {
                     node: ExprAstNode::ListLiteral(asts),
                 },
             );
-            let here_label = symbol(TokenValue::DollarLeft).map(|token| {
-                ExprAst { span: token.span, node: ExprAstNode::HereLabel }
-            });
+            let here_label = chumsky::prelude::choice((
+                symbol(TokenValue::DollarUp).map(|token| ExprAst {
+                    span: token.span,
+                    node: ExprAstNode::HereLabel(HereLabelKind::ZoneStart),
+                }),
+                symbol(TokenValue::DollarLeft).map(|token| ExprAst {
+                    span: token.span,
+                    node: ExprAstNode::HereLabel(HereLabelKind::StmtStart),
+                }),
+            ));
             let identifier = CompoundIdAst::parser().map(|compound| ExprAst {
                 span: {
                     let first = compound.ids.first().unwrap();
@@ -382,12 +403,12 @@ impl ExprAst {
                     |l, o, r, _| ExprAst::binop(BinOpAst::CmpNe, l, o, r),
                 ),
                 pratt::infix(
-                    pratt::left(BIND_LOGICAL_AND),
+                    pratt::right(BIND_LOGICAL_AND),
                     symbol(TokenValue::AndAnd),
                     |l, o, r, _| ExprAst::binop(BinOpAst::LogAnd, l, o, r),
                 ),
                 pratt::infix(
-                    pratt::left(BIND_LOGICAL_OR),
+                    pratt::right(BIND_LOGICAL_OR),
                     symbol(TokenValue::OrOr),
                     |l, o, r, _| ExprAst::binop(BinOpAst::LogOr, l, o, r),
                 ),
@@ -449,7 +470,7 @@ pub enum ExprAstNode {
     /// A ternary conditional.
     Conditional(Box<ExprAst>, Box<ExprAst>, Box<ExprAst>),
     /// A "here" label.
-    HereLabel,
+    HereLabel(HereLabelKind),
     /// An identifier.
     Identifier(CompoundIdAst),
     /// An indexing operation (e.g. into a list).

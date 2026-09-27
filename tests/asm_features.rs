@@ -91,9 +91,13 @@ fn static_here_address() {
     .SECTION "TEST", start=$10
         .u8 1
         .u8 $<
+    {
+        .u8 3
+        .u8 $^
+    }
     .END
     "#;
-    assert_eq!(static_data(assemble(source)), vec![0x01, 0x11]);
+    assert_eq!(static_data(assemble(source)), vec![0x01, 0x11, 0x03, 0x12]);
 }
 
 #[test]

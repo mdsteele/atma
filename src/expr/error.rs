@@ -166,19 +166,19 @@ pub enum ExprTypeError {
         /// The expression type of the other item in the list.
         other_item_type: ExprType,
     },
-    /// Found a relative label (e.g. `$<`) in a debugger script.
-    RelativeLabelInDebuggerScript {
-        /// The source code span for the relative label.
+    /// Found a "here" label (e.g. `$<`) in a debugger script.
+    HereLabelInDebuggerScript {
+        /// The source code span for the "here" label.
         span: SrcSpan,
     },
-    /// Found a relative label (e.g. `$<`) in a linker config.
-    RelativeLabelInLinkerConfig {
-        /// The source code span for the relative label.
+    /// Found a "here" label (e.g. `$<`) in a linker config.
+    HereLabelInLinkerConfig {
+        /// The source code span for the "here" label.
         span: SrcSpan,
     },
-    /// Found a relative label (e.g. `$<`) outside of any `.SECTION` directive.
-    RelativeLabelOutsideOfAnySection {
-        /// The source code span for the relative label.
+    /// Found a "here" label (e.g. `$<`) outside of any `.SECTION` directive.
+    HereLabelOutsideOfAnySection {
+        /// The source code span for the "here" label.
         span: SrcSpan,
     },
     /// Tried to use an identifier whose name is reserved under the current
@@ -394,19 +394,19 @@ impl ExprTypeError {
                     .with_label(SrcLoc::new(path, first_item_span), label1)
                     .with_primary_label(label2)
             }
-            Self::RelativeLabelInDebuggerScript { span } => {
+            Self::HereLabelInDebuggerScript { span } => {
                 let message =
-                    "Cannot use relative labels in a debugger script";
+                    "Cannot use \"here\" labels in a debugger script";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }
-            Self::RelativeLabelInLinkerConfig { span } => {
-                let message = "Cannot use relative labels in a linker config";
+            Self::HereLabelInLinkerConfig { span } => {
+                let message = "Cannot use \"here\" labels in a linker config";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }
-            Self::RelativeLabelOutsideOfAnySection { span } => {
-                let message = "Relative labels must be within a .SECTION";
+            Self::HereLabelOutsideOfAnySection { span } => {
+                let message = "\"here\" labels must be within a .SECTION";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label("")
             }

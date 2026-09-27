@@ -8,7 +8,9 @@ use super::template::Template;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::{Errs, SrcSpan};
-use crate::parse::{BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, UnOpAst};
+use crate::parse::{
+    BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst,
+};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -196,7 +198,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 ));
                 self.tasks.push(Task::Expr(*pred_ast));
             }
-            ExprAstNode::HereLabel => self.push_here_label(subexpr.span),
+            ExprAstNode::HereLabel(kind) => {
+                self.push_here_label(subexpr.span, kind)
+            }
             ExprAstNode::Identifier(compound) => {
                 self.push_identifier(subexpr.span, compound);
             }
@@ -437,11 +441,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         self.types.push((cond_type, cond_static));
     }
 
-    fn push_here_label(&mut self, span: SrcSpan) {
-        match self.errs.ok(self.env.typecheck_here_label(span)) {
-            Some((op, static_label)) => {
+    fn push_here_label(&mut self, span: SrcSpan, kind: HereLabelKind) {
+        match self.errs.ok(self.env.typecheck_here_label(span, kind)) {
+            Some((op, expr_static)) => {
                 self.ops.push(op);
-                self.types.push((ExprType::Label, static_label));
+                self.types.push((ExprType::Label, expr_static));
             }
             None => self.types.push(UNDEFINED),
         }

@@ -226,7 +226,7 @@ impl<'a> MacroBuilder<'a> {
         let mut errs = Errs::<AsmError>::new();
         match &expression.node {
             ExprAstNode::BoolLiteral(_)
-            | ExprAstNode::HereLabel
+            | ExprAstNode::HereLabel(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => {}
             ExprAstNode::Identifier(compound) => {
@@ -713,7 +713,7 @@ impl<'a> MacroExpansion<'a> {
                 ),
             },
             ExprAstNode::BoolLiteral(_)
-            | ExprAstNode::HereLabel
+            | ExprAstNode::HereLabel(_)
             | ExprAstNode::IntLiteral(_)
             | ExprAstNode::StrLiteral(_) => expression.clone(),
             ExprAstNode::Conditional(pred, lhs, rhs) => ExprAst {

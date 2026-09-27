@@ -381,7 +381,7 @@ fn link_relative_body(
     let dest_expr = pool.placeholder_expr(placeholder);
     let base_expr = {
         // TODO: Use $> here instead of ($< + 1)
-        let lhs = pool.here_label_expr();
+        let lhs = pool.stmt_start_label_expr();
         let rhs = pool.int_literal_expr(1);
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };

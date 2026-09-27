@@ -8,7 +8,7 @@ use crate::expr::{
     ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc};
-use crate::parse::{ExprAst, IdentifierAst, LinkConfigAst};
+use crate::parse::{ExprAst, HereLabelKind, IdentifierAst, LinkConfigAst};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -143,8 +143,9 @@ impl ExprEnv for ConfigTypeEnv {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
+        _kind: HereLabelKind,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
-        Err(Errs::one(ExprTypeError::RelativeLabelInLinkerConfig { span }))
+        Err(Errs::one(ExprTypeError::HereLabelInLinkerConfig { span }))
     }
 
     fn typecheck_identifier(

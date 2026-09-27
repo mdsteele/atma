@@ -7,7 +7,7 @@ use crate::expr::{
     make_global_builtin_values,
 };
 use crate::parse::AdsModuleAst;
-use crate::parse::{ExprAst, IdentifierAst};
+use crate::parse::{ExprAst, HereLabelKind, IdentifierAst};
 use crate::system::SimSystem;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -292,8 +292,9 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
     fn typecheck_here_label(
         &self,
         span: SrcSpan,
+        _kind: HereLabelKind,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
-        Err(Errs::one(ExprTypeError::RelativeLabelInDebuggerScript { span }))
+        Err(Errs::one(ExprTypeError::HereLabelInDebuggerScript { span }))
     }
 
     fn typecheck_identifier(
