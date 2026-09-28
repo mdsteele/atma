@@ -15,8 +15,8 @@ pub use asm::{
     AsmDefMacroAst, AsmEnumAst, AsmEnumFieldAst, AsmIntDataAst, AsmIntTypeAst,
     AsmInvokeAst, AsmLabelAst, AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst,
     AsmRelTypeAst, AsmRepeatAst, AsmReserveAst, AsmScopeAst, AsmSectionAst,
-    AsmSetAst, AsmStmtAst, AsmStructAst, AsmStructFieldAst, AsmUseAst,
-    AsmUtf8DataAst,
+    AsmSetAst, AsmStmtAst, AsmStrDataAst, AsmStrTypeAst, AsmStructAst,
+    AsmStructFieldAst, AsmUseAst,
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst};

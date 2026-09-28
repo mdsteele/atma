@@ -72,12 +72,12 @@ pub enum AsmStmtAst {
     Section(AsmSectionAst),
     /// A `.SET` directive.
     Set(AsmSetAst),
+    /// A string data directive (e.g. `.UTF8` or `.ASCII`).
+    StrData(AsmStrDataAst),
     /// A `.STRUCT` definition directive.
     Struct(AsmStructAst),
     /// A `.USE` directive.
     Use(AsmUseAst),
-    /// A `.UTF8` directive.
-    Utf8Data(AsmUtf8DataAst),
 }
 
 impl AsmStmtAst {
@@ -191,9 +191,9 @@ impl AsmStmtAst {
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
                 section_dir,
                 AsmSetAst::parser().map(AsmStmtAst::Set),
+                AsmStrDataAst::parser().map(AsmStmtAst::StrData),
                 AsmStructAst::parser().map(AsmStmtAst::Struct),
                 AsmUseAst::parser().map(AsmStmtAst::Use),
-                AsmUtf8DataAst::parser().map(AsmStmtAst::Utf8Data),
             ))
         })
     }
@@ -814,6 +814,73 @@ impl AsmSetAst {
 
 //===========================================================================//
 
+/// The abstract syntax tree for a string data directive in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmStrDataAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The type of string data.
+    pub str_type: AsmStrTypeAst,
+    /// The expressions for the string data to insert.
+    pub expressions: Vec<ExprAst>,
+}
+
+impl AsmStrDataAst {
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        AsmStrTypeAst::parser()
+            .then(
+                ExprAst::parser()
+                    .separated_by(symbol(TokenValue::Comma))
+                    .at_least(1)
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(linebreak())
+            .map(|((directive_span, str_type), expressions)| Self {
+                directive_span,
+                str_type,
+                expressions,
+            })
+    }
+}
+
+//===========================================================================//
+
+/// Types of string data directives in assembly code.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AsmStrTypeAst {
+    /// ASCII string data.
+    Ascii,
+    /// UTF-8 string data.
+    Utf8,
+}
+
+impl AsmStrTypeAst {
+    const ALL: &[Self] = &[Self::Ascii, Self::Utf8];
+
+    pub(crate) fn directive(self) -> &'static str {
+        match self {
+            Self::Ascii => ".ASCII",
+            Self::Utf8 => ".UTF8",
+        }
+    }
+
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+        chumsky::prelude::choice(
+            Self::ALL
+                .iter()
+                .copied()
+                .map(|str_type| {
+                    directive(str_type.directive())
+                        .map(move |span| (span, str_type))
+                })
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+//===========================================================================//
+
 /// The abstract syntax tree for defining a struct type in an assembly file.
 #[derive(Clone, Debug)]
 pub struct AsmStructAst {
@@ -883,34 +950,6 @@ impl AsmUseAst {
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(directive_span, path)| Self { directive_span, path })
-    }
-}
-
-//===========================================================================//
-
-/// The abstract syntax tree for a UTF8 data directive in an assembly file.
-#[derive(Clone, Debug)]
-pub struct AsmUtf8DataAst {
-    /// The location in the source code where the directive token appears.
-    pub directive_span: SrcSpan,
-    /// The expressions for the string data to insert.
-    pub expressions: Vec<ExprAst>,
-}
-
-impl AsmUtf8DataAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".UTF8")
-            .then(
-                ExprAst::parser()
-                    .separated_by(symbol(TokenValue::Comma))
-                    .at_least(1)
-                    .collect::<Vec<_>>(),
-            )
-            .then_ignore(linebreak())
-            .map(|(directive_span, expressions)| Self {
-                directive_span,
-                expressions,
-            })
     }
 }
 

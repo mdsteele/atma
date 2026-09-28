@@ -101,6 +101,20 @@ fn static_here_address() {
 }
 
 #[test]
+fn string_data() {
+    let source = r#"\
+    .SECTION "TEST", fill=$ab
+        .ascii "Foo", $1b
+        .utf8 "\u{1F602}", $80
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![0x46, 0x6f, 0x6f, 0x1b, 0xf0, 0x9f, 0x98, 0x82, 0xc2, 0x80]
+    );
+}
+
+#[test]
 fn struct_field_offsets() {
     let source = r#"\
     .STRUCT sFoo {

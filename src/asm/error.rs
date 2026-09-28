@@ -163,6 +163,21 @@ pub enum AsmError {
         /// The value of the expression.
         expr_value: BigInt,
     },
+    /// An `.ASCII` directive had a non-ASCII string or character value.
+    InvalidAsciiString {
+        /// The source code location for the expression.
+        expr_loc: ObjSrcLoc,
+        /// The non-ASCII character that was found.
+        non_ascii_char: char,
+    },
+    /// An ASCII byte value expression had an invalid value.
+    InvalidAsciiValue {
+        /// The source code location for the expression that evaluated to an
+        /// invalid ASCII value.
+        expr_loc: ObjSrcLoc,
+        /// The value of the expression.
+        expr_value: BigInt,
+    },
     /// A directive was given an unknown attribute name.
     InvalidAttrName {
         /// The directive name (e.g. `".SECTION"`).
@@ -455,6 +470,22 @@ impl AsmError {
                 };
                 let label =
                     format!("the value of this expression is ${expr_value:x}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
+            Self::InvalidAsciiString { expr_loc, non_ascii_char } => {
+                let message = "invalid ASCII string";
+                let label =
+                    format!("contains non-ASCII character '{non_ascii_char}'");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
+            Self::InvalidAsciiValue { expr_loc, expr_value } => {
+                let message = "invalid ASCII value";
+                let label =
+                    format!("the value of this expression is {expr_value}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)

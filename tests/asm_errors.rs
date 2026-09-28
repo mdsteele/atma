@@ -302,6 +302,19 @@ fn invalid_attr_name() {
 }
 
 #[test]
+fn invalid_ascii_string() {
+    let source = r#"\
+    .SECTION "TEST"
+        .ascii "foo\u{90}bar", $7f, $80
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::InvalidAsciiString { non_ascii_char: '\u{90}', .. },
+        AsmError::InvalidAsciiValue { expr_value, .. },
+    ] if *expr_value == BigInt::from(0x80));
+}
+
+#[test]
 fn invalid_unicode_scalar_value() {
     let source = r#"\
     .SECTION "TEST"

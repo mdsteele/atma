@@ -8,6 +8,7 @@ mod int_data;
 mod macros;
 mod predef;
 mod repeat;
+mod str_data;
 
 pub use build::assemble_source;
 pub use error::{AsmError, AsmResult};
