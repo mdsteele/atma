@@ -187,6 +187,27 @@ impl BinaryIo for bool {
     }
 }
 
+impl BinaryIo for char {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let value = u32::read_from(decoder)?;
+        char::try_from(value).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("expected char, found {}", value),
+            )
+        })
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        u32::from(*self).write_to(encoder)
+    }
+}
+
 impl BinaryIo for u8 {
     fn read_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,

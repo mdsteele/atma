@@ -5,9 +5,8 @@ use crate::obj::{BinaryIo, Decoder, Encoder};
 use chumsky::error::Rich;
 use chumsky::inspector::SimpleState;
 use chumsky::{self, IterParser, Parser, primitive};
-use num_bigint::{BigUint, Sign};
+use num_bigint::{BigInt, BigUint, Sign};
 use std::collections::HashSet;
-use std::fmt::Write;
 use std::io;
 use std::rc::Rc;
 
@@ -22,6 +21,10 @@ const TAG_KIND_DEBUG: u8 = 0x01;
 const TAG_KIND_BINARY: u8 = 0x02;
 const TAG_KIND_LOWER_HEX: u8 = 0x03;
 const TAG_KIND_UPPER_HEX: u8 = 0x04;
+
+const TAG_ALIGN_LEFT: u8 = 0x00;
+const TAG_ALIGN_CENTER: u8 = 0x01;
+const TAG_ALIGN_RIGHT: u8 = 0x02;
 
 //===========================================================================//
 
@@ -247,6 +250,7 @@ impl BinaryIo for Slot {
 
 #[derive(Debug, Default, Eq, PartialEq)]
 struct FormatOptions {
+    align: Option<(char, FormatAlign)>,
     flags: u8,
     width: u16,
     kind: FormatKind,
@@ -254,6 +258,10 @@ struct FormatOptions {
 
 impl FormatOptions {
     fn parser<'a>() -> impl Parser<'a, &'a str, Self, Extra<'a>> {
+        let align_parser = primitive::any()
+            .then(FormatAlign::parser())
+            .or(FormatAlign::parser().map(|align| (' ', align)))
+            .or_not();
         let flags_parser = primitive::group((
             primitive::just('+').to(FLAG_ALWAYS_SIGN).or_not(),
             primitive::just('#').to(FLAG_ALT_FORMAT).or_not(),
@@ -274,8 +282,18 @@ impl FormatOptions {
             .map(Option::unwrap_or_default);
         let kind_parser =
             FormatKind::parser().or_not().map(Option::unwrap_or_default);
-        primitive::group((flags_parser, width_parser, kind_parser))
-            .map(|(flags, width, kind)| Self { flags, width, kind })
+        primitive::group((
+            align_parser,
+            flags_parser,
+            width_parser,
+            kind_parser,
+        ))
+        .map(|(align, flags, width, kind)| Self {
+            align,
+            flags,
+            width,
+            kind,
+        })
     }
 
     fn restrict_type(&self, item: &mut ExprType) {
@@ -291,42 +309,38 @@ impl FormatOptions {
         out: &mut String,
     ) -> Result<(), TemplateEvalError> {
         let width = usize::from(self.width);
-        match arg {
-            ExprValue::String(string) => match self.kind {
-                FormatKind::Debug => {
-                    write!(out, "{:width$?}", string).unwrap();
-                }
-                _ => write!(out, "{:width$}", string).unwrap(),
-            },
-            ExprValue::Integer(int) => {
-                let mut prefix = String::new();
-                if int.sign() == Sign::Minus {
-                    prefix.push('-');
-                } else if 0 != self.flags & FLAG_ALWAYS_SIGN {
-                    prefix.push('+');
-                }
-                if 0 != self.flags & FLAG_ALT_FORMAT {
-                    prefix.push_str(self.kind.alt_prefix());
-                }
-                let magnitude = self.kind.format_uint(int.magnitude());
-                let len = prefix.len() + magnitude.len();
-                out.reserve(width.max(len));
-                if len < width {
-                    if 0 != self.flags & FLAG_ZERO_PAD {
-                        prefix.reserve(width - len);
-                        for _ in 0..(width - len) {
-                            prefix.push('0');
-                        }
-                    } else {
-                        for _ in 0..(width - len) {
-                            out.push(' ');
-                        }
-                    }
-                }
-                out.push_str(&prefix);
-                out.push_str(&magnitude);
+        let (default_align, formatted) = match arg {
+            ExprValue::String(string) => {
+                (FormatAlign::Left, self.kind.format_string(string))
             }
-            other => write!(out, "{:width$}", other).unwrap(),
+            ExprValue::Integer(int) => (
+                FormatAlign::Right,
+                self.kind.format_integer(int, width, self.flags),
+            ),
+            other => (FormatAlign::Left, other.to_string()),
+        };
+        let len = formatted.len();
+        out.reserve(width.max(len));
+        if width > len {
+            let padding = width - len;
+            let (fill, align) = self.align.unwrap_or((' ', default_align));
+            match align {
+                FormatAlign::Left => {
+                    out.push_str(&formatted);
+                    pad(out, padding, fill);
+                }
+                FormatAlign::Center => {
+                    pad(out, padding / 2, fill);
+                    out.push_str(&formatted);
+                    pad(out, padding.div_ceil(2), fill);
+                }
+                FormatAlign::Right => {
+                    pad(out, padding, fill);
+                    out.push_str(&formatted);
+                }
+            }
+        } else {
+            out.push_str(&formatted);
         }
         Ok(())
     }
@@ -336,19 +350,68 @@ impl BinaryIo for FormatOptions {
     fn read_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
+        let align = Option::<(char, FormatAlign)>::read_from(decoder)?;
         let flags = u8::read_from(decoder)?;
         let width = u16::read_from(decoder)?;
         let kind = FormatKind::read_from(decoder)?;
-        Ok(Self { width, flags, kind })
+        Ok(Self { align, width, flags, kind })
     }
 
     fn write_to<W: io::Write>(
         &self,
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
+        self.align.write_to(encoder)?;
         self.flags.write_to(encoder)?;
         self.width.write_to(encoder)?;
         self.kind.write_to(encoder)
+    }
+}
+
+//===========================================================================//
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FormatAlign {
+    Left,
+    Center,
+    Right,
+}
+
+impl FormatAlign {
+    fn parser<'a>() -> impl Parser<'a, &'a str, Self, Extra<'a>> {
+        primitive::choice((
+            primitive::just('<').to(Self::Left),
+            primitive::just('^').to(Self::Center),
+            primitive::just('>').to(Self::Right),
+        ))
+    }
+}
+
+impl BinaryIo for FormatAlign {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        match u8::read_from(decoder)? {
+            TAG_ALIGN_LEFT => Ok(Self::Left),
+            TAG_ALIGN_CENTER => Ok(Self::Center),
+            TAG_ALIGN_RIGHT => Ok(Self::Right),
+            byte => Err(io::Error::other(format!(
+                "unknown FormatAlign tag: 0x{:02x}",
+                byte
+            ))),
+        }
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        let tag = match self {
+            Self::Left => TAG_ALIGN_LEFT,
+            Self::Center => TAG_ALIGN_CENTER,
+            Self::Right => TAG_ALIGN_RIGHT,
+        };
+        tag.write_to(encoder)
     }
 }
 
@@ -390,6 +453,38 @@ impl FormatKind {
             Self::Binary => "%",
             Self::LowerHex => "$",
             Self::UpperHex => "$",
+        }
+    }
+
+    fn format_integer(
+        self,
+        integer: &BigInt,
+        width: usize,
+        flags: u8,
+    ) -> String {
+        let mut formatted = String::new();
+        if integer.sign() == Sign::Minus {
+            formatted.push('-');
+        } else if 0 != flags & FLAG_ALWAYS_SIGN {
+            formatted.push('+');
+        }
+        if 0 != flags & FLAG_ALT_FORMAT {
+            formatted.push_str(self.alt_prefix());
+        }
+        let magnitude = self.format_uint(integer.magnitude());
+        let len = formatted.len() + magnitude.len();
+        if width > len && 0 != flags & FLAG_ZERO_PAD {
+            formatted.reserve(width - formatted.len());
+            pad(&mut formatted, width - len, '0');
+        }
+        formatted.push_str(&magnitude);
+        formatted
+    }
+
+    fn format_string(self, string: &str) -> String {
+        match self {
+            Self::Debug => format!("{:?}", string),
+            _ => string.to_string(),
         }
     }
 
@@ -468,6 +563,14 @@ pub(crate) enum TemplateEvalError {
 
 type ParseError<'a> = Rich<'a, char>;
 type Extra<'a> = chumsky::extra::Full<ParseError<'a>, SimpleState<usize>, ()>;
+
+//===========================================================================//
+
+fn pad(string: &mut String, count: usize, chr: char) {
+    for _ in 0..count {
+        string.push(chr);
+    }
+}
 
 //===========================================================================//
 

@@ -82,6 +82,12 @@ fn interpolation_operator() {
     assert_eq!(compile_and_run("print \"{:04}\" %% 25\n"), "\"0025\"\n");
     assert_eq!(compile_and_run("print \"{:+#04x}\" %% 10\n"), "\"+$0a\"\n");
     assert_eq!(compile_and_run("print \"{:#07b}\" %% 10\n"), "\"%001010\"\n");
+    assert_eq!(compile_and_run("print \"{:\\0<3}\" %% 10\n"), "\"10\\0\"\n");
+    assert_eq!(
+        compile_and_run("print \"{:>12}\" %% {1, 2, 3}\n"),
+        "\"   {1, 2, 3}\"\n"
+    );
+    assert_eq!(compile_and_run("print \"{:^6}\" %% 123\n"), "\" 123  \"\n");
 }
 
 #[test]
