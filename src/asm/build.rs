@@ -1,3 +1,7 @@
+use super::check::{
+    bigint_range, typecheck_dir_expr_as, typecheck_static_dir_expr_as,
+};
+use super::chunk::{typecheck_chunk_attrs, validate_chunk_location};
 use super::env::{AsmDeclValue, AsmTypeEnv};
 use super::error::{AsmError, AsmResult};
 use super::int_data::{assemble_int_data, int_patch_type};
@@ -5,28 +9,27 @@ use super::macros::MacroTable;
 use super::predef::make_predefined_arch_macros;
 use super::repeat::typecheck_iterator;
 use super::str_data::assemble_str_data;
-use crate::addr::{Addr, Align, Offset, Size};
+use crate::addr::{Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
     ExprEvalError, ExprFunc, ExprFuncEvalError, ExprLabel,
-    ExprNotStaticReason, ExprStatic, ExprType, ExprTypeError, ExprValue,
+    ExprNotStaticReason, ExprType, ExprTypeError, ExprValue,
 };
 use crate::obj::{
     ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatchData,
     ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent, ObjSymbol,
 };
 use crate::parse::{
-    AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
-    AsmDefMacroAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
-    AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst, AsmReserveAst,
-    AsmScopeAst, AsmSectionAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
+    AsmAssertAst, AsmBinaryAst, AsmChunkAst, AsmCondAst, AsmDataTypeAst,
+    AsmDeclareAst, AsmDefMacroAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst,
+    AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst,
+    AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
     AsmStructAst, AsmUseAst, DeclarationKind, ExprAst, IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::range::RangeInclusive;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -101,6 +104,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(_) => Ok(()),
             AsmStmtAst::Binary(_) => Ok(()),
+            AsmStmtAst::Chunk(ast) => self.predeclare_chunk(ast),
             AsmStmtAst::Cond(_) => Ok(()),
             AsmStmtAst::Declare(_) => Ok(()),
             AsmStmtAst::DefMacro(_) => Ok(()),
@@ -108,17 +112,20 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Import(id) => self.predeclare_import(id),
             AsmStmtAst::IntData(_) => Ok(()),
             AsmStmtAst::Invoke(_) => Ok(()),
-            AsmStmtAst::Label(label) => self.predeclare_label(label),
+            AsmStmtAst::Label(ast) => self.predeclare_label(ast),
             AsmStmtAst::RelAddr(_) => Ok(()),
             AsmStmtAst::Repeat(_) => Ok(()),
             AsmStmtAst::Reserve(_) => Ok(()),
-            AsmStmtAst::Scope(scope) => self.predeclare_scope(scope),
-            AsmStmtAst::Section(section) => self.predeclare_section(section),
+            AsmStmtAst::Scope(ast) => self.predeclare_scope(ast),
             AsmStmtAst::Set(_) => Ok(()),
             AsmStmtAst::StrData(_) => Ok(()),
             AsmStmtAst::Struct(_) => Ok(()),
             AsmStmtAst::Use(_) => Ok(()),
         }
+    }
+
+    fn predeclare_chunk(&mut self, chunk_ast: &AsmChunkAst) -> AsmResult<()> {
+        self.predeclare_statements(&chunk_ast.body)
     }
 
     fn predeclare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
@@ -140,13 +147,6 @@ impl<'a> Assembler<'a> {
         } else {
             Ok(())
         }
-    }
-
-    fn predeclare_section(
-        &mut self,
-        section_ast: &AsmSectionAst,
-    ) -> AsmResult<()> {
-        self.predeclare_statements(&section_ast.body)
     }
 
     /// Consumes a module AST, expanding macros and directives into chunk data.
@@ -173,6 +173,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(ast) => self.expand_assert(ast),
             AsmStmtAst::Binary(ast) => self.expand_binary_data(ast),
+            AsmStmtAst::Chunk(ast) => self.expand_chunk(ast),
             AsmStmtAst::Cond(ast) => self.expand_conditional(ast),
             AsmStmtAst::Declare(ast) => self.expand_declaration(ast),
             AsmStmtAst::DefMacro(ast) => self.expand_macro_definition(ast),
@@ -185,7 +186,6 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Repeat(ast) => self.expand_repeat(ast),
             AsmStmtAst::Reserve(ast) => self.expand_reserve(ast),
             AsmStmtAst::Scope(ast) => self.expand_scope(ast),
-            AsmStmtAst::Section(ast) => self.expand_section(ast),
             AsmStmtAst::Set(ast) => self.expand_assignment(ast),
             AsmStmtAst::StrData(ast) => self.expand_str_data(ast),
             AsmStmtAst::Struct(ast) => self.expand_struct(ast),
@@ -195,7 +195,8 @@ impl<'a> Assembler<'a> {
 
     fn expand_assert(&mut self, assert_ast: AsmAssertAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let condition = errs.ok(self.typecheck_dir_expr_as(
+        let condition = errs.ok(typecheck_dir_expr_as(
+            &self.env,
             (".ASSERT", "condition"),
             assert_ast.condition,
             ExprType::Boolean,
@@ -210,7 +211,8 @@ impl<'a> Assembler<'a> {
                 }
                 Some(message_ast) => {
                     let message_span = message_ast.span;
-                    match errs.ok(self.typecheck_dir_expr_as(
+                    match errs.ok(typecheck_dir_expr_as(
+                        &self.env,
                         (".ASSERT", "message"),
                         message_ast,
                         ExprType::String,
@@ -420,7 +422,8 @@ impl<'a> Assembler<'a> {
         for field_ast in enum_ast.fields {
             if let Some(expr_ast) = field_ast.expression {
                 field_value = errs
-                    .ok(self.typecheck_static_dir_expr_as(
+                    .ok(typecheck_static_dir_expr_as(
+                        &self.env,
                         (".ENUM", "value"),
                         expr_ast,
                         ExprType::Integer,
@@ -553,8 +556,7 @@ impl<'a> Assembler<'a> {
             .ok(self.env.data_type_size(reserve_ast.data_type))
             .unwrap_or_default();
         let Some(count) = errs.ok(self.typecheck_data_type_count(
-            ".RESERVE",
-            "count",
+            (".RESERVE", "count"),
             reserve_ast.count,
         )) else {
             return errs.result();
@@ -568,87 +570,49 @@ impl<'a> Assembler<'a> {
         errs.result()
     }
 
-    fn expand_section(&mut self, section_ast: AsmSectionAst) -> AsmResult<()> {
+    fn expand_chunk(&mut self, chunk_ast: AsmChunkAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let section_name_loc = self.env.make_loc(section_ast.name.span);
-        let name: Option<Rc<str>> = errs
-            .ok(self.typecheck_static_dir_expr_as(
-                (".SECTION", "name"),
-                section_ast.name,
+        errs.also(validate_chunk_location(
+            &self.env,
+            chunk_ast.directive_span,
+            chunk_ast.kind,
+        ));
+        let section_name_loc = self.env.make_loc(chunk_ast.section_name.span);
+        let section_name: Option<Rc<str>> = errs
+            .ok(typecheck_static_dir_expr_as(
+                &self.env,
+                (chunk_ast.kind.directive(), "name"),
+                chunk_ast.section_name,
                 ExprType::String,
             ))
             .map(|value| value.unwrap_str());
-
-        let mut align: Option<Align> = None;
-        let mut arch: Option<Rc<str>> = None;
-        let mut fill: Option<u8> = None;
-        let mut start: Option<Addr> = None;
-        let mut within: Option<Align> = None;
-        let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
-        for (id_ast, expr_ast) in section_ast.attrs {
-            errs.also(self.chunk_declare_attr(&mut prev_attrs, &id_ast));
-            match &*id_ast.name {
-                "align" => {
-                    align = Some(
-                        errs.ok_or_default(self.chunk_align_attr(expr_ast)),
-                    )
-                }
-                "arch" => {
-                    arch =
-                        Some(errs.ok_or_else(
-                            self.chunk_arch_attr(expr_ast),
-                            || self.env.current_arch().clone(),
-                        ))
-                }
-                "fill" => {
-                    fill = Some(
-                        errs.ok_or_default(self.chunk_fill_attr(expr_ast)),
-                    )
-                }
-                "start" => {
-                    start = Some(
-                        errs.ok_or_default(self.chunk_start_attr(expr_ast)),
-                    )
-                }
-                "within" => {
-                    within =
-                        Some(errs.ok_or(
-                            self.chunk_within_attr(expr_ast),
-                            Align::MAX,
-                        ))
-                }
-                _ => {
-                    errs.push(AsmError::InvalidAttrName {
-                        directive: ".SECTION",
-                        attr_name: id_ast.name,
-                        attr_loc: self.env.make_loc(id_ast.span),
-                    });
-                }
-            }
-        }
-
+        let attrs = errs.with(typecheck_chunk_attrs(
+            &self.env,
+            chunk_ast.kind,
+            chunk_ast.attrs,
+        ));
         let chunk_index = self.next_chunk_index;
         self.next_chunk_index += 1;
-        self.env.begin_chunk(chunk_index, start, fill);
-        if let Some(arch) = arch {
+        self.env.begin_chunk(chunk_index, attrs.start, attrs.fill);
+        if let Some(arch) = attrs.arch {
             self.env.set_current_arch(arch);
         }
         // TODO: don't attempt to expand statements if the arch was invalid
-        errs.also(self.expand_statements(section_ast.body));
+        errs.also(self.expand_statements(chunk_ast.body));
         let chunk_env = self.env.end_chunk();
         // TODO: error if size is too large
         let size = Size::try_from(chunk_env.total_size()).unwrap();
         let finished_chunk = chunk_env.finish();
-        if let Some(section_name) = name {
+        if let Some(section_name) = section_name {
             let chunk = ObjChunk {
                 section_name,
                 section_name_loc,
                 data: finished_chunk.data,
                 size,
-                start,
-                align: align.unwrap_or_default(),
-                within,
-                fill,
+                start: attrs.start,
+                align: attrs.align.unwrap_or_default(),
+                within: attrs.within,
+                fill: attrs.fill,
                 symbols: finished_chunk.symbols,
                 patches: finished_chunk.patches,
             };
@@ -704,7 +668,8 @@ impl<'a> Assembler<'a> {
 
     fn expand_use_file(&mut self, use_ast: AsmUseAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        if !self.env.is_at_top_level() {
+        let is_at_top_level = self.env.is_at_top_level();
+        if !is_at_top_level {
             errs.push(AsmError::DirectiveNotAtTopLevel {
                 directive: ".USE",
                 loc: self.env.make_loc(use_ast.directive_span),
@@ -713,6 +678,7 @@ impl<'a> Assembler<'a> {
         let path_span = use_ast.path.span;
         if let Some(path) =
             errs.ok(self.typecheck_static_path_expr(".USE", use_ast.path))
+            && is_at_top_level
         {
             // TODO: skip if we've already used this path
             match self.cache.fetch_or_get_cached_utf8(&path) {
@@ -824,13 +790,11 @@ impl<'a> Assembler<'a> {
         }
         let rel_type = self.rel_patch_type(rel_addr.rel_type);
         let (dest_expr, dest_static) = errs.with(self.typecheck_rel_expr(
-            directive,
-            "destination address",
+            (directive, "destination address"),
             rel_addr.dest_expr,
         ));
         let (base_expr, base_static) = errs.with(self.typecheck_rel_expr(
-            directive,
-            "base address",
+            (directive, "base address"),
             rel_addr.base_expr,
         ));
         // TODO: Error if destination is statically out of range.
@@ -855,8 +819,7 @@ impl<'a> Assembler<'a> {
 
     fn typecheck_rel_expr(
         &self,
-        directive: &'static str,
-        component: &'static str,
+        (directive, component): (&'static str, &'static str),
         expr_ast: ExprAst,
     ) -> ((Option<ObjExpr>, Option<ExprLabel>), Errs<AsmError>) {
         let mut errs = Errs::<AsmError>::new();
@@ -907,123 +870,13 @@ impl<'a> Assembler<'a> {
         }
     }
 
-    fn chunk_align_attr(&mut self, expr_ast: ExprAst) -> AsmResult<Align> {
-        self.chunk_static_align_attr("align", expr_ast)
-    }
-
-    fn chunk_arch_attr(&mut self, expr_ast: ExprAst) -> AsmResult<Rc<str>> {
-        let expr_span = expr_ast.span;
-        let arch = self.chunk_static_str_attr("arch", expr_ast)?;
-        if self.env.arch_tree().contains_arch(&arch) {
-            Ok(arch)
-        } else {
-            Err(Errs::one(AsmError::UnknownArch {
-                arch: arch.clone(),
-                loc: self.env.make_loc(expr_span),
-            }))
-        }
-    }
-
-    fn chunk_fill_attr(&mut self, expr_ast: ExprAst) -> AsmResult<u8> {
-        let expr_span = expr_ast.span;
-        let bigint = self.chunk_static_int_attr("fill", expr_ast)?;
-        u8::try_from(&bigint).map_err(|_| {
-            Errs::one(AsmError::DirectiveExprOutOfRange {
-                directive: ".SECTION",
-                component: "fill",
-                expr_loc: self.env.make_loc(expr_span),
-                expr_value: bigint,
-                valid_range: bigint_range(u8::MIN, u8::MAX),
-            })
-        })
-    }
-
-    fn chunk_start_attr(&mut self, expr_ast: ExprAst) -> AsmResult<Addr> {
-        let expr_span = expr_ast.span;
-        let bigint = self.chunk_static_int_attr("start", expr_ast)?;
-        Addr::try_from(&bigint).map_err(|_| {
-            Errs::one(AsmError::DirectiveExprOutOfRange {
-                directive: ".SECTION",
-                component: "start",
-                expr_loc: self.env.make_loc(expr_span),
-                expr_value: bigint,
-                valid_range: bigint_range(Addr::MIN, Addr::MAX),
-            })
-        })
-    }
-
-    fn chunk_within_attr(&mut self, expr_ast: ExprAst) -> AsmResult<Align> {
-        self.chunk_static_align_attr("within", expr_ast)
-    }
-
-    fn chunk_static_align_attr(
-        &mut self,
-        attr_name: &'static str,
-        expr_ast: ExprAst,
-    ) -> AsmResult<Align> {
-        let expr_span = expr_ast.span;
-        let bigint = self.chunk_static_int_attr(attr_name, expr_ast)?;
-        Align::try_from(&bigint).map_err(|error| {
-            Errs::one(AsmError::InvalidAlignmentValue {
-                directive: ".SECTION",
-                attr_name,
-                error,
-                expr_loc: self.env.make_loc(expr_span),
-                expr_value: bigint,
-            })
-        })
-    }
-
-    fn chunk_static_int_attr(
-        &mut self,
-        attr_name: &'static str,
-        expr_ast: ExprAst,
-    ) -> AsmResult<BigInt> {
-        self.typecheck_static_dir_expr_as(
-            (".SECTION", attr_name),
-            expr_ast,
-            ExprType::Integer,
-        )
-        .map(|value| value.unwrap_int_ref().clone())
-    }
-
-    fn chunk_static_str_attr(
-        &mut self,
-        attr_name: &'static str,
-        expr_ast: ExprAst,
-    ) -> AsmResult<Rc<str>> {
-        self.typecheck_static_dir_expr_as(
-            (".SECTION", attr_name),
-            expr_ast,
-            ExprType::String,
-        )
-        .map(|value| value.unwrap_str_ref().clone())
-    }
-
-    fn chunk_declare_attr(
-        &mut self,
-        prev_attrs: &mut HashMap<Rc<str>, SrcSpan>,
-        id_ast: &IdentifierAst,
-    ) -> AsmResult<()> {
-        if let Some(&prev_span) = prev_attrs.get(&id_ast.name) {
-            Err(Errs::one(AsmError::DuplicateAttrName {
-                directive: ".SECTION",
-                attr_name: id_ast.name.clone(),
-                attr_loc: self.env.make_loc(id_ast.span),
-                prev_loc: self.env.make_loc(prev_span),
-            }))
-        } else {
-            prev_attrs.insert(id_ast.name.clone(), id_ast.span);
-            Ok(())
-        }
-    }
-
     fn typecheck_static_path_expr(
         &mut self,
         directive: &'static str,
         expr_ast: ExprAst,
     ) -> AsmResult<Rc<str>> {
-        let value = self.typecheck_static_dir_expr_as(
+        let value = typecheck_static_dir_expr_as(
+            &self.env,
             (directive, "path"),
             expr_ast,
             ExprType::String,
@@ -1055,20 +908,20 @@ impl<'a> Assembler<'a> {
     ) -> AsmResult<Size> {
         let type_size = self.env.data_type_size(data_type)?;
         let count =
-            self.typecheck_data_type_count(directive, "count", count_expr)?;
+            self.typecheck_data_type_count((directive, "count"), count_expr)?;
         // TODO: error on overflow
         Ok(Size::try_from(u128::from(type_size) * u128::from(count)).unwrap())
     }
 
     fn typecheck_data_type_count(
         &self,
-        directive: &'static str,
-        component: &'static str,
+        (directive, component): (&'static str, &'static str),
         count_expr: Option<ExprAst>,
     ) -> AsmResult<u64> {
         if let Some(expr_ast) = count_expr {
             let expr_span = expr_ast.span;
-            let expr_value = self.typecheck_static_dir_expr_as(
+            let expr_value = typecheck_static_dir_expr_as(
+                &self.env,
                 (directive, component),
                 expr_ast,
                 ExprType::Integer,
@@ -1088,52 +941,6 @@ impl<'a> Assembler<'a> {
         }
     }
 
-    fn typecheck_static_dir_expr_as(
-        &self,
-        (directive, component): (&'static str, &'static str),
-        expr_ast: ExprAst,
-        required_type: ExprType,
-    ) -> AsmResult<ExprValue> {
-        let expr_span = expr_ast.span;
-        let (_, expr_static) = self.typecheck_dir_expr_as(
-            (directive, component),
-            expr_ast,
-            required_type,
-        )?;
-        match expr_static {
-            Ok(value) => Ok(value),
-            Err(reason) => Err(Errs::one(AsmError::DirectiveExprNotStatic {
-                directive,
-                component,
-                expr_loc: self.env.make_loc(expr_span),
-                reason,
-            })),
-        }
-    }
-
-    fn typecheck_dir_expr_as(
-        &self,
-        (directive, component): (&'static str, &'static str),
-        expr_ast: ExprAst,
-        required_type: ExprType,
-    ) -> AsmResult<(ObjExpr, ExprStatic)> {
-        let mut errs = Errs::<AsmError>::new();
-        let expr_span = expr_ast.span;
-        let (expr, expr_type, expr_static) =
-            errs.with(self.env.typecheck_expression(expr_ast));
-        if !expr_type.is_subtype_of(&required_type) {
-            errs.push(AsmError::DirectiveExprTypeError {
-                directive,
-                component,
-                expr_loc: self.env.make_loc(expr_span),
-                expr_type,
-                valid_types: vec![required_type],
-            });
-        }
-        errs.result()?;
-        Ok((expr, expr_static))
-    }
-
     fn finish(self) -> ObjFile {
         ObjFile {
             chunks: self.chunks.into_values().collect(),
@@ -1141,10 +948,6 @@ impl<'a> Assembler<'a> {
             variables: self.variables,
         }
     }
-}
-
-fn bigint_range<T: Into<BigInt>>(start: T, last: T) -> RangeInclusive<BigInt> {
-    RangeInclusive { start: start.into(), last: last.into() }
 }
 
 //===========================================================================//

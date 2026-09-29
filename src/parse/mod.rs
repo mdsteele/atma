@@ -11,12 +11,12 @@ mod lvalue;
 
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
 pub use asm::{
-    AsmAssertAst, AsmBinaryAst, AsmCondAst, AsmDataTypeAst, AsmDeclareAst,
-    AsmDefMacroAst, AsmEnumAst, AsmEnumFieldAst, AsmIntDataAst, AsmIntTypeAst,
-    AsmInvokeAst, AsmLabelAst, AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst,
-    AsmRelTypeAst, AsmRepeatAst, AsmReserveAst, AsmScopeAst, AsmSectionAst,
-    AsmSetAst, AsmStmtAst, AsmStrDataAst, AsmStrTypeAst, AsmStructAst,
-    AsmStructFieldAst, AsmUseAst,
+    AsmAssertAst, AsmBinaryAst, AsmChunkAst, AsmChunkKind, AsmCondAst,
+    AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst, AsmEnumAst,
+    AsmEnumFieldAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
+    AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst,
+    AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
+    AsmStrTypeAst, AsmStructAst, AsmStructFieldAst, AsmUseAst,
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst};

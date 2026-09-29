@@ -253,6 +253,18 @@ fn duplicate_macro_placeholder() {
 }
 
 #[test]
+fn elsewhere_chunk_at_top_level() {
+    let source = r#"\
+    .ELSEWHERE "TEST"
+    .END
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::DirectiveNotInSection { directive: ".ELSEWHERE", loc: _ },]
+    );
+}
+
+#[test]
 fn enum_with_duplicate_field_name() {
     let source = r#"\
     .Enum Foo {
@@ -397,6 +409,20 @@ fn repeat_iterator_not_static() {
                 error: ExprEvalError::LabelAddressUnresolved { .. },
             },
         }]
+    );
+}
+
+#[test]
+fn section_not_at_top_level() {
+    let source = r#"\
+    .SECTION "TEST"
+    .SECTION "FOOBAR"
+    .END
+    .END
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::DirectiveNotAtTopLevel { directive: ".SECTION", loc: _ },]
     );
 }
 
@@ -569,6 +595,19 @@ fn unknown_struct() {
         AsmError::UnknownStruct { name: name1, loc: _ },
         AsmError::UnknownStruct { name: name2, loc: _ },
     ] if &**name1 == "Baz" && &**name2 == "Blarg");
+}
+
+#[test]
+fn use_statement_not_at_top_level() {
+    let source = r#"\
+    .SECTION "TEST"
+        .use "foo"
+    .END
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::DirectiveNotAtTopLevel { directive: ".USE", loc: _ },]
+    );
 }
 
 #[test]

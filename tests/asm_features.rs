@@ -11,11 +11,16 @@ fn assemble(source: &str) -> ObjFile {
     atma::asm::assemble_source(&mut cache, asm_path, &asm_source).unwrap()
 }
 
-fn static_data(obj_file: ObjFile) -> Vec<u8> {
-    assert_eq!(obj_file.chunks.len(), 1);
-    let obj_chunk = &obj_file.chunks[0];
-    assert!(obj_chunk.patches.is_empty());
-    obj_chunk.data.to_vec()
+fn static_data(obj_file: ObjFile) -> Vec<Vec<u8>> {
+    assert!(obj_file.variables.is_empty());
+    obj_file
+        .chunks
+        .into_iter()
+        .map(|obj_chunk| {
+            assert!(obj_chunk.patches.is_empty());
+            obj_chunk.data.to_vec()
+        })
+        .collect()
 }
 
 //===========================================================================//
@@ -33,6 +38,24 @@ fn compound_id_for_named_scope() {
     .END
     "#;
     assert_eq!(assemble(source).chunks[0].patches.len(), 1);
+}
+
+#[test]
+fn elsewhere_chunk() {
+    let source = r#"\
+    .SECTION "TEST"
+        .u8 1
+    .ELSEWHERE "OTHER"
+        .u8 4
+    .END
+        .u8 2
+        .u8 3
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![0x01, 0x02, 0x03], vec![0x04]]
+    );
 }
 
 #[test]
@@ -97,7 +120,10 @@ fn static_here_address() {
     }
     .END
     "#;
-    assert_eq!(static_data(assemble(source)), vec![0x01, 0x11, 0x03, 0x12]);
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![0x01, 0x11, 0x03, 0x12]]
+    );
 }
 
 #[test]
@@ -110,7 +136,7 @@ fn string_data() {
     "#;
     assert_eq!(
         static_data(assemble(source)),
-        vec![0x46, 0x6f, 0x6f, 0x1b, 0xf0, 0x9f, 0x98, 0x82, 0xc2, 0x80]
+        vec![vec![0x46, 0x6f, 0x6f, 0x1b, 0xf0, 0x9f, 0x98, 0x82, 0xc2, 0x80]]
     );
 }
 
@@ -132,7 +158,7 @@ fn struct_field_offsets() {
     "#;
     assert_eq!(
         static_data(assemble(source)),
-        vec![0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0x00, 0x03, 0x05, 0x06]
+        vec![vec![0xab, 0xab, 0xab, 0xab, 0xab, 0xab, 0x00, 0x03, 0x05, 0x06]]
     );
 }
 

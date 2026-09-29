@@ -46,6 +46,8 @@ pub enum AsmStmtAst {
     Binary(AsmBinaryAst),
     /// An `.ENUM` definition directive.
     Enum(AsmEnumAst),
+    /// A chunk directive (e.g. `.SECTION` or `.ELSEWHERE`).
+    Chunk(AsmChunkAst),
     /// An `.IF` directive.
     Cond(AsmCondAst),
     /// A `.LET` or `.VAR` directive.
@@ -68,8 +70,6 @@ pub enum AsmStmtAst {
     Reserve(AsmReserveAst),
     /// A local scope.
     Scope(AsmScopeAst),
-    /// A `.SECTION` block.
-    Section(AsmSectionAst),
     /// A `.SET` directive.
     Set(AsmSetAst),
     /// A string data directive (e.g. `.UTF8` or `.ASCII`).
@@ -164,21 +164,33 @@ impl AsmStmtAst {
                 .map(|((id, expression), body)| {
                     AsmStmtAst::Repeat(AsmRepeatAst { id, expression, body })
                 });
-            let section_dir = directive(".SECTION")
-                .ignore_then(ExprAst::parser())
+            let chunk_dir = AsmChunkKind::parser()
+                .then(ExprAst::parser())
                 .then(attributes)
                 .then_ignore(linebreak())
                 .then(stmts)
                 .then_ignore(directive(".END"))
                 .then_ignore(linebreak())
-                .map(|((name, attrs), body)| {
-                    AsmStmtAst::Section(AsmSectionAst { name, attrs, body })
-                });
+                .map(
+                    |(
+                        (((directive_span, kind), section_name), attrs),
+                        body,
+                    )| {
+                        AsmStmtAst::Chunk(AsmChunkAst {
+                            directive_span,
+                            kind,
+                            section_name,
+                            attrs,
+                            body,
+                        })
+                    },
+                );
             chumsky::prelude::choice((
                 anonymous_scope,
                 label_or_named_scope,
                 AsmAssertAst::parser().map(AsmStmtAst::Assert),
                 AsmBinaryAst::parser().map(AsmStmtAst::Binary),
+                chunk_dir,
                 cond_dir,
                 AsmDeclareAst::parser().map(AsmStmtAst::Declare),
                 def_macro_dir,
@@ -189,7 +201,6 @@ impl AsmStmtAst {
                 AsmRelAddrAst::parser().map(AsmStmtAst::RelAddr),
                 repeat_dir,
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
-                section_dir,
                 AsmSetAst::parser().map(AsmStmtAst::Set),
                 AsmStrDataAst::parser().map(AsmStmtAst::StrData),
                 AsmStructAst::parser().map(AsmStmtAst::Struct),
@@ -248,6 +259,63 @@ impl AsmBinaryAst {
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(directive_span, path)| Self { directive_span, path })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a chunk declaration in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmChunkAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// What kind of chunk this is.
+    pub kind: AsmChunkKind,
+    /// A static expression that evaluates to the name of the section that this
+    /// chunk belongs to.
+    pub section_name: ExprAst,
+    /// Key/value attributes associated with this chunk.
+    pub attrs: Vec<(IdentifierAst, ExprAst)>,
+    /// The statements inside the chunk block.
+    pub body: Vec<AsmStmtAst>,
+}
+
+//===========================================================================//
+
+/// Kinds of chunk declarations that can appear in an assembly file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AsmChunkKind {
+    /// A top-level chunk that is placed directly into its section.
+    Section,
+    /// A nested chunk, whose symbols are declared in the enclosing scope, but
+    /// whose data and symbol addresses are not included in the enclosing
+    /// chunk, but are instead placed into a separate chunk (possibly in a
+    /// different section).
+    Elsewhere,
+    // TODO: Loadable,
+}
+
+impl AsmChunkKind {
+    const ALL: &[Self] = &[Self::Section, Self::Elsewhere];
+
+    pub(crate) fn directive(self) -> &'static str {
+        match self {
+            Self::Section => ".SECTION",
+            Self::Elsewhere => ".ELSEWHERE",
+        }
+    }
+
+    fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+        chumsky::prelude::choice(
+            Self::ALL
+                .iter()
+                .copied()
+                .map(|kind| {
+                    directive(kind.directive()).map(move |span| (span, kind))
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 }
 
@@ -772,20 +840,6 @@ pub struct AsmScopeAst {
     /// anonymous scope.
     pub label: Option<AsmLabelAst>,
     /// The statements inside the scope block.
-    pub body: Vec<AsmStmtAst>,
-}
-
-//===========================================================================//
-
-/// The abstract syntax tree for a section declaration in an assembly file.
-#[derive(Clone, Debug)]
-pub struct AsmSectionAst {
-    /// A static expression that evaluates to the name of the section that this
-    /// chunk belongs to.
-    pub name: ExprAst,
-    /// Key/value attributes associated with this chunk.
-    pub attrs: Vec<(IdentifierAst, ExprAst)>,
-    /// The statements inside the section block.
     pub body: Vec<AsmStmtAst>,
 }
 

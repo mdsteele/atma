@@ -2,6 +2,8 @@
 
 mod arch;
 mod build;
+mod check;
+mod chunk;
 mod env;
 mod error;
 mod int_data;
