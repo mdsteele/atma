@@ -12,8 +12,8 @@ use crate::obj::{
     ObjSymbol,
 };
 use crate::parse::{
-    AsmDataTypeAst, AsmLabelAst, AsmModuleAst, DeclarationKind, ExprAst,
-    HereLabelKind, IdentifierAst, IdentifierKind,
+    AsmChunkKind, AsmDataTypeAst, AsmLabelAst, AsmModuleAst, DeclarationKind,
+    ExprAst, HereLabelKind, IdentifierAst, IdentifierKind,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -180,11 +180,13 @@ impl AsmTypeEnv {
     pub fn begin_chunk(
         &mut self,
         chunk_index: usize,
+        kind: AsmChunkKind,
         start_addr: Option<Addr>,
         fill_byte: Option<u8>,
     ) {
         self.chunk_stack.push(ChunkEnv::new(
             chunk_index,
+            kind,
             start_addr,
             fill_byte,
         ));
@@ -195,14 +197,98 @@ impl AsmTypeEnv {
         self.chunk_stack.last()
     }
 
-    pub fn current_chunk_mut(&mut self) -> Option<&mut ChunkEnv> {
-        self.chunk_stack.last_mut()
-    }
-
     pub fn end_chunk(&mut self) -> ChunkEnv {
         debug_assert!(self.arch_stack.len() >= 2);
         self.arch_stack.pop();
         self.chunk_stack.pop().unwrap()
+    }
+
+    fn with_mutable_chunk<F>(&mut self, func: F) -> AsmResult<()>
+    where
+        F: FnOnce(&mut ChunkEnv) -> AsmResult<()>,
+    {
+        let mut errs = Errs::<AsmError>::new();
+        let mut i = self.chunk_stack.len();
+        while i > 0 {
+            i -= 1;
+            let chunk_env = &mut self.chunk_stack[i];
+            match chunk_env.kind {
+                AsmChunkKind::Loadable => {}
+                AsmChunkKind::Section | AsmChunkKind::Elsewhere => {
+                    let old_size = chunk_env.total_size();
+                    errs.also(func(chunk_env));
+                    let new_size = chunk_env.total_size();
+                    debug_assert!(new_size >= old_size);
+                    let added = new_size - old_size;
+                    if added > 0 {
+                        for j in (i + 1)..self.chunk_stack.len() {
+                            let loadable = &mut self.chunk_stack[j];
+                            errs.also(loadable.append_padding(added));
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        errs.result()
+    }
+
+    /// Appends the given data to the current chunk, if any.  If the current
+    /// chunk is a `Loadable` chunk, then this instead appends padding to that
+    /// chunk and tries again on the enclosing chunk.  May return one or more
+    /// errors if this process causes any chunks to exceed their maximum size.
+    ///
+    /// If there is no current chunk, this does nothing and emits no error; the
+    /// caller is expected to have already emitted a single error for whichever
+    /// directive is appending data.
+    pub fn append_chunk_data(&mut self, data: &[u8]) -> AsmResult<()> {
+        self.with_mutable_chunk(|chunk_env| chunk_env.append_data(data))
+    }
+
+    pub fn with_chunk_data<F>(&mut self, func: F) -> AsmResult<()>
+    where
+        F: FnOnce(&mut Vec<u8>) -> AsmResult<()>,
+    {
+        self.with_mutable_chunk(|chunk_env| func(chunk_env.data_mut()))
+    }
+
+    /// Appends the specified number of padding bytes to the current chunk, if
+    /// any.  If the current chunk is a `Loadable` chunk, then this appends
+    /// padding to that chunk and then repeats with the enclosing chunk.  May
+    /// return one or more errors if this process causes any chunks to exceed
+    /// their maximum size.
+    ///
+    /// If there is no current chunk, this does nothing and emits no error; the
+    /// caller is expected to have already emitted a single error for whichever
+    /// directive is appending padding.
+    pub fn append_chunk_padding(&mut self, padding: usize) -> AsmResult<()> {
+        self.with_mutable_chunk(|chunk_env| chunk_env.append_padding(padding))
+    }
+
+    /// Appends the given patch to the current chunk, if any.  If the current
+    /// chunk is a `Loadable` chunk, then this instead appends padding to that
+    /// chunk and tries again on the enclosing chunk.  May return one or more
+    /// errors if this process causes any chunks to exceed their maximum size.
+    ///
+    /// If there is no current chunk, this does nothing and emits no error; the
+    /// caller is expected to have already emitted a single error for whichever
+    /// directive is appending data.
+    pub fn append_chunk_patch(&mut self, data: ObjPatchData) -> AsmResult<()> {
+        self.with_mutable_chunk(|chunk_env| chunk_env.append_patch(data))
+    }
+
+    pub fn append_chunk_symbol(
+        &mut self,
+        name: Rc<str>,
+        loc: ObjSrcLoc,
+        exported: bool,
+    ) -> AsmResult<()> {
+        if let Some(chunk_env) = self.chunk_stack.last_mut() {
+            // TODO: handle overflow
+            let offset = Offset::try_from(chunk_env.total_size()).unwrap();
+            chunk_env.symbols.push(ObjSymbol { name, loc, exported, offset });
+        }
+        Ok(())
     }
 
     pub fn current_arch(&self) -> &Rc<str> {
@@ -537,6 +623,7 @@ impl ExprEnv for AsmTypeEnv {
 
 pub(super) struct ChunkEnv {
     chunk_index: usize,
+    kind: AsmChunkKind,
     start_addr: Option<Addr>,
     fill_byte: Option<u8>,
     data: Vec<u8>,
@@ -549,11 +636,13 @@ pub(super) struct ChunkEnv {
 impl ChunkEnv {
     fn new(
         chunk_index: usize,
+        kind: AsmChunkKind,
         start_addr: Option<Addr>,
         fill_byte: Option<u8>,
     ) -> ChunkEnv {
         ChunkEnv {
             chunk_index,
+            kind,
             start_addr,
             fill_byte,
             data: Vec::new(),
@@ -572,7 +661,7 @@ impl ChunkEnv {
         self.data.len() + self.padding
     }
 
-    pub fn data_mut(&mut self) -> &mut Vec<u8> {
+    fn data_mut(&mut self) -> &mut Vec<u8> {
         if self.padding > 0 {
             let fill_byte = self.fill_byte.unwrap_or_else(|| {
                 self.patches.push(ObjPatch {
@@ -588,23 +677,25 @@ impl ChunkEnv {
         &mut self.data
     }
 
-    pub fn append_padding(&mut self, padding: usize) -> AsmResult<()> {
+    fn append_data(&mut self, data: &[u8]) -> AsmResult<()> {
+        // TODO: check for overflow (counting both padding and data.len())
+        self.data_mut().extend_from_slice(data);
+        Ok(())
+    }
+
+    fn append_padding(&mut self, padding: usize) -> AsmResult<()> {
         // TODO: check for overflow (counting both padding and data.len())
         self.padding += padding;
         Ok(())
     }
 
-    pub fn append_patch(&mut self, data: ObjPatchData) -> AsmResult<()> {
+    fn append_patch(&mut self, data: ObjPatchData) -> AsmResult<()> {
         let old_size = self.total_size();
         // TODO: Error instead of crash if offset is too large.
         let offset = Offset::try_from(old_size).unwrap();
         self.data_mut().resize(old_size + data.num_bytes(), 0u8);
         self.patches.push(ObjPatch { offset, data });
         Ok(())
-    }
-
-    pub fn add_symbol(&mut self, symbol: ObjSymbol) {
-        self.symbols.push(symbol);
     }
 
     fn current_zone(&self) -> &ZoneEnv {

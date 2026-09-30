@@ -55,14 +55,15 @@ pub(super) fn assemble_int_data(
             IntDataValue::default()
         }
     };
-    if let Some(chunk) = env.current_chunk_mut() {
-        match int_data_value {
-            IntDataValue::Static(static_value) => {
-                int_type.append_value(static_value, chunk.data_mut());
-            }
-            IntDataValue::Patch(patch_data) => {
-                errs.also(chunk.append_patch(patch_data));
-            }
+    match int_data_value {
+        IntDataValue::Static(static_value) => {
+            errs.also(env.with_chunk_data(|chunk_data| {
+                int_type.append_value(static_value, chunk_data);
+                Ok(())
+            }));
+        }
+        IntDataValue::Patch(patch_data) => {
+            errs.also(env.append_chunk_patch(patch_data));
         }
     }
     errs.result()

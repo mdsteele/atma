@@ -17,7 +17,7 @@ use crate::expr::{
 };
 use crate::obj::{
     ObjChunk, ObjExpr, ObjExprOp, ObjFile, ObjImport, ObjPatchData,
-    ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent, ObjSymbol,
+    ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmChunkAst, AsmCondAst, AsmDataTypeAst,
@@ -490,19 +490,13 @@ impl<'a> Assembler<'a> {
         let full_name =
             self.env.current_scope().prefixed(&label_ast.identifier.name);
         let loc = self.env.make_loc(label_ast.identifier.span);
-        let Some(chunk_env) = self.env.current_chunk_mut() else {
+        if self.env.current_chunk().is_none() {
             return Err(Errs::one(AsmError::DirectiveNotInSection {
                 directive: "label",
                 loc,
             }));
         };
-        chunk_env.add_symbol(ObjSymbol {
-            name: full_name,
-            loc,
-            exported: label_ast.exported,
-            offset: Offset::try_from(chunk_env.total_size()).unwrap(), // TODO
-        });
-        Ok(())
+        self.env.append_chunk_symbol(full_name, loc, label_ast.exported)
     }
 
     fn expand_scope(&mut self, scope_ast: AsmScopeAst) -> AsmResult<()> {
@@ -561,39 +555,34 @@ impl<'a> Assembler<'a> {
         )) else {
             return errs.result();
         };
-        if let Some(chunk_env) = self.env.current_chunk_mut() {
-            // TODO: handle overflow
-            errs.also(chunk_env.append_padding(
-                usize::try_from(type_size).unwrap() * (count as usize),
-            ));
-        }
+        // TODO: handle overflow
+        let padding = usize::try_from(type_size).unwrap() * (count as usize);
+        errs.also(self.env.append_chunk_padding(padding));
         errs.result()
     }
 
     fn expand_chunk(&mut self, chunk_ast: AsmChunkAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
+        let kind = chunk_ast.kind;
         errs.also(validate_chunk_location(
             &self.env,
             chunk_ast.directive_span,
-            chunk_ast.kind,
+            kind,
         ));
         let section_name_loc = self.env.make_loc(chunk_ast.section_name.span);
         let section_name: Option<Rc<str>> = errs
             .ok(typecheck_static_dir_expr_as(
                 &self.env,
-                (chunk_ast.kind.directive(), "name"),
+                (kind.directive(), "name"),
                 chunk_ast.section_name,
                 ExprType::String,
             ))
             .map(|value| value.unwrap_str());
-        let attrs = errs.with(typecheck_chunk_attrs(
-            &self.env,
-            chunk_ast.kind,
-            chunk_ast.attrs,
-        ));
+        let attrs =
+            errs.with(typecheck_chunk_attrs(&self.env, kind, chunk_ast.attrs));
         let chunk_index = self.next_chunk_index;
         self.next_chunk_index += 1;
-        self.env.begin_chunk(chunk_index, attrs.start, attrs.fill);
+        self.env.begin_chunk(chunk_index, kind, attrs.start, attrs.fill);
         if let Some(arch) = attrs.arch {
             self.env.set_current_arch(arch);
         }
@@ -723,19 +712,19 @@ impl<'a> Assembler<'a> {
         let path_span = data_ast.path.span;
         if let Some(path) =
             errs.ok(self.typecheck_static_path_expr(".BINARY", data_ast.path))
-            && let Some(chunk_env) = self.env.current_chunk_mut()
         {
-            let chunk_data = chunk_env.data_mut();
-            match self.cache.fetch_and_write_data(&path, chunk_data) {
-                Ok(()) => {}
-                Err(error) => {
-                    errs.push(AsmError::SrcCacheError {
-                        path,
-                        path_loc: self.env.make_loc(path_span),
-                        error,
-                    });
-                }
-            }
+            let path_loc = self.env.make_loc(path_span);
+            errs.also(self.env.with_chunk_data(|chunk_data| {
+                self.cache.fetch_and_write_data(&path, chunk_data).map_err(
+                    |error| {
+                        Errs::one(AsmError::SrcCacheError {
+                            path,
+                            path_loc,
+                            error,
+                        })
+                    },
+                )
+            }));
         }
         errs.result()
     }
@@ -803,17 +792,14 @@ impl<'a> Assembler<'a> {
             && let Ok(delta_bigint) = dest_label.try_subtract(&base_label)
             && let Ok(delta) = rel_type.delta_value_in_range(&delta_bigint)
         {
-            if let Some(chunk_env) = self.env.current_chunk_mut() {
-                rel_type.append_delta(delta, chunk_env.data_mut());
-            }
-        } else {
-            if let (Some(dest), Some(base)) = (dest_expr, base_expr)
-                && let Some(chunk_env) = self.env.current_chunk_mut()
-            {
-                let data = ObjPatchData::Relative(rel_type, dest, base);
-                errs.also(chunk_env.append_patch(data));
-            }
-        };
+            errs.also(self.env.with_chunk_data(|chunk_data| {
+                rel_type.append_delta(delta, chunk_data);
+                Ok(())
+            }));
+        } else if let (Some(dest), Some(base)) = (dest_expr, base_expr) {
+            let data = ObjPatchData::Relative(rel_type, dest, base);
+            errs.also(self.env.append_chunk_patch(data));
+        }
         errs.result()
     }
 

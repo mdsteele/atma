@@ -69,31 +69,25 @@ fn assemble_str_data_bigint(
             if let Some(byte) = bigint.to_u8()
                 && byte < 0x80
             {
-                if let Some(chunk_env) = env.current_chunk_mut() {
-                    chunk_env.data_mut().push(byte);
-                }
+                env.append_chunk_data(&[byte])
             } else {
-                return Err(Errs::one(AsmError::InvalidAsciiValue {
+                Err(Errs::one(AsmError::InvalidAsciiValue {
                     expr_loc: env.make_loc(expr_span),
                     expr_value: bigint.clone(),
-                }));
+                }))
             }
         }
         AsmStrTypeAst::Utf8 => {
-            let Some(chr) = bigint.to_u32().and_then(char::from_u32) else {
-                return Err(Errs::one(AsmError::InvalidUnicodeScalarValue {
+            if let Some(chr) = bigint.to_u32().and_then(char::from_u32) {
+                env.append_chunk_data(chr.to_string().as_bytes())
+            } else {
+                Err(Errs::one(AsmError::InvalidUnicodeScalarValue {
                     expr_loc: env.make_loc(expr_span),
                     expr_value: bigint.clone(),
-                }));
-            };
-            if let Some(chunk_env) = env.current_chunk_mut() {
-                chunk_env
-                    .data_mut()
-                    .extend_from_slice(chr.to_string().as_bytes());
+                }))
             }
         }
     }
-    Ok(())
 }
 
 fn assemble_str_data_string(
@@ -105,22 +99,15 @@ fn assemble_str_data_string(
     match str_type {
         AsmStrTypeAst::Ascii => {
             if let Some(chr) = string.chars().find(|chr| !chr.is_ascii()) {
-                return Err(Errs::one(AsmError::InvalidAsciiString {
+                Err(Errs::one(AsmError::InvalidAsciiString {
                     expr_loc: env.make_loc(expr_span),
                     non_ascii_char: chr,
-                }));
+                }))
+            } else {
+                env.append_chunk_data(string.as_bytes())
             }
-            if let Some(chunk_env) = env.current_chunk_mut() {
-                chunk_env.data_mut().extend_from_slice(string.as_bytes());
-            }
-            Ok(())
         }
-        AsmStrTypeAst::Utf8 => {
-            if let Some(chunk_env) = env.current_chunk_mut() {
-                chunk_env.data_mut().extend_from_slice(string.as_bytes());
-            }
-            Ok(())
-        }
+        AsmStrTypeAst::Utf8 => env.append_chunk_data(string.as_bytes()),
     }
 }
 

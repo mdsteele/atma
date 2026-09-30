@@ -227,7 +227,7 @@ pub(super) fn validate_chunk_location(
                 }));
             }
         }
-        AsmChunkKind::Elsewhere => {
+        AsmChunkKind::Elsewhere | AsmChunkKind::Loadable => {
             if env.current_chunk().is_none() {
                 return Err(Errs::one(AsmError::DirectiveNotInSection {
                     directive: kind.directive(),

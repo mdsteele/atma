@@ -46,7 +46,7 @@ pub enum AsmStmtAst {
     Binary(AsmBinaryAst),
     /// An `.ENUM` definition directive.
     Enum(AsmEnumAst),
-    /// A chunk directive (e.g. `.SECTION` or `.ELSEWHERE`).
+    /// A chunk directive (e.g. `.SECTION`, `.ELSEWHERE`, or `.LOADABLE`).
     Chunk(AsmChunkAst),
     /// An `.IF` directive.
     Cond(AsmCondAst),
@@ -292,16 +292,21 @@ pub enum AsmChunkKind {
     /// chunk, but are instead placed into a separate chunk (possibly in a
     /// different section).
     Elsewhere,
-    // TODO: Loadable,
+    /// A nested chunk, whose symbols are declared in the enclosing scope and
+    /// whose data is included in the enclosing chunk, but whose symbols
+    /// addresses are instead placed into a separate chunk that consists
+    /// entirely of padding.
+    Loadable,
 }
 
 impl AsmChunkKind {
-    const ALL: &[Self] = &[Self::Section, Self::Elsewhere];
+    const ALL: &[Self] = &[Self::Section, Self::Elsewhere, Self::Loadable];
 
     pub(crate) fn directive(self) -> &'static str {
         match self {
             Self::Section => ".SECTION",
             Self::Elsewhere => ".ELSEWHERE",
+            Self::Loadable => ".LOADABLE",
         }
     }
 

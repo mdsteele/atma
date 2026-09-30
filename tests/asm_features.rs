@@ -109,6 +109,24 @@ fn label_references() {
 }
 
 #[test]
+fn loadable_chunk() {
+    let source = r#"\
+    .SECTION "TEST", start=$10
+        .u8 1
+    .LOADABLE "OTHER", start=$20
+        .u8 2
+        .u8 $<
+    .END
+        .u8 $<
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![0x01, 0x02, 0x21, 0x13], vec![]]
+    );
+}
+
+#[test]
 fn static_here_address() {
     let source = r#"\
     .SECTION "TEST", start=$10
