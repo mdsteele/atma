@@ -22,7 +22,7 @@ use crate::obj::{
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmChunkAst, AsmCondAst, AsmDataTypeAst,
     AsmDeclareAst, AsmDefMacroAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst,
-    AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst,
+    AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelType, AsmRepeatAst,
     AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
     AsmStructAst, AsmUseAst, DeclarationKind, ExprAst, IdentifierAst,
 };
@@ -848,11 +848,11 @@ impl<'a> Assembler<'a> {
         (ret, errs)
     }
 
-    fn rel_patch_type(&self, rel_type: AsmRelTypeAst) -> ObjPatchRelType {
+    fn rel_patch_type(&self, rel_type: AsmRelType) -> ObjPatchRelType {
         match rel_type {
-            AsmRelTypeAst::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
-            AsmRelTypeAst::Addr16Rel16le => ObjPatchRelType::Addr16Rel16le,
-            AsmRelTypeAst::Addr16RelLink => ObjPatchRelType::Addr16RelLink,
+            AsmRelType::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
+            AsmRelType::Addr16Rel16le => ObjPatchRelType::Addr16Rel16le,
+            AsmRelType::Addr16RelLink => ObjPatchRelType::Addr16RelLink,
         }
     }
 

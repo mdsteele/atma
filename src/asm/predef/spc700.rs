@@ -6,7 +6,7 @@ use super::addrmode::{
 use super::pool::RcPool;
 use crate::lex::TokenValue;
 use crate::parse::{
-    AsmIntTypeAst, AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst,
+    AsmIntType, AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst,
 };
 
 //===========================================================================//
@@ -597,7 +597,7 @@ fn addr8_comma_bit_opcode(
         };
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
-    pool.int_data_stmt(AsmIntTypeAst::U8, opcode_expr)
+    pool.int_data_stmt(AsmIntType::U8, opcode_expr)
 }
 
 fn addr13_comma_bit_address(pool: &mut RcPool) -> AsmStmtAst {
@@ -611,7 +611,7 @@ fn addr13_comma_bit_address(pool: &mut RcPool) -> AsmStmtAst {
         };
         pool.binop_expr(BinOpAst::BitOr, lhs, rhs)
     };
-    pool.int_data_stmt(AsmIntTypeAst::U16le, expr)
+    pool.int_data_stmt(AsmIntType::U16le, expr)
 }
 
 fn bit_expr(pool: &mut RcPool) -> ExprAst {
@@ -633,7 +633,7 @@ fn tcall_index_opcode(pool: &mut RcPool, prefix_bytes: &[u8]) -> AsmStmtAst {
         };
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
-    pool.int_data_stmt(AsmIntTypeAst::U8, opcode_expr)
+    pool.int_data_stmt(AsmIntType::U8, opcode_expr)
 }
 
 //===========================================================================//

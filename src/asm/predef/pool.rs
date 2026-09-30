@@ -2,7 +2,7 @@ use crate::error::SrcSpan;
 use crate::expr::ExprFunc;
 use crate::lex::{Token, TokenValue};
 use crate::parse::{
-    AsmIntDataAst, AsmIntTypeAst, AsmRelAddrAst, AsmRelTypeAst, AsmStmtAst,
+    AsmIntDataAst, AsmIntType, AsmRelAddrAst, AsmRelType, AsmStmtAst,
     BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, HereLabelKind,
     IdentifierAst, IdentifierKind,
 };
@@ -63,7 +63,7 @@ impl RcPool {
     pub fn constant_bytes_stmt(&mut self, bytes: &[u8]) -> AsmStmtAst {
         AsmStmtAst::IntData(AsmIntDataAst {
             directive_span: SrcSpan::INTERNAL,
-            int_type: AsmIntTypeAst::U8,
+            int_type: AsmIntType::U8,
             expressions: bytes
                 .iter()
                 .map(|&byte| self.int_literal_expr(i32::from(byte)))
@@ -88,7 +88,7 @@ impl RcPool {
         let lhs = self.placeholder_expr(placeholder);
         let rhs = self.int_literal_expr(0xff);
         let expr = self.binop_expr(BinOpAst::BitAnd, lhs, rhs);
-        self.int_data_stmt(AsmIntTypeAst::U8, expr)
+        self.int_data_stmt(AsmIntType::U8, expr)
     }
 
     fn identifier_ast(
@@ -112,7 +112,7 @@ impl RcPool {
 
     pub fn int_data_stmt(
         &mut self,
-        int_type: AsmIntTypeAst,
+        int_type: AsmIntType,
         expr: ExprAst,
     ) -> AsmStmtAst {
         AsmStmtAst::IntData(AsmIntDataAst {
@@ -140,7 +140,7 @@ impl RcPool {
             let rhs = self.int_literal_expr(1);
             self.binop_expr(BinOpAst::Add, lhs, rhs)
         };
-        self.rel_addr_stmt(AsmRelTypeAst::Addr16Rel8, dest_expr, base_expr)
+        self.rel_addr_stmt(AsmRelType::Addr16Rel8, dest_expr, base_expr)
     }
 
     pub fn placeholder_addr16_rel16le(
@@ -154,7 +154,7 @@ impl RcPool {
             let rhs = self.int_literal_expr(2);
             self.binop_expr(BinOpAst::Add, lhs, rhs)
         };
-        self.rel_addr_stmt(AsmRelTypeAst::Addr16Rel16le, dest_expr, base_expr)
+        self.rel_addr_stmt(AsmRelType::Addr16Rel16le, dest_expr, base_expr)
     }
 
     pub fn placeholder_expr(&mut self, placeholder: &'static str) -> ExprAst {
@@ -179,7 +179,7 @@ impl RcPool {
 
     pub fn placeholder_u8(&mut self, placeholder: &'static str) -> AsmStmtAst {
         let expr = self.placeholder_expr(placeholder);
-        self.int_data_stmt(AsmIntTypeAst::U8, expr)
+        self.int_data_stmt(AsmIntType::U8, expr)
     }
 
     pub fn placeholder_u16le(
@@ -187,7 +187,7 @@ impl RcPool {
         placeholder: &'static str,
     ) -> AsmStmtAst {
         let expr = self.placeholder_expr(placeholder);
-        self.int_data_stmt(AsmIntTypeAst::U16le, expr)
+        self.int_data_stmt(AsmIntType::U16le, expr)
     }
 
     pub fn placeholder_u24le(
@@ -195,12 +195,12 @@ impl RcPool {
         placeholder: &'static str,
     ) -> AsmStmtAst {
         let expr = self.placeholder_expr(placeholder);
-        self.int_data_stmt(AsmIntTypeAst::U24le, expr)
+        self.int_data_stmt(AsmIntType::U24le, expr)
     }
 
     pub fn rel_addr_stmt(
         &mut self,
-        rel_type: AsmRelTypeAst,
+        rel_type: AsmRelType,
         dest_expr: ExprAst,
         base_expr: ExprAst,
     ) -> AsmStmtAst {

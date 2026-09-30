@@ -344,7 +344,7 @@ pub struct AsmCondAst {
 #[derive(Clone, Debug)]
 pub enum AsmDataTypeAst {
     /// An integer data type.
-    Int(SrcSpan, AsmIntTypeAst),
+    Int(SrcSpan, AsmIntType),
     /// A reference to a struct type.
     Struct(IdentifierAst),
 }
@@ -352,7 +352,7 @@ pub enum AsmDataTypeAst {
 impl AsmDataTypeAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         chumsky::prelude::choice((
-            AsmIntTypeAst::parser()
+            AsmIntType::parser()
                 .map(|(span, int_type)| Self::Int(span, int_type)),
             IdentifierAst::parser().map(Self::Struct),
         ))
@@ -461,14 +461,14 @@ pub struct AsmIntDataAst {
     /// The location in the source code where the directive token appears.
     pub directive_span: SrcSpan,
     /// The type of integer data.
-    pub int_type: AsmIntTypeAst,
+    pub int_type: AsmIntType,
     /// The expressions for the integer data to insert.
     pub expressions: Vec<ExprAst>,
 }
 
 impl AsmIntDataAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        AsmIntTypeAst::parser()
+        AsmIntType::parser()
             .then(
                 ExprAst::parser()
                     .separated_by(symbol(TokenValue::Comma))
@@ -488,7 +488,7 @@ impl AsmIntDataAst {
 
 /// Types of integer data directives in assembly code.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AsmIntTypeAst {
+pub enum AsmIntType {
     /// An 8-bit signed integer.
     S8,
     /// A 16-bit signed integer, using the current architecture's native
@@ -523,7 +523,7 @@ pub enum AsmIntTypeAst {
     U24le,
 }
 
-impl AsmIntTypeAst {
+impl AsmIntType {
     const ALL: &[Self] = &[
         Self::S8,
         Self::S16,
@@ -726,7 +726,7 @@ pub struct AsmRelAddrAst {
     /// The location in the source code where the directive token appears.
     pub directive_span: SrcSpan,
     /// The type of relative address.
-    pub rel_type: AsmRelTypeAst,
+    pub rel_type: AsmRelType,
     /// The expression for the destination address.
     pub dest_expr: ExprAst,
     /// The expression for the base address.
@@ -735,7 +735,7 @@ pub struct AsmRelAddrAst {
 
 impl AsmRelAddrAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        AsmRelTypeAst::parser()
+        AsmRelType::parser()
             .then(ExprAst::parser())
             .then_ignore(symbol(TokenValue::Comma))
             .then(ExprAst::parser())
@@ -753,7 +753,7 @@ impl AsmRelAddrAst {
 
 /// Types of integer data directives in assembly code.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AsmRelTypeAst {
+pub enum AsmRelType {
     /// A 8-bit signed relative address within a 16-bit address space.
     Addr16Rel8,
     /// A 16-bit signed little-endian relative address within a 16-bit address
@@ -764,7 +764,7 @@ pub enum AsmRelTypeAst {
     Addr16RelLink,
 }
 
-impl AsmRelTypeAst {
+impl AsmRelType {
     const ALL: &[Self] = &[Self::Addr16Rel8, Self::Addr16Rel16le];
 
     pub(crate) fn directive(self) -> &'static str {
@@ -879,14 +879,14 @@ pub struct AsmStrDataAst {
     /// The location in the source code where the directive token appears.
     pub directive_span: SrcSpan,
     /// The type of string data.
-    pub str_type: AsmStrTypeAst,
+    pub str_type: AsmStrType,
     /// The expressions for the string data to insert.
     pub expressions: Vec<ExprAst>,
 }
 
 impl AsmStrDataAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        AsmStrTypeAst::parser()
+        AsmStrType::parser()
             .then(
                 ExprAst::parser()
                     .separated_by(symbol(TokenValue::Comma))
@@ -906,14 +906,14 @@ impl AsmStrDataAst {
 
 /// Types of string data directives in assembly code.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AsmStrTypeAst {
+pub enum AsmStrType {
     /// ASCII string data.
     Ascii,
     /// UTF-8 string data.
     Utf8,
 }
 
-impl AsmStrTypeAst {
+impl AsmStrType {
     const ALL: &[Self] = &[Self::Ascii, Self::Utf8];
 
     pub(crate) fn directive(self) -> &'static str {

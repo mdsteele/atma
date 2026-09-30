@@ -4,7 +4,7 @@ use super::addrmode::{
 };
 use super::pool::RcPool;
 use crate::parse::{
-    AsmIntTypeAst, AsmMacroArgAst, AsmRelTypeAst, AsmStmtAst, BinOpAst,
+    AsmIntType, AsmMacroArgAst, AsmRelType, AsmStmtAst, BinOpAst,
 };
 
 //===========================================================================//
@@ -371,7 +371,7 @@ fn link_pound_imm_body(
         };
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
-    vec![pool.int_data_stmt(AsmIntTypeAst::U8, opcode_expr)]
+    vec![pool.int_data_stmt(AsmIntType::U8, opcode_expr)]
 }
 
 fn link_relative_body(
@@ -385,11 +385,7 @@ fn link_relative_body(
         let rhs = pool.int_literal_expr(1);
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
-    vec![pool.rel_addr_stmt(
-        AsmRelTypeAst::Addr16RelLink,
-        dest_expr,
-        base_expr,
-    )]
+    vec![pool.rel_addr_stmt(AsmRelType::Addr16RelLink, dest_expr, base_expr)]
 }
 
 //===========================================================================//

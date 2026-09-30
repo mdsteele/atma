@@ -2,7 +2,7 @@ use super::env::AsmTypeEnv;
 use super::error::{AsmError, AsmResult};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::ExprType;
-use crate::parse::{AsmStrTypeAst, ExprAst};
+use crate::parse::{AsmStrType, ExprAst};
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
@@ -10,7 +10,7 @@ use num_traits::ToPrimitive;
 
 pub(super) fn assemble_str_data(
     env: &mut AsmTypeEnv,
-    str_type: AsmStrTypeAst,
+    str_type: AsmStrType,
     expr_ast: ExprAst,
 ) -> AsmResult<()> {
     let mut errs = Errs::<AsmError>::new();
@@ -60,12 +60,12 @@ pub(super) fn assemble_str_data(
 
 fn assemble_str_data_bigint(
     env: &mut AsmTypeEnv,
-    str_type: AsmStrTypeAst,
+    str_type: AsmStrType,
     expr_span: SrcSpan,
     bigint: &BigInt,
 ) -> AsmResult<()> {
     match str_type {
-        AsmStrTypeAst::Ascii => {
+        AsmStrType::Ascii => {
             if let Some(byte) = bigint.to_u8()
                 && byte < 0x80
             {
@@ -77,7 +77,7 @@ fn assemble_str_data_bigint(
                 }))
             }
         }
-        AsmStrTypeAst::Utf8 => {
+        AsmStrType::Utf8 => {
             if let Some(chr) = bigint.to_u32().and_then(char::from_u32) {
                 env.append_chunk_data(chr.to_string().as_bytes())
             } else {
@@ -92,12 +92,12 @@ fn assemble_str_data_bigint(
 
 fn assemble_str_data_string(
     env: &mut AsmTypeEnv,
-    str_type: AsmStrTypeAst,
+    str_type: AsmStrType,
     expr_span: SrcSpan,
     string: &str,
 ) -> AsmResult<()> {
     match str_type {
-        AsmStrTypeAst::Ascii => {
+        AsmStrType::Ascii => {
             if let Some(chr) = string.chars().find(|chr| !chr.is_ascii()) {
                 Err(Errs::one(AsmError::InvalidAsciiString {
                     expr_loc: env.make_loc(expr_span),
@@ -107,7 +107,7 @@ fn assemble_str_data_string(
                 env.append_chunk_data(string.as_bytes())
             }
         }
-        AsmStrTypeAst::Utf8 => env.append_chunk_data(string.as_bytes()),
+        AsmStrType::Utf8 => env.append_chunk_data(string.as_bytes()),
     }
 }
 

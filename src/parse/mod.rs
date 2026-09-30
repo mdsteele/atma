@@ -13,10 +13,10 @@ pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
 pub use asm::{
     AsmAssertAst, AsmBinaryAst, AsmChunkAst, AsmChunkKind, AsmCondAst,
     AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst, AsmEnumAst,
-    AsmEnumFieldAst, AsmIntDataAst, AsmIntTypeAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst, AsmRelTypeAst, AsmRepeatAst,
+    AsmEnumFieldAst, AsmIntDataAst, AsmIntType, AsmInvokeAst, AsmLabelAst,
+    AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst, AsmRelType, AsmRepeatAst,
     AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
-    AsmStrTypeAst, AsmStructAst, AsmStructFieldAst, AsmUseAst,
+    AsmStrType, AsmStructAst, AsmStructFieldAst, AsmUseAst,
 };
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst};
