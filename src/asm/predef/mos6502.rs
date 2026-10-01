@@ -238,13 +238,13 @@ impl AddrMode for Mos6502 {
             | Self::ParAddr8CommaRegEns(_)
             | Self::ParAddr8EnsCommaReg(_) => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
             Self::BangAddr16
             | Self::BangAddr16CommaReg(_)
             | Self::ParBangAddr16Ens => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u16le(PLACEHOLDER_ADDR),
+                pool.placeholder_a16le(PLACEHOLDER_ADDR),
             ],
             Self::Implied | Self::Reg(_) => {
                 vec![pool.constant_bytes_stmt(prefix_bytes)]

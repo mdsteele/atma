@@ -146,18 +146,18 @@ impl AddrMode for W65c816 {
             | Self::ParAddr8CommaRegEnsCommaReg(_, _)
             | Self::ParAddr8Ens => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
             Self::BracBangAddr16Kets | Self::ParBangAddr16CommaRegEns(_) => {
                 vec![
                     pool.constant_bytes_stmt(prefix_bytes),
-                    pool.placeholder_u16le(PLACEHOLDER_ADDR),
+                    pool.placeholder_a16le(PLACEHOLDER_ADDR),
                 ]
             }
             Self::BangBangAddr24 | Self::BangBangAddr24CommaReg(_) => {
                 vec![
                     pool.constant_bytes_stmt(prefix_bytes),
-                    pool.placeholder_u24le(PLACEHOLDER_ADDR),
+                    pool.placeholder_a24le(PLACEHOLDER_ADDR),
                 ]
             }
             Self::PoundImm8CommaPoundImm8 => vec![

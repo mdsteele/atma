@@ -2,8 +2,8 @@ use super::env::AsmTypeEnv;
 use super::error::{AsmError, AsmResult};
 use crate::addr::Endianness;
 use crate::error::{Errs, SrcSpan};
-use crate::expr::{ExprType, ExprUnOp};
-use crate::obj::{ObjExpr, ObjExprOp, ObjPatchData, ObjPatchIntType};
+use crate::expr::ExprType;
+use crate::obj::{ObjPatchData, ObjPatchIntType};
 use crate::parse::{AsmIntDataAst, AsmIntType, ExprAst};
 use num_bigint::BigInt;
 use std::range::RangeInclusive;
@@ -26,13 +26,9 @@ pub(super) fn assemble_int_data(
                     env, directive, int_type, expr_span, address,
                 )),
                 None => {
-                    IntDataValue::label_patch(env, int_type, expr_span, expr)
+                    IntDataValue::Patch(ObjPatchData::Integer(int_type, expr))
                 }
             }
-        }
-        (expr, ExprType::Label, Err(reason)) => {
-            errs.also(env.check_for_inevitable_eval_error(&reason));
-            IntDataValue::label_patch(env, int_type, expr_span, expr)
         }
         (_, ExprType::Integer, Ok(static_value)) => {
             let bigint = static_value.unwrap_int();
@@ -40,7 +36,9 @@ pub(super) fn assemble_int_data(
                 env, directive, int_type, expr_span, bigint,
             ))
         }
-        (expr, ExprType::Integer | ExprType::Bottom, Err(reason)) => {
+        (expr, ExprType::Label, Err(reason))
+        | (expr, ExprType::Integer, Err(reason))
+        | (expr, ExprType::Bottom, Err(reason)) => {
             errs.also(env.check_for_inevitable_eval_error(&reason));
             IntDataValue::Patch(ObjPatchData::Integer(int_type, expr))
         }
@@ -77,21 +75,6 @@ enum IntDataValue {
 }
 
 impl IntDataValue {
-    pub fn label_patch(
-        env: &AsmTypeEnv,
-        int_type: ObjPatchIntType,
-        expr_span: SrcSpan,
-        mut expr: ObjExpr,
-    ) -> Self {
-        expr.ops.push(ObjExprOp::UnOp {
-            context: env.current_src_context(),
-            unop: ExprUnOp::AddrOf,
-            op_span: expr_span,
-            arg_span: expr_span,
-        });
-        Self::Patch(ObjPatchData::Integer(int_type, expr))
-    }
-
     pub fn integer_static(
         env: &AsmTypeEnv,
         directive: &'static str,
@@ -133,6 +116,33 @@ pub(super) fn int_patch_type(
     int_data_ast: &AsmIntDataAst,
 ) -> AsmResult<ObjPatchIntType> {
     match int_data_ast.int_type {
+        // Address:
+        AsmIntType::A8 => Ok(ObjPatchIntType::A8),
+        AsmIntType::A16 => endian_patch_type(
+            env,
+            int_data_ast,
+            ObjPatchIntType::A16be,
+            ObjPatchIntType::A16le,
+        ),
+        AsmIntType::A16be => Ok(ObjPatchIntType::A16be),
+        AsmIntType::A16le => Ok(ObjPatchIntType::A16le),
+        AsmIntType::A24 => endian_patch_type(
+            env,
+            int_data_ast,
+            ObjPatchIntType::A24be,
+            ObjPatchIntType::A24le,
+        ),
+        AsmIntType::A24be => Ok(ObjPatchIntType::A24be),
+        AsmIntType::A24le => Ok(ObjPatchIntType::A24le),
+        AsmIntType::A32 => endian_patch_type(
+            env,
+            int_data_ast,
+            ObjPatchIntType::A32be,
+            ObjPatchIntType::A32le,
+        ),
+        AsmIntType::A32be => Ok(ObjPatchIntType::A32be),
+        AsmIntType::A32le => Ok(ObjPatchIntType::A32le),
+        // Signed:
         AsmIntType::S8 => Ok(ObjPatchIntType::S8),
         AsmIntType::S16 => endian_patch_type(
             env,
@@ -150,6 +160,15 @@ pub(super) fn int_patch_type(
         ),
         AsmIntType::S24be => Ok(ObjPatchIntType::S24be),
         AsmIntType::S24le => Ok(ObjPatchIntType::S24le),
+        AsmIntType::S32 => endian_patch_type(
+            env,
+            int_data_ast,
+            ObjPatchIntType::S32be,
+            ObjPatchIntType::S32le,
+        ),
+        AsmIntType::S32be => Ok(ObjPatchIntType::S32be),
+        AsmIntType::S32le => Ok(ObjPatchIntType::S32le),
+        // Unsigned:
         AsmIntType::U8 => Ok(ObjPatchIntType::U8),
         AsmIntType::U16 => endian_patch_type(
             env,
@@ -167,6 +186,14 @@ pub(super) fn int_patch_type(
         ),
         AsmIntType::U24be => Ok(ObjPatchIntType::U24be),
         AsmIntType::U24le => Ok(ObjPatchIntType::U24le),
+        AsmIntType::U32 => endian_patch_type(
+            env,
+            int_data_ast,
+            ObjPatchIntType::U32be,
+            ObjPatchIntType::U32le,
+        ),
+        AsmIntType::U32be => Ok(ObjPatchIntType::U32be),
+        AsmIntType::U32le => Ok(ObjPatchIntType::U32le),
     }
 }
 

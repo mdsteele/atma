@@ -182,9 +182,13 @@ impl<'a> FilePatcher<'a> {
                 ObjPatchData::Fill(size) => {
                     self.apply_fill_patch(chunk_index, size, start, data)
                 }
-                ObjPatchData::Integer(int_type, expr) => {
-                    self.apply_int_patch(int_type, expr, start, data)
-                }
+                ObjPatchData::Integer(int_type, expr) => self.apply_int_patch(
+                    chunk_index,
+                    int_type,
+                    expr,
+                    start,
+                    data,
+                ),
                 ObjPatchData::Relative(rel_type, lhs, rhs) => self
                     .apply_rel_patch(
                         chunk_index,
@@ -214,28 +218,23 @@ impl<'a> FilePatcher<'a> {
 
     fn apply_int_patch(
         &self,
+        chunk_index: usize,
         int_type: ObjPatchIntType,
         expr: ObjExpr,
         start: usize,
         data: &mut [u8],
     ) -> LinkResult<()> {
-        match self.eval_patch_expr(expr)? {
-            ExprValue::Integer(bigint) => {
-                match int_type.value_in_range(&bigint) {
-                    Ok(int) => {
-                        int_type.write_value_at(int, start, data);
-                        Ok(())
-                    }
-                    Err(_range) => {
-                        Err(Errs::one(LinkError::PatchValueOutOfRange {
-                            int_type,
-                            value: bigint,
-                        }))
-                    }
-                }
+        let bigint = if int_type.is_address() {
+            let absolute = self.eval_addr_expr(chunk_index, expr)?;
+            let metadata = &self.context.chunk_metadata[chunk_index];
+            if absolute.space != metadata.start.space {
+                return Err(Errs::one(LinkError::Misc));
             }
-            _ => Err(Errs::one(LinkError::PatchValueWrongType)),
-        }
+            BigInt::from(absolute.address)
+        } else {
+            self.eval_int_expr(expr)?
+        };
+        write_int_patch(int_type, bigint, start, data)
     }
 
     fn apply_rel_patch(
@@ -248,29 +247,19 @@ impl<'a> FilePatcher<'a> {
         data: &mut [u8],
     ) -> LinkResult<()> {
         let mut errs = Errs::<LinkError>::new();
-        let lhs = errs.ok(self.eval_rel_expr(chunk_index, lhs_expr));
-        let rhs = errs.ok(self.eval_rel_expr(chunk_index, rhs_expr));
+        let lhs = errs.ok(self.eval_addr_expr(chunk_index, lhs_expr));
+        let rhs = errs.ok(self.eval_addr_expr(chunk_index, rhs_expr));
         if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
             if lhs.space != rhs.space {
                 errs.push(LinkError::Misc);
             } else {
-                let delta =
-                    BigInt::from(lhs.address) - BigInt::from(rhs.address);
-                match rel_type.delta_value_in_range(&delta) {
-                    Ok(delta) => rel_type.write_delta_at(delta, start, data),
-                    Err(range) => {
-                        errs.push(LinkError::RelativeAddressOutOfRange {
-                            delta,
-                            range,
-                        });
-                    }
-                }
+                errs.also(write_rel_patch(rel_type, lhs, rhs, start, data))
             }
         }
         errs.result()
     }
 
-    fn eval_rel_expr(
+    fn eval_addr_expr(
         &self,
         chunk_index: usize,
         expr: ObjExpr,
@@ -284,6 +273,17 @@ impl<'a> FilePatcher<'a> {
                     // TODO: validate address against addrspace bits
                     address: Addr::wrap_bigint(&address),
                 })
+            }
+            _ => Err(Errs::one(LinkError::PatchValueWrongType)),
+        }
+    }
+
+    fn eval_int_expr(&self, expr: ObjExpr) -> LinkResult<BigInt> {
+        match self.eval_patch_expr(expr)? {
+            ExprValue::Integer(bigint) => Ok(bigint),
+            ExprValue::Label(label) => {
+                let absolute = self.context.resolve_label(&label)?;
+                Ok(BigInt::from(absolute.address))
             }
             _ => Err(Errs::one(LinkError::PatchValueWrongType)),
         }
@@ -305,6 +305,43 @@ fn write_fill_patch(
 ) {
     debug_assert!(offset + size <= data.len());
     data[offset..(offset + size)].fill(fill_byte);
+}
+
+fn write_int_patch(
+    int_type: ObjPatchIntType,
+    value: BigInt,
+    offset: usize,
+    data: &mut [u8],
+) -> LinkResult<()> {
+    match int_type.value_in_range(&value) {
+        Ok(int) => {
+            int_type.write_value_at(int, offset, data);
+            Ok(())
+        }
+        Err(_range) => {
+            Err(Errs::one(LinkError::PatchValueOutOfRange { int_type, value }))
+        }
+    }
+}
+
+fn write_rel_patch(
+    rel_type: ObjPatchRelType,
+    lhs: AbsoluteLabel,
+    rhs: AbsoluteLabel,
+    offset: usize,
+    data: &mut [u8],
+) -> LinkResult<()> {
+    let delta = BigInt::from(lhs.address) - BigInt::from(rhs.address);
+    match rel_type.delta_value_in_range(&delta) {
+        Ok(delta) => {
+            rel_type.write_delta_at(delta, offset, data);
+            Ok(())
+        }
+        Err(range) => Err(Errs::one(LinkError::RelativeAddressOutOfRange {
+            delta,
+            range,
+        })),
+    }
 }
 
 //===========================================================================//

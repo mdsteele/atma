@@ -14,16 +14,27 @@ const TAG_A16R8: u8 = 0x80;
 const TAG_A16R16LE: u8 = 0x81;
 const TAG_A16RLINK: u8 = 0x82;
 
-const TAG_S8: u8 = 0x00;
-const TAG_S16BE: u8 = 0x01;
-const TAG_S16LE: u8 = 0x02;
-const TAG_S24BE: u8 = 0x03;
-const TAG_S24LE: u8 = 0x04;
-const TAG_U8: u8 = 0x05;
-const TAG_U16BE: u8 = 0x06;
-const TAG_U16LE: u8 = 0x07;
-const TAG_U24BE: u8 = 0x08;
-const TAG_U24LE: u8 = 0x09;
+const TAG_A8: u8 = 0x00;
+const TAG_A16BE: u8 = 0x01;
+const TAG_A16LE: u8 = 0x02;
+const TAG_A24BE: u8 = 0x03;
+const TAG_A24LE: u8 = 0x04;
+const TAG_A32BE: u8 = 0x05;
+const TAG_A32LE: u8 = 0x06;
+const TAG_S8: u8 = 0x07;
+const TAG_S16BE: u8 = 0x08;
+const TAG_S16LE: u8 = 0x09;
+const TAG_S24BE: u8 = 0x0a;
+const TAG_S24LE: u8 = 0x0b;
+const TAG_S32BE: u8 = 0x0c;
+const TAG_S32LE: u8 = 0x0d;
+const TAG_U8: u8 = 0x0e;
+const TAG_U16BE: u8 = 0x0f;
+const TAG_U16LE: u8 = 0x10;
+const TAG_U24BE: u8 = 0x11;
+const TAG_U24LE: u8 = 0x12;
+const TAG_U32BE: u8 = 0x13;
+const TAG_U32LE: u8 = 0x14;
 
 //===========================================================================//
 
@@ -94,7 +105,7 @@ impl BinaryIo for ObjPatchData {
                 Ok(ObjPatchData::Relative(rel_type, lhs, rhs))
             }
             byte => {
-                let int_type = ObjPatchIntType::decode_from_byte(byte)?;
+                let int_type = ObjPatchIntType::decode_from_byte(byte & 0x3f)?;
                 let expr = ObjExpr::read_from(decoder)?;
                 Ok(ObjPatchData::Integer(int_type, expr))
             }
@@ -129,16 +140,41 @@ impl BinaryIo for ObjPatchData {
 /// file.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ObjPatchIntType {
+    /// Patch a single data byte with an signed 8-bit address in the current
+    /// address space.
+    A8,
+    /// Patch two data bytes with a big-endian signed 16-bit address in the
+    /// current address space.
+    A16be,
+    /// Patch two data bytes with a little-endian signed 16-bit address in the
+    /// current address space.
+    A16le,
+    /// Patch three data bytes with a big-endian signed 24-bit address in the
+    /// current address space.
+    A24be,
+    /// Patch three data bytes with a little-endian signed 24-bit address in
+    /// the current address space.
+    A24le,
+    /// Patch three data bytes with a big-endian signed 32-bit address in the
+    /// current address space.
+    A32be,
+    /// Patch three data bytes with a little-endian signed 32-bit address in
+    /// the current address space.
+    A32le,
     /// Patch a single data byte with an signed 8-bit integer.
     S8,
-    /// Patch a single data byte with a big-endian signed 16-bit integer.
+    /// Patch two data bytes with a big-endian signed 16-bit integer.
     S16be,
-    /// Patch a single data byte with a little-endian signed 16-bit integer.
+    /// Patch two data bytes with a little-endian signed 16-bit integer.
     S16le,
-    /// Patch a single data byte with a big-endian signed 24-bit integer.
+    /// Patch three data bytes with a big-endian signed 24-bit integer.
     S24be,
-    /// Patch a single data byte with a little-endian signed 24-bit integer.
+    /// Patch three data bytes with a little-endian signed 24-bit integer.
     S24le,
+    /// Patch three data bytes with a big-endian signed 32-bit integer.
+    S32be,
+    /// Patch three data bytes with a little-endian signed 32-bit integer.
+    S32le,
     /// Patch a single data byte with an unsigned 8-bit integer.
     U8,
     /// Patch two data bytes with a big-endian unsigned 16-bit integer.
@@ -149,14 +185,48 @@ pub enum ObjPatchIntType {
     U24be,
     /// Patch three data bytes with a little-endian unsigned 24-bit integer.
     U24le,
+    /// Patch three data bytes with a big-endian unsigned 32-bit integer.
+    U32be,
+    /// Patch three data bytes with a little-endian unsigned 32-bit integer.
+    U32le,
 }
 
 impl ObjPatchIntType {
     fn num_bytes(self) -> usize {
         match self {
-            Self::S8 | Self::U8 => 1,
-            Self::S16be | Self::S16le | Self::U16be | Self::U16le => 2,
-            Self::S24be | Self::S24le | Self::U24be | Self::U24le => 3,
+            Self::A8 | Self::S8 | Self::U8 => 1,
+            Self::A16be | Self::S16be | Self::U16be => 2,
+            Self::A16le | Self::S16le | Self::U16le => 2,
+            Self::A24be | Self::S24be | Self::U24be => 3,
+            Self::A24le | Self::S24le | Self::U24le => 3,
+            Self::A32be | Self::S32be | Self::U32be => 4,
+            Self::A32le | Self::S32le | Self::U32le => 4,
+        }
+    }
+
+    pub(crate) fn is_address(self) -> bool {
+        match self {
+            Self::A8
+            | Self::A16be
+            | Self::A16le
+            | Self::A24be
+            | Self::A24le
+            | Self::A32be
+            | Self::A32le => true,
+            Self::S8
+            | Self::S16be
+            | Self::S16le
+            | Self::S24be
+            | Self::S24le
+            | Self::S32be
+            | Self::S32le
+            | Self::U8
+            | Self::U16be
+            | Self::U16le
+            | Self::U24be
+            | Self::U24le
+            | Self::U32be
+            | Self::U32le => false,
         }
     }
 
@@ -179,26 +249,38 @@ impl ObjPatchIntType {
 
     pub(crate) fn append_value(self, value: i64, out: &mut Vec<u8>) {
         match self {
-            Self::S8 | Self::U8 => {
+            Self::A8 | Self::S8 | Self::U8 => {
                 out.push(value as u8);
             }
-            Self::S16be | Self::U16be => {
+            Self::A16be | Self::S16be | Self::U16be => {
                 out.push((value >> 8) as u8);
                 out.push(value as u8);
             }
-            Self::S16le | Self::U16le => {
+            Self::A16le | Self::S16le | Self::U16le => {
                 out.push(value as u8);
                 out.push((value >> 8) as u8);
             }
-            Self::S24be | Self::U24be => {
+            Self::A24be | Self::S24be | Self::U24be => {
                 out.push((value >> 16) as u8);
                 out.push((value >> 8) as u8);
                 out.push(value as u8);
             }
-            Self::S24le | Self::U24le => {
+            Self::A24le | Self::S24le | Self::U24le => {
                 out.push(value as u8);
                 out.push((value >> 8) as u8);
                 out.push((value >> 16) as u8);
+            }
+            Self::A32be | Self::S32be | Self::U32be => {
+                out.push((value >> 24) as u8);
+                out.push((value >> 16) as u8);
+                out.push((value >> 8) as u8);
+                out.push(value as u8);
+            }
+            Self::A32le | Self::S32le | Self::U32le => {
+                out.push(value as u8);
+                out.push((value >> 8) as u8);
+                out.push((value >> 16) as u8);
+                out.push((value >> 24) as u8);
             }
         }
     }
@@ -211,26 +293,38 @@ impl ObjPatchIntType {
     ) {
         debug_assert!(offset + self.num_bytes() <= data.len());
         match self {
-            Self::S8 | Self::U8 => {
+            Self::A8 | Self::S8 | Self::U8 => {
                 data[offset] = value as u8;
             }
-            Self::S16be | Self::U16be => {
+            Self::A16be | Self::S16be | Self::U16be => {
                 data[offset] = (value >> 8) as u8;
                 data[offset + 1] = value as u8;
             }
-            Self::S16le | Self::U16le => {
+            Self::A16le | Self::S16le | Self::U16le => {
                 data[offset] = value as u8;
                 data[offset + 1] = (value >> 8) as u8;
             }
-            Self::S24be | Self::U24be => {
+            Self::A24be | Self::S24be | Self::U24be => {
                 data[offset] = (value >> 16) as u8;
                 data[offset + 1] = (value >> 8) as u8;
                 data[offset + 2] = value as u8;
             }
-            Self::S24le | Self::U24le => {
+            Self::A24le | Self::S24le | Self::U24le => {
                 data[offset] = value as u8;
                 data[offset + 1] = (value >> 8) as u8;
                 data[offset + 2] = (value >> 16) as u8;
+            }
+            Self::A32be | Self::S32be | Self::U32be => {
+                data[offset] = (value >> 24) as u8;
+                data[offset + 1] = (value >> 16) as u8;
+                data[offset + 2] = (value >> 8) as u8;
+                data[offset + 3] = value as u8;
+            }
+            Self::A32le | Self::S32le | Self::U32le => {
+                data[offset] = value as u8;
+                data[offset + 1] = (value >> 8) as u8;
+                data[offset + 2] = (value >> 16) as u8;
+                data[offset + 3] = (value >> 24) as u8;
             }
         }
     }
@@ -242,30 +336,47 @@ impl ObjPatchIntType {
                 RangeInclusive { start: -0x8000, last: 0x7fff }
             }
             Self::S24be | Self::S24le => {
-                RangeInclusive { start: -0x800000, last: 0x7fffff }
+                RangeInclusive { start: -0x80_0000, last: 0x7f_ffff }
             }
-            Self::U8 => RangeInclusive { start: 0, last: 0xff },
-            Self::U16be | Self::U16le => {
+            Self::S32be | Self::S32le => {
+                RangeInclusive { start: -0x8000_0000, last: 0x7fff_ffff }
+            }
+            Self::A8 | Self::U8 => RangeInclusive { start: 0, last: 0xff },
+            Self::A16be | Self::A16le | Self::U16be | Self::U16le => {
                 RangeInclusive { start: 0, last: 0xffff }
             }
-            Self::U24be | Self::U24le => {
-                RangeInclusive { start: 0, last: 0xffffff }
+            Self::A24be | Self::A24le | Self::U24be | Self::U24le => {
+                RangeInclusive { start: 0, last: 0xff_ffff }
+            }
+            Self::A32be | Self::A32le | Self::U32be | Self::U32le => {
+                RangeInclusive { start: 0, last: 0xffff_ffff }
             }
         }
     }
 
     fn decode_from_byte(byte: u8) -> io::Result<Self> {
         match byte {
+            TAG_A8 => Ok(Self::A8),
+            TAG_A16BE => Ok(Self::A16be),
+            TAG_A16LE => Ok(Self::A16le),
+            TAG_A24BE => Ok(Self::A24be),
+            TAG_A24LE => Ok(Self::A24le),
+            TAG_A32BE => Ok(Self::A32be),
+            TAG_A32LE => Ok(Self::A32le),
             TAG_S8 => Ok(Self::S8),
             TAG_S16BE => Ok(Self::S16be),
             TAG_S16LE => Ok(Self::S16le),
             TAG_S24BE => Ok(Self::S24be),
             TAG_S24LE => Ok(Self::S24le),
+            TAG_S32BE => Ok(Self::S32be),
+            TAG_S32LE => Ok(Self::S32le),
             TAG_U8 => Ok(Self::U8),
             TAG_U16BE => Ok(Self::U16be),
             TAG_U16LE => Ok(Self::U16le),
             TAG_U24BE => Ok(Self::U24be),
             TAG_U24LE => Ok(Self::U24le),
+            TAG_U32BE => Ok(Self::U32be),
+            TAG_U32LE => Ok(Self::U32le),
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("invalid ObjPatchIntType byte: {}", byte),
@@ -275,16 +386,27 @@ impl ObjPatchIntType {
 
     fn encode_to_byte(self) -> u8 {
         match self {
+            Self::A8 => TAG_A8,
+            Self::A16be => TAG_A16BE,
+            Self::A16le => TAG_A16LE,
+            Self::A24be => TAG_A24BE,
+            Self::A24le => TAG_A24LE,
+            Self::A32be => TAG_A32BE,
+            Self::A32le => TAG_A32LE,
             Self::S8 => TAG_S8,
             Self::S16be => TAG_S16BE,
             Self::S16le => TAG_S16LE,
             Self::S24be => TAG_S24BE,
             Self::S24le => TAG_S24LE,
+            Self::S32be => TAG_S32BE,
+            Self::S32le => TAG_S32LE,
             Self::U8 => TAG_U8,
             Self::U16be => TAG_U16BE,
             Self::U16le => TAG_U16LE,
             Self::U24be => TAG_U24BE,
             Self::U24le => TAG_U24LE,
+            Self::U32be => TAG_U32BE,
+            Self::U32le => TAG_U32LE,
         }
     }
 }
@@ -464,16 +586,27 @@ mod tests {
 
     #[test]
     fn obj_patch_int_type_round_trips() {
+        assert_round_trips(ObjPatchIntType::A8);
+        assert_round_trips(ObjPatchIntType::A16be);
+        assert_round_trips(ObjPatchIntType::A16le);
+        assert_round_trips(ObjPatchIntType::A24be);
+        assert_round_trips(ObjPatchIntType::A24le);
+        assert_round_trips(ObjPatchIntType::A32be);
+        assert_round_trips(ObjPatchIntType::A32le);
         assert_round_trips(ObjPatchIntType::S8);
         assert_round_trips(ObjPatchIntType::S16be);
         assert_round_trips(ObjPatchIntType::S16le);
         assert_round_trips(ObjPatchIntType::S24be);
         assert_round_trips(ObjPatchIntType::S24le);
+        assert_round_trips(ObjPatchIntType::S32be);
+        assert_round_trips(ObjPatchIntType::S32le);
         assert_round_trips(ObjPatchIntType::U8);
         assert_round_trips(ObjPatchIntType::U16be);
         assert_round_trips(ObjPatchIntType::U16le);
         assert_round_trips(ObjPatchIntType::U24be);
         assert_round_trips(ObjPatchIntType::U24le);
+        assert_round_trips(ObjPatchIntType::U32be);
+        assert_round_trips(ObjPatchIntType::U32le);
     }
 
     #[test]

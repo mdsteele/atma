@@ -432,32 +432,32 @@ impl AddrMode for Spc700 {
             | Self::RegCommaBracAddr8PlusRegKets(_, _)
             | Self::RegCommaBracAddr8KetsPlusReg(_, _) => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
             Self::Addr8CommaAddr8 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR2),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR2),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
             Self::Addr8CommaBit => vec![
                 addr8_comma_bit_opcode(pool, prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
             Self::Addr8CommaBitCommaRelative8 => vec![
                 addr8_comma_bit_opcode(pool, prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
                 pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR2),
             ],
             Self::Addr8CommaRelative8
             | Self::Addr8PlusRegCommaRelative8(_) => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
                 pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR2),
             ],
             Self::Addr8CommaPoundImm8 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
                 pool.placeholder_u8(PLACEHOLDER_IMM),
-                pool.placeholder_u8(PLACEHOLDER_ADDR),
+                pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
             Self::BangAddr16
             | Self::BangAddr16PlusRegCommaReg(_, _)
@@ -466,7 +466,7 @@ impl AddrMode for Spc700 {
             | Self::RegCommaBangAddr16(_)
             | Self::RegCommaBangAddr16PlusReg(_, _) => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u16le(PLACEHOLDER_ADDR),
+                pool.placeholder_a16le(PLACEHOLDER_ADDR),
             ],
             Self::AddrHi => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
@@ -603,6 +603,7 @@ fn addr8_comma_bit_opcode(
 fn addr13_comma_bit_address(pool: &mut RcPool) -> AsmStmtAst {
     let expr = {
         // TODO: error unless address in range [0x0000, 0x1fff]
+        // TODO: error unless address is in the current address space
         let lhs = pool.placeholder_expr(PLACEHOLDER_ADDR);
         let rhs = {
             let lhs = bit_expr(pool);

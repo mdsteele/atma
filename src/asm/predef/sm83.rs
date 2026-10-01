@@ -171,7 +171,7 @@ impl AddrMode for Sm83 {
         match *self {
             Self::Addr16 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_u16le(PLACEHOLDER_ADDR),
+                pool.placeholder_a16le(PLACEHOLDER_ADDR),
             ],
             Self::BracRegKets(_)
             | Self::Implied

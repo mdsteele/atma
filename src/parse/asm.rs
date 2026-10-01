@@ -489,6 +489,29 @@ impl AsmIntDataAst {
 /// Types of integer data directives in assembly code.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum AsmIntType {
+    /// An 8-bit address in the current address space.
+    A8,
+    /// A 16-bit address in the current address space, using the current
+    /// architecture's native endianness.
+    A16,
+    /// A 16-bit big-endian address in the current address space.
+    A16be,
+    /// A 16-bit little-endian address in the current address space.
+    A16le,
+    /// A 24-bit address in the current address space, using the current
+    /// architecture's native endianness.
+    A24,
+    /// A 24-bit big-endian address in the current address space.
+    A24be,
+    /// A 24-bit little-endian address in the current address space.
+    A24le,
+    /// A 32-bit address in the current address space, using the current
+    /// architecture's native endianness.
+    A32,
+    /// A 32-bit big-endian address in the current address space.
+    A32be,
+    /// A 32-bit little-endian address in the current address space.
+    A32le,
     /// An 8-bit signed integer.
     S8,
     /// A 16-bit signed integer, using the current architecture's native
@@ -505,6 +528,13 @@ pub enum AsmIntType {
     S24be,
     /// A 24-bit signed little-endian integer.
     S24le,
+    /// A 32-bit signed integer, using the current architecture's native
+    /// endianness.
+    S32,
+    /// A 32-bit signed big-endian integer.
+    S32be,
+    /// A 32-bit signed little-endian integer.
+    S32le,
     /// An 8-bit unsigned integer.
     U8,
     /// A 16-bit unsigned integer, using the current architecture's native
@@ -521,10 +551,27 @@ pub enum AsmIntType {
     U24be,
     /// A 24-bit unsigned little-endian integer.
     U24le,
+    /// A 32-bit unsigned integer, using the current architecture's native
+    /// endianness.
+    U32,
+    /// A 32-bit unsigned big-endian integer.
+    U32be,
+    /// A 32-bit unsigned little-endian integer.
+    U32le,
 }
 
 impl AsmIntType {
     const ALL: &[Self] = &[
+        Self::A8,
+        Self::A16,
+        Self::A16be,
+        Self::A16le,
+        Self::A24,
+        Self::A24be,
+        Self::A24le,
+        Self::A32,
+        Self::A32be,
+        Self::A32le,
         Self::S8,
         Self::S16,
         Self::S16be,
@@ -532,6 +579,9 @@ impl AsmIntType {
         Self::S24,
         Self::S24be,
         Self::S24le,
+        Self::S32,
+        Self::S32be,
+        Self::S32le,
         Self::U8,
         Self::U16,
         Self::U16be,
@@ -539,28 +589,56 @@ impl AsmIntType {
         Self::U24,
         Self::U24be,
         Self::U24le,
+        Self::U32,
+        Self::U32be,
+        Self::U32le,
     ];
 
     pub(crate) fn size(self) -> Size {
         match self {
-            Self::S8 | Self::U8 => Size::from(1u32),
-            Self::S16
+            Self::A8 | Self::S8 | Self::U8 => Size::from(1u32),
+            Self::A16
+            | Self::A16be
+            | Self::A16le
+            | Self::S16
             | Self::S16be
             | Self::S16le
             | Self::U16
             | Self::U16be
             | Self::U16le => Size::from(2u32),
-            Self::S24
+            Self::A24
+            | Self::A24be
+            | Self::A24le
+            | Self::S24
             | Self::S24be
             | Self::S24le
             | Self::U24
             | Self::U24be
             | Self::U24le => Size::from(3u32),
+            Self::A32
+            | Self::A32be
+            | Self::A32le
+            | Self::S32
+            | Self::S32be
+            | Self::S32le
+            | Self::U32
+            | Self::U32be
+            | Self::U32le => Size::from(4u32),
         }
     }
 
     pub(crate) fn directive(self) -> &'static str {
         match self {
+            Self::A8 => ".A8",
+            Self::A16 => ".A16",
+            Self::A16be => ".A16BE",
+            Self::A16le => ".A16LE",
+            Self::A24 => ".A24",
+            Self::A24be => ".A24BE",
+            Self::A24le => ".A24LE",
+            Self::A32 => ".A32",
+            Self::A32be => ".A32BE",
+            Self::A32le => ".A32LE",
             Self::S8 => ".S8",
             Self::S16 => ".S16",
             Self::S16be => ".S16BE",
@@ -568,6 +646,9 @@ impl AsmIntType {
             Self::S24 => ".S24",
             Self::S24be => ".S24BE",
             Self::S24le => ".S24LE",
+            Self::S32 => ".S32",
+            Self::S32be => ".S32BE",
+            Self::S32le => ".S32LE",
             Self::U8 => ".U8",
             Self::U16 => ".U16",
             Self::U16be => ".U16BE",
@@ -575,6 +656,9 @@ impl AsmIntType {
             Self::U24 => ".U24",
             Self::U24be => ".U24BE",
             Self::U24le => ".U24LE",
+            Self::U32 => ".U32",
+            Self::U32be => ".U32BE",
+            Self::U32le => ".U32LE",
         }
     }
 

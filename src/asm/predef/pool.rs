@@ -177,9 +177,22 @@ impl RcPool {
         }
     }
 
+    pub fn placeholder_a8(&mut self, placeholder: &'static str) -> AsmStmtAst {
+        let expr = self.placeholder_expr(placeholder);
+        self.int_data_stmt(AsmIntType::A8, expr)
+    }
+
     pub fn placeholder_u8(&mut self, placeholder: &'static str) -> AsmStmtAst {
         let expr = self.placeholder_expr(placeholder);
         self.int_data_stmt(AsmIntType::U8, expr)
+    }
+
+    pub fn placeholder_a16le(
+        &mut self,
+        placeholder: &'static str,
+    ) -> AsmStmtAst {
+        let expr = self.placeholder_expr(placeholder);
+        self.int_data_stmt(AsmIntType::A16le, expr)
     }
 
     pub fn placeholder_u16le(
@@ -190,12 +203,12 @@ impl RcPool {
         self.int_data_stmt(AsmIntType::U16le, expr)
     }
 
-    pub fn placeholder_u24le(
+    pub fn placeholder_a24le(
         &mut self,
         placeholder: &'static str,
     ) -> AsmStmtAst {
         let expr = self.placeholder_expr(placeholder);
-        self.int_data_stmt(AsmIntType::U24le, expr)
+        self.int_data_stmt(AsmIntType::A24le, expr)
     }
 
     pub fn rel_addr_stmt(
