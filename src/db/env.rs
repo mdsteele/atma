@@ -2,13 +2,14 @@ use super::error::{AdsError, AdsResult, AdsSrcContext};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
-    ExprBinOp, ExprCompiler, ExprEnv, ExprNotStaticReason, ExprStatic,
-    ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
+    ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
+    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
     make_global_builtin_values,
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, HereLabelKind, IdentifierAst};
 use crate::system::SimSystem;
+use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -393,6 +394,18 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
             op_span,
             arg_span,
         }
+    }
+
+    fn with_addr_op(&self, _op_span: SrcSpan) -> ExprTypeResult<Self::Op> {
+        todo!("use address space of current proc")
+    }
+
+    fn with_addr_static(
+        &self,
+        _op_span: SrcSpan,
+        _address: BigInt,
+    ) -> ExprTypeResult<ExprLabel> {
+        todo!("use address space of current proc")
     }
 }
 

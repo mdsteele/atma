@@ -227,6 +227,22 @@ impl ExprEnv for ConfigTypeEnv {
             arg_span,
         }
     }
+
+    fn with_addr_op(&self, op_span: SrcSpan) -> ExprTypeResult<Self::Op> {
+        Err(Errs::one(ExprTypeError::WithAddrOutsideOfAnyAddrSpace {
+            op_span,
+        }))
+    }
+
+    fn with_addr_static(
+        &self,
+        op_span: SrcSpan,
+        _address: BigInt,
+    ) -> ExprTypeResult<ExprLabel> {
+        Err(Errs::one(ExprTypeError::WithAddrOutsideOfAnyAddrSpace {
+            op_span,
+        }))
+    }
 }
 
 //===========================================================================//

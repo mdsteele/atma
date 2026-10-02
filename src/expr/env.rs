@@ -1,10 +1,12 @@
 use super::binop::ExprBinOp;
 use super::error::{ExprStatic, ExprTypeResult};
+use super::label::ExprLabel;
 use super::template::Template;
 use super::unop::ExprUnOp;
 use super::value::{ExprType, ExprValue};
 use crate::error::SrcSpan;
 use crate::parse::HereLabelKind;
+use num_bigint::BigInt;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -57,6 +59,18 @@ pub(crate) trait ExprEnv {
         op_span: SrcSpan,
         arg_span: SrcSpan,
     ) -> Self::Op;
+
+    /// Returns an operation to use the top stack value as an integer address
+    /// to create a label in the current address space.
+    fn with_addr_op(&self, op_span: SrcSpan) -> ExprTypeResult<Self::Op>;
+
+    /// Returns a label in the current address space with the given static
+    /// integer address.
+    fn with_addr_static(
+        &self,
+        op_span: SrcSpan,
+        address: BigInt,
+    ) -> ExprTypeResult<ExprLabel>;
 }
 
 //===========================================================================//

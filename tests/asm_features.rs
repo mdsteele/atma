@@ -180,4 +180,14 @@ fn struct_field_offsets() {
     );
 }
 
+#[test]
+fn with_addr_operator() {
+    let source = r#"\
+    .SECTION "TEST", start=$8000
+        .u8 %sqrtz($< - *$7edf)  ; TODO: change this to %sqrtx
+    .END
+    "#;
+    assert_eq!(static_data(assemble(source)), vec![vec![0x11]]);
+}
+
 //===========================================================================//

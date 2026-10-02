@@ -217,6 +217,12 @@ pub enum ExprTypeError {
         /// The name of the identifier.
         name: Rc<str>,
     },
+    /// Found a with-addr operator (unary `*`) outside of any context with a
+    /// meaningful address space.
+    WithAddrOutsideOfAnyAddrSpace {
+        /// The source code span for the with-addr operator.
+        op_span: SrcSpan,
+    },
 }
 
 impl ExprTypeError {
@@ -445,6 +451,13 @@ impl ExprTypeError {
                 let message = format!("unknown identifier: `{name}`");
                 let label = "this identifier was never declared";
                 SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label(label)
+            }
+            Self::WithAddrOutsideOfAnyAddrSpace { op_span } => {
+                let message = "cannot make label from address outside of any \
+                               address space";
+                let label = "there's no address space in this context";
+                SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_primary_label(label)
             }
         }

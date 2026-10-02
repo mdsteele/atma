@@ -80,6 +80,9 @@ impl ExprUnOp {
             (UnOpAst::Neg, ExprType::Integer | ExprType::Bottom) => {
                 Ok((Self::Neg, ExprType::Integer))
             }
+            // `WithAddr` is special-cased in `ExprCompiler`, and is never
+            // passed to this method.
+            (UnOpAst::WithAddr, _) => unreachable!(),
             (op, arg_type) => {
                 Err(Errs::one(ExprTypeError::CannotApplyUnaryOpToType {
                     op_span,

@@ -23,6 +23,7 @@ const OP_SKIP_IF: u8 = 0x09;
 const OP_SKIP_UNLESS: u8 = 0x0a;
 const OP_TUPLE_ITEM: u8 = 0x0b;
 const OP_UNOP: u8 = 0x0c;
+const OP_WITH_ADDR: u8 = 0x0d;
 
 //===========================================================================//
 
@@ -191,6 +192,13 @@ pub(crate) enum ObjExprOp {
         /// subexpression appeared.
         arg_span: SrcSpan,
     },
+    /// Pops the top value from the value stack (which must be an integer),
+    /// uses it as the absolute address for a label in the specified chunk in
+    /// this object file, then pushes the resulting label onto the value stack.
+    WithAddr {
+        /// The index of the chunk whose address space the address exists in.
+        chunk_index: usize,
+    },
 }
 
 impl BinaryIo for ObjExprOp {
@@ -234,6 +242,10 @@ impl BinaryIo for ObjExprOp {
                 let op_span = SrcSpan::read_from(decoder)?;
                 let arg_span = SrcSpan::read_from(decoder)?;
                 Ok(Self::UnOp { context, unop, op_span, arg_span })
+            }
+            OP_WITH_ADDR => {
+                let chunk_index = usize::read_from(decoder)?;
+                Ok(Self::WithAddr { chunk_index })
             }
             byte => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -308,6 +320,10 @@ impl BinaryIo for ObjExprOp {
                 unop.write_to(encoder)?;
                 op_span.write_to(encoder)?;
                 arg_span.write_to(encoder)
+            }
+            Self::WithAddr { chunk_index } => {
+                OP_WITH_ADDR.write_to(encoder)?;
+                chunk_index.write_to(encoder)
             }
         }
     }

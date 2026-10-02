@@ -40,6 +40,7 @@ enum Task {
     PhantomDone(usize),
     TupleLiteral(usize),
     UnOp((SrcSpan, UnOpAst), SrcSpan),
+    WithAddr(SrcSpan, SrcSpan),
 }
 
 //===========================================================================//
@@ -119,8 +120,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 }
                 Task::PhantomDone(size) => self.do_task_phantom_done(size),
                 Task::TupleLiteral(size) => self.do_task_tuple_literal(size),
-                Task::UnOp(unop_ast, sub_span) => {
-                    self.do_task_unop(unop_ast, sub_span);
+                Task::UnOp(unop_ast, arg_span) => {
+                    self.do_task_unop(unop_ast, arg_span);
+                }
+                Task::WithAddr(op_span, arg_span) => {
+                    self.do_task_with_addr(op_span, arg_span);
                 }
             }
         }
@@ -235,9 +239,13 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::TupleLiteral(item_asts.len()));
                 self.tasks.extend(item_asts.into_iter().rev().map(Task::Expr));
             }
-            ExprAstNode::UnOp(unop_ast, sub_ast) => {
-                self.tasks.push(Task::UnOp(unop_ast, sub_ast.span));
-                self.tasks.push(Task::Expr(*sub_ast));
+            ExprAstNode::UnOp((unop_span, UnOpAst::WithAddr), arg_ast) => {
+                self.tasks.push(Task::WithAddr(unop_span, arg_ast.span));
+                self.tasks.push(Task::Expr(*arg_ast));
+            }
+            ExprAstNode::UnOp(unop_ast, arg_ast) => {
+                self.tasks.push(Task::UnOp(unop_ast, arg_ast.span));
+                self.tasks.push(Task::Expr(*arg_ast));
             }
         }
     }
@@ -857,6 +865,47 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         };
         self.ops.push(self.env.unary_operation_op(unop, op_span, arg_span));
         self.types.push((result_type, Err(reason)));
+    }
+
+    fn do_task_with_addr(&mut self, op_span: SrcSpan, arg_span: SrcSpan) {
+        let (arg_type, arg_static) = self.types.pop().unwrap();
+        if arg_type == ExprType::Undefined {
+            self.types.push(UNDEFINED);
+            return;
+        }
+        if !arg_type.is_subtype_of(&ExprType::Integer) {
+            self.errs.push(ExprTypeError::CannotApplyUnaryOpToType {
+                op_span,
+                op: UnOpAst::WithAddr,
+                arg_span,
+                arg_type,
+            });
+            self.types.push(UNDEFINED);
+            return;
+        }
+        match arg_static {
+            Ok(arg_value) => {
+                let addr = arg_value.unwrap_int();
+                match self.errs.ok(self.env.with_addr_static(op_span, addr)) {
+                    Some(result_label) => {
+                        let result_value = ExprValue::Label(result_label);
+                        self.ops.pop().unwrap();
+                        self.ops.push(E::Op::literal(result_value.clone()));
+                        self.types.push((ExprType::Label, Ok(result_value)));
+                    }
+                    None => self.types.push(UNDEFINED),
+                }
+            }
+            Err(reason) => {
+                match self.errs.ok(self.env.with_addr_op(op_span)) {
+                    Some(op) => {
+                        self.ops.push(op);
+                        self.types.push((ExprType::Label, Err(reason)));
+                    }
+                    None => self.types.push(UNDEFINED),
+                }
+            }
+        };
     }
 
     fn pop_types(

@@ -272,13 +272,7 @@ impl<'a> ExprEvaluator<'a> {
                     self.push_value(ExprValue::Tuple(Rc::from(items)));
                 }
                 ObjExprOp::Push(ExprValue::Label(label)) => {
-                    let resolved = self.symbol_context.resolve_label(label)?;
-                    self.push_value(ExprValue::Label(
-                        ExprLabel::AddrAbsolute {
-                            space: resolved.space,
-                            address: BigInt::from(resolved.address),
-                        },
-                    ));
+                    self.push_label(label)?;
                 }
                 ObjExprOp::Push(value) => self.push_value(value.clone()),
                 &ObjExprOp::Skip(offset) => self.skip(offset)?,
@@ -318,6 +312,13 @@ impl<'a> ExprEvaluator<'a> {
                         }
                     }
                 }
+                &ObjExprOp::WithAddr { chunk_index } => {
+                    let address = self.pop_int()?;
+                    self.push_label(&ExprLabel::ChunkAbsolute {
+                        chunk_index,
+                        address,
+                    })?;
+                }
             }
         }
         let value = self.pop_value()?;
@@ -333,6 +334,15 @@ impl<'a> ExprEvaluator<'a> {
 
     fn push_value(&mut self, value: ExprValue) {
         self.value_stack.push(value);
+    }
+
+    fn push_label(&mut self, label: &ExprLabel) -> LinkResult<()> {
+        let resolved = self.symbol_context.resolve_label(label)?;
+        self.push_value(ExprValue::Label(ExprLabel::AddrAbsolute {
+            space: resolved.space,
+            address: BigInt::from(resolved.address),
+        }));
+        Ok(())
     }
 
     fn pop_values(&mut self, num_items: usize) -> LinkResult<Vec<ExprValue>> {

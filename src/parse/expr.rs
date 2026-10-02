@@ -53,6 +53,8 @@ pub enum UnOpAst {
     LogNot,
     /// Negation.
     Neg,
+    /// Label with address.
+    WithAddr,
 }
 
 impl UnOpAst {
@@ -65,6 +67,7 @@ impl UnOpAst {
             UnOpAst::Length => "get length of",
             UnOpAst::LogNot => "logical-NOT",
             UnOpAst::Neg => "negate",
+            UnOpAst::WithAddr => "make label address from",
         }
     }
 }
@@ -287,80 +290,95 @@ impl ExprAst {
                     symbol(TokenValue::StarStar),
                     |l, o, r, _| ExprAst::binop(BinOpAst::Pow, l, o, r),
                 ),
-                pratt::prefix(
-                    BIND_UNARY_PREFIX,
-                    symbol(TokenValue::And),
-                    |op, arg, _| ExprAst::unop(UnOpAst::AddrOf, op, arg),
+                (
+                    pratt::prefix(
+                        BIND_UNARY_PREFIX,
+                        symbol(TokenValue::And),
+                        |op, arg, _| ExprAst::unop(UnOpAst::AddrOf, op, arg),
+                    ),
+                    pratt::prefix(
+                        BIND_UNARY_PREFIX,
+                        symbol(TokenValue::Tilde),
+                        |op, arg, _| ExprAst::unop(UnOpAst::BitNot, op, arg),
+                    ),
+                    pratt::prefix(
+                        BIND_UNARY_PREFIX,
+                        symbol(TokenValue::Bang),
+                        |op, arg, _| ExprAst::unop(UnOpAst::LogNot, op, arg),
+                    ),
+                    pratt::prefix(
+                        BIND_UNARY_PREFIX,
+                        symbol(TokenValue::Minus),
+                        |op, arg, _| ExprAst::unop(UnOpAst::Neg, op, arg),
+                    ),
+                    pratt::prefix(
+                        BIND_UNARY_PREFIX,
+                        symbol(TokenValue::Star),
+                        |op, arg, _| ExprAst::unop(UnOpAst::WithAddr, op, arg),
+                    ),
                 ),
-                pratt::prefix(
-                    BIND_UNARY_PREFIX,
-                    symbol(TokenValue::Tilde),
-                    |op, arg, _| ExprAst::unop(UnOpAst::BitNot, op, arg),
+                (
+                    pratt::infix(
+                        pratt::left(BIND_MULTIPLICATIVE),
+                        symbol(TokenValue::Star),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Mul, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_MULTIPLICATIVE),
+                        symbol(TokenValue::Slash),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Div, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_MULTIPLICATIVE),
+                        symbol(TokenValue::Percent),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Mod, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_MULTIPLICATIVE),
+                        symbol(TokenValue::PercentPercent),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Interp, l, o, r),
+                    ),
                 ),
-                pratt::prefix(
-                    BIND_UNARY_PREFIX,
-                    symbol(TokenValue::Bang),
-                    |op, arg, _| ExprAst::unop(UnOpAst::LogNot, op, arg),
+                (
+                    pratt::infix(
+                        pratt::left(BIND_ADDITIVE),
+                        symbol(TokenValue::PlusPlus),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Concat, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_ADDITIVE),
+                        symbol(TokenValue::Plus),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Add, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_ADDITIVE),
+                        symbol(TokenValue::Minus),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Sub, l, o, r),
+                    ),
                 ),
-                pratt::prefix(
-                    BIND_UNARY_PREFIX,
-                    symbol(TokenValue::Minus),
-                    |op, arg, _| ExprAst::unop(UnOpAst::Neg, op, arg),
+                (
+                    pratt::infix(
+                        pratt::left(BIND_BIT_SHIFT),
+                        symbol(TokenValue::LessLess),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Shl, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_BIT_SHIFT),
+                        symbol(TokenValue::GreaterGreater),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Shr, l, o, r),
+                    ),
                 ),
-                pratt::infix(
-                    pratt::left(BIND_MULTIPLICATIVE),
-                    symbol(TokenValue::Star),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Mul, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_MULTIPLICATIVE),
-                    symbol(TokenValue::Slash),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Div, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_MULTIPLICATIVE),
-                    symbol(TokenValue::Percent),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Mod, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_MULTIPLICATIVE),
-                    symbol(TokenValue::PercentPercent),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Interp, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_ADDITIVE),
-                    symbol(TokenValue::PlusPlus),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Concat, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_ADDITIVE),
-                    symbol(TokenValue::Plus),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Add, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_ADDITIVE),
-                    symbol(TokenValue::Minus),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Sub, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_BIT_SHIFT),
-                    symbol(TokenValue::LessLess),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Shl, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_BIT_SHIFT),
-                    symbol(TokenValue::GreaterGreater),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Shr, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_BIT_AND),
-                    symbol(TokenValue::Bang),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::Byte, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::left(BIND_BIT_AND),
-                    symbol(TokenValue::And),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::BitAnd, l, o, r),
+                (
+                    pratt::infix(
+                        pratt::left(BIND_BIT_AND),
+                        symbol(TokenValue::Bang),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Byte, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_BIT_AND),
+                        symbol(TokenValue::And),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::BitAnd, l, o, r),
+                    ),
                 ),
                 pratt::infix(
                     pratt::left(BIND_BIT_XOR),
@@ -372,35 +390,37 @@ impl ExprAst {
                     symbol(TokenValue::Or),
                     |l, o, r, _| ExprAst::binop(BinOpAst::BitOr, l, o, r),
                 ),
-                pratt::infix(
-                    pratt::none(BIND_COMPARISON),
-                    symbol(TokenValue::EqualsEquals),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::CmpEq, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::none(BIND_COMPARISON),
-                    symbol(TokenValue::LessThan),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::CmpLt, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::none(BIND_COMPARISON),
-                    symbol(TokenValue::LessEquals),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::CmpLe, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::none(BIND_COMPARISON),
-                    symbol(TokenValue::GreaterThan),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::CmpGt, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::none(BIND_COMPARISON),
-                    symbol(TokenValue::GreaterEquals),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::CmpGe, l, o, r),
-                ),
-                pratt::infix(
-                    pratt::none(BIND_COMPARISON),
-                    symbol(TokenValue::BangEquals),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::CmpNe, l, o, r),
+                (
+                    pratt::infix(
+                        pratt::none(BIND_COMPARISON),
+                        symbol(TokenValue::EqualsEquals),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::CmpEq, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::none(BIND_COMPARISON),
+                        symbol(TokenValue::LessThan),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::CmpLt, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::none(BIND_COMPARISON),
+                        symbol(TokenValue::LessEquals),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::CmpLe, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::none(BIND_COMPARISON),
+                        symbol(TokenValue::GreaterThan),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::CmpGt, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::none(BIND_COMPARISON),
+                        symbol(TokenValue::GreaterEquals),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::CmpGe, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::none(BIND_COMPARISON),
+                        symbol(TokenValue::BangEquals),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::CmpNe, l, o, r),
+                    ),
                 ),
                 pratt::infix(
                     pratt::right(BIND_LOGICAL_AND),

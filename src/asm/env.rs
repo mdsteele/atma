@@ -617,6 +617,32 @@ impl ExprEnv for AsmTypeEnv {
             arg_span,
         }
     }
+
+    fn with_addr_op(&self, op_span: SrcSpan) -> ExprTypeResult<Self::Op> {
+        if let Some(chunk_env) = self.current_chunk() {
+            let chunk_index = chunk_env.chunk_index();
+            Ok(ObjExprOp::WithAddr { chunk_index })
+        } else {
+            Err(Errs::one(ExprTypeError::WithAddrOutsideOfAnyAddrSpace {
+                op_span,
+            }))
+        }
+    }
+
+    fn with_addr_static(
+        &self,
+        op_span: SrcSpan,
+        address: BigInt,
+    ) -> ExprTypeResult<ExprLabel> {
+        if let Some(chunk_env) = self.current_chunk() {
+            let chunk_index = chunk_env.chunk_index();
+            Ok(ExprLabel::ChunkAbsolute { chunk_index, address })
+        } else {
+            Err(Errs::one(ExprTypeError::WithAddrOutsideOfAnyAddrSpace {
+                op_span,
+            }))
+        }
+    }
 }
 
 //===========================================================================//
