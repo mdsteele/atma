@@ -144,11 +144,11 @@ fn data_count_type_error() {
 #[test]
 fn decl_name_is_builtin() {
     let source = r#"\
-    .IMPORT %sqrtz
+    .IMPORT %sqrtc
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::AssignmentToBuiltin { name, .. },
-    ] if &**name == "%sqrtz");
+    ] if &**name == "%sqrtc");
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn static_eval_error_in_assignment() {
     let source = r#"\
     .VAR foo = -1
     .IF foo != 0 {
-      .SET foo = %sqrtz(foo)
+      .SET foo = %sqrtf(foo)
     }
     "#;
     assert_matches!(asm_errors(source).as_slice(), [

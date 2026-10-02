@@ -57,7 +57,7 @@ pub(crate) enum ExprBinOpEvalError {
     /// the label has not yet been resolved and its address is not yet known.
     LabelAddressUnresolved(BinOpSide),
     /// Tried to modulo an integer, but the modulus was zero.
-    ModByZero,
+    ModuloByZero,
     /// Tried to exponentiate an integer with the given exponent, but the
     /// exponent was negative.
     PowNegativeExponent(BigInt),
@@ -97,7 +97,7 @@ impl ExprBinOpEvalError {
                     label_span: side.span(lhs_span, rhs_span),
                 }
             }
-            Self::ModByZero => ExprEvalError::ModByZero { rhs_span },
+            Self::ModuloByZero => ExprEvalError::ModuloByZero { rhs_span },
             Self::PowNegativeExponent(rhs_value) => {
                 ExprEvalError::PowNegativeExponent { rhs_span, rhs_value }
             }
@@ -395,7 +395,7 @@ impl ExprBinOp {
             Self::Mod => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     if rhs.is_zero() {
-                        Err(ExprBinOpEvalError::ModByZero)
+                        Err(ExprBinOpEvalError::ModuloByZero)
                     } else {
                         Ok(ExprValue::Integer(lhs.rem_euclid(&rhs)))
                     }
@@ -664,7 +664,7 @@ mod tests {
     fn eval_modulo_by_zero() {
         assert_eq!(
             ExprBinOp::Mod.evaluate(int_value(1), int_value(0)),
-            Err(ExprBinOpEvalError::ModByZero)
+            Err(ExprBinOpEvalError::ModuloByZero)
         );
     }
 

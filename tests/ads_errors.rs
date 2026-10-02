@@ -25,7 +25,7 @@ fn ads_errors(source: &str) -> Vec<AdsError> {
 #[test]
 fn cannot_modify_constant() {
     let source = r#"\
-    let foo = %sqrtz(1)
+    let foo = 1
     set foo = 2
     "#;
     assert_matches!(ads_errors(source).as_slice(), [

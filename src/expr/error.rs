@@ -538,7 +538,7 @@ pub enum ExprEvalError {
         index_value: BigInt,
     },
     /// Tried to modulo an integer, but the modulus was zero.
-    ModByZero {
+    ModuloByZero {
         /// The source code span for the right-hand side of the modulo
         /// operation.
         rhs_span: SrcSpan,
@@ -637,7 +637,7 @@ impl ExprEvalError {
                 SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_label(SrcLoc::new(path, label_span), label)
             }
-            Self::ModByZero { rhs_span } => {
+            Self::ModuloByZero { rhs_span } => {
                 let message = "modulus cannot be zero";
                 let label = "the value of this expression is 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)

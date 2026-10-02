@@ -3,6 +3,7 @@ use crate::error::Errs;
 use crate::expr::{ExprStatic, ExprType, ExprTypeError, ExprValue};
 use crate::obj::ObjSrcLoc;
 use num_bigint::BigInt;
+use num_integer::Integer;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -88,8 +89,8 @@ impl Iterator for BigIntRange {
         if self.current >= self.end {
             None
         } else {
-            let next = &self.current + &BigInt::ONE;
-            let value = std::mem::replace(&mut self.current, next);
+            let value = self.current.clone();
+            self.current.inc();
             Some(ExprValue::Integer(value))
         }
     }
