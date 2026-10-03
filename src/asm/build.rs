@@ -1,7 +1,7 @@
 use super::check::{
     bigint_range, typecheck_dir_expr_as, typecheck_static_dir_expr_as,
 };
-use super::chunk::{typecheck_chunk_attrs, validate_chunk_location};
+use super::chunk::{AsmChunkAttrs, AsmWithAttrs, validate_chunk_location};
 use super::env::{AsmDeclValue, AsmTypeEnv};
 use super::error::{AsmError, AsmResult};
 use super::int_data::{assemble_int_data, int_patch_type};
@@ -24,7 +24,8 @@ use crate::parse::{
     AsmDeclareAst, AsmDefMacroAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst,
     AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelType, AsmRepeatAst,
     AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
-    AsmStructAst, AsmUseAst, DeclarationKind, ExprAst, IdentifierAst,
+    AsmStructAst, AsmUseAst, AsmWithAst, DeclarationKind, ExprAst,
+    IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -104,12 +105,12 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(_) => Ok(()),
             AsmStmtAst::Binary(_) => Ok(()),
-            AsmStmtAst::Chunk(ast) => self.predeclare_chunk(ast),
+            AsmStmtAst::Chunk(ast) => self.predeclare_statements(&ast.body),
             AsmStmtAst::Cond(_) => Ok(()),
             AsmStmtAst::Declare(_) => Ok(()),
             AsmStmtAst::DefMacro(_) => Ok(()),
             AsmStmtAst::Enum(_) => Ok(()),
-            AsmStmtAst::Import(id) => self.predeclare_import(id),
+            AsmStmtAst::Import(id) => self.env.declare_import(id),
             AsmStmtAst::IntData(_) => Ok(()),
             AsmStmtAst::Invoke(_) => Ok(()),
             AsmStmtAst::Label(ast) => self.predeclare_label(ast),
@@ -121,15 +122,8 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::StrData(_) => Ok(()),
             AsmStmtAst::Struct(_) => Ok(()),
             AsmStmtAst::Use(_) => Ok(()),
+            AsmStmtAst::With(ast) => self.predeclare_statements(&ast.body),
         }
-    }
-
-    fn predeclare_chunk(&mut self, chunk_ast: &AsmChunkAst) -> AsmResult<()> {
-        self.predeclare_statements(&chunk_ast.body)
-    }
-
-    fn predeclare_import(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
-        self.env.declare_import(id_ast)
     }
 
     fn predeclare_label(&mut self, label_ast: &AsmLabelAst) -> AsmResult<()> {
@@ -189,7 +183,8 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Set(ast) => self.expand_assignment(ast),
             AsmStmtAst::StrData(ast) => self.expand_str_data(ast),
             AsmStmtAst::Struct(ast) => self.expand_struct(ast),
-            AsmStmtAst::Use(ast) => self.expand_use_file(ast),
+            AsmStmtAst::Use(ast) => self.expand_use(ast),
+            AsmStmtAst::With(ast) => self.expand_with(ast),
         }
     }
 
@@ -579,14 +574,16 @@ impl<'a> Assembler<'a> {
             ))
             .map(|value| value.unwrap_str());
         let attrs =
-            errs.with(typecheck_chunk_attrs(&self.env, kind, chunk_ast.attrs));
+            errs.with(AsmChunkAttrs::build(&self.env, kind, chunk_ast.attrs));
         let chunk_index = self.next_chunk_index;
         self.next_chunk_index += 1;
-        self.env.begin_chunk(chunk_index, kind, attrs.start, attrs.fill);
-        if let Some(arch) = attrs.arch {
-            self.env.set_current_arch(arch);
-        }
-        // TODO: don't attempt to expand statements if the arch was invalid
+        self.env.begin_chunk(
+            chunk_index,
+            kind,
+            attrs.start,
+            attrs.arch,
+            attrs.fill,
+        );
         errs.also(self.expand_statements(chunk_ast.body));
         let chunk_env = self.env.end_chunk();
         // TODO: error if size is too large
@@ -655,7 +652,7 @@ impl<'a> Assembler<'a> {
         errs.result()
     }
 
-    fn expand_use_file(&mut self, use_ast: AsmUseAst) -> AsmResult<()> {
+    fn expand_use(&mut self, use_ast: AsmUseAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let is_at_top_level = self.env.is_at_top_level();
         if !is_at_top_level {
@@ -698,6 +695,15 @@ impl<'a> Assembler<'a> {
                 }
             }
         }
+        errs.result()
+    }
+
+    fn expand_with(&mut self, with_ast: AsmWithAst) -> AsmResult<()> {
+        let mut errs = Errs::<AsmError>::new();
+        let attrs = errs.with(AsmWithAttrs::build(&self.env, with_ast.attrs));
+        self.env.begin_with(attrs.arch, attrs.fill);
+        errs.also(self.expand_statements(with_ast.body));
+        self.env.end_with();
         errs.result()
     }
 

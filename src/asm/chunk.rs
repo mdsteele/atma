@@ -22,67 +22,117 @@ pub(super) struct AsmChunkAttrs {
     pub within: Option<Align>,
 }
 
-pub(super) fn typecheck_chunk_attrs(
-    env: &AsmTypeEnv,
-    kind: AsmChunkKind,
-    attrs_ast: Vec<(IdentifierAst, ExprAst)>,
-) -> (AsmChunkAttrs, Errs<AsmError>) {
-    let mut errs = Errs::<AsmError>::new();
-    let mut attrs = AsmChunkAttrs::default();
-    let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
-    for (id_ast, expr_ast) in attrs_ast {
-        errs.also(chunk_declare_attr(env, kind, &mut prev_attrs, &id_ast));
-        match &*id_ast.name {
-            "align" => {
-                attrs.align = Some(
-                    errs.ok_or_default(chunk_align_attr(env, kind, expr_ast)),
-                )
-            }
-            "arch" => {
-                attrs.arch =
-                    Some(errs.ok_or_else(
-                        chunk_arch_attr(env, kind, expr_ast),
+impl AsmChunkAttrs {
+    pub(super) fn build(
+        env: &AsmTypeEnv,
+        kind: AsmChunkKind,
+        attrs_ast: Vec<(IdentifierAst, ExprAst)>,
+    ) -> (AsmChunkAttrs, Errs<AsmError>) {
+        let mut errs = Errs::<AsmError>::new();
+        let directive = kind.directive();
+        let mut attrs = AsmChunkAttrs::default();
+        let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
+        for (id_ast, expr_ast) in attrs_ast {
+            errs.also(declare_attr(env, directive, &mut prev_attrs, &id_ast));
+            match &*id_ast.name {
+                "align" => {
+                    attrs.align = Some(
+                        errs.ok_or_default(align_attr(env, kind, expr_ast)),
+                    )
+                }
+                "arch" => {
+                    attrs.arch = Some(errs.ok_or_else(
+                        arch_attr(env, directive, expr_ast),
                         || env.current_arch().clone(),
                     ))
-            }
-            "fill" => {
-                attrs.fill = Some(
-                    errs.ok_or_default(chunk_fill_attr(env, kind, expr_ast)),
-                )
-            }
-            "start" => {
-                attrs.start = Some(
-                    errs.ok_or_default(chunk_start_attr(env, kind, expr_ast)),
-                )
-            }
-            "within" => {
-                attrs.within =
-                    Some(errs.ok_or(
-                        chunk_within_attr(env, kind, expr_ast),
-                        Align::MAX,
-                    ))
-            }
-            _ => {
-                errs.push(AsmError::InvalidAttrName {
-                    directive: kind.directive(),
-                    attr_name: id_ast.name,
-                    attr_loc: env.make_loc(id_ast.span),
-                });
+                }
+                "fill" => {
+                    attrs.fill =
+                        Some(errs.ok_or_default(fill_attr(
+                            env, directive, expr_ast,
+                        )))
+                }
+                "start" => {
+                    attrs.start = Some(
+                        errs.ok_or_default(start_attr(env, kind, expr_ast)),
+                    )
+                }
+                "within" => {
+                    attrs.within =
+                        Some(errs.ok_or(
+                            within_attr(env, kind, expr_ast),
+                            Align::MAX,
+                        ))
+                }
+                _ => {
+                    errs.push(AsmError::InvalidAttrName {
+                        directive,
+                        attr_name: id_ast.name,
+                        attr_loc: env.make_loc(id_ast.span),
+                    });
+                }
             }
         }
+        (attrs, errs)
     }
-    (attrs, errs)
 }
 
-fn chunk_declare_attr(
+//===========================================================================//
+
+#[derive(Default)]
+pub(super) struct AsmWithAttrs {
+    pub arch: Option<Rc<str>>,
+    pub fill: Option<u8>,
+}
+
+impl AsmWithAttrs {
+    pub(super) fn build(
+        env: &AsmTypeEnv,
+        attrs_ast: Vec<(IdentifierAst, ExprAst)>,
+    ) -> (Self, Errs<AsmError>) {
+        let mut errs = Errs::<AsmError>::new();
+        let directive = ".WITH";
+        let mut attrs = AsmWithAttrs::default();
+        let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
+        for (id_ast, expr_ast) in attrs_ast {
+            errs.also(declare_attr(env, directive, &mut prev_attrs, &id_ast));
+            match &*id_ast.name {
+                "arch" => {
+                    attrs.arch = Some(errs.ok_or_else(
+                        arch_attr(env, directive, expr_ast),
+                        || env.current_arch().clone(),
+                    ))
+                }
+                "fill" => {
+                    attrs.fill =
+                        Some(errs.ok_or_default(fill_attr(
+                            env, directive, expr_ast,
+                        )))
+                }
+                _ => {
+                    errs.push(AsmError::InvalidAttrName {
+                        directive,
+                        attr_name: id_ast.name,
+                        attr_loc: env.make_loc(id_ast.span),
+                    });
+                }
+            }
+        }
+        (attrs, errs)
+    }
+}
+
+//===========================================================================//
+
+fn declare_attr(
     env: &AsmTypeEnv,
-    kind: AsmChunkKind,
+    directive: &'static str,
     prev_attrs: &mut HashMap<Rc<str>, SrcSpan>,
     id_ast: &IdentifierAst,
 ) -> AsmResult<()> {
     if let Some(&prev_span) = prev_attrs.get(&id_ast.name) {
         Err(Errs::one(AsmError::DuplicateAttrName {
-            directive: kind.directive(),
+            directive,
             attr_name: id_ast.name.clone(),
             attr_loc: env.make_loc(id_ast.span),
             prev_loc: env.make_loc(prev_span),
@@ -93,21 +143,21 @@ fn chunk_declare_attr(
     }
 }
 
-fn chunk_align_attr(
+fn align_attr(
     env: &AsmTypeEnv,
     kind: AsmChunkKind,
     expr_ast: ExprAst,
 ) -> AsmResult<Align> {
-    chunk_static_align_attr(env, kind, "align", expr_ast)
+    static_align_attr(env, kind, "align", expr_ast)
 }
 
-fn chunk_arch_attr(
+fn arch_attr(
     env: &AsmTypeEnv,
-    kind: AsmChunkKind,
+    directive: &'static str,
     expr_ast: ExprAst,
 ) -> AsmResult<Rc<str>> {
     let expr_span = expr_ast.span;
-    let arch = chunk_static_str_attr(env, kind, "arch", expr_ast)?;
+    let arch = static_str_attr(env, directive, "arch", expr_ast)?;
     if env.arch_tree().contains_arch(&arch) {
         Ok(arch)
     } else {
@@ -118,16 +168,16 @@ fn chunk_arch_attr(
     }
 }
 
-fn chunk_fill_attr(
+fn fill_attr(
     env: &AsmTypeEnv,
-    kind: AsmChunkKind,
+    directive: &'static str,
     expr_ast: ExprAst,
 ) -> AsmResult<u8> {
     let expr_span = expr_ast.span;
-    let bigint = chunk_static_int_attr(env, kind, "fill", expr_ast)?;
+    let bigint = static_int_attr(env, directive, "fill", expr_ast)?;
     u8::try_from(&bigint).map_err(|_| {
         Errs::one(AsmError::DirectiveExprOutOfRange {
-            directive: kind.directive(),
+            directive,
             component: "fill",
             expr_loc: env.make_loc(expr_span),
             expr_value: bigint,
@@ -136,13 +186,13 @@ fn chunk_fill_attr(
     })
 }
 
-fn chunk_start_attr(
+fn start_attr(
     env: &AsmTypeEnv,
     kind: AsmChunkKind,
     expr_ast: ExprAst,
 ) -> AsmResult<Addr> {
     let expr_span = expr_ast.span;
-    let bigint = chunk_static_int_attr(env, kind, "start", expr_ast)?;
+    let bigint = static_int_attr(env, kind.directive(), "start", expr_ast)?;
     Addr::try_from(&bigint).map_err(|_| {
         Errs::one(AsmError::DirectiveExprOutOfRange {
             directive: kind.directive(),
@@ -154,22 +204,22 @@ fn chunk_start_attr(
     })
 }
 
-fn chunk_within_attr(
+fn within_attr(
     env: &AsmTypeEnv,
     kind: AsmChunkKind,
     expr_ast: ExprAst,
 ) -> AsmResult<Align> {
-    chunk_static_align_attr(env, kind, "within", expr_ast)
+    static_align_attr(env, kind, "within", expr_ast)
 }
 
-fn chunk_static_align_attr(
+fn static_align_attr(
     env: &AsmTypeEnv,
     kind: AsmChunkKind,
     attr_name: &'static str,
     expr_ast: ExprAst,
 ) -> AsmResult<Align> {
     let expr_span = expr_ast.span;
-    let bigint = chunk_static_int_attr(env, kind, attr_name, expr_ast)?;
+    let bigint = static_int_attr(env, kind.directive(), attr_name, expr_ast)?;
     Align::try_from(&bigint).map_err(|error| {
         Errs::one(AsmError::InvalidAlignmentValue {
             directive: kind.directive(),
@@ -181,30 +231,30 @@ fn chunk_static_align_attr(
     })
 }
 
-fn chunk_static_int_attr(
+fn static_int_attr(
     env: &AsmTypeEnv,
-    kind: AsmChunkKind,
+    directive: &'static str,
     attr_name: &'static str,
     expr_ast: ExprAst,
 ) -> AsmResult<BigInt> {
     typecheck_static_dir_expr_as(
         env,
-        (kind.directive(), attr_name),
+        (directive, attr_name),
         expr_ast,
         ExprType::Integer,
     )
     .map(|value| value.unwrap_int())
 }
 
-fn chunk_static_str_attr(
+fn static_str_attr(
     env: &AsmTypeEnv,
-    kind: AsmChunkKind,
+    directive: &'static str,
     attr_name: &'static str,
     expr_ast: ExprAst,
 ) -> AsmResult<Rc<str>> {
     typecheck_static_dir_expr_as(
         env,
-        (kind.directive(), attr_name),
+        (directive, attr_name),
         expr_ast,
         ExprType::String,
     )

@@ -24,9 +24,16 @@ use std::rc::Rc;
 pub(super) struct AsmTypeEnv {
     arch_tree: ArchTree,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
-    arch_stack: Vec<Rc<str>>,
+    /// Settings for zones outside of any chunk.  Never empty, as it always
+    /// contains the root, top-level zone.
+    outer_zone_stack: Vec<ZoneSettings>,
+    /// Nested chunks.  Empty when outside of any chunk.
     chunk_stack: Vec<ChunkEnv>,
+    /// Nested source contexts.  Never empty, as it always contains the root
+    /// context.
     context_stack: Vec<Rc<ObjSrcContext>>,
+    /// Nested scopes.  Never empty, as it always contains the root, top-level
+    /// scope.
     scope_stack: Vec<AsmScopeEnv>,
     next_anonymous_scope_number: u32,
 }
@@ -37,7 +44,7 @@ impl AsmTypeEnv {
         AsmTypeEnv {
             arch_tree,
             builtins: make_global_builtin_values(),
-            arch_stack: vec![Rc::from(ArchTree::ROOT_ARCH_NAME)],
+            outer_zone_stack: vec![ZoneSettings::root()],
             chunk_stack: Vec::new(),
             context_stack: vec![root_context],
             scope_stack: vec![AsmScopeEnv::root()],
@@ -177,20 +184,30 @@ impl AsmTypeEnv {
         self.declare_fixed_value(id_ast, ExprType::Label, value)
     }
 
+    pub fn begin_with(&mut self, arch: Option<Rc<str>>, fill: Option<u8>) {
+        let settings = self.current_settings().with(arch, fill);
+        self.begin_zone(settings);
+    }
+
+    pub fn end_with(&mut self) {
+        self.end_zone();
+    }
+
     pub fn begin_chunk(
         &mut self,
         chunk_index: usize,
         kind: AsmChunkKind,
         start_addr: Option<Addr>,
-        fill_byte: Option<u8>,
+        arch: Option<Rc<str>>,
+        fill: Option<u8>,
     ) {
+        let settings = self.current_settings().with(arch, fill);
         self.chunk_stack.push(ChunkEnv::new(
             chunk_index,
             kind,
             start_addr,
-            fill_byte,
+            settings,
         ));
-        self.arch_stack.push(self.arch_stack.last().unwrap().clone());
     }
 
     pub fn current_chunk(&self) -> Option<&ChunkEnv> {
@@ -198,9 +215,9 @@ impl AsmTypeEnv {
     }
 
     pub fn end_chunk(&mut self) -> ChunkEnv {
-        debug_assert!(self.arch_stack.len() >= 2);
-        self.arch_stack.pop();
-        self.chunk_stack.pop().unwrap()
+        let chunk_env = self.chunk_stack.pop().unwrap();
+        debug_assert_eq!(chunk_env.zone_stack.len(), 1);
+        chunk_env
     }
 
     fn with_mutable_chunk<F>(&mut self, func: F) -> AsmResult<()>
@@ -291,13 +308,33 @@ impl AsmTypeEnv {
         Ok(())
     }
 
-    pub fn current_arch(&self) -> &Rc<str> {
-        self.arch_stack.last().unwrap()
+    fn begin_zone(&mut self, settings: ZoneSettings) {
+        if let Some(chunk_env) = self.chunk_stack.last_mut() {
+            chunk_env.begin_zone(settings);
+        } else {
+            self.outer_zone_stack.push(settings);
+        }
     }
 
-    pub fn set_current_arch(&mut self, arch: Rc<str>) {
-        debug_assert!(self.arch_tree.contains_arch(&arch));
-        *self.arch_stack.last_mut().unwrap() = arch;
+    fn end_zone(&mut self) {
+        if let Some(chunk_env) = self.chunk_stack.last_mut() {
+            chunk_env.end_zone();
+        } else {
+            self.outer_zone_stack.pop().unwrap();
+            debug_assert!(!self.outer_zone_stack.is_empty());
+        }
+    }
+
+    fn current_settings(&self) -> &ZoneSettings {
+        if let Some(chunk_env) = self.chunk_stack.last() {
+            chunk_env.current_settings()
+        } else {
+            self.outer_zone_stack.last().unwrap()
+        }
+    }
+
+    pub fn current_arch(&self) -> &Rc<str> {
+        &self.current_settings().arch
     }
 
     pub fn begin_anonymous_scope(&mut self) {
@@ -311,9 +348,7 @@ impl AsmTypeEnv {
     }
 
     fn begin_scope(&mut self, name: Rc<str>, anonymous: bool) {
-        if let Some(chunk) = self.chunk_stack.last_mut() {
-            chunk.begin_zone();
-        }
+        self.begin_zone(self.current_settings().clone());
         let current_scope = self.current_scope();
         let mut decls = HashMap::<Rc<str>, AsmDecl>::new();
         if !anonymous {
@@ -354,9 +389,7 @@ impl AsmTypeEnv {
                 outer.decls.insert(Rc::from(prefixed_name), decl);
             }
         }
-        if let Some(chunk) = self.chunk_stack.last_mut() {
-            chunk.end_zone();
-        }
+        self.end_zone();
     }
 
     fn look_up_decl(&self, name: &str) -> Option<&AsmDecl> {
@@ -651,12 +684,11 @@ pub(super) struct ChunkEnv {
     chunk_index: usize,
     kind: AsmChunkKind,
     start_addr: Option<Addr>,
-    fill_byte: Option<u8>,
     data: Vec<u8>,
     padding: usize,
     patches: Vec<ObjPatch>,
     symbols: Vec<ObjSymbol>,
-    zone_stack: Vec<ZoneEnv>,
+    zone_stack: Vec<InnerZone>,
 }
 
 impl ChunkEnv {
@@ -664,18 +696,17 @@ impl ChunkEnv {
         chunk_index: usize,
         kind: AsmChunkKind,
         start_addr: Option<Addr>,
-        fill_byte: Option<u8>,
+        settings: ZoneSettings,
     ) -> ChunkEnv {
         ChunkEnv {
             chunk_index,
             kind,
             start_addr,
-            fill_byte,
             data: Vec::new(),
             padding: 0,
             patches: Vec::new(),
             symbols: Vec::new(),
-            zone_stack: vec![ZoneEnv::with_offset(Offset::ZERO)],
+            zone_stack: vec![InnerZone::new(settings, Offset::ZERO)],
         }
     }
 
@@ -687,9 +718,13 @@ impl ChunkEnv {
         self.data.len() + self.padding
     }
 
+    fn current_settings(&self) -> &ZoneSettings {
+        &self.zone_stack.last().unwrap().settings
+    }
+
     fn data_mut(&mut self) -> &mut Vec<u8> {
         if self.padding > 0 {
-            let fill_byte = self.fill_byte.unwrap_or_else(|| {
+            let fill = self.current_settings().fill.unwrap_or_else(|| {
                 self.patches.push(ObjPatch {
                     // TODO: check for overflow
                     offset: Offset::try_from(self.data.len()).unwrap(),
@@ -697,7 +732,7 @@ impl ChunkEnv {
                 });
                 0u8
             });
-            self.data.resize(self.data.len() + self.padding, fill_byte);
+            self.data.resize(self.data.len() + self.padding, fill);
             self.padding = 0;
         }
         &mut self.data
@@ -724,19 +759,32 @@ impl ChunkEnv {
         Ok(())
     }
 
-    fn current_zone(&self) -> &ZoneEnv {
+    fn current_zone(&self) -> &InnerZone {
         self.zone_stack.last().unwrap()
     }
 
-    fn begin_zone(&mut self) {
+    fn begin_zone(&mut self, settings: ZoneSettings) {
+        // If this new zone is going to override the fill byte of the enclosing
+        // zone, then we need to explicitly fill in any existing padding.
+        if settings.fill != self.current_settings().fill {
+            debug_assert!(settings.fill.is_some());
+            self.data_mut(); // force existing padding to be filled in
+        }
         // TODO: handle overflow
         let offset = Offset::try_from(self.total_size()).unwrap();
-        self.zone_stack.push(ZoneEnv::with_offset(offset));
+        self.zone_stack.push(InnerZone::new(settings, offset));
     }
 
     fn end_zone(&mut self) {
-        debug_assert!(self.zone_stack.len() >= 2);
-        self.zone_stack.pop();
+        let zone = self.zone_stack.pop().unwrap();
+        debug_assert!(!self.zone_stack.is_empty());
+        // If this zone overrode the fill byte of the enclosing zone, then we
+        // need to explicitly fill in any padding at the end of this zone.
+        if zone.settings.fill != self.current_settings().fill {
+            let fill = zone.settings.fill.unwrap();
+            self.data.resize(self.data.len() + self.padding, fill);
+            self.padding = 0;
+        }
     }
 
     pub fn finish(self) -> FinishedChunk {
@@ -750,20 +798,51 @@ impl ChunkEnv {
 
 //===========================================================================//
 
-/// A "zone" refers either to a chunk, or to a scope within a chunk.  Nesting
-/// one chunk syntactically inside another does not create a new scope, but it
-/// does create a new zone.  Zones are what e.g. `$^` here-labels refer to.
-struct ZoneEnv {
+/// Represents settings for a zone.
+///
+/// A "zone" refers to any of (1) a chunk, (2) a "with" block, or (3) a scope
+/// (in other words, any statement block that's either terminated by an `.END`
+/// directive or enclosed by curly braces).  The root top-level scope also
+/// counts as a zone.  A zone that is inside of a chunk or is itself a chunk is
+/// called an "inner zone"; anything else (e.g. a top-level scope or "with"
+/// block that is outside of any chunk) is called an "outer zone".
+#[derive(Clone)]
+struct ZoneSettings {
+    pub arch: Rc<str>,
+    pub fill: Option<u8>,
+}
+
+impl ZoneSettings {
+    fn root() -> Self {
+        Self { arch: Rc::from(ArchTree::ROOT_ARCH_NAME), fill: None }
+    }
+
+    fn with(&self, arch: Option<Rc<str>>, fill: Option<u8>) -> Self {
+        Self {
+            arch: arch.unwrap_or_else(|| self.arch.clone()),
+            fill: fill.or(self.fill),
+        }
+    }
+}
+
+//===========================================================================//
+
+/// Represents an inner zone (i.e. a zone that is inside of a chunk or is
+/// itself a chunk).  Unlike outer zones, inner zones have start addresses and
+/// sizes, and can thus be referred to with "here" labels (e.g. `$^`).
+struct InnerZone {
+    /// Settings for this zone.
+    settings: ZoneSettings,
     /// The offset, relative to the start of the current chunk, for the start
     /// of this zone.
     start_offset: Offset,
 }
 
-impl ZoneEnv {
-    /// Returns a new `ZoneEnv` with the given start offset relative to the
+impl InnerZone {
+    /// Returns a new `InnerZone` with the given start offset relative to the
     /// start of the current chunk.
-    fn with_offset(start_offset: Offset) -> Self {
-        Self { start_offset }
+    fn new(settings: ZoneSettings, start_offset: Offset) -> Self {
+        Self { settings, start_offset }
     }
 }
 
@@ -790,7 +869,7 @@ pub(super) struct AsmScopeEnv {
 }
 
 impl AsmScopeEnv {
-    /// Creates a root scope.
+    /// Creates a new root scope.
     pub fn root() -> Self {
         Self {
             name: None,

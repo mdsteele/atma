@@ -78,16 +78,15 @@ pub enum AsmStmtAst {
     Struct(AsmStructAst),
     /// A `.USE` directive.
     Use(AsmUseAst),
+    /// A `.WITH` directive.
+    With(AsmWithAst),
 }
 
 impl AsmStmtAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], AsmStmtAst, Extra<'a>> {
-        let attributes = symbol(TokenValue::Comma)
-            .ignore_then(IdentifierAst::parser())
+        let attribute = IdentifierAst::parser()
             .then_ignore(symbol(TokenValue::Equals))
-            .then(ExprAst::parser())
-            .repeated()
-            .collect::<Vec<_>>();
+            .then(ExprAst::parser());
         chumsky::prelude::recursive(|statement| {
             let stmts = statement.repeated().collect::<Vec<_>>();
             let braced_stmts = symbol(TokenValue::BraceOpen)
@@ -166,9 +165,14 @@ impl AsmStmtAst {
                 });
             let chunk_dir = AsmChunkKind::parser()
                 .then(ExprAst::parser())
-                .then(attributes)
+                .then(
+                    symbol(TokenValue::Comma)
+                        .ignore_then(attribute.clone())
+                        .repeated()
+                        .collect::<Vec<_>>(),
+                )
                 .then_ignore(linebreak())
-                .then(stmts)
+                .then(stmts.clone())
                 .then_ignore(directive(".END"))
                 .then_ignore(linebreak())
                 .map(
@@ -185,6 +189,19 @@ impl AsmStmtAst {
                         })
                     },
                 );
+            let with_dir = directive(".WITH")
+                .ignore_then(
+                    attribute
+                        .separated_by(symbol(TokenValue::Comma))
+                        .collect::<Vec<_>>(),
+                )
+                .then_ignore(linebreak())
+                .then(stmts)
+                .then_ignore(directive(".END"))
+                .then_ignore(linebreak())
+                .map(|(attrs, body)| {
+                    AsmStmtAst::With(AsmWithAst { attrs, body })
+                });
             chumsky::prelude::choice((
                 anonymous_scope,
                 label_or_named_scope,
@@ -205,6 +222,7 @@ impl AsmStmtAst {
                 AsmStrDataAst::parser().map(AsmStmtAst::StrData),
                 AsmStructAst::parser().map(AsmStmtAst::Struct),
                 AsmUseAst::parser().map(AsmStmtAst::Use),
+                with_dir,
             ))
         })
     }
@@ -1094,6 +1112,17 @@ impl AsmUseAst {
             .then_ignore(linebreak())
             .map(|(directive_span, path)| Self { directive_span, path })
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a "with" block in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmWithAst {
+    /// Key/value attributes associated with this block.
+    pub attrs: Vec<(IdentifierAst, ExprAst)>,
+    /// The statements inside the "with" block.
+    pub body: Vec<AsmStmtAst>,
 }
 
 //===========================================================================//

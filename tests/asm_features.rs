@@ -190,4 +190,43 @@ fn with_addr_operator() {
     assert_eq!(static_data(assemble(source)), vec![vec![0x11]]);
 }
 
+#[test]
+fn with_arch_attr() {
+    let source = r#"\
+    .WITH arch="6502"
+    .SECTION "TEST"
+        cld
+        .with arch="SM83"
+        halt
+        .end
+        dex
+    .END
+    .END
+    "#;
+    assert_eq!(static_data(assemble(source)), vec![vec![0xd8, 0x76, 0xca]]);
+}
+
+#[test]
+fn with_fill_attr() {
+    let source = r#"\
+    .WITH fill=$01
+    .SECTION "TEST"
+        .reserve .u8
+        .with fill=$02
+        .reserve .u8
+        .end
+        .reserve .u8
+        .u8 $03
+        .with fill=$04
+        .reserve .u8
+        .end
+    .END
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![0x01, 0x02, 0x01, 0x03, 0x04]]
+    );
+}
+
 //===========================================================================//
