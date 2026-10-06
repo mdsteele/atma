@@ -13,6 +13,8 @@ pub enum TokenValue {
     AndAnd,
     /// A "`<-`" symbol.
     ArrowLeft,
+    /// A "`->`" symbol.
+    ArrowRight,
     /// A "`!`" symbol.
     Bang,
     /// A "`!=`" symbol.
@@ -114,6 +116,7 @@ impl TokenValue {
             TokenValue::And => "`&`",
             TokenValue::AndAnd => "`&&`",
             TokenValue::ArrowLeft => "`<-`",
+            TokenValue::ArrowRight => "`->`",
             TokenValue::Bang => "`!`",
             TokenValue::BangEquals => "`!=`",
             TokenValue::BoolLiteral(_) => "boolean literal",

@@ -221,7 +221,7 @@ impl ConfigError {
                         .collect::<Vec<_>>()
                         .join(" or "),
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -304,8 +304,7 @@ impl ConfigError {
                         )
                     }
                 };
-                let label =
-                    format!("the value of this expression is ${expr_value:x}");
+                let label = format!("this evaluates to ${expr_value:x}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -399,7 +398,7 @@ impl ConfigError {
                     attribute.entry_kind(),
                     attribute.attr_name()
                 );
-                let label = format!("the value of this expression is {value}");
+                let label = format!("this evaluates to {value}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -420,7 +419,7 @@ impl ConfigError {
                     "subconfig file path must be of type {}, not {expr_type}",
                     ExprType::String
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)

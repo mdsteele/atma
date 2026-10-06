@@ -6,7 +6,7 @@ use super::error::{AsmError, AsmResult};
 use crate::addr::{Addr, Align};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::ExprType;
-use crate::parse::{AsmChunkKind, ExprAst, IdentifierAst};
+use crate::parse::{AsmChunkKind, AsmWithAst, ExprAst, IdentifierAst};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -17,6 +17,7 @@ use std::rc::Rc;
 pub(super) struct AsmChunkAttrs {
     pub align: Option<Align>,
     pub arch: Option<Rc<str>>,
+    pub charmap: Option<Rc<str>>,
     pub fill: Option<u8>,
     pub start: Option<Addr>,
     pub within: Option<Align>,
@@ -41,10 +42,11 @@ impl AsmChunkAttrs {
                     )
                 }
                 "arch" => {
-                    attrs.arch = Some(errs.ok_or_else(
-                        arch_attr(env, directive, expr_ast),
-                        || env.current_arch().clone(),
-                    ))
+                    attrs.arch = errs.ok(arch_attr(env, directive, expr_ast));
+                }
+                "charmap" => {
+                    attrs.charmap =
+                        errs.ok(charmap_attr(env, directive, expr_ast));
                 }
                 "fill" => {
                     attrs.fill =
@@ -82,6 +84,7 @@ impl AsmChunkAttrs {
 #[derive(Default)]
 pub(super) struct AsmWithAttrs {
     pub arch: Option<Rc<str>>,
+    pub charmap: Option<Rc<str>>,
     pub fill: Option<u8>,
 }
 
@@ -91,17 +94,18 @@ impl AsmWithAttrs {
         attrs_ast: Vec<(IdentifierAst, ExprAst)>,
     ) -> (Self, Errs<AsmError>) {
         let mut errs = Errs::<AsmError>::new();
-        let directive = ".WITH";
+        let directive = AsmWithAst::DIRECTIVE;
         let mut attrs = AsmWithAttrs::default();
         let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for (id_ast, expr_ast) in attrs_ast {
             errs.also(declare_attr(env, directive, &mut prev_attrs, &id_ast));
             match &*id_ast.name {
                 "arch" => {
-                    attrs.arch = Some(errs.ok_or_else(
-                        arch_attr(env, directive, expr_ast),
-                        || env.current_arch().clone(),
-                    ))
+                    attrs.arch = errs.ok(arch_attr(env, directive, expr_ast));
+                }
+                "charmap" => {
+                    attrs.charmap =
+                        errs.ok(charmap_attr(env, directive, expr_ast));
                 }
                 "fill" => {
                     attrs.fill =
@@ -162,7 +166,24 @@ fn arch_attr(
         Ok(arch)
     } else {
         Err(Errs::one(AsmError::UnknownArch {
-            arch: arch.clone(),
+            arch,
+            loc: env.make_loc(expr_span),
+        }))
+    }
+}
+
+fn charmap_attr(
+    env: &AsmTypeEnv,
+    directive: &'static str,
+    expr_ast: ExprAst,
+) -> AsmResult<Rc<str>> {
+    let expr_span = expr_ast.span;
+    let charmap = static_str_attr(env, directive, "charmap", expr_ast)?;
+    if env.contains_charmap(&charmap) {
+        Ok(charmap)
+    } else {
+        Err(Errs::one(AsmError::UnknownCharmap {
+            charmap,
             loc: env.make_loc(expr_span),
         }))
     }

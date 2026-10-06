@@ -1,3 +1,4 @@
+use super::check::bigint_range;
 use super::env::AsmTypeEnv;
 use super::error::{AsmError, AsmResult};
 use crate::addr::Endianness;
@@ -6,7 +7,6 @@ use crate::expr::ExprType;
 use crate::obj::{ObjPatchData, ObjPatchIntType};
 use crate::parse::{AsmIntDataAst, AsmIntType, ExprAst};
 use num_bigint::BigInt;
-use std::range::RangeInclusive;
 
 //===========================================================================//
 
@@ -91,10 +91,7 @@ impl IntDataValue {
                     component: "value",
                     expr_loc: env.make_loc(expr_span),
                     expr_value: bigint,
-                    valid_range: RangeInclusive {
-                        start: BigInt::from(range.start),
-                        last: BigInt::from(range.last),
-                    },
+                    valid_range: bigint_range(range.start, range.last),
                 });
                 Self::default()
             }

@@ -8,7 +8,7 @@ use super::int_data::{assemble_int_data, int_patch_type};
 use super::macros::MacroTable;
 use super::predef::make_predefined_arch_macros;
 use super::repeat::typecheck_iterator;
-use super::str_data::assemble_str_data;
+use super::str_data::{assemble_str_data, define_charmap};
 use crate::addr::{Offset, Size};
 use crate::error::{Errs, SrcCache, SrcSpan};
 use crate::expr::{
@@ -20,12 +20,12 @@ use crate::obj::{
     ObjPatchRelType, ObjSrcContext, ObjSrcLoc, ObjSrcParent,
 };
 use crate::parse::{
-    AsmAssertAst, AsmBinaryAst, AsmChunkAst, AsmCondAst, AsmDataTypeAst,
-    AsmDeclareAst, AsmDefMacroAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst,
-    AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelType, AsmRepeatAst,
-    AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
-    AsmStructAst, AsmUseAst, AsmWithAst, DeclarationKind, ExprAst,
-    IdentifierAst,
+    AsmAssertAst, AsmBinaryAst, AsmCharmapAst, AsmChunkAst, AsmCondAst,
+    AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst, AsmEnumAst, AsmIntDataAst,
+    AsmInvokeAst, AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelType,
+    AsmRepeatAst, AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst,
+    AsmStrDataAst, AsmStructAst, AsmUseAst, AsmWithAst, DeclarationKind,
+    ExprAst, IdentifierAst,
 };
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
@@ -105,6 +105,7 @@ impl<'a> Assembler<'a> {
         match statement {
             AsmStmtAst::Assert(_) => Ok(()),
             AsmStmtAst::Binary(_) => Ok(()),
+            AsmStmtAst::Charmap(_) => Ok(()),
             AsmStmtAst::Chunk(ast) => self.predeclare_statements(&ast.body),
             AsmStmtAst::Cond(_) => Ok(()),
             AsmStmtAst::Declare(_) => Ok(()),
@@ -166,7 +167,8 @@ impl<'a> Assembler<'a> {
     fn expand_statement(&mut self, statement: AsmStmtAst) -> AsmResult<()> {
         match statement {
             AsmStmtAst::Assert(ast) => self.expand_assert(ast),
-            AsmStmtAst::Binary(ast) => self.expand_binary_data(ast),
+            AsmStmtAst::Binary(ast) => self.expand_binary(ast),
+            AsmStmtAst::Charmap(ast) => self.expand_charmap(ast),
             AsmStmtAst::Chunk(ast) => self.expand_chunk(ast),
             AsmStmtAst::Cond(ast) => self.expand_conditional(ast),
             AsmStmtAst::Declare(ast) => self.expand_declaration(ast),
@@ -192,7 +194,7 @@ impl<'a> Assembler<'a> {
         let mut errs = Errs::<AsmError>::new();
         let condition = errs.ok(typecheck_dir_expr_as(
             &self.env,
-            (".ASSERT", "condition"),
+            (AsmAssertAst::DIRECTIVE, "condition"),
             assert_ast.condition,
             ExprType::Boolean,
         ));
@@ -208,7 +210,7 @@ impl<'a> Assembler<'a> {
                     let message_span = message_ast.span;
                     match errs.ok(typecheck_dir_expr_as(
                         &self.env,
-                        (".ASSERT", "message"),
+                        (AsmAssertAst::DIRECTIVE, "message"),
                         message_ast,
                         ExprType::String,
                     )) {
@@ -317,6 +319,10 @@ impl<'a> Assembler<'a> {
         errs.result()
     }
 
+    fn expand_charmap(&mut self, charmap_ast: AsmCharmapAst) -> AsmResult<()> {
+        define_charmap(&mut self.env, charmap_ast)
+    }
+
     fn expand_conditional(&mut self, cond_ast: AsmCondAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let mut selected_body_ast: Option<Vec<AsmStmtAst>> = None;
@@ -419,7 +425,7 @@ impl<'a> Assembler<'a> {
                 field_value = errs
                     .ok(typecheck_static_dir_expr_as(
                         &self.env,
-                        (".ENUM", "value"),
+                        (AsmEnumAst::DIRECTIVE, "value"),
                         expr_ast,
                         ExprType::Integer,
                     ))
@@ -537,7 +543,7 @@ impl<'a> Assembler<'a> {
         let mut errs = Errs::<AsmError>::new();
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
-                directive: ".RESERVE",
+                directive: AsmReserveAst::DIRECTIVE,
                 loc: self.env.make_loc(reserve_ast.directive_span),
             });
         }
@@ -545,7 +551,7 @@ impl<'a> Assembler<'a> {
             .ok(self.env.data_type_size(reserve_ast.data_type))
             .unwrap_or_default();
         let Some(count) = errs.ok(self.typecheck_data_type_count(
-            (".RESERVE", "count"),
+            (AsmReserveAst::DIRECTIVE, "count"),
             reserve_ast.count,
         )) else {
             return errs.result();
@@ -582,6 +588,7 @@ impl<'a> Assembler<'a> {
             kind,
             attrs.start,
             attrs.arch,
+            attrs.charmap,
             attrs.fill,
         );
         errs.also(self.expand_statements(chunk_ast.body));
@@ -657,13 +664,13 @@ impl<'a> Assembler<'a> {
         let is_at_top_level = self.env.is_at_top_level();
         if !is_at_top_level {
             errs.push(AsmError::DirectiveNotAtTopLevel {
-                directive: ".USE",
+                directive: AsmUseAst::DIRECTIVE,
                 loc: self.env.make_loc(use_ast.directive_span),
             });
         }
         let path_span = use_ast.path.span;
-        if let Some(path) =
-            errs.ok(self.typecheck_static_path_expr(".USE", use_ast.path))
+        if let Some(path) = errs.ok(self
+            .typecheck_static_path_expr(AsmUseAst::DIRECTIVE, use_ast.path))
             && is_at_top_level
         {
             // TODO: skip if we've already used this path
@@ -701,24 +708,25 @@ impl<'a> Assembler<'a> {
     fn expand_with(&mut self, with_ast: AsmWithAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         let attrs = errs.with(AsmWithAttrs::build(&self.env, with_ast.attrs));
-        self.env.begin_with(attrs.arch, attrs.fill);
+        self.env.begin_with(attrs.arch, attrs.charmap, attrs.fill);
         errs.also(self.expand_statements(with_ast.body));
         self.env.end_with();
         errs.result()
     }
 
-    fn expand_binary_data(&mut self, data_ast: AsmBinaryAst) -> AsmResult<()> {
+    fn expand_binary(&mut self, data_ast: AsmBinaryAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
         if self.env.current_chunk().is_none() {
             errs.push(AsmError::DirectiveNotInSection {
-                directive: ".BINARY",
+                directive: AsmBinaryAst::DIRECTIVE,
                 loc: self.env.make_loc(data_ast.directive_span),
             });
         }
         let path_span = data_ast.path.span;
-        if let Some(path) =
-            errs.ok(self.typecheck_static_path_expr(".BINARY", data_ast.path))
-        {
+        if let Some(path) = errs.ok(self.typecheck_static_path_expr(
+            AsmBinaryAst::DIRECTIVE,
+            data_ast.path,
+        )) {
             let path_loc = self.env.make_loc(path_span);
             errs.also(self.env.with_chunk_data(|chunk_data| {
                 self.cache.fetch_and_write_data(&path, chunk_data).map_err(

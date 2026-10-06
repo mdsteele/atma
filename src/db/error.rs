@@ -213,7 +213,7 @@ impl AdsError {
                     "memory address must be of type {}, not {expr_type}",
                     ExprType::Integer
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -234,7 +234,7 @@ impl AdsError {
                     "source code path must be of type {}, not {expr_type}",
                     ExprType::String
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -252,7 +252,7 @@ impl AdsError {
                     "processor name must be of type {}, not {expr_type}",
                     ExprType::String
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -296,9 +296,8 @@ impl AdsError {
                     "cannot assign {expr_type} value to {lvalue_type} \
                      destination"
                 );
-                let label1 = format!("this expression has type {expr_type}");
-                let label2 =
-                    format!("this destination has type {lvalue_type}");
+                let label1 = format!("this has type {expr_type}");
+                let label2 = format!("this has type {lvalue_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label1)
                     .with_label(lvalue_loc.primary(), label2)

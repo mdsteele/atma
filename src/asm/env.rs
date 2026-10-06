@@ -1,4 +1,5 @@
 use super::arch::ArchTree;
+use super::charmap::Charmap;
 use super::error::{AsmError, AsmResult};
 use crate::addr::{Addr, Offset, Size};
 use crate::error::{Errs, SrcSpan};
@@ -24,6 +25,7 @@ use std::rc::Rc;
 pub(super) struct AsmTypeEnv {
     arch_tree: ArchTree,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
+    charmaps: HashMap<Rc<str>, (SrcSpan, Charmap)>,
     /// Settings for zones outside of any chunk.  Never empty, as it always
     /// contains the root, top-level zone.
     outer_zone_stack: Vec<ZoneSettings>,
@@ -44,6 +46,7 @@ impl AsmTypeEnv {
         AsmTypeEnv {
             arch_tree,
             builtins: make_global_builtin_values(),
+            charmaps: HashMap::new(),
             outer_zone_stack: vec![ZoneSettings::root()],
             chunk_stack: Vec::new(),
             context_stack: vec![root_context],
@@ -184,8 +187,13 @@ impl AsmTypeEnv {
         self.declare_fixed_value(id_ast, ExprType::Label, value)
     }
 
-    pub fn begin_with(&mut self, arch: Option<Rc<str>>, fill: Option<u8>) {
-        let settings = self.current_settings().with(arch, fill);
+    pub fn begin_with(
+        &mut self,
+        arch: Option<Rc<str>>,
+        charmap: Option<Rc<str>>,
+        fill: Option<u8>,
+    ) {
+        let settings = self.current_settings().with(arch, charmap, fill);
         self.begin_zone(settings);
     }
 
@@ -199,9 +207,10 @@ impl AsmTypeEnv {
         kind: AsmChunkKind,
         start_addr: Option<Addr>,
         arch: Option<Rc<str>>,
+        charmap: Option<Rc<str>>,
         fill: Option<u8>,
     ) {
-        let settings = self.current_settings().with(arch, fill);
+        let settings = self.current_settings().with(arch, charmap, fill);
         self.chunk_stack.push(ChunkEnv::new(
             chunk_index,
             kind,
@@ -309,6 +318,14 @@ impl AsmTypeEnv {
     }
 
     fn begin_zone(&mut self, settings: ZoneSettings) {
+        debug_assert!(self.arch_tree.contains_arch(&settings.arch));
+        debug_assert!(
+            settings
+                .charmap
+                .as_ref()
+                .map(|charmap| self.charmaps.contains_key(charmap))
+                .unwrap_or(true)
+        );
         if let Some(chunk_env) = self.chunk_stack.last_mut() {
             chunk_env.begin_zone(settings);
         } else {
@@ -335,6 +352,32 @@ impl AsmTypeEnv {
 
     pub fn current_arch(&self) -> &Rc<str> {
         &self.current_settings().arch
+    }
+
+    /// Returns true if `name` is a defined charmap in this environment.
+    pub fn contains_charmap(&self, name: &str) -> bool {
+        self.charmaps.contains_key(name)
+    }
+
+    pub fn get_charmap(&self, name: &str) -> Option<(SrcSpan, &Charmap)> {
+        self.charmaps.get(name).map(|(span, charmap)| (*span, charmap))
+    }
+
+    pub fn current_charmap(&self) -> Option<(&Rc<str>, &Charmap)> {
+        self.current_settings()
+            .charmap
+            .as_ref()
+            .map(|name| (name, &self.charmaps.get(name).unwrap().1))
+    }
+
+    pub fn add_charmap(
+        &mut self,
+        name: Rc<str>,
+        name_span: SrcSpan,
+        charmap: Charmap,
+    ) {
+        debug_assert!(!self.contains_charmap(&name));
+        self.charmaps.insert(name, (name_span, charmap));
     }
 
     pub fn begin_anonymous_scope(&mut self) {
@@ -809,17 +852,28 @@ impl ChunkEnv {
 #[derive(Clone)]
 struct ZoneSettings {
     pub arch: Rc<str>,
+    pub charmap: Option<Rc<str>>,
     pub fill: Option<u8>,
 }
 
 impl ZoneSettings {
     fn root() -> Self {
-        Self { arch: Rc::from(ArchTree::ROOT_ARCH_NAME), fill: None }
+        Self {
+            arch: Rc::from(ArchTree::ROOT_ARCH_NAME),
+            charmap: None,
+            fill: None,
+        }
     }
 
-    fn with(&self, arch: Option<Rc<str>>, fill: Option<u8>) -> Self {
+    fn with(
+        &self,
+        arch: Option<Rc<str>>,
+        charmap: Option<Rc<str>>,
+        fill: Option<u8>,
+    ) -> Self {
         Self {
             arch: arch.unwrap_or_else(|| self.arch.clone()),
+            charmap: charmap.or_else(|| self.charmap.clone()),
             fill: fill.or(self.fill),
         }
     }

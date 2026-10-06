@@ -17,5 +17,7 @@ logos = "0.16.1"
 num-bigint = "0.5.1"
 num-integer = "0.1.47"
 num-traits = "0.2.19"
+radix_trie = "0.3.0"
 rangemap = "1.8.0"
+smallvec = { version = "1.16.2", features = ["union"] }
 static_assertions = "1.1.0"

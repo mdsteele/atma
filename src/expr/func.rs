@@ -403,8 +403,7 @@ impl ExprFuncEvalError {
             }
             Self::LogarithmOfNonPositive(arg_value) => {
                 let message = "logarithm argument must be greater than zero";
-                let label =
-                    format!("the value of this expression is {arg_value}");
+                let label = format!("this evaluates to {arg_value}");
                 SourceError::new(arg_loc, message).with_primary_label(label)
             }
             Self::ModuloByZero => {
@@ -413,8 +412,7 @@ impl ExprFuncEvalError {
             }
             Self::SquareRootOfNegative(arg_value) => {
                 let message = "square root argument must be non-negative";
-                let label =
-                    format!("the value of this expression is {arg_value}");
+                let label = format!("this evaluates to {arg_value}");
                 SourceError::new(arg_loc, message).with_primary_label(label)
             }
         }

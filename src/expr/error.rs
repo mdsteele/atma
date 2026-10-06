@@ -244,8 +244,8 @@ impl ExprTypeError {
                 } else {
                     format!("Cannot {verb} {lhs_type} {conj} {rhs_type}")
                 };
-                let lhs_label = format!("this expression has type {lhs_type}");
-                let rhs_label = format!("this expression has type {rhs_type}");
+                let lhs_label = format!("this has type {lhs_type}");
+                let rhs_label = format!("this has type {rhs_type}");
                 let mut error =
                     SourceError::new(SrcLoc::new(path, op_span), message)
                         .with_label(SrcLoc::new(path, lhs_span), lhs_label)
@@ -269,7 +269,7 @@ impl ExprTypeError {
             } => {
                 let verb = op.verb();
                 let message = format!("Cannot {verb} {arg_type}");
-                let label = format!("this expression has type {arg_type}");
+                let label = format!("this has type {arg_type}");
                 SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_label(SrcLoc::new(path, arg_span), label)
             }
@@ -283,9 +283,8 @@ impl ExprTypeError {
                 let message = format!(
                     "expected {param_type} argument, but found {arg_type}"
                 );
-                let func_label =
-                    format!("this expression has type {func_type}");
-                let arg_label = format!("this expression has type {arg_type}");
+                let func_label = format!("this has type {func_type}");
+                let arg_label = format!("this has type {arg_type}");
                 SourceError::new(SrcLoc::new(path, arg_span), message)
                     .with_label(SrcLoc::new(path, func_span), func_label)
                     .with_primary_label(arg_label)
@@ -293,7 +292,7 @@ impl ExprTypeError {
             Self::CannotCallType { func_span, func_type } => {
                 let message =
                     format!("cannot call non-function type {func_type}");
-                let label = format!("this expression has type {func_type}");
+                let label = format!("this has type {func_type}");
                 SourceError::new(SrcLoc::new(path, func_span), message)
                     .with_primary_label(label)
             }
@@ -304,7 +303,7 @@ impl ExprTypeError {
             } => {
                 let message =
                     format!("cannot index into value of type {indexed_type}");
-                let label = format!("this expression has type {indexed_type}");
+                let label = format!("this has type {indexed_type}");
                 SourceError::new(SrcLoc::new(path, bracket_span), message)
                     .with_label(SrcLoc::new(path, indexed_span), label)
             }
@@ -318,20 +317,20 @@ impl ExprTypeError {
                 let message = "invalid argument type for template string";
                 let label1 =
                     format!("this template requires type {param_type}");
-                let label2 = format!("this expression has type {arg_type}");
+                let label2 = format!("this has type {arg_type}");
                 SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_label(SrcLoc::new(path, template_span), label1)
                     .with_label(SrcLoc::new(path, arg_span), label2)
             }
             Self::CannotUseTypeAsIndex { index_span, index_type } => {
                 let message = format!("cannot use {index_type} as an index");
-                let label = format!("this expression has type {index_type}");
+                let label = format!("this has type {index_type}");
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_primary_label(label)
             }
             Self::CannotUseTypeAsIterator { expr_span, expr_type } => {
                 let message = format!("cannot iterate over {expr_type}");
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(SrcLoc::new(path, expr_span), message)
                     .with_primary_label(label)
             }
@@ -340,7 +339,7 @@ impl ExprTypeError {
                     "predicate must be of type {}, not {expr_type}",
                     ExprType::Boolean
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(SrcLoc::new(path, expr_span), message)
                     .with_primary_label(label)
             }
@@ -348,8 +347,7 @@ impl ExprTypeError {
                 let message = format!(
                     "cannot use {template_type} as an interpolation template"
                 );
-                let label =
-                    format!("this expression has type {template_type}");
+                let label = format!("this has type {template_type}");
                 SourceError::new(SrcLoc::new(path, template_span), message)
                     .with_primary_label(label)
             }
@@ -363,8 +361,8 @@ impl ExprTypeError {
                     true_branch_span.merged_with(false_branch_span);
                 let message =
                     "both sides of a conditional must have the same type";
-                let label1 = format!("this side has type {true_branch_type}");
-                let label2 = format!("this side has type {false_branch_type}");
+                let label1 = format!("this has type {true_branch_type}");
+                let label2 = format!("this has type {false_branch_type}");
                 SourceError::new(SrcLoc::new(path, branches_span), message)
                     .with_label(SrcLoc::new(path, true_branch_span), label1)
                     .with_label(SrcLoc::new(path, false_branch_span), label2)
@@ -394,8 +392,8 @@ impl ExprTypeError {
                 other_item_type,
             } => {
                 let message = "all items in a list must have the same type";
-                let label1 = format!("this item has type {first_item_type}");
-                let label2 = format!("this item has type {other_item_type}");
+                let label1 = format!("this has type {first_item_type}");
+                let label2 = format!("this has type {other_item_type}");
                 SourceError::new(SrcLoc::new(path, other_item_span), message)
                     .with_label(SrcLoc::new(path, first_item_span), label1)
                     .with_primary_label(label2)
@@ -437,12 +435,9 @@ impl ExprTypeError {
                 index_value,
             } => {
                 let message = "tuple index out of bounds";
-                let label1 = format!(
-                    "this expression has type {}",
-                    ExprType::Tuple(item_types)
-                );
-                let label2 =
-                    format!("the value of this expression is {index_value}");
+                let label1 =
+                    format!("this has type {}", ExprType::Tuple(item_types));
+                let label2 = format!("this evaluates to {index_value}");
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_label(SrcLoc::new(path, tuple_span), label1)
                     .with_primary_label(label2)
@@ -603,28 +598,25 @@ impl ExprEvalError {
         match self {
             Self::BitShiftByNegative { rhs_span, rhs_value } => {
                 let message = "shift distance cannot be negative";
-                let label =
-                    format!("the value of this expression is {rhs_value}");
+                let label = format!("this evaluates to {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::BitShiftOutOfRange { rhs_span, rhs_value } => {
                 let message = "shift distance cannot be this large";
-                let label =
-                    format!("the value of this expression is {rhs_value}");
+                let label = format!("this evaluates to {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::ByteSelectByNegative { rhs_span, rhs_value } => {
                 let message = "byte-select index cannot be negative";
-                let label =
-                    format!("the value of this expression is {rhs_value}");
+                let label = format!("this evaluates to {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
             Self::DivideByZero { rhs_span } => {
                 let message = "divisor cannot be zero";
-                let label = "the value of this expression is 0";
+                let label = "this evaluates to 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
@@ -639,7 +631,7 @@ impl ExprEvalError {
             }
             Self::ModuloByZero { rhs_span } => {
                 let message = "modulus cannot be zero";
-                let label = "the value of this expression is 0";
+                let label = "this evaluates to 0";
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }
@@ -655,16 +647,14 @@ impl ExprEvalError {
             } => {
                 let message = "list index is out of range";
                 let list_label = format!("this list has length {list_length}");
-                let index_label =
-                    format!("the value of this expression is {index_value}");
+                let index_label = format!("this evaluates to {index_value}");
                 SourceError::new(SrcLoc::new(path, index_span), message)
                     .with_label(SrcLoc::new(path, list_span), list_label)
                     .with_primary_label(index_label)
             }
             Self::PowNegativeExponent { rhs_span, rhs_value } => {
                 let message = "exponent must be non-negative";
-                let label =
-                    format!("the value of this expression is {rhs_value}");
+                let label = format!("this evaluates to {rhs_value}");
                 SourceError::new(SrcLoc::new(path, rhs_span), message)
                     .with_primary_label(label)
             }

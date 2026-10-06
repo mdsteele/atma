@@ -26,6 +26,51 @@ fn static_data(obj_file: ObjFile) -> Vec<Vec<u8>> {
 //===========================================================================//
 
 #[test]
+fn charmap_data() {
+    let source = r#"\
+    .CHARMAP "Foo" {
+        " " -> $00
+        ("A", "Z") -> ($01, $1a)
+        "!" -> $1b
+        "," -> $1c
+        "<SMILE>" -> {$1e, $1f}
+        ("a", "z") -> ($21, $3a)
+    }
+    .SECTION "TEST", charmap="Foo"
+        .chars "Oh, hi! <SMILE>"
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![0x0f, 0x28, 0x1c, 0x00, 0x28, 0x29, 0x1b, 0x00, 0x1e, 0x1f]]
+    );
+}
+
+#[test]
+fn charmap_inheritence() {
+    let source = r#"\
+    .CHARMAP "Foo" {
+        " " -> $00
+        ("A", "Z") -> ($01, $1a)
+        "<SMILE>" -> {$1e, $1f}
+        ("a", "z") -> ($21, $3a)
+        "!" -> $3f
+    }
+    .CHARMAP "Bar" : "Foo" {
+        "!" -> $1b  ; override existing mapping
+        "," -> $1c  ; add an additional mapping
+    }
+    .SECTION "TEST", charmap="Bar"
+        .chars "Oh, hi! <SMILE>"
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![0x0f, 0x28, 0x1c, 0x00, 0x28, 0x29, 0x1b, 0x00, 0x1e, 0x1f]]
+    );
+}
+
+#[test]
 fn compound_id_for_named_scope() {
     let source = r#"\
     .SECTION "TEST"

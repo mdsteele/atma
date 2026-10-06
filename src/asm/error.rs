@@ -46,6 +46,78 @@ pub enum AsmError {
         /// The source code location for the constant's declaration.
         decl_loc: ObjSrcLoc,
     },
+    /// Tried to declare a charmap with the same name as an existing charmap.
+    CharmapAlreadyDefined {
+        /// The name of the charmap.
+        name: Rc<str>,
+        /// The source code location for the duplicate charmap name.
+        name_loc: ObjSrcLoc,
+        /// The source code location for the earlier declaration of a charmap
+        /// with the same name.
+        prev_loc: ObjSrcLoc,
+    },
+    /// Declared a mapping key in a charmap that conflicts with an earlier key.
+    CharmapKeyConflict {
+        /// The source code location for the conflicting key.
+        key_loc: ObjSrcLoc,
+        /// The key string that is in conflict with the earlier key.
+        key_string: Rc<str>,
+        /// The source code location for the earlier key.
+        prev_loc: ObjSrcLoc,
+        /// The earlier key string that the new one is in conflict with.
+        prev_string: Rc<str>,
+    },
+    /// Declared a charmap mapping with an invalid pair of types.
+    CharmapMappingTypeError {
+        /// The source code location for the expression to map from.
+        from_loc: ObjSrcLoc,
+        /// The type of the expression to map from.
+        from_type: ExprType,
+        /// The source code location for the expression to map to.
+        to_loc: ObjSrcLoc,
+        /// The type of the expression to map to.
+        to_type: ExprType,
+    },
+    /// Declared a charmap range mapping where the lower bound of the byte
+    /// range was greater than the upper bound.
+    CharmapRangeMappingEmptyByteRange {
+        /// The source code location for the byte range.
+        range_loc: ObjSrcLoc,
+        /// The lower bound of the byte range.
+        range_start: u8,
+        /// The upper bound of the byte range.
+        range_last: u8,
+    },
+    /// Declared a charmap range mapping where the lower bound of the character
+    /// range was greater than the upper bound.
+    CharmapRangeMappingEmptyCharRange {
+        /// The source code location for the character range.
+        range_loc: ObjSrcLoc,
+        /// The lower bound of the character range.
+        range_start: char,
+        /// The upper bound of the character range.
+        range_last: char,
+    },
+    /// Declared a charmap range mapping where one of the endpoints of the
+    /// character range wasn't a single character string.
+    CharmapRangeMappingInvalidCharEndpoint {
+        /// The source code location for the character range.
+        range_loc: ObjSrcLoc,
+        /// The endpoint string that doesn't consist of exactly one character.
+        range_endpoint: Rc<str>,
+    },
+    /// Declared a charmap range mapping where the two ranges don't have the
+    /// same length.
+    CharmapRangeMappingWithUnequalLengths {
+        /// The source code location for the character range.
+        char_range_loc: ObjSrcLoc,
+        /// The number of values in the character range.
+        char_range_len: u32,
+        /// The source code location for the byte range.
+        byte_range_loc: ObjSrcLoc,
+        /// The number of values in the byte range.
+        byte_range_len: u32,
+    },
     /// A static directive attribute had a non-static expression.
     DirectiveExprNotStatic {
         /// The directive name (e.g. `".SECTION"`).
@@ -219,6 +291,22 @@ pub enum AsmError {
         /// The value of the expression.
         expr_value: BigInt,
     },
+    /// Tried to translate a string using the current charmap, but no current
+    /// charmap is set.
+    NoCharmapSet {
+        /// The source code location for the string we tried to translate.
+        expr_loc: ObjSrcLoc,
+    },
+    /// Tried to translate a string using the current charmap, but encountered
+    /// a substring with with no matching mapping.
+    NoMatchingCharmapMapping {
+        /// The name of the current charmap.
+        charmap: Rc<str>,
+        /// The source code location for the string we tried to translate.
+        expr_loc: ObjSrcLoc,
+        /// The unmatched portion of the string.
+        unmatched: Rc<str>,
+    },
     /// An piece of assembly source code failed to parse.
     ParseError {
         /// The context that the parse error occurred within.
@@ -245,12 +333,20 @@ pub enum AsmError {
         /// evaluated.
         error: ExprEvalError,
     },
-    /// Tried to switch to an architecture that was never defined.
+    /// Tried to reference an architecture that was never defined.
     UnknownArch {
         /// The name of the undefined architecture.
         arch: Rc<str>,
         /// The source code location for the expression that evaluated to the
         /// unknown architecture name.
+        loc: ObjSrcLoc,
+    },
+    /// Tried to reference a charmap that was never defined.
+    UnknownCharmap {
+        /// The name of the undefined charmap.
+        charmap: Rc<str>,
+        /// The source code location for the expression that evaluated to the
+        /// unknown charmap name.
         loc: ObjSrcLoc,
     },
     /// Tried to use an undeclared placeholder in a macro definition.
@@ -330,6 +426,103 @@ impl AsmError {
                     .with_primary_label(label2)
                     .with_context(&*lvalue_loc.context)
             }
+            Self::CharmapAlreadyDefined { name, name_loc, prev_loc } => {
+                let message = format!("charmap {name:?} was already defined");
+                let label1 = "previously defined here";
+                let label2 = "defined again here";
+                SourceError::new(name_loc.primary(), message)
+                    .with_label(prev_loc.primary(), label1)
+                    .with_primary_label(label2)
+                    .with_context(&*name_loc.context)
+            }
+            Self::CharmapKeyConflict {
+                key_loc,
+                key_string,
+                prev_loc,
+                prev_string,
+            } => {
+                let message = "Conflicting mapping key in charmap";
+                let label1 = format!("Previous key {prev_string:?}...");
+                let label2 = format!("...conflicts with key {key_string:?}");
+                SourceError::new(key_loc.primary(), message)
+                    .with_label(prev_loc.primary(), label1)
+                    .with_primary_label(label2)
+                    .with_context(&*key_loc.context)
+            }
+            Self::CharmapMappingTypeError {
+                from_loc,
+                from_type,
+                to_loc,
+                to_type,
+            } => {
+                let message = format!(
+                    "A charmap cannot map from {from_type} to {to_type}"
+                );
+                let label1 = format!("this has type {from_type}");
+                let label2 = format!("this has type {to_type}");
+                // TODO: add hint with acceptable types
+                SourceError::new(from_loc.primary(), message)
+                    .with_primary_label(label1)
+                    .with_label(to_loc.primary(), label2)
+                    .with_context(&*from_loc.context)
+            }
+            Self::CharmapRangeMappingEmptyByteRange {
+                range_loc,
+                range_start,
+                range_last,
+            } => {
+                let message = "Empty byte range in charmap mapping";
+                let label = format!(
+                    "${range_start:02x} is greater than ${range_last:02x}"
+                );
+                SourceError::new(range_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*range_loc.context)
+            }
+            Self::CharmapRangeMappingEmptyCharRange {
+                range_loc,
+                range_start,
+                range_last,
+            } => {
+                let message = "Empty character range in charmap mapping";
+                let label =
+                    format!("{range_start:?} is greater than {range_last:?}");
+                SourceError::new(range_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*range_loc.context)
+            }
+            Self::CharmapRangeMappingInvalidCharEndpoint {
+                range_loc,
+                range_endpoint,
+            } => {
+                let message =
+                    "Character range endpoints must be single characters";
+                let label =
+                    format!("{range_endpoint:?} isn't a single character");
+                SourceError::new(range_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*range_loc.context)
+            }
+            Self::CharmapRangeMappingWithUnequalLengths {
+                char_range_loc,
+                char_range_len,
+                byte_range_loc,
+                byte_range_len,
+            } => {
+                let message = "Unequal range lengths in charmap mapping";
+                let label1 = format!(
+                    "This range spans {char_range_len} character{}",
+                    if char_range_len == 1 { "" } else { "s" }
+                );
+                let label2 = format!(
+                    "This range spans {byte_range_len} byte value{}",
+                    if byte_range_len == 1 { "" } else { "s" }
+                );
+                SourceError::new(char_range_loc.primary(), message)
+                    .with_primary_label(label1)
+                    .with_label(byte_range_loc.primary(), label2)
+                    .with_context(&*char_range_loc.context)
+            }
             Self::DirectiveExprNotStatic {
                 directive,
                 component,
@@ -355,8 +548,7 @@ impl AsmError {
                     "{directive} {component} must be between {} and {}",
                     valid_range.start, valid_range.last
                 );
-                let label =
-                    format!("the value of this expression is {expr_value}");
+                let label = format!("this evaluates to {expr_value}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -376,7 +568,7 @@ impl AsmError {
                         .collect::<Vec<_>>()
                         .join(" or "),
                 );
-                let label = format!("this expression has type {expr_type}");
+                let label = format!("this has type {expr_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -418,7 +610,8 @@ impl AsmError {
                 prev_loc,
             } => {
                 let message = format!(
-                    "Duplicate `{placeholder_name}` placeholder in macro `{macro_name}`"
+                    "Duplicate `{placeholder_name}` placeholder in macro \
+                     `{macro_name}`"
                 );
                 let label1 = "Previously declared here";
                 let label2 = "Duplicated here";
@@ -468,8 +661,7 @@ impl AsmError {
                         )
                     }
                 };
-                let label =
-                    format!("the value of this expression is ${expr_value:x}");
+                let label = format!("this evaluates to ${expr_value:x}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -484,8 +676,7 @@ impl AsmError {
             }
             Self::InvalidAsciiValue { expr_loc, expr_value } => {
                 let message = "invalid ASCII value";
-                let label =
-                    format!("the value of this expression is {expr_value}");
+                let label = format!("this evaluates to {expr_value}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -499,8 +690,7 @@ impl AsmError {
             }
             Self::InvalidUnicodeScalarValue { expr_loc, expr_value } => {
                 let message = "invalid unicode scalar value";
-                let label =
-                    format!("the value of this expression is {expr_value}");
+                let label = format!("this evaluates to {expr_value}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -522,8 +712,28 @@ impl AsmError {
             }
             Self::NegativeRepeatCount { expr_loc, expr_value } => {
                 let message = "negative repeat count";
-                let label =
-                    format!("the value of this expression is {expr_value}");
+                let label = format!("this evaluates to {expr_value}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
+            Self::NoCharmapSet { expr_loc } => {
+                let message = "cannot translate string without a charmap set";
+                // TODO: add a hint for setting a charmap, or using .UTF8 or
+                // .ASCII instead
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label("")
+                    .with_context(&*expr_loc.context)
+            }
+            Self::NoMatchingCharmapMapping {
+                charmap,
+                expr_loc,
+                unmatched,
+            } => {
+                let message = format!(
+                    "no mapping for {unmatched:?} in charset {charmap:?}"
+                );
+                let label = format!("found unmapped substring {unmatched:?}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*expr_loc.context)
@@ -543,8 +753,15 @@ impl AsmError {
             Self::UnknownArch { arch, loc } => {
                 let message =
                     format!("the `{arch}` architecture was never defined");
-                let label =
-                    format!("The value of this expression is {arch:?}");
+                let label = format!("this evaluates to {arch:?}");
+                SourceError::new(loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*loc.context)
+            }
+            Self::UnknownCharmap { charmap, loc } => {
+                let message =
+                    format!("no `{charmap}` charmap was ever defined");
+                let label = format!("this evaluates to {charmap:?}");
                 SourceError::new(loc.primary(), message)
                     .with_primary_label(label)
                     .with_context(&*loc.context)
@@ -592,9 +809,8 @@ impl AsmError {
                     "cannot assign {expr_type} value to {lvalue_type} \
                      destination"
                 );
-                let label1 = format!("this expression has type {expr_type}");
-                let label2 =
-                    format!("this destination has type {lvalue_type}");
+                let label1 = format!("this has type {expr_type}");
+                let label2 = format!("this has type {lvalue_type}");
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label1)
                     .with_label(lvalue_loc.primary(), label2)

@@ -97,6 +97,8 @@ enum TokenKind {
     AndAnd,
     #[token("<-")]
     ArrowLeft,
+    #[token("->")]
+    ArrowRight,
     #[token("\\", backslash_callback)]
     Backslash,
     #[token("!")]
@@ -207,6 +209,7 @@ impl TokenKind {
             TokenKind::And => TokenValue::And,
             TokenKind::AndAnd => TokenValue::AndAnd,
             TokenKind::ArrowLeft => TokenValue::ArrowLeft,
+            TokenKind::ArrowRight => TokenValue::ArrowRight,
             TokenKind::Backslash => unreachable!(),
             TokenKind::Bang => TokenValue::Bang,
             TokenKind::BangEquals => TokenValue::BangEquals,

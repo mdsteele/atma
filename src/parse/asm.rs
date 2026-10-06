@@ -46,6 +46,8 @@ pub enum AsmStmtAst {
     Binary(AsmBinaryAst),
     /// An `.ENUM` definition directive.
     Enum(AsmEnumAst),
+    /// A `.CHARMAP` definition directive.
+    Charmap(AsmCharmapAst),
     /// A chunk directive (e.g. `.SECTION`, `.ELSEWHERE`, or `.LOADABLE`).
     Chunk(AsmChunkAst),
     /// An `.IF` directive.
@@ -72,7 +74,7 @@ pub enum AsmStmtAst {
     Scope(AsmScopeAst),
     /// A `.SET` directive.
     Set(AsmSetAst),
-    /// A string data directive (e.g. `.UTF8` or `.ASCII`).
+    /// A string data directive (e.g. `.UTF8`, `.ASCII`, or `.CHARS`).
     StrData(AsmStrDataAst),
     /// A `.STRUCT` definition directive.
     Struct(AsmStructAst),
@@ -133,7 +135,7 @@ impl AsmStmtAst {
                         else_block,
                     })
                 });
-            let def_macro_dir = directive(".DEFMACRO")
+            let def_macro_dir = directive(AsmDefMacroAst::DIRECTIVE)
                 .ignore_then(IdentifierAst::parser())
                 .then(
                     AsmMacroArgAst::parser()
@@ -151,7 +153,7 @@ impl AsmStmtAst {
                 .ignore_then(IdentifierAst::parser())
                 .then_ignore(linebreak())
                 .map(AsmStmtAst::Import);
-            let repeat_dir = directive(".REPEAT")
+            let repeat_dir = directive(AsmRepeatAst::DIRECTIVE)
                 .ignore_then(
                     IdentifierAst::parser()
                         .then_ignore(symbol(TokenValue::ArrowLeft))
@@ -189,7 +191,7 @@ impl AsmStmtAst {
                         })
                     },
                 );
-            let with_dir = directive(".WITH")
+            let with_dir = directive(AsmWithAst::DIRECTIVE)
                 .ignore_then(
                     attribute
                         .separated_by(symbol(TokenValue::Comma))
@@ -207,6 +209,7 @@ impl AsmStmtAst {
                 label_or_named_scope,
                 AsmAssertAst::parser().map(AsmStmtAst::Assert),
                 AsmBinaryAst::parser().map(AsmStmtAst::Binary),
+                AsmCharmapAst::parser().map(AsmStmtAst::Charmap),
                 chunk_dir,
                 cond_dir,
                 AsmDeclareAst::parser().map(AsmStmtAst::Declare),
@@ -243,8 +246,10 @@ pub struct AsmAssertAst {
 }
 
 impl AsmAssertAst {
+    pub(crate) const DIRECTIVE: &str = ".ASSERT";
+
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".ASSERT")
+        directive(Self::DIRECTIVE)
             .then(ExprAst::parser())
             .then(
                 symbol(TokenValue::Comma)
@@ -272,11 +277,54 @@ pub struct AsmBinaryAst {
 }
 
 impl AsmBinaryAst {
+    pub(crate) const DIRECTIVE: &str = ".BINARY";
+
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".BINARY")
+        directive(Self::DIRECTIVE)
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(directive_span, path)| Self { directive_span, path })
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a charmap definition in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmCharmapAst {
+    /// A static expression that evaluates to the name of the new charmap.
+    pub name: ExprAst,
+    /// A static expression that evaluates to the name of the parent charmap,
+    /// if any, that this one should inherit from.
+    pub parent: Option<ExprAst>,
+    /// The mappings defined for this charmap.
+    pub mappings: Vec<(ExprAst, ExprAst)>,
+}
+
+impl AsmCharmapAst {
+    pub(crate) const DIRECTIVE: &str = ".CHARMAP";
+
+    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+        directive(Self::DIRECTIVE)
+            .ignore_then(ExprAst::parser())
+            .then(
+                symbol(TokenValue::Colon)
+                    .ignore_then(ExprAst::parser())
+                    .or_not(),
+            )
+            .then_ignore(symbol(TokenValue::BraceOpen))
+            .then_ignore(linebreak())
+            .then(
+                ExprAst::parser()
+                    .then_ignore(symbol(TokenValue::ArrowRight))
+                    .then(ExprAst::parser())
+                    .then_ignore(linebreak())
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
+            .then_ignore(symbol(TokenValue::BraceClose))
+            .then_ignore(linebreak())
+            .map(|((name, parent), mappings)| Self { name, parent, mappings })
     }
 }
 
@@ -423,6 +471,10 @@ pub struct AsmDefMacroAst {
     pub body: Vec<AsmStmtAst>,
 }
 
+impl AsmDefMacroAst {
+    pub(crate) const DIRECTIVE: &str = ".DEFMACRO";
+}
+
 //===========================================================================//
 
 /// The abstract syntax tree for defining an enum type in an assembly file.
@@ -435,8 +487,10 @@ pub struct AsmEnumAst {
 }
 
 impl AsmEnumAst {
+    pub(crate) const DIRECTIVE: &str = ".ENUM";
+
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".ENUM")
+        directive(Self::DIRECTIVE)
             .ignore_then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::BraceOpen))
             .then_ignore(linebreak())
@@ -905,6 +959,10 @@ pub struct AsmRepeatAst {
     pub body: Vec<AsmStmtAst>,
 }
 
+impl AsmRepeatAst {
+    pub(crate) const DIRECTIVE: &str = ".REPEAT";
+}
+
 //===========================================================================//
 
 /// The abstract syntax tree for a reserve declaration in an assembly file.
@@ -920,8 +978,10 @@ pub struct AsmReserveAst {
 }
 
 impl AsmReserveAst {
+    pub(crate) const DIRECTIVE: &str = ".RESERVE";
+
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".RESERVE")
+        directive(Self::DIRECTIVE)
             .then(
                 AsmDataTypeAst::parser().then(
                     symbol(TokenValue::Comma)
@@ -1011,16 +1071,19 @@ impl AsmStrDataAst {
 pub enum AsmStrType {
     /// ASCII string data.
     Ascii,
+    /// String data mapped through the current charmap.
+    Chars,
     /// UTF-8 string data.
     Utf8,
 }
 
 impl AsmStrType {
-    const ALL: &[Self] = &[Self::Ascii, Self::Utf8];
+    const ALL: &[Self] = &[Self::Ascii, Self::Chars, Self::Utf8];
 
     pub(crate) fn directive(self) -> &'static str {
         match self {
             Self::Ascii => ".ASCII",
+            Self::Chars => ".CHARS",
             Self::Utf8 => ".UTF8",
         }
     }
@@ -1052,8 +1115,10 @@ pub struct AsmStructAst {
 }
 
 impl AsmStructAst {
+    pub(crate) const DIRECTIVE: &str = ".STRUCT";
+
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".STRUCT")
+        directive(Self::DIRECTIVE)
             .ignore_then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::BraceOpen))
             .then_ignore(linebreak())
@@ -1106,8 +1171,10 @@ pub struct AsmUseAst {
 }
 
 impl AsmUseAst {
+    pub(crate) const DIRECTIVE: &str = ".USE";
+
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
-        directive(".USE")
+        directive(Self::DIRECTIVE)
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(directive_span, path)| Self { directive_span, path })
@@ -1123,6 +1190,10 @@ pub struct AsmWithAst {
     pub attrs: Vec<(IdentifierAst, ExprAst)>,
     /// The statements inside the "with" block.
     pub body: Vec<AsmStmtAst>,
+}
+
+impl AsmWithAst {
+    pub(crate) const DIRECTIVE: &str = ".WITH";
 }
 
 //===========================================================================//

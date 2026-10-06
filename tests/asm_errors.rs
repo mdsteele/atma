@@ -93,6 +93,144 @@ fn cannot_use_type_as_predicate() {
 }
 
 #[test]
+fn charmap_key_conflict_same_key() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        "ab" -> 1
+        "ab" -> 2
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::CharmapKeyConflict {
+            key_string,
+            prev_string,
+            ..
+        },
+    ] if &**key_string == "ab" && &**prev_string == "ab");
+}
+
+#[test]
+fn charmap_key_conflict_prefix_of_key() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        "abc" -> 1
+        "ab" -> 2
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::CharmapKeyConflict {
+            key_string,
+            prev_string,
+            ..
+        },
+    ] if &**key_string == "ab" && &**prev_string == "abc");
+}
+
+#[test]
+fn charmap_key_conflict_extension_of_key() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        "abc" -> 1
+        "abcd" -> 2
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::CharmapKeyConflict {
+            key_string,
+            prev_string,
+            ..
+        },
+    ] if &**key_string == "abcd" && &**prev_string == "abc");
+}
+
+#[test]
+fn charmap_mapping_type_error() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        1 -> %true
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::CharmapMappingTypeError {
+            from_type: ExprType::Integer,
+            to_type: ExprType::Boolean,
+            ..
+        }]
+    );
+}
+
+#[test]
+fn charmap_range_mapping_empty_byte_range() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        ("A", "B") -> (1, 0)
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::CharmapRangeMappingEmptyByteRange {
+            range_start: 1,
+            range_last: 0,
+            ..
+        }]
+    );
+}
+
+#[test]
+fn charmap_range_mapping_empty_char_range() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        ("A", " ") -> (0, 1)
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::CharmapRangeMappingEmptyCharRange {
+            range_start: 'A',
+            range_last: ' ',
+            ..
+        }]
+    );
+}
+
+#[test]
+fn charmap_range_mapping_invalid_char_endpoint() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        ("", "ab") -> (1, 10)
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::CharmapRangeMappingInvalidCharEndpoint {
+            range_endpoint: endpoint1,
+            ..
+        },
+        AsmError::CharmapRangeMappingInvalidCharEndpoint {
+            range_endpoint: endpoint2,
+            ..
+        },
+    ] if &**endpoint1 == "" && &**endpoint2 == "ab");
+}
+
+#[test]
+fn charmap_range_mapping_with_unequal_lengths() {
+    let source = r#"\
+    .CHARMAP "foo" {
+        ("A", "Z") -> (0, 26)
+    }
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::CharmapRangeMappingWithUnequalLengths {
+            char_range_len: 26,
+            byte_range_len: 27,
+            ..
+        }]
+    );
+}
+
+#[test]
 fn conditional_predicate_not_static() {
     let source = r#"\
     .IMPORT Foo
@@ -111,6 +249,38 @@ fn conditional_predicate_not_static() {
             ..
         }]
     );
+}
+
+#[test]
+fn charmap_byte_out_of_range() {
+    let source = r#"\
+    .CHARMAP "Foo" {
+        "a" -> 258
+        "b" -> {1, 257, 3}
+        ("c", "d") -> (255, 256)
+    }
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::DirectiveExprOutOfRange {
+            directive: ".CHARMAP",
+            component: "byte",
+            expr_value: value1,
+            ..
+        },
+        AsmError::DirectiveExprOutOfRange {
+            directive: ".CHARMAP",
+            component: "byte",
+            expr_value: value2,
+            ..
+        },
+        AsmError::DirectiveExprOutOfRange {
+            directive: ".CHARMAP",
+            component: "byte",
+            expr_value: value3,
+            ..
+        },
+    ] if *value1 == BigInt::from(258) && *value2 == BigInt::from(257)
+      && *value3 == BigInt::from(256));
 }
 
 #[test]
@@ -355,9 +525,11 @@ fn multiple_macro_placeholders() {
 #[test]
 fn negative_repeat_count() {
     let source = r#"\
+    .SECTION "TEST"
     .REPEAT -5 {
         .u8 0
     }
+    .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::NegativeRepeatCount {
@@ -365,6 +537,37 @@ fn negative_repeat_count() {
             expr_value,
         },
     ] if *expr_value == BigInt::from(-5));
+}
+
+#[test]
+fn no_charmap_set() {
+    let source = r#"\
+    .SECTION "TEST"
+        .chars "foobar"
+    .END
+    "#;
+    assert_matches!(
+        asm_errors(source).as_slice(),
+        [AsmError::NoCharmapSet { expr_loc: _ }]
+    );
+}
+
+#[test]
+fn no_matching_charmap_mapping() {
+    let source = r#"\
+    .CHARMAP "Foo" {
+        " " -> 0
+        ("a", "z") -> (1, 26)
+        "<=" -> 27
+        "<<" -> 28
+    }
+    .SECTION "TEST", charmap="Foo"
+        .chars "foo <= bar <> baz << quux"
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::NoMatchingCharmapMapping { charmap, expr_loc: _, unmatched },
+    ] if &**charmap == "Foo" && &**unmatched == "<>");
 }
 
 #[test]
@@ -567,6 +770,22 @@ fn unknown_arch() {
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::UnknownArch { arch, .. },
     ] if &**arch == "x86");
+}
+
+#[test]
+fn unknown_charmap() {
+    let source = r#"\
+    .CHARMAP "foo" : "bar" {
+        "a" -> 1
+    }
+    .SECTION "TEST", charmap="quux"
+        ;; TODO: If charmap is unknown, silently ignore any .CHARS directives
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::UnknownCharmap { charmap: name1, .. },
+        AsmError::UnknownCharmap { charmap: name2, .. },
+    ] if &**name1 == "bar" && &**name2 == "quux");
 }
 
 #[test]

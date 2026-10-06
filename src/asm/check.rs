@@ -24,15 +24,14 @@ pub(super) fn typecheck_static_dir_expr_as(
         expr_ast,
         required_type,
     )?;
-    match expr_static {
-        Ok(value) => Ok(value),
-        Err(reason) => Err(Errs::one(AsmError::DirectiveExprNotStatic {
+    expr_static.map_err(|reason| {
+        Errs::one(AsmError::DirectiveExprNotStatic {
             directive,
             component,
             expr_loc: env.make_loc(expr_span),
             reason,
-        })),
-    }
+        })
+    })
 }
 
 pub(super) fn typecheck_dir_expr_as(

@@ -2,6 +2,7 @@
 
 mod arch;
 mod build;
+mod charmap;
 mod check;
 mod chunk;
 mod env;

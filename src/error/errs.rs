@@ -20,6 +20,25 @@ impl<E> Errs<E> {
         Errs { errors: vec![error] }
     }
 
+    /// If both results are `Ok`, returns `Ok` with the pair of values;
+    /// otherwise, returns `Err` with any errors.  This is similar to
+    /// `Result::and()`, except that if both results are `Err`, the returned
+    /// `Err` will contain both sets of errors, not just the first one.
+    pub fn join_results<T1, T2>(
+        result1: Result<T1, Errs<E>>,
+        result2: Result<T2, Errs<E>>,
+    ) -> Result<(T1, T2), Errs<E>> {
+        match (result1, result2) {
+            (Ok(value1), Ok(value2)) => Ok((value1, value2)),
+            (Err(errs1), Ok(_)) => Err(errs1),
+            (Ok(_), Err(errs2)) => Err(errs2),
+            (Err(mut errs1), Err(errs2)) => {
+                errs1.append(errs2);
+                Err(errs1)
+            }
+        }
+    }
+
     /// Returns `true` if there are no errors in the error list.
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()

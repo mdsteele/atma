@@ -2,6 +2,7 @@ use super::error::AsmError;
 use crate::error::Errs;
 use crate::expr::{ExprStatic, ExprType, ExprTypeError, ExprValue};
 use crate::obj::ObjSrcLoc;
+use crate::parse::AsmRepeatAst;
 use num_bigint::BigInt;
 use num_integer::Integer;
 use std::rc::Rc;
@@ -42,7 +43,7 @@ pub(super) fn typecheck_iterator(
             Err(reason),
         ) => {
             errs.push(AsmError::DirectiveExprNotStatic {
-                directive: ".REPEAT",
+                directive: AsmRepeatAst::DIRECTIVE,
                 component: "iterator",
                 expr_loc: expr_loc.clone(),
                 reason,
