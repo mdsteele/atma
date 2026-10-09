@@ -1,6 +1,8 @@
 //! Facilities for parsing Atma Debugger Script.
 
-use super::atom::{Extra, keyword, linebreak, parse_tokens, symbol, tokenize};
+use super::atom::{
+    Extra, Language, keyword, linebreak, parse_tokens, symbol, tokenize,
+};
 use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::{DeclarationKind, IdentifierAst};
@@ -31,12 +33,11 @@ impl AdsModuleAst {
 
     fn parser<'a>()
     -> impl Parser<'a, &'a [Token], AdsModuleAst, Extra<'a>> + Clone {
-        symbol(TokenValue::Linebreak).repeated().ignore_then(
-            AdsStmtAst::parser()
-                .repeated()
-                .collect::<Vec<_>>()
-                .map(|statements| AdsModuleAst { statements }),
-        )
+        symbol(TokenValue::Linebreak)
+            .repeated()
+            .ignore_then(AdsStmtAst::parser().repeated().collect::<Vec<_>>())
+            .map(|statements| AdsModuleAst { statements })
+            .with_ctx(Language::Debugger)
     }
 }
 

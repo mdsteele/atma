@@ -110,6 +110,13 @@ pub enum ExprTypeError {
         /// The type of the expression.
         expr_type: ExprType,
     },
+    /// A memory address was specified using an expression of the wrong type.
+    CannotUseTypeAsMemoryAddress {
+        /// The source code location for the memory address expression.
+        expr_span: SrcSpan,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
     /// A control flow predicate was specified using a non-boolean expression.
     CannotUseTypeAsPredicate {
         /// The source code span for the predicate expression.
@@ -165,16 +172,6 @@ pub enum ExprTypeError {
         other_item_span: SrcSpan,
         /// The expression type of the other item in the list.
         other_item_type: ExprType,
-    },
-    /// Found a "here" label (e.g. `$<`) in a debugger script.
-    HereLabelInDebuggerScript {
-        /// The source code span for the "here" label.
-        span: SrcSpan,
-    },
-    /// Found a "here" label (e.g. `$<`) in a linker config.
-    HereLabelInLinkerConfig {
-        /// The source code span for the "here" label.
-        span: SrcSpan,
     },
     /// Found a "here" label (e.g. `$<`) outside of any `.SECTION` directive.
     HereLabelOutsideOfAnySection {
@@ -334,6 +331,16 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, expr_span), message)
                     .with_primary_label(label)
             }
+            Self::CannotUseTypeAsMemoryAddress { expr_span, expr_type } => {
+                // TODO: Allow `ExprType::Label` as well.
+                let message = format!(
+                    "memory address must be of type {}, not {expr_type}",
+                    ExprType::Integer
+                );
+                let label = format!("this has type {expr_type}");
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
+            }
             Self::CannotUseTypeAsPredicate { expr_span, expr_type } => {
                 let message = format!(
                     "predicate must be of type {}, not {expr_type}",
@@ -397,17 +404,6 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, other_item_span), message)
                     .with_label(SrcLoc::new(path, first_item_span), label1)
                     .with_primary_label(label2)
-            }
-            Self::HereLabelInDebuggerScript { span } => {
-                let message =
-                    "Cannot use \"here\" labels in a debugger script";
-                SourceError::new(SrcLoc::new(path, span), message)
-                    .with_primary_label("")
-            }
-            Self::HereLabelInLinkerConfig { span } => {
-                let message = "Cannot use \"here\" labels in a linker config";
-                SourceError::new(SrcLoc::new(path, span), message)
-                    .with_primary_label("")
             }
             Self::HereLabelOutsideOfAnySection { span } => {
                 let message = "\"here\" labels must be within a .SECTION";
@@ -707,6 +703,13 @@ pub enum ExprNotStaticReason {
         error: ExprEvalError,
     },
     /// Cannot statically evaluate the expression because it depends on the
+    /// runtime contents of the simulated memory bus.
+    MemoryRead {
+        /// The source code span where the expression reads from the simulated
+        /// memory bus at runtime.
+        span: SrcSpan,
+    },
+    /// Cannot statically evaluate the expression because it depends on the
     /// value of a non-static variable.
     Variable {
         /// The source code span where the variable appears in the expression.
@@ -752,6 +755,8 @@ impl ExprNotStaticReason {
             {
                 other
             }
+            (ExprNotStaticReason::MemoryRead { .. }, _) => self,
+            (_, ExprNotStaticReason::MemoryRead { .. }) => other,
             _ => self,
         }
     }
@@ -769,6 +774,7 @@ pub struct ExprNotStaticContext {
 impl SourceContext for ExprNotStaticContext {
     fn annotate(&self, error: SourceError) -> SourceError {
         match &self.reason {
+            ExprNotStaticReason::TypeError => error,
             ExprNotStaticReason::Phantom => error,
             ExprNotStaticReason::StaticEvalError { error: eval_error } => {
                 let eval_error =
@@ -789,7 +795,10 @@ impl SourceContext for ExprNotStaticContext {
                     .into_iter()
                     .fold(error, |e, note| e.with_note(note))
             }
-            ExprNotStaticReason::TypeError => error,
+            ExprNotStaticReason::MemoryRead { span } => {
+                let label = "...because it reads from runtime memory";
+                error.with_label(SrcLoc::new(&self.path, *span), label)
+            }
             ExprNotStaticReason::Variable { span, name } => {
                 let label = format!("...because `{name}` isn't static");
                 error.with_label(SrcLoc::new(&self.path, *span), label)

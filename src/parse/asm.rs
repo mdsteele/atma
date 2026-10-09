@@ -1,7 +1,7 @@
 //! Facilities for parsing assembly source code.
 
 use super::atom::{
-    Context, Extra, directive, linebreak, parse_tokens, symbol, tokenize,
+    Extra, Language, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
 use super::expr::ExprAst;
@@ -26,10 +26,9 @@ impl AsmModuleAst {
         let tokens = tokenize(source)?;
         let parser = symbol(TokenValue::Linebreak)
             .repeated()
-            .ignore_then(AsmStmtAst::parser())
-            .repeated()
-            .collect::<Vec<_>>()
-            .map(|statements| AsmModuleAst { statements });
+            .ignore_then(AsmStmtAst::parser().repeated().collect::<Vec<_>>())
+            .map(|statements| AsmModuleAst { statements })
+            .with_ctx(Language::Assembly);
         parse_tokens(parser, &tokens)
     }
 }
@@ -142,9 +141,7 @@ impl AsmStmtAst {
                         .separated_by(symbol(TokenValue::Comma))
                         .collect::<Vec<_>>(),
                 )
-                .then(braced_stmts.clone().with_ctx(Context {
-                    allow_placeholder_as_identifier: true,
-                }))
+                .then(braced_stmts.clone().with_ctx(Language::Macro))
                 .then_ignore(linebreak())
                 .map(|((id, params), body)| {
                     AsmStmtAst::DefMacro(AsmDefMacroAst { id, params, body })

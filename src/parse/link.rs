@@ -1,7 +1,7 @@
 //! Facilities for parsing linker configuration files.
 
 use super::atom::{
-    Extra, directive, linebreak, parse_tokens, symbol, tokenize,
+    Extra, Language, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
 use super::expr::ExprAst;
@@ -32,6 +32,7 @@ impl LinkConfigAst {
                 LinkDirectiveAst::parser().repeated().collect::<Vec<_>>(),
             )
             .map(|directives| LinkConfigAst { directives })
+            .with_ctx(Language::Linker)
     }
 }
 

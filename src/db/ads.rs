@@ -4,7 +4,7 @@ use super::prog::AdsProgram;
 use crate::addr::Addr;
 use crate::bus::WatchId;
 use crate::error::SrcCache;
-use crate::expr::{ExprEvalError, ExprValue};
+use crate::expr::{ExprEvalError, ExprLabel, ExprValue};
 use crate::proc::SimBreak;
 use crate::system::SimSystem;
 use num_bigint::BigInt;
@@ -135,6 +135,11 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::ExpandTuple => {
                 let values = self.value_stack.pop().unwrap().unwrap_tuple();
                 self.value_stack.extend(values.iter().cloned());
+            }
+            AdsInstruction::GetMemory => {
+                let addr = self.pop_address_value();
+                let data = self.system.peek_byte(addr);
+                self.value_stack.push(ExprValue::Integer(BigInt::from(data)));
             }
             AdsInstruction::GetPc => {
                 let value = self.system.pc();
@@ -325,7 +330,13 @@ impl<W: Write> AdsEnvironment<W> {
     }
 
     fn pop_address_value(&mut self) -> Addr {
-        Addr::wrap_bigint(self.value_stack.pop().unwrap().unwrap_int_ref())
+        match self.value_stack.pop().unwrap() {
+            ExprValue::Integer(bigint) => Addr::wrap_bigint(&bigint),
+            ExprValue::Label(ExprLabel::AddrAbsolute { address, .. }) => {
+                Addr::wrap_bigint(&address)
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn pop_u32_value(&mut self) -> u32 {

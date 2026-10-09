@@ -1,9 +1,9 @@
-use super::atom::{Extra, symbol};
+use super::atom::{Extra, Language, symbol};
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
 use crate::error::SrcSpan;
 use crate::lex::{Token, TokenValue};
-use chumsky::{self, IterParser, Parser};
+use chumsky::{self, ConfigParser, IterParser, Parser};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -55,7 +55,14 @@ impl LValueAst {
             let wildcard = symbol(TokenValue::Underscore).map(|token| {
                 LValueAst { span: token.span, node: LValueAstNode::Wildcard }
             });
-            chumsky::prelude::choice((memory, tuple, variable, wildcard))
+            chumsky::prelude::choice((
+                memory
+                    .contextual()
+                    .configure(|_, lang| matches!(lang, Language::Debugger)),
+                tuple,
+                variable,
+                wildcard,
+            ))
         })
     }
 }
@@ -66,17 +73,18 @@ impl LValueAst {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LValueAstNode {
     /// Assign to one byte of memory in the simulated memory bus, at the
-    /// address given by the specified expression.
+    /// address given by the specified expression.  These will only parse when
+    /// the `Language` is `Debugger`.
     Memory(ExprAst),
     /// Assign to a tuple of L-values.
     Tuple(Vec<LValueAst>),
-    /// Assign to a variable (or simulated processor register or PC).
+    /// Assign to a variable (or to a simulated processor register or PC, in
+    /// deugger scripts).
     Variable(Rc<str>),
     // TODO: Allow list/tuple index assignment as an lvalue node
     /// Ignore the expression.
     ///
-    /// This is mostly only useful when used as one element of a `Tuple`
-    /// L-value.
+    /// This is primarily useful when used as one element of a `Tuple` L-value.
     Wildcard,
 }
 

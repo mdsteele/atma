@@ -147,6 +147,12 @@ impl SimSystem {
         self.current_processor_mut().proc.set_register(name, value);
     }
 
+    /// Gets a single byte from memory using the currently selected processor's
+    /// memory bus, without provoking any hardware register side effects.
+    pub fn peek_byte(&self, addr: Addr) -> u8 {
+        self.current_processor().bus.peek_byte(addr)
+    }
+
     /// Writes a single byte to memory using the currently selected processor's
     /// memory bus.
     pub fn write_byte(&mut self, addr: Addr, data: u8) {

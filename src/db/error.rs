@@ -104,14 +104,6 @@ pub enum AdsError {
         /// The typechecking error.
         error: ExprTypeError,
     },
-    /// A memory address was specified using an expression of the wrong
-    /// type.
-    MemoryAddrTypeError {
-        /// The source code location for the memory address expression.
-        expr_loc: AdsSrcLoc,
-        /// The type of the expression.
-        expr_type: ExprType,
-    },
     /// An piece of ADS source code failed to parse.
     ParseError {
         /// The context that the parse error occurred within.
@@ -206,17 +198,6 @@ impl AdsError {
             }
             Self::ExprTypeError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
-            }
-            Self::MemoryAddrTypeError { expr_loc, expr_type } => {
-                // TODO: Allow `ExprType::Label` as well.
-                let message = format!(
-                    "memory address must be of type {}, not {expr_type}",
-                    ExprType::Integer
-                );
-                let label = format!("this has type {expr_type}");
-                SourceError::new(expr_loc.primary(), message)
-                    .with_primary_label(label)
-                    .with_context(&*expr_loc.context)
             }
             Self::ParseError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)

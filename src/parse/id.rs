@@ -1,6 +1,6 @@
 //! Facilities for parsing identifiers and declarations.
 
-use super::atom::{Context, Extra, parse_tokens, symbol};
+use super::atom::{Extra, Language, parse_tokens, symbol};
 use super::error::ParseResult;
 use crate::error::SrcSpan;
 use crate::lex::{Token, TokenValue};
@@ -94,7 +94,7 @@ impl IdentifierAst {
             .labelled("placeholder");
         identifier_token.or(builtin_token).or(placeholder_token
             .contextual()
-            .configure(|_, ctx: &Context| ctx.allow_placeholder_as_identifier))
+            .configure(|_, lang| matches!(lang, Language::Macro)))
     }
 }
 

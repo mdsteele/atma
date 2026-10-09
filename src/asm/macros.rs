@@ -5,7 +5,8 @@ use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
     AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
     AsmMacroArgAst, AsmRelAddrAst, AsmRepeatAst, AsmStmtAst, CompoundIdAst,
-    ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, ParseResult,
+    ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, Language,
+    ParseResult,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -257,6 +258,7 @@ impl<'a> MacroBuilder<'a> {
                     errs.also(self.scan_expression(item));
                 }
             }
+            ExprAstNode::MemoryRead(_) => unreachable!(),
         }
         errs.result()
     }
@@ -557,7 +559,7 @@ impl<'a> MacroSubstitution<'a> {
     ) -> ParseResult<Self> {
         match kind {
             PlaceholderKind::Expression => {
-                let expr = ExprAst::parse(tokens)?;
+                let expr = ExprAst::parse(tokens, Language::Assembly)?;
                 Ok(MacroSubstitution::Expression(tokens, expr))
             }
             PlaceholderKind::Identifier => {
@@ -752,6 +754,7 @@ impl<'a> MacroExpansion<'a> {
                 span: expression.span,
                 node: ExprAstNode::ListLiteral(self.expand_expressions(exprs)),
             },
+            ExprAstNode::MemoryRead(_) => unreachable!(),
             ExprAstNode::TupleLiteral(exprs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::TupleLiteral(

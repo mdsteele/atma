@@ -1,11 +1,11 @@
 //! Facilities for parsing expressions.
 
-use super::atom::{Extra, parse_tokens, symbol};
+use super::atom::{Extra, Language, parse_tokens, symbol};
 use super::error::ParseResult;
 use super::id::CompoundIdAst;
 use crate::error::SrcSpan;
 use crate::lex::{Token, TokenValue};
-use chumsky::{self, IterParser, Parser, pratt};
+use chumsky::{self, ConfigParser, IterParser, Parser, pratt};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -169,8 +169,8 @@ pub struct ExprAst {
 
 impl ExprAst {
     /// Parses a sequence of tokens into an expression abstract syntax tree.
-    pub fn parse(tokens: &[Token]) -> ParseResult<Self> {
-        parse_tokens(Self::parser(), tokens)
+    pub fn parse(tokens: &[Token], language: Language) -> ParseResult<Self> {
+        parse_tokens(Self::parser().with_ctx(language), tokens)
     }
 
     pub(super) fn parser<'a>()
@@ -209,6 +209,17 @@ impl ExprAst {
                     node: ExprAstNode::ListLiteral(asts),
                 },
             );
+            let memory_read = chumsky::prelude::group((
+                symbol(TokenValue::BracketOpen),
+                expr.clone(),
+                symbol(TokenValue::BracketClose),
+            ))
+            .map(
+                |(open, ast, close): (Token, ExprAst, Token)| ExprAst {
+                    span: open.span.merged_with(close.span),
+                    node: ExprAstNode::MemoryRead(Box::new(ast)),
+                },
+            );
             let here_label = chumsky::prelude::choice((
                 symbol(TokenValue::DollarUp).map(|token| ExprAst {
                     span: token.span,
@@ -230,8 +241,13 @@ impl ExprAst {
 
             let expr_atom = chumsky::prelude::choice((
                 parenthesized_expr.clone(),
-                here_label,
+                here_label.contextual().configure(|_, lang| {
+                    matches!(lang, Language::Assembly | Language::Macro)
+                }),
                 identifier,
+                memory_read
+                    .contextual()
+                    .configure(|_, lang| matches!(lang, Language::Debugger)),
                 list_literal,
                 bool_literal(),
                 int_literal(),
@@ -489,7 +505,8 @@ pub enum ExprAstNode {
     BoolLiteral(bool),
     /// A ternary conditional.
     Conditional(Box<ExprAst>, Box<ExprAst>, Box<ExprAst>),
-    /// A "here" label.
+    /// A "here" label.  These will only parse when the `Language` is
+    /// `Assembly` or `Macro`.
     HereLabel(HereLabelKind),
     /// An identifier.
     Identifier(CompoundIdAst),
@@ -499,6 +516,8 @@ pub enum ExprAstNode {
     IntLiteral(BigInt),
     /// A list literal.
     ListLiteral(Vec<ExprAst>),
+    /// Reading from a memory location.
+    MemoryRead(Box<ExprAst>),
     /// A string literal.
     StrLiteral(Rc<str>),
     /// A tuple literal.
@@ -561,7 +580,7 @@ fn str_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
 
 #[cfg(test)]
 mod tests {
-    use super::super::atom::tokenize;
+    use super::super::atom::{Language, tokenize};
     use super::super::error::ParseResult;
     use super::super::id::{CompoundIdAst, IdentifierAst, IdentifierKind};
     use super::{BinOpAst, ExprAst, ExprAstNode};
@@ -571,7 +590,7 @@ mod tests {
     use std::rc::Rc;
 
     fn parse(input: &str) -> ParseResult<ExprAst> {
-        ExprAst::parse(&tokenize(input)?)
+        ExprAst::parse(&tokenize(input)?, Language::Common)
     }
 
     fn int_node(value: i32) -> ExprAstNode {

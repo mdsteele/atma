@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-const UNDEFINED: (ExprType, ExprStatic) =
+const TYPE_ERROR: (ExprType, ExprStatic) =
     (ExprType::Undefined, Err(ExprNotStaticReason::TypeError));
 
 //===========================================================================//
@@ -36,6 +36,7 @@ enum Task {
     LogBranch(bool, SrcSpan, SrcSpan, ExprAst),
     LogJoin(bool, usize),
     LogUnify(bool, SrcSpan, SrcSpan, SrcSpan),
+    MemoryRead(SrcSpan, SrcSpan),
     PhantomExpr(ExprAst),
     PhantomDone(usize),
     TupleLiteral(usize),
@@ -114,6 +115,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     self.do_task_log_unify(
                         identity, op_span, lhs_span, rhs_span,
                     );
+                }
+                Task::MemoryRead(read_span, addr_span) => {
+                    self.do_task_memory_read(read_span, addr_span)
                 }
                 Task::PhantomExpr(expr_ast) => {
                     self.do_task_phantom_expr(expr_ast)
@@ -229,6 +233,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 ));
                 self.tasks.extend(item_asts.into_iter().rev().map(Task::Expr));
             }
+            ExprAstNode::MemoryRead(addr_ast) => {
+                self.tasks.push(Task::MemoryRead(subexpr.span, addr_ast.span));
+                self.tasks.push(Task::Expr(*addr_ast));
+            }
             ExprAstNode::StrLiteral(string) => {
                 self.push_primitive_literal(
                     ExprType::String,
@@ -255,7 +263,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (func_type, func_static) = self.types.pop().unwrap();
         let param_and_ret = match func_type {
             ExprType::Undefined => {
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
                 return;
             }
             ExprType::Function(ref param_and_ret) => param_and_ret,
@@ -264,7 +272,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     func_span,
                     func_type: other_type,
                 });
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
                 return;
             }
         };
@@ -278,7 +286,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 arg_type,
                 param_type,
             });
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         }
         let reason = match (func_static, arg_static) {
@@ -316,14 +324,14 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (rhs_type, rhs_static) = self.types.pop().unwrap();
         let (lhs_type, lhs_static) = self.types.pop().unwrap();
         if lhs_type == ExprType::Undefined || rhs_type == ExprType::Undefined {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         }
         let op_span = binop_ast.0;
         let Some((binop, result_type)) = self.errs.ok(ExprBinOp::typecheck(
             binop_ast, lhs_span, lhs_type, rhs_span, rhs_type,
         )) else {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         };
         let reason = match (lhs_static, rhs_static) {
@@ -455,7 +463,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.ops.push(op);
                 self.types.push((ExprType::Label, expr_static));
             }
-            None => self.types.push(UNDEFINED),
+            None => self.types.push(TYPE_ERROR),
         }
     }
 
@@ -468,7 +476,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.ops.push(op);
                 self.types.push((id_type, id_static));
             }
-            None => self.types.push(UNDEFINED),
+            None => self.types.push(TYPE_ERROR),
         }
     }
 
@@ -482,7 +490,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (lhs_type, lhs_static) = self.types.pop().unwrap();
         match (lhs_type, rhs_type) {
             (_, ExprType::Undefined) | (ExprType::Undefined, _) => {
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
             }
             (ExprType::List(item_type), ExprType::Integer)
             | (ExprType::List(item_type), ExprType::Bottom) => {
@@ -525,7 +533,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     index_span: rhs_span,
                     index_type: rhs_type,
                 });
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
             }
             (ExprType::Tuple(item_types), ExprType::Integer)
             | (ExprType::Tuple(item_types), ExprType::Bottom) => {
@@ -544,7 +552,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                                     index_value: index,
                                 },
                             );
-                            self.types.push(UNDEFINED);
+                            self.types.push(TYPE_ERROR);
                             return;
                         }
                         let index = usize::try_from(index).unwrap();
@@ -570,7 +578,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                             index_span: rhs_span,
                             reason,
                         });
-                        self.types.push(UNDEFINED);
+                        self.types.push(TYPE_ERROR);
                     }
                 }
             }
@@ -579,7 +587,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     index_span: rhs_span,
                     index_type: rhs_type,
                 });
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
             }
             (lhs_type, _) => {
                 self.errs.push(ExprTypeError::CannotIndexIntoType {
@@ -587,7 +595,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     indexed_span: lhs_span,
                     indexed_type: lhs_type,
                 });
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
             }
         }
     }
@@ -643,7 +651,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     ) {
         let (rhs_type, rhs_static) = self.types.pop().unwrap();
         if rhs_type == ExprType::Undefined {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
         } else if let Some(template) = template {
             if let Some(()) = self
                 .errs
@@ -664,10 +672,10 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     }
                 }
             } else {
-                self.types.push(UNDEFINED);
+                self.types.push(TYPE_ERROR);
             }
         } else {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
         }
     }
 
@@ -775,7 +783,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 };
                 (ExprType::Boolean, static_value)
             }
-            (ExprType::Undefined, _) | (_, ExprType::Undefined) => UNDEFINED,
+            (ExprType::Undefined, _) | (_, ExprType::Undefined) => TYPE_ERROR,
             (lhs_type, rhs_type) => {
                 self.errs.push(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,
@@ -789,9 +797,28 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     rhs_span,
                     rhs_type,
                 });
-                UNDEFINED
+                TYPE_ERROR
             }
         });
+    }
+
+    fn do_task_memory_read(&mut self, read_span: SrcSpan, addr_span: SrcSpan) {
+        let (addr_type, _addr_static) = self.types.pop().unwrap();
+        if addr_type == ExprType::Undefined {
+            self.types.push(TYPE_ERROR);
+        } else if !addr_type.is_subtype_of(&ExprType::Integer)
+            && !addr_type.is_subtype_of(&ExprType::Label)
+        {
+            self.errs.push(ExprTypeError::CannotUseTypeAsMemoryAddress {
+                expr_span: addr_span,
+                expr_type: addr_type,
+            });
+            self.types.push(TYPE_ERROR);
+        } else {
+            let reason = ExprNotStaticReason::MemoryRead { span: read_span };
+            self.ops.push(E::Op::memory_read());
+            self.types.push((ExprType::Integer, Err(reason)));
+        }
     }
 
     fn do_task_phantom_expr(&mut self, expr_ast: ExprAst) {
@@ -839,14 +866,14 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     ) {
         let (arg_type, arg_static) = self.types.pop().unwrap();
         if arg_type == ExprType::Undefined {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         }
         let op_span = unop_ast.0;
         let Some((unop, result_type)) =
             self.errs.ok(ExprUnOp::typecheck(unop_ast, arg_span, arg_type))
         else {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         };
         let reason = match arg_static {
@@ -870,7 +897,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     fn do_task_with_addr(&mut self, op_span: SrcSpan, arg_span: SrcSpan) {
         let (arg_type, arg_static) = self.types.pop().unwrap();
         if arg_type == ExprType::Undefined {
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         }
         if !arg_type.is_subtype_of(&ExprType::Integer) {
@@ -880,7 +907,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 arg_span,
                 arg_type,
             });
-            self.types.push(UNDEFINED);
+            self.types.push(TYPE_ERROR);
             return;
         }
         match arg_static {
@@ -893,7 +920,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.ops.push(E::Op::literal(result_value.clone()));
                         self.types.push((ExprType::Label, Ok(result_value)));
                     }
-                    None => self.types.push(UNDEFINED),
+                    None => self.types.push(TYPE_ERROR),
                 }
             }
             Err(reason) => {
@@ -902,7 +929,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                         self.ops.push(op);
                         self.types.push((ExprType::Label, Err(reason)));
                     }
-                    None => self.types.push(UNDEFINED),
+                    None => self.types.push(TYPE_ERROR),
                 }
             }
         };

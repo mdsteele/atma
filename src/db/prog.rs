@@ -528,22 +528,22 @@ impl<'a> AdsCompiler<'a> {
     ) -> AdsResult<WatchKind> {
         let kind = match ast {
             BreakpointAst::Pc(expr_ast) => {
-                self.compile_breakpoint_addr(expr_ast, out)?;
+                self.compile_address(expr_ast, out)?;
                 WatchKind::Pc
             }
             BreakpointAst::Read(expr_ast) => {
-                self.compile_breakpoint_addr(expr_ast, out)?;
+                self.compile_address(expr_ast, out)?;
                 WatchKind::Read
             }
             BreakpointAst::Write(expr_ast) => {
-                self.compile_breakpoint_addr(expr_ast, out)?;
+                self.compile_address(expr_ast, out)?;
                 WatchKind::Write
             }
         };
         Ok(kind)
     }
 
-    fn compile_breakpoint_addr(
+    fn compile_address(
         &self,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
@@ -551,11 +551,15 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
         let expr_type = errs.with(self.compile_expr(expr_ast, out)).0;
-        // TODO: Allow `ExprType::Label` as well.
-        if !expr_type.is_subtype_of(&ExprType::Integer) {
-            errs.push(AdsError::MemoryAddrTypeError {
-                expr_loc: self.make_loc(expr_span),
-                expr_type,
+        if !expr_type.is_subtype_of(&ExprType::Integer)
+            && !expr_type.is_subtype_of(&ExprType::Label)
+        {
+            errs.push(AdsError::ExprTypeError {
+                context: self.env.current_src_context(),
+                error: ExprTypeError::CannotUseTypeAsMemoryAddress {
+                    expr_span,
+                    expr_type,
+                },
             });
         }
         errs.result()
@@ -589,16 +593,8 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
-        let expr_span = expr_ast.span;
-        let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
+        errs.also(self.compile_address(expr_ast, out));
         out.push(AdsInstruction::SetMemory);
-        // TODO: Allow `ExprType::Label` as well.
-        if !expr_type.is_subtype_of(&ExprType::Integer) {
-            errs.push(AdsError::MemoryAddrTypeError {
-                expr_loc: self.make_loc(expr_span),
-                expr_type,
-            });
-        }
         (ExprType::Integer, errs)
     }
 

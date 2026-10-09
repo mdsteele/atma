@@ -92,6 +92,10 @@ pub(crate) trait ExprOp {
     /// tuple value.
     fn make_tuple(num_items: usize) -> Self;
 
+    /// Returns an operation to use the top stack value as an integer address
+    /// to read a byte from the simulated memory bus.
+    fn memory_read() -> Self;
+
     /// Returns an operation to unconditionally skip over the specified number
     /// of operations.
     fn skip(offset: usize) -> Self;

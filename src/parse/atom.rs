@@ -6,14 +6,27 @@ use std::rc::Rc;
 
 //===========================================================================//
 
+/// Defines which language is being parsed.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum Language {
+    /// Expression features common to all languages.
+    #[default]
+    Common,
+    /// Assembly source code.
+    Assembly,
+    /// Assembly source code within a macro definition.
+    Macro,
+    /// Linker config source code.
+    Linker,
+    /// Debugger script source code.
+    Debugger,
+}
+
+//===========================================================================//
+
 /// The error type used for `chumsky::Parser`s in this crate.
 pub(super) type Extra<'a> =
-    chumsky::extra::Full<chumsky::error::Rich<'a, Token>, (), Context>;
-
-#[derive(Clone, Copy, Default)]
-pub(super) struct Context {
-    pub allow_placeholder_as_identifier: bool,
-}
+    chumsky::extra::Full<chumsky::error::Rich<'a, Token>, (), Language>;
 
 //===========================================================================//
 

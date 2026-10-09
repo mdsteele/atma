@@ -292,10 +292,10 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
 
     fn typecheck_here_label(
         &self,
-        span: SrcSpan,
+        _span: SrcSpan,
         _kind: HereLabelKind,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
-        Err(Errs::one(ExprTypeError::HereLabelInDebuggerScript { span }))
+        unreachable!() // "here" labels don't parse in debugger scripts
     }
 
     fn typecheck_identifier(

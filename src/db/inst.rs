@@ -49,6 +49,10 @@ pub(crate) enum AdsInstruction {
     /// pushes its elements onto the stack in order, such that the last element
     /// of the tuple ends up as the top element on the stack.
     ExpandTuple,
+    /// Pops the top value from the value stack (which must be an integer or
+    /// label), then reads a byte from the simulated processor's memory bus at
+    /// that address, and pushes that byte onto the value stack.
+    GetMemory,
     /// Pushes the integer value of the simulated processsor's program counter
     /// onto the stack.
     GetPc,
@@ -109,10 +113,10 @@ pub(crate) enum AdsInstruction {
     PushValue(ExprValue),
     /// Returns from the current breakpoint handler.
     Return,
-    /// Pops the top two values from the value stack (which must both be
-    /// integers), then writes a byte to the simulated processor's memory bus,
-    /// using the topmost value as the address and the second-from-the-top
-    /// value as the data to write.
+    /// Pops the top two values from the value stack, then writes a byte to the
+    /// simulated processor's memory bus, using the topmost value (which must
+    /// be an integer or label) as the address, and the second-from-the-top
+    /// value (which must be an integer) as the data to write.
     SetMemory,
     /// Pops a value from the value stack (which must be an integer), and sets
     /// the simulated processsor's program counter to that value.
@@ -165,6 +169,10 @@ impl ExprOp for AdsInstruction {
 
     fn make_tuple(num_items: usize) -> Self {
         Self::MakeTuple(num_items)
+    }
+
+    fn memory_read() -> Self {
+        Self::GetMemory
     }
 
     fn skip(offset: usize) -> Self {

@@ -346,6 +346,12 @@ impl ExprOp for ObjExprOp {
         Self::MakeTuple(num_items)
     }
 
+    fn memory_read() -> Self {
+        // Memory read expressions don't parse in assembly or linker config
+        // source code, so this method will never be called.
+        unreachable!()
+    }
+
     fn skip(offset: usize) -> Self {
         Self::Skip(offset)
     }
