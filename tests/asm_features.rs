@@ -26,6 +26,28 @@ fn static_data(obj_file: ObjFile) -> Vec<Vec<u8>> {
 //===========================================================================//
 
 #[test]
+fn anonymous_labels() {
+    let source = r#"\
+    .SECTION "TEST", start=$10
+        .u8 1
+    $:  .u8 2
+    Foo: {
+        .u8 3
+    $:  .u8 4
+        .a8 $-
+    }
+        .a8 $-  ; This should skip over the inner scope.
+    $:  .a8 $-- ; So should this.
+        .a8 $-
+    .END
+    "#;
+    assert_eq!(
+        static_data(assemble(source)),
+        vec![vec![1, 2, 3, 4, 0x13, 0x11, 0x11, 0x16]]
+    );
+}
+
+#[test]
 fn charmap_data() {
     let source = r#"\
     .CHARMAP "Foo" {

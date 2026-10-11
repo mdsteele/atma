@@ -18,6 +18,7 @@ use crate::parse::{
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
+use std::num::NonZero;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -37,7 +38,6 @@ pub(super) struct AsmTypeEnv {
     /// Nested scopes.  Never empty, as it always contains the root, top-level
     /// scope.
     scope_stack: Vec<AsmScopeEnv>,
-    next_anonymous_scope_number: u32,
 }
 
 impl AsmTypeEnv {
@@ -51,7 +51,6 @@ impl AsmTypeEnv {
             chunk_stack: Vec::new(),
             context_stack: vec![root_context],
             scope_stack: vec![AsmScopeEnv::root()],
-            next_anonymous_scope_number: 0,
         }
     }
 
@@ -175,7 +174,14 @@ impl AsmTypeEnv {
     }
 
     pub fn declare_label(&mut self, label_ast: &AsmLabelAst) -> AsmResult<()> {
-        self.declare_symbol(&label_ast.identifier)
+        match label_ast {
+            AsmLabelAst::Named { exported: _, id } => self.declare_symbol(id),
+            AsmLabelAst::Anonymous { span: _ } => {
+                let scope = self.scope_stack.last_mut().unwrap();
+                scope.declare_anonymous_label();
+                Ok(())
+            }
+        }
     }
 
     fn declare_symbol(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
@@ -317,6 +323,18 @@ impl AsmTypeEnv {
         Ok(())
     }
 
+    pub fn append_anonymous_label(&mut self, loc: ObjSrcLoc) {
+        if let Some(chunk_env) = self.chunk_stack.last_mut() {
+            let exported = false;
+            // TODO: handle overflow
+            let offset = Offset::try_from(chunk_env.total_size()).unwrap();
+            let label = chunk_env.label_at_offset(offset);
+            let scope_env = self.scope_stack.last_mut().unwrap();
+            let name = scope_env.expand_anonymous_label(label);
+            chunk_env.symbols.push(ObjSymbol { name, loc, exported, offset });
+        }
+    }
+
     fn begin_zone(&mut self, settings: ZoneSettings) {
         debug_assert!(self.arch_tree.contains_arch(&settings.arch));
         debug_assert!(
@@ -380,38 +398,28 @@ impl AsmTypeEnv {
         self.charmaps.insert(name, (name_span, charmap));
     }
 
-    pub fn begin_anonymous_scope(&mut self) {
-        let name = format!("${:x}", self.next_anonymous_scope_number);
-        self.next_anonymous_scope_number += 1;
-        self.begin_scope(Rc::from(name), true);
-    }
-
-    pub fn begin_named_scope(&mut self, name: Rc<str>) {
+    pub fn begin_unlabeled_scope(&mut self) {
+        let enclosing_scope = self.scope_stack.last_mut().unwrap();
+        let name = enclosing_scope.generate_unlabeled_scope_name();
         self.begin_scope(name, false);
     }
 
-    fn begin_scope(&mut self, name: Rc<str>, anonymous: bool) {
+    pub fn begin_named_scope(&mut self, name: Rc<str>) {
+        self.begin_scope(name, true);
+    }
+
+    fn begin_scope(&mut self, name: Rc<str>, is_labeled: bool) {
         self.begin_zone(self.current_settings().clone());
-        let current_scope = self.current_scope();
-        let mut decls = HashMap::<Rc<str>, AsmDecl>::new();
-        if !anonymous {
-            let prefix = format!("{name}::");
-            for (decl_name, decl) in current_scope.decls.iter() {
-                if decl_name.starts_with(&prefix) {
-                    let stripped_name = Rc::from(&decl_name[prefix.len()..]);
-                    decls.insert(stripped_name, decl.clone());
-                }
-            }
-        }
-        let full_prefix =
-            Rc::from(format!("{}{name}::", current_scope.full_prefix));
-        let name = if anonymous { None } else { Some(name) };
-        self.scope_stack.push(AsmScopeEnv {
-            name,
-            full_prefix,
-            decls,
-            structs: HashMap::new(),
-        });
+        let outer = self.scope_stack.last_mut().unwrap();
+        let full_prefix = Rc::from(format!("{}{name}::", outer.full_prefix));
+        let inner = if is_labeled {
+            outer
+                .remove_subscope(&name)
+                .unwrap_or_else(|| AsmScopeEnv::new(Some(name), full_prefix))
+        } else {
+            AsmScopeEnv::new(None, full_prefix)
+        };
+        self.scope_stack.push(inner);
     }
 
     pub fn is_at_top_level(&self) -> bool {
@@ -426,18 +434,13 @@ impl AsmTypeEnv {
     pub fn end_scope(&mut self) {
         let inner = self.scope_stack.pop().unwrap();
         let outer = self.scope_stack.last_mut().unwrap();
-        if let Some(inner_name) = inner.name {
-            for (decl_name, decl) in inner.decls {
-                let prefixed_name = format!("{inner_name}::{decl_name}");
-                outer.decls.insert(Rc::from(prefixed_name), decl);
-            }
-        }
+        outer.add_subscope(inner);
         self.end_zone();
     }
 
     fn look_up_decl(&self, name: &str) -> Option<&AsmDecl> {
-        for scope in self.scope_stack.iter().rev() {
-            if let Some(decl) = scope.decls.get(name) {
+        for scope_env in self.scope_stack.iter().rev() {
+            if let Some(decl) = scope_env.look_up_decl(name) {
                 return Some(decl);
             }
         }
@@ -590,22 +593,25 @@ impl ExprEnv for AsmTypeEnv {
         kind: HereLabelKind,
     ) -> ExprTypeResult<(Self::Op, ExprStatic)> {
         if let Some(chunk_env) = self.chunk_stack.last() {
-            let chunk_index = chunk_env.chunk_index();
-            let offset = match kind {
+            let label = match kind {
+                HereLabelKind::AnonNext(count) => {
+                    let scope = self.scope_stack.last().unwrap();
+                    scope.upcoming_anonymous_label(span, count)?
+                }
+                HereLabelKind::AnonPrev(count) => {
+                    let scope = self.scope_stack.last().unwrap();
+                    scope.previous_anonymous_label(span, count)?
+                }
                 HereLabelKind::StmtStart => {
-                    BigInt::from(chunk_env.total_size())
+                    // TODO: handle overflow
+                    let offset =
+                        Offset::try_from(chunk_env.total_size()).unwrap();
+                    chunk_env.label_at_offset(offset)
                 }
                 HereLabelKind::ZoneStart => {
-                    BigInt::from(chunk_env.current_zone().start_offset)
+                    let offset = chunk_env.current_zone().start_offset;
+                    chunk_env.label_at_offset(offset)
                 }
-            };
-            let label = if let Some(start) = chunk_env.start_addr {
-                ExprLabel::ChunkAbsolute {
-                    chunk_index,
-                    address: BigInt::from(start) + offset,
-                }
-            } else {
-                ExprLabel::ChunkRelative { chunk_index, offset }
             };
             let value = ExprValue::Label(label);
             let op = ObjExprOp::Push(value.clone());
@@ -765,6 +771,20 @@ impl ChunkEnv {
         &self.zone_stack.last().unwrap().settings
     }
 
+    fn label_at_offset(&self, offset: Offset) -> ExprLabel {
+        if let Some(start) = self.start_addr {
+            ExprLabel::ChunkAbsolute {
+                chunk_index: self.chunk_index,
+                address: BigInt::from(start) + BigInt::from(offset),
+            }
+        } else {
+            ExprLabel::ChunkRelative {
+                chunk_index: self.chunk_index,
+                offset: BigInt::from(offset),
+            }
+        }
+    }
+
     fn data_mut(&mut self) -> &mut Vec<u8> {
         if self.padding > 0 {
             let fill = self.current_settings().fill.unwrap_or_else(|| {
@@ -918,19 +938,37 @@ pub(super) struct AsmScopeEnv {
     full_prefix: Rc<str>,
     /// The symbols and variables/constants currently visible in this scope.
     decls: HashMap<Rc<str>, AsmDecl>,
+    /// Named sub-scopes within this scope.
+    subscopes: HashMap<Rc<str>, AsmScopeEnv>,
     /// The struct types defined in this scope.
     structs: HashMap<Rc<str>, AsmStructDef>,
+    /// Anonymous labels declared in this scope.
+    anonymous_labels: Vec<ExprLabel>,
+    /// The number of anonymous labels in this scope that have been expanded
+    /// (not just predeclared) so far.
+    num_expanded_anonymous_labels: usize,
+    /// The next integer to use when generating a synthetic name for an
+    /// unlabeld sub-scope in this scope.
+    next_unlabeled_scope_number: u32,
 }
 
 impl AsmScopeEnv {
-    /// Creates a new root scope.
-    pub fn root() -> Self {
+    fn new(name: Option<Rc<str>>, full_prefix: Rc<str>) -> Self {
         Self {
-            name: None,
-            full_prefix: Rc::from(""),
+            name,
+            full_prefix,
             decls: HashMap::new(),
+            subscopes: HashMap::new(),
             structs: HashMap::new(),
+            anonymous_labels: Vec::new(),
+            num_expanded_anonymous_labels: 0,
+            next_unlabeled_scope_number: 0,
         }
+    }
+
+    /// Creates a new root scope.
+    fn root() -> Self {
+        Self::new(None, Rc::from(""))
     }
 
     pub fn prefixed(&self, name: &Rc<str>) -> Rc<str> {
@@ -939,6 +977,102 @@ impl AsmScopeEnv {
         } else {
             Rc::from(format!("{}{name}", self.full_prefix))
         }
+    }
+
+    fn look_up_decl(&self, name: &str) -> Option<&AsmDecl> {
+        if let Some(decl) = self.decls.get(name) {
+            Some(decl)
+        } else if let Some((first, rest)) = name.split_once("::")
+            && let Some(subscope) = self.subscopes.get(first)
+        {
+            subscope.look_up_decl(rest)
+        } else {
+            None
+        }
+    }
+
+    fn add_subscope(&mut self, subscope: AsmScopeEnv) {
+        if let Some(subscope_name) = &subscope.name {
+            self.subscopes.insert(subscope_name.clone(), subscope);
+        }
+    }
+
+    fn remove_subscope(&mut self, name: &str) -> Option<AsmScopeEnv> {
+        self.subscopes.remove(name)
+    }
+
+    fn anonymous_label_full_name(&self, index: usize) -> Rc<str> {
+        Rc::from(format!("{}${index:x}", self.full_prefix))
+    }
+
+    fn declare_anonymous_label(&mut self) {
+        let index = self.anonymous_labels.len();
+        let name = self.anonymous_label_full_name(index);
+        let label = ExprLabel::SymbolRelative { name, offset: BigInt::ZERO };
+        self.anonymous_labels.push(label);
+    }
+
+    fn expand_anonymous_label(&mut self, value: ExprLabel) -> Rc<str> {
+        debug_assert!(
+            self.num_expanded_anonymous_labels < self.anonymous_labels.len()
+        );
+        let index = self.num_expanded_anonymous_labels;
+        self.num_expanded_anonymous_labels += 1;
+        let name = self.anonymous_label_full_name(index);
+        self.anonymous_labels[index] = value;
+        name
+    }
+
+    fn previous_anonymous_label(
+        &self,
+        reference_span: SrcSpan,
+        count: NonZero<usize>,
+    ) -> ExprTypeResult<ExprLabel> {
+        debug_assert!(
+            self.num_expanded_anonymous_labels <= self.anonymous_labels.len()
+        );
+        if count.get() <= self.num_expanded_anonymous_labels {
+            // Because `count` is non-zero, `index` will be strictly less than
+            // `self.num_expanded_anonymous_labels`, and thus strictly less
+            // than `self.anonymous_labels.len()`.
+            let index = self.num_expanded_anonymous_labels - count.get();
+            Ok(self.anonymous_labels[index].clone())
+        } else {
+            Err(Errs::one(ExprTypeError::AnonymousLabelReferenceOutOfBounds {
+                reference_span,
+                forward: false,
+                reference_count: count,
+                actual_count: self.num_expanded_anonymous_labels,
+            }))
+        }
+    }
+
+    fn upcoming_anonymous_label(
+        &self,
+        reference_span: SrcSpan,
+        count: NonZero<usize>,
+    ) -> ExprTypeResult<ExprLabel> {
+        // Because `count` is non-zero, `count.get() - 1` will never underflow.
+        if let Some(index) =
+            self.num_expanded_anonymous_labels.checked_add(count.get() - 1)
+            && index < self.anonymous_labels.len()
+        {
+            Ok(self.anonymous_labels[index].clone())
+        } else {
+            Err(Errs::one(ExprTypeError::AnonymousLabelReferenceOutOfBounds {
+                reference_span,
+                forward: true,
+                reference_count: count,
+                actual_count: self.anonymous_labels.len()
+                    - self.num_expanded_anonymous_labels,
+            }))
+        }
+    }
+
+    fn generate_unlabeled_scope_name(&mut self) -> Rc<str> {
+        let name = format!("$${:x}", self.next_unlabeled_scope_number);
+        self.next_unlabeled_scope_number += 1;
+        Rc::from(name)
     }
 
     fn define_struct(

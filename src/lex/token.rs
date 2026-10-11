@@ -1,5 +1,6 @@
 use crate::error::SrcSpan;
 use num_bigint::BigInt;
+use std::num::NonZero;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -41,10 +42,16 @@ pub enum TokenValue {
     Comma,
     /// An assembler directive.
     Directive(Rc<str>),
+    /// A "`$`" symbol.
+    Dollar,
     /// A "`$v`" symbol.
     DollarDown,
     /// A "`$<`" symbol.
     DollarLeft,
+    /// A "`$-`" symbol (with one or more minuses).
+    DollarMinus(NonZero<usize>),
+    /// A "`$+`" symbol (with one or more pluses).
+    DollarPlus(NonZero<usize>),
     /// A "`$>`" symbol.
     DollarRight,
     /// A "`$^`" symbol.
@@ -130,8 +137,11 @@ impl TokenValue {
             TokenValue::ColonColon => "`::`",
             TokenValue::Comma => "`,`",
             TokenValue::Directive(_) => "directive",
+            TokenValue::Dollar => "`$`",
             TokenValue::DollarDown => "`$v`",
             TokenValue::DollarLeft => "`$<`",
+            TokenValue::DollarMinus(_) => "`$-`",
+            TokenValue::DollarPlus(_) => "`$+`",
             TokenValue::DollarRight => "`$>`",
             TokenValue::DollarUp => "`$^`",
             TokenValue::EqualsEquals => "`==`",

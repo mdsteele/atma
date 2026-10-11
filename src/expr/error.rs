@@ -4,6 +4,7 @@ use super::value::{ExprType, ExprValue};
 use crate::error::{Errs, SourceContext, SourceError, SrcLoc, SrcSpan};
 use crate::parse::{BinOpAst, UnOpAst};
 use num_bigint::{BigInt, BigUint};
+use std::num::NonZero;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -18,6 +19,22 @@ pub type ExprTypeResult<T> = Result<T, Errs<ExprTypeError>>;
 /// An error encountered while typechecking an expression.
 #[derive(Debug)]
 pub enum ExprTypeError {
+    /// An anonymous label reference tried to refer to an anonymous label index
+    /// that doesn't exist in the current scope.
+    AnonymousLabelReferenceOutOfBounds {
+        /// The source code location for the anonymous label reference.
+        reference_span: SrcSpan,
+        /// True if this was a forward reference (to an upcoming anonymous
+        /// label), false if it was a backward reference (to a previous
+        /// anonymous label).
+        forward: bool,
+        /// How many anonymous labels forward/backward the reference referred
+        /// to.
+        reference_count: NonZero<usize>,
+        /// How many anonymous labels actually exist in the current scope
+        /// forward/backward from the reference.
+        actual_count: usize,
+    },
     /// Found a binary operator that cannot be applied to its arguments'
     /// expression types.
     CannotApplyBinaryOpToTypes {
@@ -227,6 +244,27 @@ impl ExprTypeError {
     /// source file containing the expression.
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
+            Self::AnonymousLabelReferenceOutOfBounds {
+                reference_span,
+                forward,
+                reference_count: _,
+                actual_count,
+            } => {
+                let message = "anonymous label reference out of bounds";
+                let label = format!(
+                    "{} anonymous label{} exist{} {} this",
+                    if actual_count == 0 {
+                        "no".to_string()
+                    } else {
+                        format!("only {}", actual_count)
+                    },
+                    if actual_count == 1 { "" } else { "s" },
+                    if actual_count == 1 { "s" } else { "" },
+                    if forward { "after" } else { "before" }
+                );
+                SourceError::new(SrcLoc::new(path, reference_span), message)
+                    .with_primary_label(label)
+            }
             Self::CannotApplyBinaryOpToTypes {
                 op_span,
                 op,

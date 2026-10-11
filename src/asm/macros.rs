@@ -191,11 +191,11 @@ impl<'a> MacroBuilder<'a> {
                     }
                 }
             }
-            AsmStmtAst::Label(label) => {
-                errs.also(self.scan_identifier(
-                    &label.identifier,
-                    PlaceholderKind::Identifier,
-                ));
+            AsmStmtAst::Label(AsmLabelAst::Anonymous { span: _ }) => {}
+            AsmStmtAst::Label(AsmLabelAst::Named { exported: _, id }) => {
+                errs.also(
+                    self.scan_identifier(id, PlaceholderKind::Identifier),
+                );
             }
             AsmStmtAst::RelAddr(rel_addr) => {
                 errs.also(self.scan_expression(&rel_addr.dest_expr));
@@ -672,10 +672,15 @@ impl<'a> MacroExpansion<'a> {
                 id: self.expand_identifier(&invoke.id),
                 args: self.expand_macro_args(&invoke.args),
             }),
-            AsmStmtAst::Label(label) => AsmStmtAst::Label(AsmLabelAst {
-                exported: label.exported,
-                identifier: self.expand_identifier(&label.identifier),
-            }),
+            &AsmStmtAst::Label(AsmLabelAst::Anonymous { span }) => {
+                AsmStmtAst::Label(AsmLabelAst::Anonymous { span })
+            }
+            AsmStmtAst::Label(AsmLabelAst::Named { exported, id }) => {
+                AsmStmtAst::Label(AsmLabelAst::Named {
+                    exported: *exported,
+                    id: self.expand_identifier(id),
+                })
+            }
             AsmStmtAst::RelAddr(rel_addr) => {
                 AsmStmtAst::RelAddr(AsmRelAddrAst {
                     directive_span: rel_addr.directive_span,

@@ -94,11 +94,11 @@ impl AsmStmtAst {
                 .ignore_then(linebreak())
                 .ignore_then(stmts.clone())
                 .then_ignore(symbol(TokenValue::BraceClose));
-            let anonymous_scope =
+            let unlabeled_scope =
                 braced_stmts.clone().then_ignore(linebreak()).map(|body| {
                     AsmStmtAst::Scope(AsmScopeAst { label: None, body })
                 });
-            let label_or_named_scope = AsmLabelAst::parser()
+            let label_or_labeled_scope = AsmLabelAst::parser()
                 .then(braced_stmts.clone().then_ignore(linebreak()).or_not())
                 .then_ignore(symbol(TokenValue::Linebreak).repeated())
                 .map(|(label, opt_scope)| {
@@ -202,8 +202,8 @@ impl AsmStmtAst {
                     AsmStmtAst::With(AsmWithAst { attrs, body })
                 });
             chumsky::prelude::choice((
-                anonymous_scope,
-                label_or_named_scope,
+                unlabeled_scope,
+                label_or_labeled_scope,
                 AsmAssertAst::parser().map(AsmStmtAst::Assert),
                 AsmBinaryAst::parser().map(AsmStmtAst::Binary),
                 AsmCharmapAst::parser().map(AsmStmtAst::Charmap),
@@ -773,23 +773,31 @@ impl AsmInvokeAst {
 
 /// The abstract syntax tree for a label declared in an assembly file.
 #[derive(Clone, Debug)]
-pub struct AsmLabelAst {
-    /// Whether the label is exported.
-    pub exported: bool,
-    /// The identifier for the label.
-    pub identifier: IdentifierAst,
+pub enum AsmLabelAst {
+    /// An anonymous label.
+    Anonymous {
+        /// The location in the source code where the anonymous label appears.
+        span: SrcSpan,
+    },
+    /// A named label.
+    Named {
+        /// Whether the label is exported.
+        exported: bool,
+        /// The identifier for the label.
+        id: IdentifierAst,
+    },
 }
 
 impl AsmLabelAst {
     fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
         directive(".EXPORT")
             .or_not()
+            .map(|export| export.is_some())
             .then(IdentifierAst::parser())
+            .map(|(exported, id)| Self::Named { exported, id })
+            .or(symbol(TokenValue::Dollar)
+                .map(|token| Self::Anonymous { span: token.span }))
             .then_ignore(symbol(TokenValue::Colon))
-            .map(|(export, identifier)| Self {
-                exported: export.is_some(),
-                identifier,
-            })
     }
 }
 
@@ -1000,8 +1008,8 @@ impl AsmReserveAst {
 /// The abstract syntax tree for a local scope in an assembly file.
 #[derive(Clone, Debug)]
 pub struct AsmScopeAst {
-    /// The label for the scope if it is a named scope, or `None` if it is an
-    /// anonymous scope.
+    /// The label for the scope if this is a labeled scope, or `None` if this
+    /// is an unlabeled scope.
     pub label: Option<AsmLabelAst>,
     /// The statements inside the scope block.
     pub body: Vec<AsmStmtAst>,

@@ -4,6 +4,7 @@ use super::token::{Token, TokenValue};
 use crate::error::SrcSpan;
 use logos::{self, Logos};
 use num_bigint::{BigInt, Sign};
+use std::num::NonZero;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -29,7 +30,7 @@ fn backslash_callback(
 
 fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     debug_assert!(lex.slice().starts_with("%"));
-    let digits: Vec<u8> = lex.slice()[1..]
+    let digits: Vec<u8> = lex.slice()["%".len()..]
         .chars()
         .filter(|chr| *chr != '_')
         .map(|chr| chr as u8 - b'0')
@@ -47,9 +48,16 @@ fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     BigInt::from_radix_be(Sign::Plus, &digits, 10).unwrap()
 }
 
+fn dollar_plus_minus_callback(
+    lex: &mut logos::Lexer<TokenKind>,
+) -> NonZero<usize> {
+    debug_assert!(lex.slice().starts_with("$"));
+    NonZero::new(lex.slice()["$".len()..].len()).unwrap()
+}
+
 fn hex_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     debug_assert!(lex.slice().starts_with("$"));
-    let digits: Vec<u8> = lex.slice()[1..]
+    let digits: Vec<u8> = lex.slice()["$".len()..]
         .chars()
         .filter(|chr| *chr != '_')
         .map(|chr| hex_digit_value(chr).unwrap())
@@ -129,10 +137,16 @@ enum TokenKind {
     Comma,
     #[regex(r"\.[_A-Za-z][_A-Za-z0-9]*")]
     Directive,
+    #[token("$")]
+    Dollar,
     #[token("$v")]
     DollarDown,
     #[token("$<")]
     DollarLeft,
+    #[regex(r"\$-+", dollar_plus_minus_callback)]
+    DollarMinus(NonZero<usize>),
+    #[regex(r"\$\++", dollar_plus_minus_callback)]
+    DollarPlus(NonZero<usize>),
     #[token("$>")]
     DollarRight,
     #[token("$^")]
@@ -227,8 +241,11 @@ impl TokenKind {
             TokenKind::Directive => {
                 TokenValue::Directive(Rc::from(lexer.slice()))
             }
+            TokenKind::Dollar => TokenValue::Dollar,
             TokenKind::DollarDown => TokenValue::DollarDown,
             TokenKind::DollarLeft => TokenValue::DollarLeft,
+            TokenKind::DollarMinus(count) => TokenValue::DollarMinus(count),
+            TokenKind::DollarPlus(count) => TokenValue::DollarPlus(count),
             TokenKind::DollarRight => TokenValue::DollarRight,
             TokenKind::DollarUp => TokenValue::DollarUp,
             TokenKind::GreaterEquals => TokenValue::GreaterEquals,
@@ -312,6 +329,7 @@ mod tests {
     use super::{LexerError, Token, TokenLexer, TokenValue};
     use crate::error::SrcSpan;
     use num_bigint::BigInt;
+    use std::num::NonZero;
     use std::ops::Range;
     use std::rc::Rc;
 
@@ -400,6 +418,31 @@ mod tests {
         assert_eq!(
             read_all("12_345"),
             vec![token(0..6, TokenValue::IntLiteral(BigInt::from(12345)))]
+        );
+    }
+
+    #[test]
+    fn dollar() {
+        assert_eq!(read_all("$^"), vec![token(0..2, TokenValue::DollarUp)]);
+        assert_eq!(read_all("$v"), vec![token(0..2, TokenValue::DollarDown)]);
+        assert_eq!(read_all("$<"), vec![token(0..2, TokenValue::DollarLeft)]);
+        assert_eq!(read_all("$>"), vec![token(0..2, TokenValue::DollarRight)]);
+
+        let value = TokenValue::DollarPlus(NonZero::new(1).unwrap());
+        assert_eq!(read_all("$+"), vec![token(0..2, value)]);
+        let value = TokenValue::DollarPlus(NonZero::new(2).unwrap());
+        assert_eq!(read_all("$++"), vec![token(0..3, value)]);
+        let value = TokenValue::DollarMinus(NonZero::new(1).unwrap());
+        assert_eq!(read_all("$-"), vec![token(0..2, value)]);
+        let value = TokenValue::DollarMinus(NonZero::new(2).unwrap());
+        assert_eq!(read_all("$--"), vec![token(0..3, value)]);
+
+        assert_eq!(
+            read_all("$:"),
+            vec![
+                token(0..1, TokenValue::Dollar),
+                token(1..2, TokenValue::Colon)
+            ]
         );
     }
 

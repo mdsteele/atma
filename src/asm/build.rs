@@ -135,9 +135,11 @@ impl<'a> Assembler<'a> {
         if let Some(label_ast) = &scope_ast.label {
             let mut errs = Errs::<AsmError>::new();
             errs.also(self.predeclare_label(label_ast));
-            self.env.begin_named_scope(label_ast.identifier.name.clone());
-            errs.also(self.predeclare_statements(&scope_ast.body));
-            self.env.end_scope();
+            if let AsmLabelAst::Named { id, .. } = label_ast {
+                self.env.begin_named_scope(id.name.clone());
+                errs.also(self.predeclare_statements(&scope_ast.body));
+                self.env.end_scope();
+            }
             errs.result()
         } else {
             Ok(())
@@ -377,7 +379,7 @@ impl<'a> Assembler<'a> {
         if let Some(body_ast) = selected_body_ast.or(cond_ast.else_block)
             && !body_ast.is_empty()
         {
-            self.env.begin_anonymous_scope();
+            self.env.begin_unlabeled_scope();
             errs.also(self.predeclare_statements(&body_ast));
             errs.also(self.expand_statements(body_ast));
             self.env.end_scope();
@@ -488,26 +490,36 @@ impl<'a> Assembler<'a> {
     }
 
     fn expand_label(&mut self, label_ast: AsmLabelAst) -> AsmResult<()> {
-        let full_name =
-            self.env.current_scope().prefixed(&label_ast.identifier.name);
-        let loc = self.env.make_loc(label_ast.identifier.span);
-        if self.env.current_chunk().is_none() {
-            return Err(Errs::one(AsmError::DirectiveNotInSection {
-                directive: "label",
-                loc,
-            }));
-        };
-        self.env.append_chunk_symbol(full_name, loc, label_ast.exported)
+        match label_ast {
+            AsmLabelAst::Anonymous { span } => {
+                let loc = self.env.make_loc(span);
+                self.env.append_anonymous_label(loc);
+                Ok(())
+            }
+            AsmLabelAst::Named { exported, id } => {
+                let full_name = self.env.current_scope().prefixed(&id.name);
+                let loc = self.env.make_loc(id.span);
+                if self.env.current_chunk().is_none() {
+                    return Err(Errs::one(AsmError::DirectiveNotInSection {
+                        directive: "label",
+                        loc,
+                    }));
+                };
+                self.env.append_chunk_symbol(full_name, loc, exported)
+            }
+        }
     }
 
     fn expand_scope(&mut self, scope_ast: AsmScopeAst) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        if let Some(label_ast) = scope_ast.label {
-            let name = label_ast.identifier.name.clone();
+        if let Some(label_ast) = scope_ast.label
+            && let AsmLabelAst::Named { id, .. } = &label_ast
+        {
+            let name = id.name.clone();
             errs.also(self.expand_label(label_ast));
             self.env.begin_named_scope(name);
         } else {
-            self.env.begin_anonymous_scope();
+            self.env.begin_unlabeled_scope();
             errs.also(self.predeclare_statements(&scope_ast.body));
         }
         errs.also(self.expand_statements(scope_ast.body));
@@ -523,7 +535,7 @@ impl<'a> Assembler<'a> {
         let (item_type, iterator) =
             errs.with(typecheck_iterator(expr_loc, expr_type, expr_static));
         for value in iterator {
-            self.env.begin_anonymous_scope();
+            self.env.begin_unlabeled_scope();
             if let Some(id) = &repeat_ast.id {
                 errs.also(self.env.declare_variable(
                     DeclarationKind::Let,

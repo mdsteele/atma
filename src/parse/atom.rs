@@ -2,6 +2,7 @@ use super::error::{ParseError, ParseResult};
 use crate::error::{Errs, SrcSpan};
 use crate::lex::{Token, TokenLexer, TokenValue};
 use chumsky::{self, Parser};
+use std::num::NonZero;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -77,6 +78,22 @@ pub(super) fn directive<'a>(
             }
         })
         .labelled(word)
+}
+
+pub(super) fn dollar_minus<'a>()
+-> impl Parser<'a, &'a [Token], (SrcSpan, NonZero<usize>), Extra<'a>> + Clone {
+    chumsky::prelude::any().try_map(|token: Token, span| match token.value {
+        TokenValue::DollarMinus(count) => Ok((token.span, count)),
+        _ => Err(chumsky::error::Rich::custom(span, "")),
+    })
+}
+
+pub(super) fn dollar_plus<'a>()
+-> impl Parser<'a, &'a [Token], (SrcSpan, NonZero<usize>), Extra<'a>> + Clone {
+    chumsky::prelude::any().try_map(|token: Token, span| match token.value {
+        TokenValue::DollarPlus(count) => Ok((token.span, count)),
+        _ => Err(chumsky::error::Rich::custom(span, "")),
+    })
 }
 
 pub(super) fn keyword<'a>(

@@ -25,6 +25,37 @@ fn asm_errors(source: &str) -> Vec<AsmError> {
 //===========================================================================//
 
 #[test]
+fn anonymous_label_reference_out_of_bounds() {
+    let source = r#"\
+    .SECTION "TEST", arch="none"
+    $:  .u8 0
+    $:  .a8 $++
+    $:  .a8 $----
+    .END
+    "#;
+    assert_matches!(asm_errors(source).as_slice(), [
+        AsmError::ExprTypeError {
+            context: _,
+            error: ExprTypeError::AnonymousLabelReferenceOutOfBounds {
+                reference_span: _,
+                forward: true,
+                reference_count: ref_count_1,
+                actual_count: 1,
+            },
+        },
+        AsmError::ExprTypeError {
+            context: _,
+            error: ExprTypeError::AnonymousLabelReferenceOutOfBounds {
+                reference_span: _,
+                forward: false,
+                reference_count: ref_count_2,
+                actual_count: 3,
+            },
+        },
+    ] if ref_count_1.get() == 2 && ref_count_2.get() == 4);
+}
+
+#[test]
 fn arch_has_no_endianness() {
     let source = r#"\
     .SECTION "TEST", arch="none"

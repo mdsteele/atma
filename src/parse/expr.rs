@@ -1,12 +1,15 @@
 //! Facilities for parsing expressions.
 
-use super::atom::{Extra, Language, parse_tokens, symbol};
+use super::atom::{
+    Extra, Language, dollar_minus, dollar_plus, parse_tokens, symbol,
+};
 use super::error::ParseResult;
 use super::id::CompoundIdAst;
 use crate::error::SrcSpan;
 use crate::lex::{Token, TokenValue};
 use chumsky::{self, ConfigParser, IterParser, Parser, pratt};
 use num_bigint::BigInt;
+use std::num::NonZero;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -29,6 +32,10 @@ const BIND_EXPONENTIATE: u16 = 11;
 /// A kind of "here" label.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HereLabelKind {
+    /// Refers to an upcoming anonymous label in the current scope.
+    AnonNext(NonZero<usize>),
+    /// Refers to a previous anonymous label in the current scope.
+    AnonPrev(NonZero<usize>),
     // TODO: StmtEnd (`$>`)
     /// Refers to the start of the current statement.
     StmtStart,
@@ -36,6 +43,22 @@ pub enum HereLabelKind {
     /// Refers to the start of the current zone (that is, the start of the
     /// current scope, or the start of the current chunk, whichever is closer).
     ZoneStart,
+}
+
+impl HereLabelKind {
+    pub(super) fn parser<'a>()
+    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+        chumsky::prelude::choice((
+            dollar_plus()
+                .map(|(span, count)| (span, HereLabelKind::AnonNext(count))),
+            dollar_minus()
+                .map(|(span, count)| (span, HereLabelKind::AnonPrev(count))),
+            symbol(TokenValue::DollarLeft)
+                .map(|token| (token.span, HereLabelKind::StmtStart)),
+            symbol(TokenValue::DollarUp)
+                .map(|token| (token.span, HereLabelKind::ZoneStart)),
+        ))
+    }
 }
 
 //===========================================================================//
@@ -220,16 +243,9 @@ impl ExprAst {
                     node: ExprAstNode::MemoryRead(Box::new(ast)),
                 },
             );
-            let here_label = chumsky::prelude::choice((
-                symbol(TokenValue::DollarUp).map(|token| ExprAst {
-                    span: token.span,
-                    node: ExprAstNode::HereLabel(HereLabelKind::ZoneStart),
-                }),
-                symbol(TokenValue::DollarLeft).map(|token| ExprAst {
-                    span: token.span,
-                    node: ExprAstNode::HereLabel(HereLabelKind::StmtStart),
-                }),
-            ));
+            let here_label = HereLabelKind::parser().map(|(span, kind)| {
+                ExprAst { span, node: ExprAstNode::HereLabel(kind) }
+            });
             let identifier = CompoundIdAst::parser().map(|compound| ExprAst {
                 span: {
                     let first = compound.ids.first().unwrap();
