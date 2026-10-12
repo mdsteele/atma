@@ -158,6 +158,17 @@ fn enum_manual_values() {
 }
 
 #[test]
+fn label_bitwise_and() {
+    let source = r#"\
+    .SECTION "TEST", start=$1230
+        .a8 $< & $ff
+        .assert $ff00 & $< == *$1200
+    .END
+    "#;
+    assert_eq!(static_data(assemble(source)), vec![vec![0x30]]);
+}
+
+#[test]
 fn label_references() {
     let source = r#"\
     .SECTION "TEST"

@@ -198,12 +198,17 @@ impl ExprBinOp {
             (BinOpAst::Add, ExprType::Label, ExprType::Integer) => {
                 Ok((Self::Add, ExprType::Label))
             }
-            // TODO: support bitwise arithmetic between labels and integers
             (BinOpAst::BitAnd, ExprType::Boolean, ExprType::Boolean) => {
                 Ok((Self::BitAnd, ExprType::Boolean))
             }
             (BinOpAst::BitAnd, ExprType::Integer, ExprType::Integer) => {
                 Ok((Self::BitAnd, ExprType::Integer))
+            }
+            (BinOpAst::BitAnd, ExprType::Integer, ExprType::Label) => {
+                Ok((Self::BitAnd, ExprType::Label))
+            }
+            (BinOpAst::BitAnd, ExprType::Label, ExprType::Integer) => {
+                Ok((Self::BitAnd, ExprType::Label))
             }
             (BinOpAst::BitOr, ExprType::Boolean, ExprType::Boolean) => {
                 Ok((Self::BitOr, ExprType::Boolean))
@@ -334,6 +339,18 @@ impl ExprBinOp {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs & rhs))
                 }
+                (ExprValue::Integer(lhs), ExprValue::Label(rhs)) => rhs
+                    .map_absolute_address(|addr| lhs & addr)
+                    .map(ExprValue::Label)
+                    .ok_or(ExprBinOpEvalError::LabelAddressUnresolved(
+                        BinOpSide::Rhs,
+                    )),
+                (ExprValue::Label(lhs), ExprValue::Integer(rhs)) => lhs
+                    .map_absolute_address(|addr| addr & rhs)
+                    .map(ExprValue::Label)
+                    .ok_or(ExprBinOpEvalError::LabelAddressUnresolved(
+                        BinOpSide::Lhs,
+                    )),
                 _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::BitOr => match (lhs, rhs) {

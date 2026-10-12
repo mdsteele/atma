@@ -50,6 +50,25 @@ impl ExprLabel {
         }
     }
 
+    pub(crate) fn map_absolute_address<F>(self, func: F) -> Option<Self>
+    where
+        F: FnOnce(BigInt) -> BigInt,
+    {
+        match self {
+            ExprLabel::AddrAbsolute { space, address } => {
+                Some(ExprLabel::AddrAbsolute { space, address: func(address) })
+            }
+            ExprLabel::ChunkAbsolute { chunk_index, address } => {
+                Some(ExprLabel::ChunkAbsolute {
+                    chunk_index,
+                    address: func(address),
+                })
+            }
+            ExprLabel::ChunkRelative { .. }
+            | ExprLabel::SymbolRelative { .. } => None,
+        }
+    }
+
     pub(crate) fn try_subtract(
         &self,
         rhs: &ExprLabel,
