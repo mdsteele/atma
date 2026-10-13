@@ -465,7 +465,7 @@ fn format_abs(bus: &dyn SimBus, bank: u8, abs: u16) -> String {
     let addr = (Addr::from(bank) << 16) | Addr::from(abs);
     match bus.label_at(addr) {
         Some(label) => label.to_string(),
-        None => format!("${abs:04x}"),
+        None => format!("*${abs:04x}"),
     }
 }
 
@@ -830,17 +830,17 @@ mod tests {
 
     #[test]
     fn disassemble_branch() {
-        assert_eq!(disassemble(&[0x0c, 0x10], 0), "BCC $0012");
-        assert_eq!(disassemble(&[0x0d, 0x0e], 0), "BCS $0010");
-        assert_eq!(disassemble(&[0x09, 0x80], 0), "BEQ $ff82");
-        assert_eq!(disassemble(&[0x06, 0x10], 0), "BGE $0012");
-        assert_eq!(disassemble(&[0x07, 0x10], 0), "BLT $0012");
-        assert_eq!(disassemble(&[0x0b, 0xf0], 0), "BMI $fff2");
-        assert_eq!(disassemble(&[0x08, 0x81], 0), "BNE $ff83");
-        assert_eq!(disassemble(&[0x0a, 0x7f], 0), "BPL $0081");
-        assert_eq!(disassemble(&[0x05, 0x10], 0), "BRA $0012");
-        assert_eq!(disassemble(&[0x0e, 0xfe], 0), "BVC $0000");
-        assert_eq!(disassemble(&[0x0f, 0xfd], 0), "BVS $ffff");
+        assert_eq!(disassemble(&[0x0c, 0x10], 0), "BCC *$0012");
+        assert_eq!(disassemble(&[0x0d, 0x0e], 0), "BCS *$0010");
+        assert_eq!(disassemble(&[0x09, 0x80], 0), "BEQ *$ff82");
+        assert_eq!(disassemble(&[0x06, 0x10], 0), "BGE *$0012");
+        assert_eq!(disassemble(&[0x07, 0x10], 0), "BLT *$0012");
+        assert_eq!(disassemble(&[0x0b, 0xf0], 0), "BMI *$fff2");
+        assert_eq!(disassemble(&[0x08, 0x81], 0), "BNE *$ff83");
+        assert_eq!(disassemble(&[0x0a, 0x7f], 0), "BPL *$0081");
+        assert_eq!(disassemble(&[0x05, 0x10], 0), "BRA *$0012");
+        assert_eq!(disassemble(&[0x0e, 0xfe], 0), "BVC *$0000");
+        assert_eq!(disassemble(&[0x0f, 0xfd], 0), "BVS *$ffff");
         assert_eq!(
             disassemble_with_label(&[0x0c, 0x10], 0, 0x12, "foo"),
             "BCC foo"
@@ -1027,22 +1027,22 @@ mod tests {
 
     #[test]
     fn disassemble_lm() {
-        assert_eq!(disassemble(&[0xf0, 0x34, 0x12], 1), "LM R0, ($1234)");
-        assert_eq!(disassemble(&[0xf1, 0x34, 0x12], 1), "LM R1, ($1234)");
-        assert_eq!(disassemble(&[0xf2, 0x34, 0x12], 1), "LM R2, ($1234)");
-        assert_eq!(disassemble(&[0xf3, 0x34, 0x12], 1), "LM R3, ($1234)");
-        assert_eq!(disassemble(&[0xf4, 0x34, 0x12], 1), "LM R4, ($1234)");
-        assert_eq!(disassemble(&[0xf5, 0x34, 0x12], 1), "LM R5, ($1234)");
-        assert_eq!(disassemble(&[0xf6, 0x34, 0x12], 1), "LM R6, ($1234)");
-        assert_eq!(disassemble(&[0xf7, 0x34, 0x12], 1), "LM R7, ($1234)");
-        assert_eq!(disassemble(&[0xf8, 0x34, 0x12], 1), "LM R8, ($1234)");
-        assert_eq!(disassemble(&[0xf9, 0x34, 0x12], 1), "LM R9, ($1234)");
-        assert_eq!(disassemble(&[0xfa, 0x34, 0x12], 1), "LM R10, ($1234)");
-        assert_eq!(disassemble(&[0xfb, 0x34, 0x12], 1), "LM R11, ($1234)");
-        assert_eq!(disassemble(&[0xfc, 0x34, 0x12], 1), "LM R12, ($1234)");
-        assert_eq!(disassemble(&[0xfd, 0x34, 0x12], 1), "LM R13, ($1234)");
-        assert_eq!(disassemble(&[0xfe, 0x34, 0x12], 1), "LM R14, ($1234)");
-        assert_eq!(disassemble(&[0xff, 0x34, 0x12], 1), "LM R15, ($1234)");
+        assert_eq!(disassemble(&[0xf0, 0x34, 0x12], 1), "LM R0, (*$1234)");
+        assert_eq!(disassemble(&[0xf1, 0x34, 0x12], 1), "LM R1, (*$1234)");
+        assert_eq!(disassemble(&[0xf2, 0x34, 0x12], 1), "LM R2, (*$1234)");
+        assert_eq!(disassemble(&[0xf3, 0x34, 0x12], 1), "LM R3, (*$1234)");
+        assert_eq!(disassemble(&[0xf4, 0x34, 0x12], 1), "LM R4, (*$1234)");
+        assert_eq!(disassemble(&[0xf5, 0x34, 0x12], 1), "LM R5, (*$1234)");
+        assert_eq!(disassemble(&[0xf6, 0x34, 0x12], 1), "LM R6, (*$1234)");
+        assert_eq!(disassemble(&[0xf7, 0x34, 0x12], 1), "LM R7, (*$1234)");
+        assert_eq!(disassemble(&[0xf8, 0x34, 0x12], 1), "LM R8, (*$1234)");
+        assert_eq!(disassemble(&[0xf9, 0x34, 0x12], 1), "LM R9, (*$1234)");
+        assert_eq!(disassemble(&[0xfa, 0x34, 0x12], 1), "LM R10, (*$1234)");
+        assert_eq!(disassemble(&[0xfb, 0x34, 0x12], 1), "LM R11, (*$1234)");
+        assert_eq!(disassemble(&[0xfc, 0x34, 0x12], 1), "LM R12, (*$1234)");
+        assert_eq!(disassemble(&[0xfd, 0x34, 0x12], 1), "LM R13, (*$1234)");
+        assert_eq!(disassemble(&[0xfe, 0x34, 0x12], 1), "LM R14, (*$1234)");
+        assert_eq!(disassemble(&[0xff, 0x34, 0x12], 1), "LM R15, (*$1234)");
         assert_eq!(
             disassemble_with_label(&[0xf0, 0x34, 0x12], 1, 0x701234, "foo"),
             "LM R0, (foo)"
@@ -1051,22 +1051,22 @@ mod tests {
 
     #[test]
     fn disassemble_lms() {
-        assert_eq!(disassemble(&[0xa0, 0x00], 1), "LMS R0, ($0000)");
-        assert_eq!(disassemble(&[0xa1, 0x01], 1), "LMS R1, ($0002)");
-        assert_eq!(disassemble(&[0xa2, 0xff], 1), "LMS R2, ($01fe)");
-        assert_eq!(disassemble(&[0xa3, 0x80], 1), "LMS R3, ($0100)");
-        assert_eq!(disassemble(&[0xa4, 0x12], 1), "LMS R4, ($0024)");
-        assert_eq!(disassemble(&[0xa5, 0x12], 1), "LMS R5, ($0024)");
-        assert_eq!(disassemble(&[0xa6, 0x12], 1), "LMS R6, ($0024)");
-        assert_eq!(disassemble(&[0xa7, 0x12], 1), "LMS R7, ($0024)");
-        assert_eq!(disassemble(&[0xa8, 0x12], 1), "LMS R8, ($0024)");
-        assert_eq!(disassemble(&[0xa9, 0x12], 1), "LMS R9, ($0024)");
-        assert_eq!(disassemble(&[0xaa, 0x12], 1), "LMS R10, ($0024)");
-        assert_eq!(disassemble(&[0xab, 0x12], 1), "LMS R11, ($0024)");
-        assert_eq!(disassemble(&[0xac, 0x12], 1), "LMS R12, ($0024)");
-        assert_eq!(disassemble(&[0xad, 0x12], 1), "LMS R13, ($0024)");
-        assert_eq!(disassemble(&[0xae, 0x12], 1), "LMS R14, ($0024)");
-        assert_eq!(disassemble(&[0xaf, 0x12], 1), "LMS R15, ($0024)");
+        assert_eq!(disassemble(&[0xa0, 0x00], 1), "LMS R0, (*$0000)");
+        assert_eq!(disassemble(&[0xa1, 0x01], 1), "LMS R1, (*$0002)");
+        assert_eq!(disassemble(&[0xa2, 0xff], 1), "LMS R2, (*$01fe)");
+        assert_eq!(disassemble(&[0xa3, 0x80], 1), "LMS R3, (*$0100)");
+        assert_eq!(disassemble(&[0xa4, 0x12], 1), "LMS R4, (*$0024)");
+        assert_eq!(disassemble(&[0xa5, 0x12], 1), "LMS R5, (*$0024)");
+        assert_eq!(disassemble(&[0xa6, 0x12], 1), "LMS R6, (*$0024)");
+        assert_eq!(disassemble(&[0xa7, 0x12], 1), "LMS R7, (*$0024)");
+        assert_eq!(disassemble(&[0xa8, 0x12], 1), "LMS R8, (*$0024)");
+        assert_eq!(disassemble(&[0xa9, 0x12], 1), "LMS R9, (*$0024)");
+        assert_eq!(disassemble(&[0xaa, 0x12], 1), "LMS R10, (*$0024)");
+        assert_eq!(disassemble(&[0xab, 0x12], 1), "LMS R11, (*$0024)");
+        assert_eq!(disassemble(&[0xac, 0x12], 1), "LMS R12, (*$0024)");
+        assert_eq!(disassemble(&[0xad, 0x12], 1), "LMS R13, (*$0024)");
+        assert_eq!(disassemble(&[0xae, 0x12], 1), "LMS R14, (*$0024)");
+        assert_eq!(disassemble(&[0xaf, 0x12], 1), "LMS R15, (*$0024)");
         assert_eq!(
             disassemble_with_label(&[0xa0, 0x12], 1, 0x700024, "foo"),
             "LMS R0, (foo)"
@@ -1222,22 +1222,22 @@ mod tests {
 
     #[test]
     fn disassemble_sm() {
-        assert_eq!(disassemble(&[0xf0, 0x34, 0x12], 2), "SM ($1234), R0");
-        assert_eq!(disassemble(&[0xf1, 0x34, 0x12], 2), "SM ($1234), R1");
-        assert_eq!(disassemble(&[0xf2, 0x34, 0x12], 2), "SM ($1234), R2");
-        assert_eq!(disassemble(&[0xf3, 0x34, 0x12], 2), "SM ($1234), R3");
-        assert_eq!(disassemble(&[0xf4, 0x34, 0x12], 2), "SM ($1234), R4");
-        assert_eq!(disassemble(&[0xf5, 0x34, 0x12], 2), "SM ($1234), R5");
-        assert_eq!(disassemble(&[0xf6, 0x34, 0x12], 2), "SM ($1234), R6");
-        assert_eq!(disassemble(&[0xf7, 0x34, 0x12], 2), "SM ($1234), R7");
-        assert_eq!(disassemble(&[0xf8, 0x34, 0x12], 2), "SM ($1234), R8");
-        assert_eq!(disassemble(&[0xf9, 0x34, 0x12], 2), "SM ($1234), R9");
-        assert_eq!(disassemble(&[0xfa, 0x34, 0x12], 2), "SM ($1234), R10");
-        assert_eq!(disassemble(&[0xfb, 0x34, 0x12], 2), "SM ($1234), R11");
-        assert_eq!(disassemble(&[0xfc, 0x34, 0x12], 2), "SM ($1234), R12");
-        assert_eq!(disassemble(&[0xfd, 0x34, 0x12], 2), "SM ($1234), R13");
-        assert_eq!(disassemble(&[0xfe, 0x34, 0x12], 2), "SM ($1234), R14");
-        assert_eq!(disassemble(&[0xff, 0x34, 0x12], 2), "SM ($1234), R15");
+        assert_eq!(disassemble(&[0xf0, 0x34, 0x12], 2), "SM (*$1234), R0");
+        assert_eq!(disassemble(&[0xf1, 0x34, 0x12], 2), "SM (*$1234), R1");
+        assert_eq!(disassemble(&[0xf2, 0x34, 0x12], 2), "SM (*$1234), R2");
+        assert_eq!(disassemble(&[0xf3, 0x34, 0x12], 2), "SM (*$1234), R3");
+        assert_eq!(disassemble(&[0xf4, 0x34, 0x12], 2), "SM (*$1234), R4");
+        assert_eq!(disassemble(&[0xf5, 0x34, 0x12], 2), "SM (*$1234), R5");
+        assert_eq!(disassemble(&[0xf6, 0x34, 0x12], 2), "SM (*$1234), R6");
+        assert_eq!(disassemble(&[0xf7, 0x34, 0x12], 2), "SM (*$1234), R7");
+        assert_eq!(disassemble(&[0xf8, 0x34, 0x12], 2), "SM (*$1234), R8");
+        assert_eq!(disassemble(&[0xf9, 0x34, 0x12], 2), "SM (*$1234), R9");
+        assert_eq!(disassemble(&[0xfa, 0x34, 0x12], 2), "SM (*$1234), R10");
+        assert_eq!(disassemble(&[0xfb, 0x34, 0x12], 2), "SM (*$1234), R11");
+        assert_eq!(disassemble(&[0xfc, 0x34, 0x12], 2), "SM (*$1234), R12");
+        assert_eq!(disassemble(&[0xfd, 0x34, 0x12], 2), "SM (*$1234), R13");
+        assert_eq!(disassemble(&[0xfe, 0x34, 0x12], 2), "SM (*$1234), R14");
+        assert_eq!(disassemble(&[0xff, 0x34, 0x12], 2), "SM (*$1234), R15");
         assert_eq!(
             disassemble_with_label(&[0xf0, 0x34, 0x12], 2, 0x701234, "foo"),
             "SM (foo), R0"
@@ -1246,22 +1246,22 @@ mod tests {
 
     #[test]
     fn disassemble_sms() {
-        assert_eq!(disassemble(&[0xa0, 0x00], 2), "SMS ($0000), R0");
-        assert_eq!(disassemble(&[0xa1, 0x01], 2), "SMS ($0002), R1");
-        assert_eq!(disassemble(&[0xa2, 0xff], 2), "SMS ($01fe), R2");
-        assert_eq!(disassemble(&[0xa3, 0x80], 2), "SMS ($0100), R3");
-        assert_eq!(disassemble(&[0xa4, 0x12], 2), "SMS ($0024), R4");
-        assert_eq!(disassemble(&[0xa5, 0x12], 2), "SMS ($0024), R5");
-        assert_eq!(disassemble(&[0xa6, 0x12], 2), "SMS ($0024), R6");
-        assert_eq!(disassemble(&[0xa7, 0x12], 2), "SMS ($0024), R7");
-        assert_eq!(disassemble(&[0xa8, 0x12], 2), "SMS ($0024), R8");
-        assert_eq!(disassemble(&[0xa9, 0x12], 2), "SMS ($0024), R9");
-        assert_eq!(disassemble(&[0xaa, 0x12], 2), "SMS ($0024), R10");
-        assert_eq!(disassemble(&[0xab, 0x12], 2), "SMS ($0024), R11");
-        assert_eq!(disassemble(&[0xac, 0x12], 2), "SMS ($0024), R12");
-        assert_eq!(disassemble(&[0xad, 0x12], 2), "SMS ($0024), R13");
-        assert_eq!(disassemble(&[0xae, 0x12], 2), "SMS ($0024), R14");
-        assert_eq!(disassemble(&[0xaf, 0x12], 2), "SMS ($0024), R15");
+        assert_eq!(disassemble(&[0xa0, 0x00], 2), "SMS (*$0000), R0");
+        assert_eq!(disassemble(&[0xa1, 0x01], 2), "SMS (*$0002), R1");
+        assert_eq!(disassemble(&[0xa2, 0xff], 2), "SMS (*$01fe), R2");
+        assert_eq!(disassemble(&[0xa3, 0x80], 2), "SMS (*$0100), R3");
+        assert_eq!(disassemble(&[0xa4, 0x12], 2), "SMS (*$0024), R4");
+        assert_eq!(disassemble(&[0xa5, 0x12], 2), "SMS (*$0024), R5");
+        assert_eq!(disassemble(&[0xa6, 0x12], 2), "SMS (*$0024), R6");
+        assert_eq!(disassemble(&[0xa7, 0x12], 2), "SMS (*$0024), R7");
+        assert_eq!(disassemble(&[0xa8, 0x12], 2), "SMS (*$0024), R8");
+        assert_eq!(disassemble(&[0xa9, 0x12], 2), "SMS (*$0024), R9");
+        assert_eq!(disassemble(&[0xaa, 0x12], 2), "SMS (*$0024), R10");
+        assert_eq!(disassemble(&[0xab, 0x12], 2), "SMS (*$0024), R11");
+        assert_eq!(disassemble(&[0xac, 0x12], 2), "SMS (*$0024), R12");
+        assert_eq!(disassemble(&[0xad, 0x12], 2), "SMS (*$0024), R13");
+        assert_eq!(disassemble(&[0xae, 0x12], 2), "SMS (*$0024), R14");
+        assert_eq!(disassemble(&[0xaf, 0x12], 2), "SMS (*$0024), R15");
         assert_eq!(
             disassemble_with_label(&[0xa0, 0x12], 2, 0x700024, "foo"),
             "SMS (foo), R0"

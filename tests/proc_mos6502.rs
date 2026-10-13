@@ -74,7 +74,7 @@ fn op_asl_zero_page() {
     let mut bus = make_test_bus(8, &[0x06, 0x02, 0x89]);
     test_opcode_with_bus(
         &mut *bus,
-        "ASL $02",
+        "ASL *$02",
         [0x12, 0x34, 0x56, 0x78, 0x02], // A, X, Y, S, P=Z
         [0x12, 0x34, 0x56, 0x78, 0x01], // A, X, Y, S, P=C
         0x0002,
@@ -86,7 +86,7 @@ fn op_asl_zero_page() {
 fn op_bit_absolute() {
     test_opcode_with_data(
         &[0x2c, 0x03, 0x00, 0x41],
-        "BIT !$0003",
+        "BIT !*$0003",
         [0x06, 0x34, 0x56, 0x78, 0x88], // A, X, Y, S, P=ND
         [0x06, 0x34, 0x56, 0x78, 0x4a], // A, X, Y, S, P=VDZ
         0x0003,
@@ -144,7 +144,7 @@ fn op_dec_zero_page() {
     let mut bus = make_test_bus(4, &[0xc6, 0x02, 0x01]);
     test_opcode_with_bus(
         &mut *bus,
-        "DEC $02",
+        "DEC *$02",
         [0x12, 0x34, 0x56, 0x78, 0x00], // A, X, Y, S, P=0
         [0x12, 0x34, 0x56, 0x78, 0x02], // A, X, Y, S, P=Z
         0x0002,
@@ -152,7 +152,7 @@ fn op_dec_zero_page() {
     assert_eq!(bus.peek_byte(Addr::from(0x02u8)), 0x00);
     test_opcode_with_bus(
         &mut *bus,
-        "DEC $02",
+        "DEC *$02",
         [0x12, 0x34, 0x56, 0x78, 0x02], // A, X, Y, S, P=Z
         [0x12, 0x34, 0x56, 0x78, 0x80], // A, X, Y, S, P=N
         0x0002,
@@ -193,7 +193,7 @@ fn op_lda_immediate() {
 fn op_lda_absolute() {
     test_opcode_with_data(
         &[0xad, 0x03, 0x00, 0x01],
-        "LDA !$0003",
+        "LDA !*$0003",
         [0x00, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         [0x01, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         0x0003,
@@ -204,7 +204,7 @@ fn op_lda_absolute() {
 fn op_lda_zero_page() {
     test_opcode_with_data(
         &[0xa5, 0x02, 0x80],
-        "LDA $02",
+        "LDA *$02",
         [0x00, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         [0x80, 0x00, 0x00, 0x00, 0x80], // A, X, Y, S, P=N
         0x0002,
@@ -215,7 +215,7 @@ fn op_lda_zero_page() {
 fn op_lda_zero_page_indirect_y_indexed() {
     test_opcode_with_data(
         &[0xb1, 0x02, 0x04, 0x00, 0xd0, 0xd1, 0xd2, 0xd3, 0xd4],
-        "LDA ($02), Y",
+        "LDA (*$02), Y",
         [0x00, 0x00, 0x03, 0x00, 0x00], // A, X, Y, S, P=0
         [0xd3, 0x00, 0x03, 0x00, 0x80], // A, X, Y, S, P=N
         0x0002,
@@ -267,7 +267,7 @@ fn op_sta_zero_page() {
     let mut bus = make_test_bus(4, &[0x85, 0x0e]);
     test_opcode_with_bus(
         &mut *bus,
-        "STA $0e",
+        "STA *$0e",
         [0xab, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         [0xab, 0x00, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         0x0002,
@@ -280,7 +280,7 @@ fn op_sta_x_indexed_zero_page_indirect() {
     let mut bus = make_test_bus(9, &[0x81, 0x02, 0x00, 0x00, 0x23, 0x01]);
     test_opcode_with_bus(
         &mut *bus,
-        "STA ($02, X)",
+        "STA (*$02, X)",
         [0xcd, 0x02, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         [0xcd, 0x02, 0x00, 0x00, 0x00], // A, X, Y, S, P=0
         0x0002,

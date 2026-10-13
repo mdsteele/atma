@@ -18,9 +18,17 @@ pub(super) fn assemble_int_data(
 ) -> AsmResult<()> {
     let mut errs = Errs::<AsmError>::new();
     let expr_span = expr_ast.span;
+    let allow_int = !int_type.is_address();
+    let allow_label = int_type.is_address();
     let int_data_value = match errs.with(env.typecheck_expression(expr_ast)) {
         (_, ExprType::Undefined, _) => IntDataValue::default(),
-        (expr, ExprType::Label, Ok(static_value)) => {
+        (_, ExprType::Integer, Ok(static_value)) if allow_int => {
+            let bigint = static_value.unwrap_int();
+            errs.with(IntDataValue::integer_static(
+                env, directive, int_type, expr_span, bigint,
+            ))
+        }
+        (expr, ExprType::Label, Ok(static_value)) if allow_label => {
             match static_value.unwrap_label().into_absolute_address() {
                 Some(address) => errs.with(IntDataValue::integer_static(
                     env, directive, int_type, expr_span, address,
@@ -30,25 +38,30 @@ pub(super) fn assemble_int_data(
                 }
             }
         }
-        (_, ExprType::Integer, Ok(static_value)) => {
-            let bigint = static_value.unwrap_int();
-            errs.with(IntDataValue::integer_static(
-                env, directive, int_type, expr_span, bigint,
-            ))
+        (expr, ExprType::Bottom, Err(reason)) => {
+            errs.also(env.check_for_inevitable_eval_error(&reason));
+            IntDataValue::Patch(ObjPatchData::Integer(int_type, expr))
         }
-        (expr, ExprType::Label, Err(reason))
-        | (expr, ExprType::Integer, Err(reason))
-        | (expr, ExprType::Bottom, Err(reason)) => {
+        (expr, ExprType::Integer, Err(reason)) if allow_int => {
+            errs.also(env.check_for_inevitable_eval_error(&reason));
+            IntDataValue::Patch(ObjPatchData::Integer(int_type, expr))
+        }
+        (expr, ExprType::Label, Err(reason)) if allow_label => {
             errs.also(env.check_for_inevitable_eval_error(&reason));
             IntDataValue::Patch(ObjPatchData::Integer(int_type, expr))
         }
         (_, expr_type, _) => {
+            let valid_types = if int_type.is_address() {
+                vec![ExprType::Label]
+            } else {
+                vec![ExprType::Integer, ExprType::Label]
+            };
             errs.push(AsmError::DirectiveExprTypeError {
                 directive,
                 component: "value",
                 expr_loc: env.make_loc(expr_span),
                 expr_type,
-                valid_types: vec![ExprType::Integer, ExprType::Label],
+                valid_types,
             });
             IntDataValue::default()
         }

@@ -678,14 +678,14 @@ impl Operand {
 fn format_zp(zp: u8, bus: &dyn SimBus) -> String {
     match bus.label_at(Addr::from(zp)) {
         Some(label) => label.to_string(),
-        None => format!("${zp:02x}"),
+        None => format!("*${zp:02x}"),
     }
 }
 
 fn format_abs(abs: u16, bus: &dyn SimBus) -> String {
     match bus.label_at(Addr::from(abs)) {
         Some(label) => label.to_string(),
-        None => format!("${abs:04x}"),
+        None => format!("*${abs:04x}"),
     }
 }
 
@@ -843,14 +843,14 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_relative() {
-        assert_eq!(disassemble(&[0x90, 0x10]), "BCC $0012");
-        assert_eq!(disassemble(&[0xb0, 0x0e]), "BCS $0010");
-        assert_eq!(disassemble(&[0xf0, 0x80]), "BEQ $ff82");
-        assert_eq!(disassemble(&[0x30, 0xf0]), "BMI $fff2");
-        assert_eq!(disassemble(&[0xd0, 0x81]), "BNE $ff83");
-        assert_eq!(disassemble(&[0x10, 0x7f]), "BPL $0081");
-        assert_eq!(disassemble(&[0x50, 0xfe]), "BVC $0000");
-        assert_eq!(disassemble(&[0x70, 0xfd]), "BVS $ffff");
+        assert_eq!(disassemble(&[0x90, 0x10]), "BCC *$0012");
+        assert_eq!(disassemble(&[0xb0, 0x0e]), "BCS *$0010");
+        assert_eq!(disassemble(&[0xf0, 0x80]), "BEQ *$ff82");
+        assert_eq!(disassemble(&[0x30, 0xf0]), "BMI *$fff2");
+        assert_eq!(disassemble(&[0xd0, 0x81]), "BNE *$ff83");
+        assert_eq!(disassemble(&[0x10, 0x7f]), "BPL *$0081");
+        assert_eq!(disassemble(&[0x50, 0xfe]), "BVC *$0000");
+        assert_eq!(disassemble(&[0x70, 0xfd]), "BVS *$ffff");
         assert_eq!(
             disassemble_with_label(&[0x90, 0x10], 0x12, "foo"),
             "BCC foo"
@@ -859,29 +859,29 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_absolute() {
-        assert_eq!(disassemble(&[0x6d, 0x34, 0x12]), "ADC !$1234");
-        assert_eq!(disassemble(&[0x2d, 0x78, 0x56]), "AND !$5678");
-        assert_eq!(disassemble(&[0x0e, 0xbc, 0x9a]), "ASL !$9abc");
-        assert_eq!(disassemble(&[0x2c, 0xfe, 0xca]), "BIT !$cafe");
-        assert_eq!(disassemble(&[0xcd, 0xf0, 0xde]), "CMP !$def0");
-        assert_eq!(disassemble(&[0xec, 0x41, 0x31]), "CPX !$3141");
-        assert_eq!(disassemble(&[0xcc, 0x26, 0x59]), "CPY !$5926");
-        assert_eq!(disassemble(&[0xce, 0x22, 0x11]), "DEC !$1122");
-        assert_eq!(disassemble(&[0x4d, 0x44, 0x33]), "EOR !$3344");
-        assert_eq!(disassemble(&[0xee, 0x66, 0x55]), "INC !$5566");
-        assert_eq!(disassemble(&[0x4c, 0xad, 0xde]), "JMP !$dead");
-        assert_eq!(disassemble(&[0x20, 0xef, 0xbe]), "JSR !$beef");
-        assert_eq!(disassemble(&[0xad, 0x88, 0x77]), "LDA !$7788");
-        assert_eq!(disassemble(&[0xae, 0x77, 0x88]), "LDX !$8877");
-        assert_eq!(disassemble(&[0xac, 0xaa, 0x99]), "LDY !$99aa");
-        assert_eq!(disassemble(&[0x4e, 0xcc, 0xbb]), "LSR !$bbcc");
-        assert_eq!(disassemble(&[0x0d, 0xee, 0xdd]), "ORA !$ddee");
-        assert_eq!(disassemble(&[0x2e, 0x00, 0xff]), "ROL !$ff00");
-        assert_eq!(disassemble(&[0x6e, 0xed, 0x0f]), "ROR !$0fed");
-        assert_eq!(disassemble(&[0xed, 0xa9, 0xbc]), "SBC !$bca9");
-        assert_eq!(disassemble(&[0x8d, 0x65, 0x87]), "STA !$8765");
-        assert_eq!(disassemble(&[0x8e, 0x21, 0x43]), "STX !$4321");
-        assert_eq!(disassemble(&[0x8c, 0xcd, 0xab]), "STY !$abcd");
+        assert_eq!(disassemble(&[0x6d, 0x34, 0x12]), "ADC !*$1234");
+        assert_eq!(disassemble(&[0x2d, 0x78, 0x56]), "AND !*$5678");
+        assert_eq!(disassemble(&[0x0e, 0xbc, 0x9a]), "ASL !*$9abc");
+        assert_eq!(disassemble(&[0x2c, 0xfe, 0xca]), "BIT !*$cafe");
+        assert_eq!(disassemble(&[0xcd, 0xf0, 0xde]), "CMP !*$def0");
+        assert_eq!(disassemble(&[0xec, 0x41, 0x31]), "CPX !*$3141");
+        assert_eq!(disassemble(&[0xcc, 0x26, 0x59]), "CPY !*$5926");
+        assert_eq!(disassemble(&[0xce, 0x22, 0x11]), "DEC !*$1122");
+        assert_eq!(disassemble(&[0x4d, 0x44, 0x33]), "EOR !*$3344");
+        assert_eq!(disassemble(&[0xee, 0x66, 0x55]), "INC !*$5566");
+        assert_eq!(disassemble(&[0x4c, 0xad, 0xde]), "JMP !*$dead");
+        assert_eq!(disassemble(&[0x20, 0xef, 0xbe]), "JSR !*$beef");
+        assert_eq!(disassemble(&[0xad, 0x88, 0x77]), "LDA !*$7788");
+        assert_eq!(disassemble(&[0xae, 0x77, 0x88]), "LDX !*$8877");
+        assert_eq!(disassemble(&[0xac, 0xaa, 0x99]), "LDY !*$99aa");
+        assert_eq!(disassemble(&[0x4e, 0xcc, 0xbb]), "LSR !*$bbcc");
+        assert_eq!(disassemble(&[0x0d, 0xee, 0xdd]), "ORA !*$ddee");
+        assert_eq!(disassemble(&[0x2e, 0x00, 0xff]), "ROL !*$ff00");
+        assert_eq!(disassemble(&[0x6e, 0xed, 0x0f]), "ROR !*$0fed");
+        assert_eq!(disassemble(&[0xed, 0xa9, 0xbc]), "SBC !*$bca9");
+        assert_eq!(disassemble(&[0x8d, 0x65, 0x87]), "STA !*$8765");
+        assert_eq!(disassemble(&[0x8e, 0x21, 0x43]), "STX !*$4321");
+        assert_eq!(disassemble(&[0x8c, 0xcd, 0xab]), "STY !*$abcd");
         assert_eq!(
             disassemble_with_label(&[0x8c, 0xcd, 0xab], 0xabcd, "foo"),
             "STY !foo"
@@ -890,7 +890,7 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_absolute_indirect() {
-        assert_eq!(disassemble(&[0x6c, 0xef, 0xbe]), "JMP (!$beef)");
+        assert_eq!(disassemble(&[0x6c, 0xef, 0xbe]), "JMP (!*$beef)");
         assert_eq!(
             disassemble_with_label(&[0x6c, 0xef, 0xbe], 0xbeef, "foo"),
             "JMP (!foo)"
@@ -899,21 +899,21 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_x_indexed_absolute() {
-        assert_eq!(disassemble(&[0x7d, 0x34, 0x12]), "ADC !$1234, X");
-        assert_eq!(disassemble(&[0x3d, 0x78, 0x56]), "AND !$5678, X");
-        assert_eq!(disassemble(&[0x1e, 0xbc, 0x9a]), "ASL !$9abc, X");
-        assert_eq!(disassemble(&[0xdd, 0xf0, 0xde]), "CMP !$def0, X");
-        assert_eq!(disassemble(&[0xde, 0x22, 0x11]), "DEC !$1122, X");
-        assert_eq!(disassemble(&[0x5d, 0x44, 0x33]), "EOR !$3344, X");
-        assert_eq!(disassemble(&[0xfe, 0x66, 0x55]), "INC !$5566, X");
-        assert_eq!(disassemble(&[0xbd, 0x88, 0x77]), "LDA !$7788, X");
-        assert_eq!(disassemble(&[0xbc, 0xaa, 0x99]), "LDY !$99aa, X");
-        assert_eq!(disassemble(&[0x5e, 0xcc, 0xbb]), "LSR !$bbcc, X");
-        assert_eq!(disassemble(&[0x1d, 0xee, 0xdd]), "ORA !$ddee, X");
-        assert_eq!(disassemble(&[0x3e, 0x00, 0xff]), "ROL !$ff00, X");
-        assert_eq!(disassemble(&[0x7e, 0xed, 0x0f]), "ROR !$0fed, X");
-        assert_eq!(disassemble(&[0xfd, 0xa9, 0xbc]), "SBC !$bca9, X");
-        assert_eq!(disassemble(&[0x9d, 0x65, 0x87]), "STA !$8765, X");
+        assert_eq!(disassemble(&[0x7d, 0x34, 0x12]), "ADC !*$1234, X");
+        assert_eq!(disassemble(&[0x3d, 0x78, 0x56]), "AND !*$5678, X");
+        assert_eq!(disassemble(&[0x1e, 0xbc, 0x9a]), "ASL !*$9abc, X");
+        assert_eq!(disassemble(&[0xdd, 0xf0, 0xde]), "CMP !*$def0, X");
+        assert_eq!(disassemble(&[0xde, 0x22, 0x11]), "DEC !*$1122, X");
+        assert_eq!(disassemble(&[0x5d, 0x44, 0x33]), "EOR !*$3344, X");
+        assert_eq!(disassemble(&[0xfe, 0x66, 0x55]), "INC !*$5566, X");
+        assert_eq!(disassemble(&[0xbd, 0x88, 0x77]), "LDA !*$7788, X");
+        assert_eq!(disassemble(&[0xbc, 0xaa, 0x99]), "LDY !*$99aa, X");
+        assert_eq!(disassemble(&[0x5e, 0xcc, 0xbb]), "LSR !*$bbcc, X");
+        assert_eq!(disassemble(&[0x1d, 0xee, 0xdd]), "ORA !*$ddee, X");
+        assert_eq!(disassemble(&[0x3e, 0x00, 0xff]), "ROL !*$ff00, X");
+        assert_eq!(disassemble(&[0x7e, 0xed, 0x0f]), "ROR !*$0fed, X");
+        assert_eq!(disassemble(&[0xfd, 0xa9, 0xbc]), "SBC !*$bca9, X");
+        assert_eq!(disassemble(&[0x9d, 0x65, 0x87]), "STA !*$8765, X");
         assert_eq!(
             disassemble_with_label(&[0x9d, 0x65, 0x87], 0x8765, "foo"),
             "STA !foo, X"
@@ -922,15 +922,15 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_y_indexed_absolute() {
-        assert_eq!(disassemble(&[0x79, 0x34, 0x12]), "ADC !$1234, Y");
-        assert_eq!(disassemble(&[0x39, 0x78, 0x56]), "AND !$5678, Y");
-        assert_eq!(disassemble(&[0xd9, 0xf0, 0xde]), "CMP !$def0, Y");
-        assert_eq!(disassemble(&[0x59, 0x44, 0x33]), "EOR !$3344, Y");
-        assert_eq!(disassemble(&[0xb9, 0x88, 0x77]), "LDA !$7788, Y");
-        assert_eq!(disassemble(&[0xbe, 0xaa, 0x99]), "LDX !$99aa, Y");
-        assert_eq!(disassemble(&[0x19, 0xee, 0xdd]), "ORA !$ddee, Y");
-        assert_eq!(disassemble(&[0xf9, 0xa9, 0xbc]), "SBC !$bca9, Y");
-        assert_eq!(disassemble(&[0x99, 0x65, 0x87]), "STA !$8765, Y");
+        assert_eq!(disassemble(&[0x79, 0x34, 0x12]), "ADC !*$1234, Y");
+        assert_eq!(disassemble(&[0x39, 0x78, 0x56]), "AND !*$5678, Y");
+        assert_eq!(disassemble(&[0xd9, 0xf0, 0xde]), "CMP !*$def0, Y");
+        assert_eq!(disassemble(&[0x59, 0x44, 0x33]), "EOR !*$3344, Y");
+        assert_eq!(disassemble(&[0xb9, 0x88, 0x77]), "LDA !*$7788, Y");
+        assert_eq!(disassemble(&[0xbe, 0xaa, 0x99]), "LDX !*$99aa, Y");
+        assert_eq!(disassemble(&[0x19, 0xee, 0xdd]), "ORA !*$ddee, Y");
+        assert_eq!(disassemble(&[0xf9, 0xa9, 0xbc]), "SBC !*$bca9, Y");
+        assert_eq!(disassemble(&[0x99, 0x65, 0x87]), "STA !*$8765, Y");
         assert_eq!(
             disassemble_with_label(&[0x99, 0x65, 0x87], 0x8765, "foo"),
             "STA !foo, Y"
@@ -939,27 +939,27 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_zero_page() {
-        assert_eq!(disassemble(&[0x65, 0xef]), "ADC $ef");
-        assert_eq!(disassemble(&[0x25, 0x12]), "AND $12");
-        assert_eq!(disassemble(&[0x06, 0x00]), "ASL $00");
-        assert_eq!(disassemble(&[0x24, 0xb1]), "BIT $b1");
-        assert_eq!(disassemble(&[0xc5, 0x09]), "CMP $09");
-        assert_eq!(disassemble(&[0xe4, 0x0a]), "CPX $0a");
-        assert_eq!(disassemble(&[0xc4, 0x0f]), "CPY $0f");
-        assert_eq!(disassemble(&[0xc6, 0xff]), "DEC $ff");
-        assert_eq!(disassemble(&[0x45, 0xee]), "EOR $ee");
-        assert_eq!(disassemble(&[0xe6, 0xb2]), "INC $b2");
-        assert_eq!(disassemble(&[0xa5, 0x22]), "LDA $22");
-        assert_eq!(disassemble(&[0xa6, 0x33]), "LDX $33");
-        assert_eq!(disassemble(&[0xa4, 0x44]), "LDY $44");
-        assert_eq!(disassemble(&[0x46, 0x49]), "LSR $49");
-        assert_eq!(disassemble(&[0x05, 0xfa]), "ORA $fa");
-        assert_eq!(disassemble(&[0x26, 0xc9]), "ROL $c9");
-        assert_eq!(disassemble(&[0x66, 0xbb]), "ROR $bb");
-        assert_eq!(disassemble(&[0xe5, 0xcd]), "SBC $cd");
-        assert_eq!(disassemble(&[0x85, 0x22]), "STA $22");
-        assert_eq!(disassemble(&[0x86, 0x33]), "STX $33");
-        assert_eq!(disassemble(&[0x84, 0x44]), "STY $44");
+        assert_eq!(disassemble(&[0x65, 0xef]), "ADC *$ef");
+        assert_eq!(disassemble(&[0x25, 0x12]), "AND *$12");
+        assert_eq!(disassemble(&[0x06, 0x00]), "ASL *$00");
+        assert_eq!(disassemble(&[0x24, 0xb1]), "BIT *$b1");
+        assert_eq!(disassemble(&[0xc5, 0x09]), "CMP *$09");
+        assert_eq!(disassemble(&[0xe4, 0x0a]), "CPX *$0a");
+        assert_eq!(disassemble(&[0xc4, 0x0f]), "CPY *$0f");
+        assert_eq!(disassemble(&[0xc6, 0xff]), "DEC *$ff");
+        assert_eq!(disassemble(&[0x45, 0xee]), "EOR *$ee");
+        assert_eq!(disassemble(&[0xe6, 0xb2]), "INC *$b2");
+        assert_eq!(disassemble(&[0xa5, 0x22]), "LDA *$22");
+        assert_eq!(disassemble(&[0xa6, 0x33]), "LDX *$33");
+        assert_eq!(disassemble(&[0xa4, 0x44]), "LDY *$44");
+        assert_eq!(disassemble(&[0x46, 0x49]), "LSR *$49");
+        assert_eq!(disassemble(&[0x05, 0xfa]), "ORA *$fa");
+        assert_eq!(disassemble(&[0x26, 0xc9]), "ROL *$c9");
+        assert_eq!(disassemble(&[0x66, 0xbb]), "ROR *$bb");
+        assert_eq!(disassemble(&[0xe5, 0xcd]), "SBC *$cd");
+        assert_eq!(disassemble(&[0x85, 0x22]), "STA *$22");
+        assert_eq!(disassemble(&[0x86, 0x33]), "STX *$33");
+        assert_eq!(disassemble(&[0x84, 0x44]), "STY *$44");
         assert_eq!(
             disassemble_with_label(&[0x84, 0x44], 0x44, "foo"),
             "STY foo"
@@ -968,22 +968,22 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_x_indexed_zero_page() {
-        assert_eq!(disassemble(&[0x75, 0x01]), "ADC $01, X");
-        assert_eq!(disassemble(&[0x35, 0x0f]), "AND $0f, X");
-        assert_eq!(disassemble(&[0x16, 0x40]), "ASL $40, X");
-        assert_eq!(disassemble(&[0xd5, 0xef]), "CMP $ef, X");
-        assert_eq!(disassemble(&[0xd6, 0x70]), "DEC $70, X");
-        assert_eq!(disassemble(&[0x55, 0xbe]), "EOR $be, X");
-        assert_eq!(disassemble(&[0xf6, 0x88]), "INC $88, X");
-        assert_eq!(disassemble(&[0xb5, 0x10]), "LDA $10, X");
-        assert_eq!(disassemble(&[0xb4, 0x11]), "LDY $11, X");
-        assert_eq!(disassemble(&[0x56, 0x12]), "LSR $12, X");
-        assert_eq!(disassemble(&[0x15, 0x13]), "ORA $13, X");
-        assert_eq!(disassemble(&[0x36, 0x14]), "ROL $14, X");
-        assert_eq!(disassemble(&[0x76, 0x15]), "ROR $15, X");
-        assert_eq!(disassemble(&[0xf5, 0x16]), "SBC $16, X");
-        assert_eq!(disassemble(&[0x95, 0x2a]), "STA $2a, X");
-        assert_eq!(disassemble(&[0x94, 0x20]), "STY $20, X");
+        assert_eq!(disassemble(&[0x75, 0x01]), "ADC *$01, X");
+        assert_eq!(disassemble(&[0x35, 0x0f]), "AND *$0f, X");
+        assert_eq!(disassemble(&[0x16, 0x40]), "ASL *$40, X");
+        assert_eq!(disassemble(&[0xd5, 0xef]), "CMP *$ef, X");
+        assert_eq!(disassemble(&[0xd6, 0x70]), "DEC *$70, X");
+        assert_eq!(disassemble(&[0x55, 0xbe]), "EOR *$be, X");
+        assert_eq!(disassemble(&[0xf6, 0x88]), "INC *$88, X");
+        assert_eq!(disassemble(&[0xb5, 0x10]), "LDA *$10, X");
+        assert_eq!(disassemble(&[0xb4, 0x11]), "LDY *$11, X");
+        assert_eq!(disassemble(&[0x56, 0x12]), "LSR *$12, X");
+        assert_eq!(disassemble(&[0x15, 0x13]), "ORA *$13, X");
+        assert_eq!(disassemble(&[0x36, 0x14]), "ROL *$14, X");
+        assert_eq!(disassemble(&[0x76, 0x15]), "ROR *$15, X");
+        assert_eq!(disassemble(&[0xf5, 0x16]), "SBC *$16, X");
+        assert_eq!(disassemble(&[0x95, 0x2a]), "STA *$2a, X");
+        assert_eq!(disassemble(&[0x94, 0x20]), "STY *$20, X");
         assert_eq!(
             disassemble_with_label(&[0x94, 0x20], 0x20, "foo"),
             "STY foo, X"
@@ -992,8 +992,8 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_y_indexed_zero_page() {
-        assert_eq!(disassemble(&[0xb6, 0x1a]), "LDX $1a, Y");
-        assert_eq!(disassemble(&[0x96, 0x2a]), "STX $2a, Y");
+        assert_eq!(disassemble(&[0xb6, 0x1a]), "LDX *$1a, Y");
+        assert_eq!(disassemble(&[0x96, 0x2a]), "STX *$2a, Y");
         assert_eq!(
             disassemble_with_label(&[0x96, 0x2a], 0x2a, "foo"),
             "STX foo, Y"
@@ -1002,14 +1002,14 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_x_indexed_zero_page_indirect() {
-        assert_eq!(disassemble(&[0x61, 0x12]), "ADC ($12, X)");
-        assert_eq!(disassemble(&[0x21, 0x34]), "AND ($34, X)");
-        assert_eq!(disassemble(&[0xc1, 0x56]), "CMP ($56, X)");
-        assert_eq!(disassemble(&[0x41, 0x78]), "EOR ($78, X)");
-        assert_eq!(disassemble(&[0xa1, 0x9a]), "LDA ($9a, X)");
-        assert_eq!(disassemble(&[0x01, 0xbc]), "ORA ($bc, X)");
-        assert_eq!(disassemble(&[0xe1, 0xde]), "SBC ($de, X)");
-        assert_eq!(disassemble(&[0x81, 0xf0]), "STA ($f0, X)");
+        assert_eq!(disassemble(&[0x61, 0x12]), "ADC (*$12, X)");
+        assert_eq!(disassemble(&[0x21, 0x34]), "AND (*$34, X)");
+        assert_eq!(disassemble(&[0xc1, 0x56]), "CMP (*$56, X)");
+        assert_eq!(disassemble(&[0x41, 0x78]), "EOR (*$78, X)");
+        assert_eq!(disassemble(&[0xa1, 0x9a]), "LDA (*$9a, X)");
+        assert_eq!(disassemble(&[0x01, 0xbc]), "ORA (*$bc, X)");
+        assert_eq!(disassemble(&[0xe1, 0xde]), "SBC (*$de, X)");
+        assert_eq!(disassemble(&[0x81, 0xf0]), "STA (*$f0, X)");
         assert_eq!(
             disassemble_with_label(&[0x81, 0xf0], 0xf0, "foo"),
             "STA (foo, X)"
@@ -1018,14 +1018,14 @@ mod tests {
 
     #[test]
     fn disassemble_addr_mode_zero_page_indirect_y_indexed() {
-        assert_eq!(disassemble(&[0x71, 0x12]), "ADC ($12), Y");
-        assert_eq!(disassemble(&[0x31, 0x34]), "AND ($34), Y");
-        assert_eq!(disassemble(&[0xd1, 0x56]), "CMP ($56), Y");
-        assert_eq!(disassemble(&[0x51, 0x78]), "EOR ($78), Y");
-        assert_eq!(disassemble(&[0xb1, 0x9a]), "LDA ($9a), Y");
-        assert_eq!(disassemble(&[0x11, 0xbc]), "ORA ($bc), Y");
-        assert_eq!(disassemble(&[0xf1, 0xde]), "SBC ($de), Y");
-        assert_eq!(disassemble(&[0x91, 0xf0]), "STA ($f0), Y");
+        assert_eq!(disassemble(&[0x71, 0x12]), "ADC (*$12), Y");
+        assert_eq!(disassemble(&[0x31, 0x34]), "AND (*$34), Y");
+        assert_eq!(disassemble(&[0xd1, 0x56]), "CMP (*$56), Y");
+        assert_eq!(disassemble(&[0x51, 0x78]), "EOR (*$78), Y");
+        assert_eq!(disassemble(&[0xb1, 0x9a]), "LDA (*$9a), Y");
+        assert_eq!(disassemble(&[0x11, 0xbc]), "ORA (*$bc), Y");
+        assert_eq!(disassemble(&[0xf1, 0xde]), "SBC (*$de), Y");
+        assert_eq!(disassemble(&[0x91, 0xf0]), "STA (*$f0), Y");
         assert_eq!(
             disassemble_with_label(&[0x91, 0xf0], 0xf0, "foo"),
             "STA (foo), Y"
@@ -1073,108 +1073,108 @@ mod tests {
 
     #[test]
     fn disassemble_undocumented_addr_mode_absolute() {
-        assert_eq!(disassemble(&[0xcf, 0x34, 0x12]), "dcp !$1234");
-        assert_eq!(disassemble(&[0xef, 0x34, 0x12]), "isc !$1234");
-        assert_eq!(disassemble(&[0xaf, 0x34, 0x12]), "lax !$1234");
-        assert_eq!(disassemble(&[0x0c, 0x34, 0x12]), "nop !$1234");
-        assert_eq!(disassemble(&[0x2f, 0x34, 0x12]), "rla !$1234");
-        assert_eq!(disassemble(&[0x6f, 0x34, 0x12]), "rra !$1234");
-        assert_eq!(disassemble(&[0x8f, 0x34, 0x12]), "sax !$1234");
-        assert_eq!(disassemble(&[0x0f, 0x34, 0x12]), "slo !$1234");
-        assert_eq!(disassemble(&[0x4f, 0x34, 0x12]), "sre !$1234");
+        assert_eq!(disassemble(&[0xcf, 0x34, 0x12]), "dcp !*$1234");
+        assert_eq!(disassemble(&[0xef, 0x34, 0x12]), "isc !*$1234");
+        assert_eq!(disassemble(&[0xaf, 0x34, 0x12]), "lax !*$1234");
+        assert_eq!(disassemble(&[0x0c, 0x34, 0x12]), "nop !*$1234");
+        assert_eq!(disassemble(&[0x2f, 0x34, 0x12]), "rla !*$1234");
+        assert_eq!(disassemble(&[0x6f, 0x34, 0x12]), "rra !*$1234");
+        assert_eq!(disassemble(&[0x8f, 0x34, 0x12]), "sax !*$1234");
+        assert_eq!(disassemble(&[0x0f, 0x34, 0x12]), "slo !*$1234");
+        assert_eq!(disassemble(&[0x4f, 0x34, 0x12]), "sre !*$1234");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_x_indexed_absolute() {
-        assert_eq!(disassemble(&[0xdf, 0x34, 0x12]), "dcp !$1234, X");
-        assert_eq!(disassemble(&[0xff, 0x34, 0x12]), "isc !$1234, X");
-        assert_eq!(disassemble(&[0x1c, 0x34, 0x12]), "nop !$1234, X");
-        assert_eq!(disassemble(&[0x3c, 0x34, 0x12]), "nop !$1234, X");
-        assert_eq!(disassemble(&[0x5c, 0x34, 0x12]), "nop !$1234, X");
-        assert_eq!(disassemble(&[0x7c, 0x34, 0x12]), "nop !$1234, X");
-        assert_eq!(disassemble(&[0xdc, 0x34, 0x12]), "nop !$1234, X");
-        assert_eq!(disassemble(&[0xfc, 0x34, 0x12]), "nop !$1234, X");
-        assert_eq!(disassemble(&[0x3f, 0x34, 0x12]), "rla !$1234, X");
-        assert_eq!(disassemble(&[0x7f, 0x34, 0x12]), "rra !$1234, X");
-        assert_eq!(disassemble(&[0x9c, 0x34, 0x12]), "shy !$1234, X");
-        assert_eq!(disassemble(&[0x1f, 0x34, 0x12]), "slo !$1234, X");
-        assert_eq!(disassemble(&[0x5f, 0x34, 0x12]), "sre !$1234, X");
+        assert_eq!(disassemble(&[0xdf, 0x34, 0x12]), "dcp !*$1234, X");
+        assert_eq!(disassemble(&[0xff, 0x34, 0x12]), "isc !*$1234, X");
+        assert_eq!(disassemble(&[0x1c, 0x34, 0x12]), "nop !*$1234, X");
+        assert_eq!(disassemble(&[0x3c, 0x34, 0x12]), "nop !*$1234, X");
+        assert_eq!(disassemble(&[0x5c, 0x34, 0x12]), "nop !*$1234, X");
+        assert_eq!(disassemble(&[0x7c, 0x34, 0x12]), "nop !*$1234, X");
+        assert_eq!(disassemble(&[0xdc, 0x34, 0x12]), "nop !*$1234, X");
+        assert_eq!(disassemble(&[0xfc, 0x34, 0x12]), "nop !*$1234, X");
+        assert_eq!(disassemble(&[0x3f, 0x34, 0x12]), "rla !*$1234, X");
+        assert_eq!(disassemble(&[0x7f, 0x34, 0x12]), "rra !*$1234, X");
+        assert_eq!(disassemble(&[0x9c, 0x34, 0x12]), "shy !*$1234, X");
+        assert_eq!(disassemble(&[0x1f, 0x34, 0x12]), "slo !*$1234, X");
+        assert_eq!(disassemble(&[0x5f, 0x34, 0x12]), "sre !*$1234, X");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_y_indexed_absolute() {
-        assert_eq!(disassemble(&[0xdb, 0x34, 0x12]), "dcp !$1234, Y");
-        assert_eq!(disassemble(&[0xfb, 0x34, 0x12]), "isc !$1234, Y");
-        assert_eq!(disassemble(&[0xbb, 0x34, 0x12]), "las !$1234, Y");
-        assert_eq!(disassemble(&[0xbf, 0x34, 0x12]), "lax !$1234, Y");
-        assert_eq!(disassemble(&[0x3b, 0x34, 0x12]), "rla !$1234, Y");
-        assert_eq!(disassemble(&[0x7b, 0x34, 0x12]), "rra !$1234, Y");
-        assert_eq!(disassemble(&[0x9f, 0x34, 0x12]), "sha !$1234, Y");
-        assert_eq!(disassemble(&[0x9b, 0x34, 0x12]), "shs !$1234, Y");
-        assert_eq!(disassemble(&[0x9e, 0x34, 0x12]), "shx !$1234, Y");
-        assert_eq!(disassemble(&[0x1b, 0x34, 0x12]), "slo !$1234, Y");
-        assert_eq!(disassemble(&[0x5b, 0x34, 0x12]), "sre !$1234, Y");
+        assert_eq!(disassemble(&[0xdb, 0x34, 0x12]), "dcp !*$1234, Y");
+        assert_eq!(disassemble(&[0xfb, 0x34, 0x12]), "isc !*$1234, Y");
+        assert_eq!(disassemble(&[0xbb, 0x34, 0x12]), "las !*$1234, Y");
+        assert_eq!(disassemble(&[0xbf, 0x34, 0x12]), "lax !*$1234, Y");
+        assert_eq!(disassemble(&[0x3b, 0x34, 0x12]), "rla !*$1234, Y");
+        assert_eq!(disassemble(&[0x7b, 0x34, 0x12]), "rra !*$1234, Y");
+        assert_eq!(disassemble(&[0x9f, 0x34, 0x12]), "sha !*$1234, Y");
+        assert_eq!(disassemble(&[0x9b, 0x34, 0x12]), "shs !*$1234, Y");
+        assert_eq!(disassemble(&[0x9e, 0x34, 0x12]), "shx !*$1234, Y");
+        assert_eq!(disassemble(&[0x1b, 0x34, 0x12]), "slo !*$1234, Y");
+        assert_eq!(disassemble(&[0x5b, 0x34, 0x12]), "sre !*$1234, Y");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_zero_page() {
-        assert_eq!(disassemble(&[0xc7, 0x12]), "dcp $12");
-        assert_eq!(disassemble(&[0xe7, 0x12]), "isc $12");
-        assert_eq!(disassemble(&[0xa7, 0x12]), "lax $12");
-        assert_eq!(disassemble(&[0x04, 0x12]), "nop $12");
-        assert_eq!(disassemble(&[0x44, 0x12]), "nop $12");
-        assert_eq!(disassemble(&[0x64, 0x12]), "nop $12");
-        assert_eq!(disassemble(&[0x27, 0x12]), "rla $12");
-        assert_eq!(disassemble(&[0x67, 0x12]), "rra $12");
-        assert_eq!(disassemble(&[0x87, 0x12]), "sax $12");
-        assert_eq!(disassemble(&[0x07, 0x12]), "slo $12");
-        assert_eq!(disassemble(&[0x47, 0x12]), "sre $12");
+        assert_eq!(disassemble(&[0xc7, 0x12]), "dcp *$12");
+        assert_eq!(disassemble(&[0xe7, 0x12]), "isc *$12");
+        assert_eq!(disassemble(&[0xa7, 0x12]), "lax *$12");
+        assert_eq!(disassemble(&[0x04, 0x12]), "nop *$12");
+        assert_eq!(disassemble(&[0x44, 0x12]), "nop *$12");
+        assert_eq!(disassemble(&[0x64, 0x12]), "nop *$12");
+        assert_eq!(disassemble(&[0x27, 0x12]), "rla *$12");
+        assert_eq!(disassemble(&[0x67, 0x12]), "rra *$12");
+        assert_eq!(disassemble(&[0x87, 0x12]), "sax *$12");
+        assert_eq!(disassemble(&[0x07, 0x12]), "slo *$12");
+        assert_eq!(disassemble(&[0x47, 0x12]), "sre *$12");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_x_indexed_zero_page() {
-        assert_eq!(disassemble(&[0xd7, 0x12]), "dcp $12, X");
-        assert_eq!(disassemble(&[0xf7, 0x12]), "isc $12, X");
-        assert_eq!(disassemble(&[0x14, 0x12]), "nop $12, X");
-        assert_eq!(disassemble(&[0x34, 0x12]), "nop $12, X");
-        assert_eq!(disassemble(&[0x54, 0x12]), "nop $12, X");
-        assert_eq!(disassemble(&[0x74, 0x12]), "nop $12, X");
-        assert_eq!(disassemble(&[0xd4, 0x12]), "nop $12, X");
-        assert_eq!(disassemble(&[0xf4, 0x12]), "nop $12, X");
-        assert_eq!(disassemble(&[0x37, 0x12]), "rla $12, X");
-        assert_eq!(disassemble(&[0x77, 0x12]), "rra $12, X");
-        assert_eq!(disassemble(&[0x17, 0x12]), "slo $12, X");
-        assert_eq!(disassemble(&[0x57, 0x12]), "sre $12, X");
+        assert_eq!(disassemble(&[0xd7, 0x12]), "dcp *$12, X");
+        assert_eq!(disassemble(&[0xf7, 0x12]), "isc *$12, X");
+        assert_eq!(disassemble(&[0x14, 0x12]), "nop *$12, X");
+        assert_eq!(disassemble(&[0x34, 0x12]), "nop *$12, X");
+        assert_eq!(disassemble(&[0x54, 0x12]), "nop *$12, X");
+        assert_eq!(disassemble(&[0x74, 0x12]), "nop *$12, X");
+        assert_eq!(disassemble(&[0xd4, 0x12]), "nop *$12, X");
+        assert_eq!(disassemble(&[0xf4, 0x12]), "nop *$12, X");
+        assert_eq!(disassemble(&[0x37, 0x12]), "rla *$12, X");
+        assert_eq!(disassemble(&[0x77, 0x12]), "rra *$12, X");
+        assert_eq!(disassemble(&[0x17, 0x12]), "slo *$12, X");
+        assert_eq!(disassemble(&[0x57, 0x12]), "sre *$12, X");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_y_indexed_zero_page() {
-        assert_eq!(disassemble(&[0xb7, 0x12]), "lax $12, Y");
-        assert_eq!(disassemble(&[0x97, 0x12]), "sax $12, Y");
+        assert_eq!(disassemble(&[0xb7, 0x12]), "lax *$12, Y");
+        assert_eq!(disassemble(&[0x97, 0x12]), "sax *$12, Y");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_x_indexed_zero_page_indirect() {
-        assert_eq!(disassemble(&[0xc3, 0x12]), "dcp ($12, X)");
-        assert_eq!(disassemble(&[0xe3, 0x12]), "isc ($12, X)");
-        assert_eq!(disassemble(&[0xa3, 0x12]), "lax ($12, X)");
-        assert_eq!(disassemble(&[0x23, 0x12]), "rla ($12, X)");
-        assert_eq!(disassemble(&[0x63, 0x12]), "rra ($12, X)");
-        assert_eq!(disassemble(&[0x83, 0x12]), "sax ($12, X)");
-        assert_eq!(disassemble(&[0x03, 0x12]), "slo ($12, X)");
-        assert_eq!(disassemble(&[0x43, 0x12]), "sre ($12, X)");
+        assert_eq!(disassemble(&[0xc3, 0x12]), "dcp (*$12, X)");
+        assert_eq!(disassemble(&[0xe3, 0x12]), "isc (*$12, X)");
+        assert_eq!(disassemble(&[0xa3, 0x12]), "lax (*$12, X)");
+        assert_eq!(disassemble(&[0x23, 0x12]), "rla (*$12, X)");
+        assert_eq!(disassemble(&[0x63, 0x12]), "rra (*$12, X)");
+        assert_eq!(disassemble(&[0x83, 0x12]), "sax (*$12, X)");
+        assert_eq!(disassemble(&[0x03, 0x12]), "slo (*$12, X)");
+        assert_eq!(disassemble(&[0x43, 0x12]), "sre (*$12, X)");
     }
 
     #[test]
     fn disassemble_undocumented_addr_mode_zero_page_indirect_y_indexed() {
-        assert_eq!(disassemble(&[0xd3, 0x12]), "dcp ($12), Y");
-        assert_eq!(disassemble(&[0xf3, 0x12]), "isc ($12), Y");
-        assert_eq!(disassemble(&[0xb3, 0x12]), "lax ($12), Y");
-        assert_eq!(disassemble(&[0x33, 0x12]), "rla ($12), Y");
-        assert_eq!(disassemble(&[0x73, 0x12]), "rra ($12), Y");
-        assert_eq!(disassemble(&[0x93, 0x12]), "sha ($12), Y");
-        assert_eq!(disassemble(&[0x13, 0x12]), "slo ($12), Y");
-        assert_eq!(disassemble(&[0x53, 0x12]), "sre ($12), Y");
+        assert_eq!(disassemble(&[0xd3, 0x12]), "dcp (*$12), Y");
+        assert_eq!(disassemble(&[0xf3, 0x12]), "isc (*$12), Y");
+        assert_eq!(disassemble(&[0xb3, 0x12]), "lax (*$12), Y");
+        assert_eq!(disassemble(&[0x33, 0x12]), "rla (*$12), Y");
+        assert_eq!(disassemble(&[0x73, 0x12]), "rra (*$12), Y");
+        assert_eq!(disassemble(&[0x93, 0x12]), "sha (*$12), Y");
+        assert_eq!(disassemble(&[0x13, 0x12]), "slo (*$12), Y");
+        assert_eq!(disassemble(&[0x53, 0x12]), "sre (*$12), Y");
     }
 }
 

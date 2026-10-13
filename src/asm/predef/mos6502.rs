@@ -263,10 +263,7 @@ impl AddrMode for Mos6502 {
 
 //===========================================================================//
 
-pub(super) fn par_addr_comma_reg_ens_arg(
-    pool: &mut RcPool,
-    reg: Reg,
-) -> AsmMacroArgAst {
+fn par_addr_comma_reg_ens_arg(pool: &mut RcPool, reg: Reg) -> AsmMacroArgAst {
     macro_arg(vec![
         token(TokenValue::ParenOpen),
         pool.placeholder_token(PLACEHOLDER_ADDR),

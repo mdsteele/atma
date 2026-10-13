@@ -864,7 +864,7 @@ impl Instruction {
             Operation::Rra => "RRA".to_string(),
             Operation::Rrca => "RRCA".to_string(),
             Operation::Rst(zp) => match bus.label_at(Addr::from(zp)) {
-                None => format!("RST ${zp:02x}"),
+                None => format!("RST *${zp:02x}"),
                 Some(label) => format!("RST {label}"),
             },
             Operation::SbcAI8 => format!("SBC A, ${:02x}", operand.as_i32()),
@@ -899,7 +899,7 @@ fn format_relative(
 
 fn format_address(bus: &dyn SimBus, addr: u16) -> String {
     match bus.label_at(Addr::from(addr)) {
-        None => format!("${addr:04x}"),
+        None => format!("*${addr:04x}"),
         Some(label) => label.to_string(),
     }
 }
@@ -1002,11 +1002,11 @@ mod tests {
 
     #[test]
     fn disassemble_call() {
-        assert_eq!(disassemble(&[0xcd, 0x22, 0x00]), "CALL $0022");
-        assert_eq!(disassemble(&[0xdc, 0x34, 0x12]), "CALL C, $1234");
-        assert_eq!(disassemble(&[0xd4, 0x02, 0x00]), "CALL NC, $0002");
-        assert_eq!(disassemble(&[0xcc, 0xfe, 0xff]), "CALL Z, $fffe");
-        assert_eq!(disassemble(&[0xc4, 0x82, 0xff]), "CALL NZ, $ff82");
+        assert_eq!(disassemble(&[0xcd, 0x22, 0x00]), "CALL *$0022");
+        assert_eq!(disassemble(&[0xdc, 0x34, 0x12]), "CALL C, *$1234");
+        assert_eq!(disassemble(&[0xd4, 0x02, 0x00]), "CALL NC, *$0002");
+        assert_eq!(disassemble(&[0xcc, 0xfe, 0xff]), "CALL Z, *$fffe");
+        assert_eq!(disassemble(&[0xc4, 0x82, 0xff]), "CALL NZ, *$ff82");
         assert_eq!(
             disassemble_with_label(&[0xcd, 0x34, 0x12], 0x1234, "foo"),
             "CALL foo"
@@ -1080,11 +1080,11 @@ mod tests {
     #[test]
     fn disassemble_jp() {
         assert_eq!(disassemble(&[0xe9]), "JP HL");
-        assert_eq!(disassemble(&[0xc3, 0x22, 0x00]), "JP $0022");
-        assert_eq!(disassemble(&[0xda, 0x34, 0x12]), "JP C, $1234");
-        assert_eq!(disassemble(&[0xd2, 0x02, 0x00]), "JP NC, $0002");
-        assert_eq!(disassemble(&[0xca, 0xfe, 0xff]), "JP Z, $fffe");
-        assert_eq!(disassemble(&[0xc2, 0x82, 0xff]), "JP NZ, $ff82");
+        assert_eq!(disassemble(&[0xc3, 0x22, 0x00]), "JP *$0022");
+        assert_eq!(disassemble(&[0xda, 0x34, 0x12]), "JP C, *$1234");
+        assert_eq!(disassemble(&[0xd2, 0x02, 0x00]), "JP NC, *$0002");
+        assert_eq!(disassemble(&[0xca, 0xfe, 0xff]), "JP Z, *$fffe");
+        assert_eq!(disassemble(&[0xc2, 0x82, 0xff]), "JP NZ, *$ff82");
         assert_eq!(
             disassemble_with_label(&[0xc3, 0x34, 0x12], 0x1234, "foo"),
             "JP foo"
@@ -1097,11 +1097,11 @@ mod tests {
 
     #[test]
     fn disassemble_jr() {
-        assert_eq!(disassemble(&[0x18, 0x20]), "JR $0022");
-        assert_eq!(disassemble(&[0x38, 0x7f]), "JR C, $0081");
-        assert_eq!(disassemble(&[0x30, 0x00]), "JR NC, $0002");
-        assert_eq!(disassemble(&[0x28, 0xfc]), "JR Z, $fffe");
-        assert_eq!(disassemble(&[0x20, 0x80]), "JR NZ, $ff82");
+        assert_eq!(disassemble(&[0x18, 0x20]), "JR *$0022");
+        assert_eq!(disassemble(&[0x38, 0x7f]), "JR C, *$0081");
+        assert_eq!(disassemble(&[0x30, 0x00]), "JR NC, *$0002");
+        assert_eq!(disassemble(&[0x28, 0xfc]), "JR Z, *$fffe");
+        assert_eq!(disassemble(&[0x20, 0x80]), "JR NZ, *$ff82");
         assert_eq!(
             disassemble_with_label(&[0x18, 0x4e], 0x0050, "foo"),
             "JR foo"
@@ -1204,8 +1204,8 @@ mod tests {
         assert_eq!(disassemble(&[0x22]), "LD [HL+], A");
         assert_eq!(disassemble(&[0x3a]), "LD A, [HL-]");
         assert_eq!(disassemble(&[0x32]), "LD [HL-], A");
-        assert_eq!(disassemble(&[0xfa, 0x34, 0x12]), "LD A, [$1234]");
-        assert_eq!(disassemble(&[0xea, 0x78, 0x56]), "LD [$5678], A");
+        assert_eq!(disassemble(&[0xfa, 0x34, 0x12]), "LD A, [*$1234]");
+        assert_eq!(disassemble(&[0xea, 0x78, 0x56]), "LD [*$5678], A");
         assert_eq!(
             disassemble_with_label(&[0xfa, 0x34, 0x12], 0x1234, "foo"),
             "LD A, [foo]"
@@ -1226,7 +1226,7 @@ mod tests {
         assert_eq!(disassemble(&[0xf8, 0x00]), "LD HL, SP + 0");
         assert_eq!(disassemble(&[0xf8, 0x7f]), "LD HL, SP + 127");
         assert_eq!(disassemble(&[0xf8, 0x80]), "LD HL, SP - 128");
-        assert_eq!(disassemble(&[0x08, 0x34, 0x12]), "LD [$1234], SP");
+        assert_eq!(disassemble(&[0x08, 0x34, 0x12]), "LD [*$1234], SP");
         assert_eq!(
             disassemble_with_label(&[0x08, 0xcd, 0xab], 0xabcd, "foo"),
             "LD [foo], SP"
@@ -1237,8 +1237,8 @@ mod tests {
     fn disassemble_ldh() {
         assert_eq!(disassemble(&[0xf2]), "LDH A, [C]");
         assert_eq!(disassemble(&[0xe2]), "LDH [C], A");
-        assert_eq!(disassemble(&[0xf0, 0x42]), "LDH A, [$ff42]");
-        assert_eq!(disassemble(&[0xe0, 0x42]), "LDH [$ff42], A");
+        assert_eq!(disassemble(&[0xf0, 0x42]), "LDH A, [*$ff42]");
+        assert_eq!(disassemble(&[0xe0, 0x42]), "LDH [*$ff42], A");
         assert_eq!(
             disassemble_with_label(&[0xf0, 0x12], 0xff12, "foo"),
             "LDH A, [foo]"
@@ -1290,14 +1290,14 @@ mod tests {
 
     #[test]
     fn disassemble_rst() {
-        assert_eq!(disassemble(&[0xc7]), "RST $00");
-        assert_eq!(disassemble(&[0xcf]), "RST $08");
-        assert_eq!(disassemble(&[0xd7]), "RST $10");
-        assert_eq!(disassemble(&[0xdf]), "RST $18");
-        assert_eq!(disassemble(&[0xe7]), "RST $20");
-        assert_eq!(disassemble(&[0xef]), "RST $28");
-        assert_eq!(disassemble(&[0xf7]), "RST $30");
-        assert_eq!(disassemble(&[0xff]), "RST $38");
+        assert_eq!(disassemble(&[0xc7]), "RST *$00");
+        assert_eq!(disassemble(&[0xcf]), "RST *$08");
+        assert_eq!(disassemble(&[0xd7]), "RST *$10");
+        assert_eq!(disassemble(&[0xdf]), "RST *$18");
+        assert_eq!(disassemble(&[0xe7]), "RST *$20");
+        assert_eq!(disassemble(&[0xef]), "RST *$28");
+        assert_eq!(disassemble(&[0xf7]), "RST *$30");
+        assert_eq!(disassemble(&[0xff]), "RST *$38");
         assert_eq!(disassemble_with_label(&[0xef], 0x0028, "foo"), "RST foo");
     }
 

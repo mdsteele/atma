@@ -101,17 +101,17 @@ fn assemble_and_reg_instructions() {
 
 #[test]
 fn assemble_branch_instructions() {
-    assert_asm_dis("BCC $0012", &[0x0c, 0x10]);
-    assert_asm_dis("BCS $0010", &[0x0d, 0x0e]);
-    assert_asm_dis("BEQ $ff82", &[0x09, 0x80]);
-    assert_asm_dis("BGE $0012", &[0x06, 0x10]);
-    assert_asm_dis("BLT $0012", &[0x07, 0x10]);
-    assert_asm_dis("BMI $fff2", &[0x0b, 0xf0]);
-    assert_asm_dis("BNE $ff83", &[0x08, 0x81]);
-    assert_asm_dis("BPL $0081", &[0x0a, 0x7f]);
-    assert_asm_dis("BRA $0012", &[0x05, 0x10]);
-    assert_asm_dis("BVC $0000", &[0x0e, 0xfe]);
-    assert_asm_dis("BVS $ffff", &[0x0f, 0xfd]);
+    assert_asm_dis("BCC *$0012", &[0x0c, 0x10]);
+    assert_asm_dis("BCS *$0010", &[0x0d, 0x0e]);
+    assert_asm_dis("BEQ *$ff82", &[0x09, 0x80]);
+    assert_asm_dis("BGE *$0012", &[0x06, 0x10]);
+    assert_asm_dis("BLT *$0012", &[0x07, 0x10]);
+    assert_asm_dis("BMI *$fff2", &[0x0b, 0xf0]);
+    assert_asm_dis("BNE *$ff83", &[0x08, 0x81]);
+    assert_asm_dis("BPL *$0081", &[0x0a, 0x7f]);
+    assert_asm_dis("BRA *$0012", &[0x05, 0x10]);
+    assert_asm_dis("BVC *$0000", &[0x0e, 0xfe]);
+    assert_asm_dis("BVS *$ffff", &[0x0f, 0xfd]);
 }
 
 #[test]
@@ -244,10 +244,10 @@ fn assemble_link_instructions() {
     assert_asm_dis("LINK #2", &[0x92]);
     assert_asm_dis("LINK #3", &[0x93]);
     assert_asm_dis("LINK #4", &[0x94]);
-    assert_asm("LINK $0002", &[0x91]);
-    assert_asm("LINK $0003", &[0x92]);
-    assert_asm("LINK $0004", &[0x93]);
-    assert_asm("LINK $0005", &[0x94]);
+    assert_asm("LINK *$0002", &[0x91]);
+    assert_asm("LINK *$0003", &[0x92]);
+    assert_asm("LINK *$0004", &[0x93]);
+    assert_asm("LINK *$0005", &[0x94]);
 }
 
 #[test]

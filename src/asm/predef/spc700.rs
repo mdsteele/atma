@@ -6,7 +6,7 @@ use super::addrmode::{
 use super::pool::RcPool;
 use crate::lex::TokenValue;
 use crate::parse::{
-    AsmIntType, AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst,
+    AsmIntType, AsmMacroArgAst, AsmStmtAst, BinOpAst, ExprAst, UnOpAst,
 };
 
 //===========================================================================//
@@ -602,9 +602,12 @@ fn addr8_comma_bit_opcode(
 
 fn addr13_comma_bit_address(pool: &mut RcPool) -> AsmStmtAst {
     let expr = {
-        // TODO: error unless address in range [0x0000, 0x1fff]
-        // TODO: error unless address is in the current address space
-        let lhs = pool.placeholder_expr(PLACEHOLDER_ADDR);
+        let lhs = {
+            // TODO: error unless address in range [0x0000, 0x1fff]
+            // TODO: error unless address is in the current address space
+            let arg = pool.placeholder_expr(PLACEHOLDER_ADDR);
+            pool.unop_expr(UnOpAst::AddrOf, arg)
+        };
         let rhs = {
             let lhs = bit_expr(pool);
             let rhs = pool.int_literal_expr(13);

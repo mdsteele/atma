@@ -4,7 +4,7 @@ use crate::lex::{Token, TokenValue};
 use crate::parse::{
     AsmIntDataAst, AsmIntType, AsmRelAddrAst, AsmRelType, AsmStmtAst,
     BinOpAst, CompoundIdAst, ExprAst, ExprAstNode, HereLabelKind,
-    IdentifierAst, IdentifierKind,
+    IdentifierAst, IdentifierKind, UnOpAst,
 };
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -88,7 +88,7 @@ impl RcPool {
         let lhs = self.placeholder_expr(placeholder);
         let rhs = self.int_literal_expr(0xff);
         let expr = self.binop_expr(BinOpAst::BitAnd, lhs, rhs);
-        self.int_data_stmt(AsmIntType::U8, expr)
+        self.int_data_stmt(AsmIntType::A8, expr)
     }
 
     fn identifier_ast(
@@ -249,6 +249,13 @@ impl RcPool {
                 Box::new(then_expr),
                 Box::new(else_expr),
             ),
+        }
+    }
+
+    pub fn unop_expr(&mut self, op: UnOpAst, arg: ExprAst) -> ExprAst {
+        ExprAst {
+            span: SrcSpan::INTERNAL,
+            node: ExprAstNode::UnOp((SrcSpan::INTERNAL, op), Box::new(arg)),
         }
     }
 }

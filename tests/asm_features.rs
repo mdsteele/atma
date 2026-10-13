@@ -96,7 +96,7 @@ fn charmap_inheritence() {
 fn compound_id_for_named_scope() {
     let source = r#"\
     .SECTION "TEST"
-        .u8 Foo::Bar
+        .a8 Foo::Bar
     Foo: {
         .u8 1
     Bar:
@@ -172,15 +172,15 @@ fn label_bitwise_and() {
 fn label_references() {
     let source = r#"\
     .SECTION "TEST"
-        .u16le Foo::Bar
+        .a16le Foo::Bar
     Foo: {
-        .u16le Foo
-        .u16le Bar
+        .a16le Foo
+        .a16le Bar
     Bar:
-        .u16le Bar
-        .u16le Foo
+        .a16le Bar
+        .a16le Foo
     }
-        .u16le Foo::Bar
+        .a16le Foo::Bar
     .END
     "#;
     assemble(source);
@@ -193,9 +193,9 @@ fn loadable_chunk() {
         .u8 1
     .LOADABLE "OTHER", start=$20
         .u8 2
-        .u8 $<
+        .a8 $<
     .END
-        .u8 $<
+        .a8 $<
     .END
     "#;
     assert_eq!(
@@ -209,10 +209,10 @@ fn static_here_address() {
     let source = r#"\
     .SECTION "TEST", start=$10
         .u8 1
-        .u8 $<
+        .a8 $<
     {
         .u8 3
-        .u8 $^
+        .a8 $^
     }
     .END
     "#;

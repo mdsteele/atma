@@ -2,7 +2,7 @@ use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::positioned::PositionedBinary;
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::{Addr, Offset};
+use crate::addr::Offset;
 use crate::error::Errs;
 use crate::expr::ExprValue;
 use crate::obj::{
@@ -189,15 +189,9 @@ impl<'a> FilePatcher<'a> {
                     start,
                     data,
                 ),
-                ObjPatchData::Relative(rel_type, lhs, rhs) => self
-                    .apply_rel_patch(
-                        chunk_index,
-                        rel_type,
-                        lhs,
-                        rhs,
-                        start,
-                        data,
-                    ),
+                ObjPatchData::Relative(rel_type, lhs, rhs) => {
+                    self.apply_rel_patch(rel_type, lhs, rhs, start, data)
+                }
             }
         } else {
             Err(Errs::one(LinkError::PatchOffsetOutOfRange))
@@ -225,7 +219,7 @@ impl<'a> FilePatcher<'a> {
         data: &mut [u8],
     ) -> LinkResult<()> {
         let bigint = if int_type.is_address() {
-            let absolute = self.eval_addr_expr(chunk_index, expr)?;
+            let absolute = self.eval_addr_expr(expr)?;
             let metadata = &self.context.chunk_metadata[chunk_index];
             if absolute.space != metadata.start.space {
                 return Err(Errs::one(LinkError::Misc));
@@ -239,7 +233,6 @@ impl<'a> FilePatcher<'a> {
 
     fn apply_rel_patch(
         &self,
-        chunk_index: usize,
         rel_type: ObjPatchRelType,
         lhs_expr: ObjExpr,
         rhs_expr: ObjExpr,
@@ -247,8 +240,8 @@ impl<'a> FilePatcher<'a> {
         data: &mut [u8],
     ) -> LinkResult<()> {
         let mut errs = Errs::<LinkError>::new();
-        let lhs = errs.ok(self.eval_addr_expr(chunk_index, lhs_expr));
-        let rhs = errs.ok(self.eval_addr_expr(chunk_index, rhs_expr));
+        let lhs = errs.ok(self.eval_addr_expr(lhs_expr));
+        let rhs = errs.ok(self.eval_addr_expr(rhs_expr));
         if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
             if lhs.space != rhs.space {
                 errs.push(LinkError::Misc);
@@ -259,21 +252,9 @@ impl<'a> FilePatcher<'a> {
         errs.result()
     }
 
-    fn eval_addr_expr(
-        &self,
-        chunk_index: usize,
-        expr: ObjExpr,
-    ) -> LinkResult<AbsoluteLabel> {
+    fn eval_addr_expr(&self, expr: ObjExpr) -> LinkResult<AbsoluteLabel> {
         match self.eval_patch_expr(expr)? {
             ExprValue::Label(label) => self.context.resolve_label(&label),
-            ExprValue::Integer(address) => {
-                let metadata = &self.context.chunk_metadata[chunk_index];
-                Ok(AbsoluteLabel {
-                    space: metadata.start.space.clone(),
-                    // TODO: validate address against addrspace bits
-                    address: Addr::wrap_bigint(&address),
-                })
-            }
             _ => Err(Errs::one(LinkError::PatchValueWrongType)),
         }
     }
@@ -281,10 +262,6 @@ impl<'a> FilePatcher<'a> {
     fn eval_int_expr(&self, expr: ObjExpr) -> LinkResult<BigInt> {
         match self.eval_patch_expr(expr)? {
             ExprValue::Integer(bigint) => Ok(bigint),
-            ExprValue::Label(label) => {
-                let absolute = self.context.resolve_label(&label)?;
-                Ok(BigInt::from(absolute.address))
-            }
             _ => Err(Errs::one(LinkError::PatchValueWrongType)),
         }
     }
