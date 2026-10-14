@@ -29,6 +29,7 @@ pub(super) fn assemble_int_data(
             ))
         }
         (expr, ExprType::Label, Ok(static_value)) if allow_label => {
+            // TODO: require label to be in the current address space
             match static_value.unwrap_label().into_absolute_address() {
                 Some(address) => errs.with(IntDataValue::integer_static(
                     env, directive, int_type, expr_span, address,

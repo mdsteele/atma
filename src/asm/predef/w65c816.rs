@@ -1,11 +1,13 @@
 use super::addrmode::{
     AddrMode, PLACEHOLDER_ADDR, PLACEHOLDER_IMM, PLACEHOLDER_IMM2, Reg,
-    addr_arg, macro_arg, pound_imm_arg, reg_arg, token,
+    addr_arg, bang_addr_arg, macro_arg, pound_imm_arg, reg_arg, token,
 };
 use super::mos6502::{Mos6502, par_addr_ens_arg};
 use super::pool::RcPool;
 use crate::lex::TokenValue;
-use crate::parse::{AsmMacroArgAst, AsmStmtAst};
+use crate::parse::{
+    AsmIntType, AsmMacroArgAst, AsmRelType, AsmStmtAst, BinOpAst,
+};
 
 //===========================================================================//
 
@@ -33,10 +35,12 @@ pub(super) const MACROS_65C816: &[(&str, &[u8], W65c816)] = &[
     // TODO: new address modes for EOR
     ("INC", &[0x1a], W65c816::Mos(Mos6502::Reg("A"))),
     ("JML", &[0x5c], W65c816::BangBangAddr24),
-    ("JML", &[0xdc], W65c816::BracBangAddr16Kets),
-    ("JMP", &[0x7c], W65c816::ParBangAddr16CommaRegEns("X")),
+    ("JML", &[0xdc], W65c816::BracBangAbs16Kets),
+    ("JMP", &[0x4c], W65c816::BangPbr16),
+    ("JMP", &[0x7c], W65c816::ParBangPbr16CommaRegEns("X")),
     ("JSL", &[0x22], W65c816::BangBangAddr24),
-    ("JSR", &[0xfc], W65c816::ParBangAddr16CommaRegEns("X")),
+    ("JSR", &[0x20], W65c816::BangPbr16),
+    ("JSR", &[0xfc], W65c816::ParBangPbr16CommaRegEns("X")),
     ("LDA", &[0xa3], W65c816::Imm8CommaReg("S")),
     ("LDA", &[0xa7], W65c816::BracAddr8Kets),
     ("LDA", &[0xa9], W65c816::PoundPoundImm16),
@@ -50,7 +54,7 @@ pub(super) const MACROS_65C816: &[(&str, &[u8], W65c816)] = &[
     ("MVN", &[0x54], W65c816::PoundImm8CommaPoundImm8),
     ("MVP", &[0x44], W65c816::PoundImm8CommaPoundImm8),
     // TODO: new address modes for ORA
-    ("PEA", &[0xf4], W65c816::Mos(Mos6502::BangAddr16)),
+    ("PEA", &[0xf4], W65c816::BangAny16),
     ("PEI", &[0xd4], W65c816::ParAddr8Ens),
     ("PER", &[0x62], W65c816::Relative16),
     ("PHB", &[0x8b], W65c816::Mos(Mos6502::Implied)),
@@ -104,17 +108,33 @@ pub(super) const MACROS_65C816: &[(&str, &[u8], W65c816)] = &[
 #[derive(Clone, Copy)]
 pub(super) enum W65c816 {
     Mos(Mos6502),
+    /// FOO !!addr  ; where addr is an address in any bank
     BangBangAddr24,
+    /// FOO !!addr, R  ; where addr is an address in any bank
     BangBangAddr24CommaReg(Reg),
+    /// FOO !addr  ; where addr is an address in any bank
+    BangAny16,
+    /// FOO !addr  ; where addr is an address in the current program bank
+    BangPbr16,
+    /// FOO [addr]  ; where addr is an address in the current direct page
     BracAddr8Kets,
+    /// FOO [addr], R  ; where addr is an address in the current direct page
     BracAddr8KetsCommaReg(Reg),
-    BracBangAddr16Kets,
+    /// FOO [!addr]  ; where addr is an address in bank zero
+    BracBangAbs16Kets,
+    /// FOO imm, R
     Imm8CommaReg(Reg),
+    /// FOO (addr)  ; where addr is an address in the current direct page
     ParAddr8Ens,
-    ParBangAddr16CommaRegEns(Reg),
+    /// FOO (!addr, R)  ; where addr is an address in the current program bank
+    ParBangPbr16CommaRegEns(Reg),
+    /// FOO (imm, R1), R2
     ParImm8CommaRegEnsCommaReg(Reg, Reg),
+    /// FOO #imm, #imm2
     PoundImm8CommaPoundImm8,
+    /// FOO ##imm
     PoundPoundImm16,
+    /// FOO addr  ; where addr is an address in the current program bank
     Relative16,
 }
 
@@ -129,16 +149,17 @@ impl AddrMode for W65c816 {
             Self::BangBangAddr24CommaReg(reg) => {
                 vec![bang_bang_addr_arg(pool), reg_arg(pool, reg)]
             }
+            Self::BangAny16 | Self::BangPbr16 => vec![bang_addr_arg(pool)],
             Self::BracAddr8Kets => vec![brac_addr_kets_arg(pool)],
             Self::BracAddr8KetsCommaReg(reg) => {
                 vec![brac_addr_kets_arg(pool), reg_arg(pool, reg)]
             }
-            Self::BracBangAddr16Kets => vec![brac_bang_addr_kets_arg(pool)],
+            Self::BracBangAbs16Kets => vec![brac_bang_addr_kets_arg(pool)],
             Self::Imm8CommaReg(reg) => {
                 vec![imm_arg(pool), reg_arg(pool, reg)]
             }
             Self::ParAddr8Ens => vec![par_addr_ens_arg(pool)],
-            Self::ParBangAddr16CommaRegEns(reg) => {
+            Self::ParBangPbr16CommaRegEns(reg) => {
                 vec![par_bang_addr_comma_reg_ens_arg(pool, reg)]
             }
             Self::ParImm8CommaRegEnsCommaReg(r1, r2) => {
@@ -164,16 +185,34 @@ impl AddrMode for W65c816 {
                 pool.constant_bytes_stmt(prefix_bytes),
                 pool.placeholder_a8(PLACEHOLDER_ADDR),
             ],
-            Self::BracBangAddr16Kets | Self::ParBangAddr16CommaRegEns(_) => {
+            Self::BracBangAbs16Kets => {
                 vec![
                     pool.constant_bytes_stmt(prefix_bytes),
                     pool.placeholder_a16le(PLACEHOLDER_ADDR),
+                ]
+            }
+            Self::ParBangPbr16CommaRegEns(_) => {
+                vec![
+                    pool.constant_bytes_stmt(prefix_bytes),
+                    a16le_in_current_bank(pool),
                 ]
             }
             Self::BangBangAddr24 | Self::BangBangAddr24CommaReg(_) => {
                 vec![
                     pool.constant_bytes_stmt(prefix_bytes),
                     pool.placeholder_a24le(PLACEHOLDER_ADDR),
+                ]
+            }
+            Self::BangAny16 => {
+                vec![
+                    pool.constant_bytes_stmt(prefix_bytes),
+                    a16le_in_any_bank(pool),
+                ]
+            }
+            Self::BangPbr16 => {
+                vec![
+                    pool.constant_bytes_stmt(prefix_bytes),
+                    a16le_in_current_bank(pool),
                 ]
             }
             Self::Imm8CommaReg(_) | Self::ParImm8CommaRegEnsCommaReg(_, _) => {
@@ -195,7 +234,7 @@ impl AddrMode for W65c816 {
             }
             Self::Relative16 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_addr16_rel16le(PLACEHOLDER_ADDR),
+                pool.placeholder_r16s16le(PLACEHOLDER_ADDR),
             ],
         }
     }
@@ -269,6 +308,27 @@ fn pound_pound_imm_arg(pool: &mut RcPool) -> AsmMacroArgAst {
         token(TokenValue::Pound),
         pool.placeholder_token(PLACEHOLDER_IMM),
     ])
+}
+
+//===========================================================================//
+
+fn a16le_in_any_bank(pool: &mut RcPool) -> AsmStmtAst {
+    let addr_expr = {
+        let lhs = pool.placeholder_expr(PLACEHOLDER_ADDR);
+        let rhs = pool.int_literal_expr(0xffff);
+        pool.binop_expr(BinOpAst::BitAnd, lhs, rhs)
+    };
+    pool.int_data_stmt(AsmIntType::A16le, addr_expr)
+}
+
+fn a16le_in_current_bank(pool: &mut RcPool) -> AsmStmtAst {
+    let dest_expr = pool.placeholder_expr(PLACEHOLDER_ADDR);
+    let base_expr = {
+        let lhs = pool.stmt_start_label_expr();
+        let rhs = pool.int_literal_expr(-0x10000);
+        pool.binop_expr(BinOpAst::BitAnd, lhs, rhs)
+    };
+    pool.rel_addr_stmt(AsmRelType::R16U16le, dest_expr, base_expr)
 }
 
 //===========================================================================//

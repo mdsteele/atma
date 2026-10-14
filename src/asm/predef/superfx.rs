@@ -334,7 +334,7 @@ impl AddrMode for SuperFx {
             }
             Self::Relative8 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR),
+                pool.placeholder_r16s8(PLACEHOLDER_ADDR),
             ],
         }
     }
@@ -380,12 +380,11 @@ fn link_relative_body(
 ) -> Vec<AsmStmtAst> {
     let dest_expr = pool.placeholder_expr(placeholder);
     let base_expr = {
-        // TODO: Use $> here instead of ($< + 1)
         let lhs = pool.stmt_start_label_expr();
         let rhs = pool.int_literal_expr(1);
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
-    vec![pool.rel_addr_stmt(AsmRelType::Addr16RelLink, dest_expr, base_expr)]
+    vec![pool.rel_addr_stmt(AsmRelType::R16Link, dest_expr, base_expr)]
 }
 
 //===========================================================================//

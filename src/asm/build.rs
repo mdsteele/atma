@@ -876,9 +876,11 @@ impl<'a> Assembler<'a> {
 
     fn rel_patch_type(&self, rel_type: AsmRelType) -> ObjPatchRelType {
         match rel_type {
-            AsmRelType::Addr16Rel8 => ObjPatchRelType::Addr16Rel8,
-            AsmRelType::Addr16Rel16le => ObjPatchRelType::Addr16Rel16le,
-            AsmRelType::Addr16RelLink => ObjPatchRelType::Addr16RelLink,
+            AsmRelType::R16Link => ObjPatchRelType::R16Link,
+            AsmRelType::R16S8 => ObjPatchRelType::R16S8,
+            AsmRelType::R16S16le => ObjPatchRelType::R16S16le,
+            AsmRelType::R16U8 => ObjPatchRelType::R16U8,
+            AsmRelType::R16U16le => ObjPatchRelType::R16U16le,
         }
     }
 

@@ -84,11 +84,12 @@ impl RcPool {
     }
 
     pub fn high_page_addr(&mut self, placeholder: &'static str) -> AsmStmtAst {
-        // TODO: error unless address in range [0xff00, 0xffff]
-        let lhs = self.placeholder_expr(placeholder);
-        let rhs = self.int_literal_expr(0xff);
-        let expr = self.binop_expr(BinOpAst::BitAnd, lhs, rhs);
-        self.int_data_stmt(AsmIntType::A8, expr)
+        let dest_expr = self.placeholder_expr(placeholder);
+        let base_expr = {
+            let arg = self.int_literal_expr(0xff00);
+            self.unop_expr(UnOpAst::WithAddr, arg)
+        };
+        self.rel_addr_stmt(AsmRelType::R16U8, dest_expr, base_expr)
     }
 
     fn identifier_ast(
@@ -129,32 +130,30 @@ impl RcPool {
         }
     }
 
-    pub fn placeholder_addr16_rel8(
+    pub fn placeholder_r16s8(
         &mut self,
         placeholder: &'static str,
     ) -> AsmStmtAst {
         let dest_expr = self.placeholder_expr(placeholder);
         let base_expr = {
-            // TODO: Use $> here instead of ($< + 1)
             let lhs = self.stmt_start_label_expr();
             let rhs = self.int_literal_expr(1);
             self.binop_expr(BinOpAst::Add, lhs, rhs)
         };
-        self.rel_addr_stmt(AsmRelType::Addr16Rel8, dest_expr, base_expr)
+        self.rel_addr_stmt(AsmRelType::R16S8, dest_expr, base_expr)
     }
 
-    pub fn placeholder_addr16_rel16le(
+    pub fn placeholder_r16s16le(
         &mut self,
         placeholder: &'static str,
     ) -> AsmStmtAst {
         let dest_expr = self.placeholder_expr(placeholder);
         let base_expr = {
-            // TODO: Use $> here instead of ($< + 2)
             let lhs = self.stmt_start_label_expr();
             let rhs = self.int_literal_expr(2);
             self.binop_expr(BinOpAst::Add, lhs, rhs)
         };
-        self.rel_addr_stmt(AsmRelType::Addr16Rel16le, dest_expr, base_expr)
+        self.rel_addr_stmt(AsmRelType::R16S16le, dest_expr, base_expr)
     }
 
     pub fn placeholder_expr(&mut self, placeholder: &'static str) -> ExprAst {

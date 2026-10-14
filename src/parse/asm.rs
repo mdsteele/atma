@@ -915,24 +915,37 @@ impl AsmRelAddrAst {
 /// Types of integer data directives in assembly code.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum AsmRelType {
+    /// A relative address within a 16-bit address space, encoded as a SuperFX
+    /// LINK opcode.
+    R16Link,
     /// A 8-bit signed relative address within a 16-bit address space.
-    Addr16Rel8,
+    R16S8,
     /// A 16-bit signed little-endian relative address within a 16-bit address
     /// space.
-    Addr16Rel16le,
-    /// A 16-bit signed little-endian relative address, encoded as a SuperFX
-    /// LINK opcode.
-    Addr16RelLink,
+    R16S16le,
+    /// A 8-bit unsigned relative address within a 16-bit address space.
+    R16U8,
+    /// A 16-bit unsigned little-endian relative address within a 16-bit
+    /// address space.
+    R16U16le,
 }
 
 impl AsmRelType {
-    const ALL: &[Self] = &[Self::Addr16Rel8, Self::Addr16Rel16le];
+    const ALL: &[Self] = &[
+        Self::R16Link,
+        Self::R16S8,
+        Self::R16S16le,
+        Self::R16U8,
+        Self::R16U16le,
+    ];
 
     pub(crate) fn directive(self) -> &'static str {
         match self {
-            Self::Addr16Rel8 => ".A16R8",
-            Self::Addr16Rel16le => ".A16R16LE",
-            Self::Addr16RelLink => ".A16RLINK",
+            Self::R16Link => ".R16LINK",
+            Self::R16S8 => ".R16S8",
+            Self::R16S16le => ".R16S16LE",
+            Self::R16U8 => ".R16U8",
+            Self::R16U16le => ".R16U16LE",
         }
     }
 

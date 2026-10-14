@@ -605,19 +605,19 @@ fn no_matching_charmap_mapping() {
 fn relative_address_type_error() {
     let source = r#"\
     .SECTION "TEST"
-        .a16r8 "elsewhere", %false
+        .r16u8 "elsewhere", %false
     .END
     "#;
     assert_matches!(asm_errors(source).as_slice(), [
         AsmError::DirectiveExprTypeError {
-            directive: ".A16R8",
+            directive: ".R16U8",
             component: "destination address",
             expr_type: ExprType::String,
             valid_types,
             ..
         },
         AsmError::DirectiveExprTypeError {
-            directive: ".A16R8",
+            directive: ".R16U8",
             component: "base address",
             expr_type: ExprType::Boolean,
             ..

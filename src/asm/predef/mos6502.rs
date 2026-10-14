@@ -255,7 +255,7 @@ impl AddrMode for Mos6502 {
             ],
             Self::Relative8 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR),
+                pool.placeholder_r16s8(PLACEHOLDER_ADDR),
             ],
         }
     }

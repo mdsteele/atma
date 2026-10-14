@@ -446,13 +446,13 @@ impl AddrMode for Spc700 {
             Self::Addr8CommaBitCommaRelative8 => vec![
                 addr8_comma_bit_opcode(pool, prefix_bytes),
                 pool.placeholder_a8(PLACEHOLDER_ADDR),
-                pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR2),
+                pool.placeholder_r16s8(PLACEHOLDER_ADDR2),
             ],
             Self::Addr8CommaRelative8
             | Self::Addr8PlusRegCommaRelative8(_) => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
                 pool.placeholder_a8(PLACEHOLDER_ADDR),
-                pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR2),
+                pool.placeholder_r16s8(PLACEHOLDER_ADDR2),
             ],
             Self::Addr8CommaPoundImm8 => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
@@ -497,7 +497,7 @@ impl AddrMode for Spc700 {
             }
             Self::Relative8 | Self::RegCommaRelative8(_) => vec![
                 pool.constant_bytes_stmt(prefix_bytes),
-                pool.placeholder_addr16_rel8(PLACEHOLDER_ADDR),
+                pool.placeholder_r16s8(PLACEHOLDER_ADDR),
             ],
             Self::TcallIndex => vec![tcall_index_opcode(pool, prefix_bytes)],
         }
