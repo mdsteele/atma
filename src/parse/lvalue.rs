@@ -1,4 +1,4 @@
-use super::atom::{Extra, Language, symbol};
+use super::atom::{AtmaParser, Language, symbol};
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
 use crate::error::SrcSpan;
@@ -18,8 +18,7 @@ pub struct LValueAst {
 }
 
 impl LValueAst {
-    pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], LValueAst, Extra<'a>> + Clone {
+    pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         chumsky::prelude::recursive(|lvalue| {
             let memory = chumsky::prelude::group((
                 symbol(TokenValue::BracketOpen),

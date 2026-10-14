@@ -25,9 +25,20 @@ pub enum Language {
 
 //===========================================================================//
 
-/// The error type used for `chumsky::Parser`s in this crate.
+/// The error/context type used for `chumsky::Parser`s within `crate::parse`.
 pub(super) type Extra<'a> =
     chumsky::extra::Full<chumsky::error::Rich<'a, Token>, (), Language>;
+
+/// Trait alias used for most `chumsky::Parser`s within `crate::parse`.
+pub(super) trait AtmaParser<'a, O>:
+    Parser<'a, &'a [Token], O, Extra<'a>> + Clone
+{
+}
+
+impl<'a, O, P> AtmaParser<'a, O> for P where
+    P: Parser<'a, &'a [Token], O, Extra<'a>> + Clone
+{
+}
 
 //===========================================================================//
 
@@ -66,7 +77,7 @@ where
 
 pub(super) fn directive<'a>(
     word: &'static str,
-) -> impl Parser<'a, &'a [Token], SrcSpan, Extra<'a>> + Clone {
+) -> impl AtmaParser<'a, SrcSpan> {
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::Directive(id) = token.value
@@ -81,7 +92,7 @@ pub(super) fn directive<'a>(
 }
 
 pub(super) fn dollar_minus<'a>()
--> impl Parser<'a, &'a [Token], (SrcSpan, NonZero<usize>), Extra<'a>> + Clone {
+-> impl AtmaParser<'a, (SrcSpan, NonZero<usize>)> {
     chumsky::prelude::any().try_map(|token: Token, span| match token.value {
         TokenValue::DollarMinus(count) => Ok((token.span, count)),
         _ => Err(chumsky::error::Rich::custom(span, "")),
@@ -89,16 +100,14 @@ pub(super) fn dollar_minus<'a>()
 }
 
 pub(super) fn dollar_plus<'a>()
--> impl Parser<'a, &'a [Token], (SrcSpan, NonZero<usize>), Extra<'a>> + Clone {
+-> impl AtmaParser<'a, (SrcSpan, NonZero<usize>)> {
     chumsky::prelude::any().try_map(|token: Token, span| match token.value {
         TokenValue::DollarPlus(count) => Ok((token.span, count)),
         _ => Err(chumsky::error::Rich::custom(span, "")),
     })
 }
 
-pub(super) fn keyword<'a>(
-    word: &'static str,
-) -> impl Parser<'a, &'a [Token], (), Extra<'a>> + Clone {
+pub(super) fn keyword<'a>(word: &'static str) -> impl AtmaParser<'a, ()> {
     chumsky::prelude::any()
         .filter(move |token: &Token| {
             if let TokenValue::Identifier(id) = &token.value {
@@ -111,14 +120,11 @@ pub(super) fn keyword<'a>(
         .labelled(word)
 }
 
-pub(super) fn linebreak<'a>()
--> impl Parser<'a, &'a [Token], (), Extra<'a>> + Clone {
+pub(super) fn linebreak<'a>() -> impl AtmaParser<'a, ()> {
     symbol(TokenValue::Linebreak).repeated().at_least(1)
 }
 
-pub(super) fn symbol<'a>(
-    value: TokenValue,
-) -> impl Parser<'a, &'a [Token], Token, Extra<'a>> + Clone {
+pub(super) fn symbol<'a>(value: TokenValue) -> impl AtmaParser<'a, Token> {
     let name = value.name();
     chumsky::prelude::any()
         .filter(move |token: &Token| token.value == value)

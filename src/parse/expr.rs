@@ -1,7 +1,7 @@
 //! Facilities for parsing expressions.
 
 use super::atom::{
-    Extra, Language, dollar_minus, dollar_plus, parse_tokens, symbol,
+    AtmaParser, Language, dollar_minus, dollar_plus, parse_tokens, symbol,
 };
 use super::error::ParseResult;
 use super::id::CompoundIdAst;
@@ -46,8 +46,7 @@ pub enum HereLabelKind {
 }
 
 impl HereLabelKind {
-    pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+    pub(super) fn parser<'a>() -> impl AtmaParser<'a, (SrcSpan, Self)> {
         chumsky::prelude::choice((
             dollar_plus()
                 .map(|(span, count)| (span, HereLabelKind::AnonNext(count))),
@@ -196,8 +195,7 @@ impl ExprAst {
         parse_tokens(Self::parser().with_ctx(language), tokens)
     }
 
-    pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         chumsky::prelude::recursive(|expr| {
             let parenthesized_expr = chumsky::prelude::group((
                 symbol(TokenValue::ParenOpen),
@@ -544,8 +542,7 @@ pub enum ExprAstNode {
 
 //===========================================================================//
 
-fn bool_literal<'a>()
--> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone {
+fn bool_literal<'a>() -> impl AtmaParser<'a, ExprAst> {
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::BoolLiteral(boolean) = token.value {
@@ -560,8 +557,7 @@ fn bool_literal<'a>()
         .labelled("boolean literal")
 }
 
-fn int_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
-{
+fn int_literal<'a>() -> impl AtmaParser<'a, ExprAst> {
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::IntLiteral(int) = token.value {
@@ -576,8 +572,7 @@ fn int_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
         .labelled("integer literal")
 }
 
-fn str_literal<'a>() -> impl Parser<'a, &'a [Token], ExprAst, Extra<'a>> + Clone
-{
+fn str_literal<'a>() -> impl AtmaParser<'a, ExprAst> {
     chumsky::prelude::any()
         .try_map(|token: Token, span| {
             if let TokenValue::StrLiteral(string) = token.value {

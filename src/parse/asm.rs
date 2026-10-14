@@ -1,7 +1,7 @@
 //! Facilities for parsing assembly source code.
 
 use super::atom::{
-    Extra, Language, directive, linebreak, parse_tokens, symbol, tokenize,
+    AtmaParser, Language, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
 use super::expr::ExprAst;
@@ -84,7 +84,7 @@ pub enum AsmStmtAst {
 }
 
 impl AsmStmtAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], AsmStmtAst, Extra<'a>> {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         let attribute = IdentifierAst::parser()
             .then_ignore(symbol(TokenValue::Equals))
             .then(ExprAst::parser());
@@ -245,7 +245,7 @@ pub struct AsmAssertAst {
 impl AsmAssertAst {
     pub(crate) const DIRECTIVE: &str = ".ASSERT";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .then(ExprAst::parser())
             .then(
@@ -276,7 +276,7 @@ pub struct AsmBinaryAst {
 impl AsmBinaryAst {
     pub(crate) const DIRECTIVE: &str = ".BINARY";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .then(ExprAst::parser())
             .then_ignore(linebreak())
@@ -301,7 +301,7 @@ pub struct AsmCharmapAst {
 impl AsmCharmapAst {
     pub(crate) const DIRECTIVE: &str = ".CHARMAP";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .ignore_then(ExprAst::parser())
             .then(
@@ -373,8 +373,7 @@ impl AsmChunkKind {
         }
     }
 
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, (SrcSpan, Self)> {
         chumsky::prelude::choice(
             Self::ALL
                 .iter()
@@ -413,7 +412,7 @@ pub enum AsmDataTypeAst {
 }
 
 impl AsmDataTypeAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         chumsky::prelude::choice((
             AsmIntType::parser()
                 .map(|(span, int_type)| Self::Int(span, int_type)),
@@ -437,7 +436,7 @@ pub struct AsmDeclareAst {
 }
 
 impl AsmDeclareAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         // TODO: Allow declaring a tuple of identifiers/wildcards.
         chumsky::prelude::choice((
             directive(".LET").to(DeclarationKind::Let),
@@ -486,7 +485,7 @@ pub struct AsmEnumAst {
 impl AsmEnumAst {
     pub(crate) const DIRECTIVE: &str = ".ENUM";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .ignore_then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::BraceOpen))
@@ -510,7 +509,7 @@ pub struct AsmEnumFieldAst {
 }
 
 impl AsmEnumFieldAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         IdentifierAst::parser()
             .then(
                 symbol(TokenValue::Equals)
@@ -536,7 +535,7 @@ pub struct AsmIntDataAst {
 }
 
 impl AsmIntDataAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         AsmIntType::parser()
             .then(
                 ExprAst::parser()
@@ -731,8 +730,7 @@ impl AsmIntType {
         }
     }
 
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, (SrcSpan, Self)> {
         chumsky::prelude::choice(
             Self::ALL
                 .iter()
@@ -758,7 +756,7 @@ pub struct AsmInvokeAst {
 }
 
 impl AsmInvokeAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         let macro_args = AsmMacroArgAst::parser()
             .separated_by(symbol(TokenValue::Comma))
             .collect::<Vec<_>>();
@@ -789,7 +787,7 @@ pub enum AsmLabelAst {
 }
 
 impl AsmLabelAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(".EXPORT")
             .or_not()
             .map(|export| export.is_some())
@@ -813,7 +811,7 @@ pub struct AsmMacroArgAst {
 }
 
 impl AsmMacroArgAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         let simple = chumsky::prelude::any().filter(|token: &Token| {
             !matches!(
                 token.value,
@@ -895,7 +893,7 @@ pub struct AsmRelAddrAst {
 }
 
 impl AsmRelAddrAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         AsmRelType::parser()
             .then(ExprAst::parser())
             .then_ignore(symbol(TokenValue::Comma))
@@ -949,8 +947,7 @@ impl AsmRelType {
         }
     }
 
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, (SrcSpan, Self)> {
         chumsky::prelude::choice(
             Self::ALL
                 .iter()
@@ -998,7 +995,7 @@ pub struct AsmReserveAst {
 impl AsmReserveAst {
     pub(crate) const DIRECTIVE: &str = ".RESERVE";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .then(
                 AsmDataTypeAst::parser().then(
@@ -1040,7 +1037,7 @@ pub struct AsmSetAst {
 }
 
 impl AsmSetAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         // TODO: Support other kinds of lvalues
         directive(".SET")
             .ignore_then(IdentifierAst::parser())
@@ -1065,7 +1062,7 @@ pub struct AsmStrDataAst {
 }
 
 impl AsmStrDataAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         AsmStrType::parser()
             .then(
                 ExprAst::parser()
@@ -1106,8 +1103,7 @@ impl AsmStrType {
         }
     }
 
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], (SrcSpan, Self), Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, (SrcSpan, Self)> {
         chumsky::prelude::choice(
             Self::ALL
                 .iter()
@@ -1135,7 +1131,7 @@ pub struct AsmStructAst {
 impl AsmStructAst {
     pub(crate) const DIRECTIVE: &str = ".STRUCT";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .ignore_then(IdentifierAst::parser())
             .then_ignore(symbol(TokenValue::BraceOpen))
@@ -1162,7 +1158,7 @@ pub struct AsmStructFieldAst {
 }
 
 impl AsmStructFieldAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         IdentifierAst::parser()
             .then_ignore(symbol(TokenValue::Colon))
             .then(
@@ -1191,7 +1187,7 @@ pub struct AsmUseAst {
 impl AsmUseAst {
     pub(crate) const DIRECTIVE: &str = ".USE";
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         directive(Self::DIRECTIVE)
             .then(ExprAst::parser())
             .then_ignore(linebreak())

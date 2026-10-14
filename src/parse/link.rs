@@ -1,12 +1,12 @@
 //! Facilities for parsing linker configuration files.
 
 use super::atom::{
-    Extra, Language, directive, linebreak, parse_tokens, symbol, tokenize,
+    AtmaParser, Language, directive, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
-use crate::lex::{Token, TokenValue};
+use crate::lex::TokenValue;
 use chumsky::{self, IterParser, Parser};
 
 //===========================================================================//
@@ -25,7 +25,7 @@ impl LinkConfigAst {
         parse_tokens(LinkConfigAst::parser(), &tokens)
     }
 
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], LinkConfigAst, Extra<'a>> {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         symbol(TokenValue::Linebreak)
             .repeated()
             .ignore_then(
@@ -61,8 +61,7 @@ pub enum LinkDirectiveAst {
 }
 
 impl LinkDirectiveAst {
-    fn parser<'a>() -> impl Parser<'a, &'a [Token], LinkDirectiveAst, Extra<'a>>
-    {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         let entries_block = symbol(TokenValue::BraceOpen)
             .ignore_then(linebreak())
             .ignore_then(LinkEntryAst::parser().repeated().collect::<Vec<_>>())
@@ -128,21 +127,23 @@ pub struct LinkEntryAst {
 }
 
 impl LinkEntryAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], LinkEntryAst, Extra<'a>> + Clone {
-        let attribute = IdentifierAst::parser()
-            .then_ignore(symbol(TokenValue::Equals))
-            .then(ExprAst::parser());
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         IdentifierAst::parser()
             .then_ignore(symbol(TokenValue::Colon))
-            .then(
-                attribute
-                    .separated_by(symbol(TokenValue::Comma))
-                    .collect::<Vec<_>>(),
-            )
+            .then(attributes())
             .then_ignore(linebreak())
             .map(|(id, attrs)| LinkEntryAst { id, attrs })
     }
+}
+
+//===========================================================================//
+
+fn attributes<'a>() -> impl AtmaParser<'a, Vec<(IdentifierAst, ExprAst)>> {
+    IdentifierAst::parser()
+        .then_ignore(symbol(TokenValue::Equals))
+        .then(ExprAst::parser())
+        .separated_by(symbol(TokenValue::Comma))
+        .collect::<Vec<_>>()
 }
 
 //===========================================================================//

@@ -1,7 +1,7 @@
 //! Facilities for parsing Atma Debugger Script.
 
 use super::atom::{
-    Extra, Language, keyword, linebreak, parse_tokens, symbol, tokenize,
+    AtmaParser, Language, keyword, linebreak, parse_tokens, symbol, tokenize,
 };
 use super::error::ParseResult;
 use super::expr::ExprAst;
@@ -31,8 +31,7 @@ impl AdsModuleAst {
         parse_tokens(AdsModuleAst::parser(), tokens)
     }
 
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AdsModuleAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         symbol(TokenValue::Linebreak)
             .repeated()
             .ignore_then(AdsStmtAst::parser().repeated().collect::<Vec<_>>())
@@ -80,8 +79,7 @@ pub enum AdsStmtAst {
 }
 
 impl AdsStmtAst {
-    fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
         chumsky::prelude::recursive(|statement| {
             let stmt_block = symbol(TokenValue::BraceOpen)
                 .ignore_then(linebreak())
@@ -157,8 +155,7 @@ pub enum BreakpointAst {
 }
 
 impl BreakpointAst {
-    pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], BreakpointAst, Extra<'a>> + Clone {
+    pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         chumsky::prelude::choice((
             keyword("at")
                 .ignore_then(ExprAst::parser())
@@ -175,8 +172,7 @@ impl BreakpointAst {
 
 //===========================================================================//
 
-fn declare_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn declare_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     // TODO: Allow declaring a tuple of identifiers/wildcards.
     chumsky::prelude::choice((
         keyword("let").to(DeclarationKind::Let),
@@ -189,31 +185,26 @@ fn declare_statement<'a>()
     .map(|((kind, id), expr)| AdsStmtAst::Declare(kind, id, expr))
 }
 
-fn exit_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn exit_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("exit").ignore_then(linebreak()).to(AdsStmtAst::Exit)
 }
 
-fn print_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn print_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("print")
         .ignore_then(ExprAst::parser())
         .then_ignore(linebreak())
         .map(AdsStmtAst::Print)
 }
 
-fn relax_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn relax_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("relax").ignore_then(linebreak()).to(AdsStmtAst::Relax)
 }
 
-fn run_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn run_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("run").ignore_then(linebreak()).to(AdsStmtAst::Run)
 }
 
-fn run_until_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn run_until_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("run")
         .ignore_then(keyword("until"))
         .ignore_then(BreakpointAst::parser())
@@ -221,8 +212,7 @@ fn run_until_statement<'a>()
         .map(AdsStmtAst::RunUntil)
 }
 
-fn set_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn set_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("set")
         .ignore_then(LValueAst::parser())
         .then_ignore(symbol(TokenValue::Equals))
@@ -231,13 +221,11 @@ fn set_statement<'a>()
         .map(|(id, expr)| AdsStmtAst::Set(id, expr))
 }
 
-fn step_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn step_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("step").ignore_then(linebreak()).to(AdsStmtAst::Step)
 }
 
-fn use_statement<'a>()
--> impl Parser<'a, &'a [Token], AdsStmtAst, Extra<'a>> + Clone {
+fn use_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("use")
         .ignore_then(ExprAst::parser())
         .then_ignore(linebreak())

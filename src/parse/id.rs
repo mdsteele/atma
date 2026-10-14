@@ -1,6 +1,6 @@
 //! Facilities for parsing identifiers and declarations.
 
-use super::atom::{Extra, Language, parse_tokens, symbol};
+use super::atom::{AtmaParser, Language, parse_tokens, symbol};
 use super::error::ParseResult;
 use crate::error::SrcSpan;
 use crate::lex::{Token, TokenValue};
@@ -51,8 +51,7 @@ impl IdentifierAst {
         parse_tokens(Self::parser(), tokens)
     }
 
-    pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         let identifier_token = chumsky::prelude::any()
             .try_map(|token: Token, span| {
                 if let TokenValue::Identifier(name) = token.value {
@@ -109,8 +108,7 @@ pub struct CompoundIdAst {
 }
 
 impl CompoundIdAst {
-    pub(super) fn parser<'a>()
-    -> impl Parser<'a, &'a [Token], Self, Extra<'a>> + Clone {
+    pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         IdentifierAst::parser()
             .separated_by(symbol(TokenValue::ColonColon))
             .at_least(1)
