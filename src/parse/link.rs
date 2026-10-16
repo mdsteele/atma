@@ -3,6 +3,7 @@
 use super::atom::{
     AtmaParser, Language, directive, linebreak, parse_tokens, symbol, tokenize,
 };
+use super::attr::AttributeAst;
 use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
@@ -43,38 +44,33 @@ impl LinkConfigAst {
 #[derive(Debug)]
 pub enum LinkDirectiveAst {
     /// An `.ADDRSPACES` directive block.
-    Addrspaces(Vec<LinkEntryAst>),
+    Addrspaces(LinkBlockAst),
     /// A `.CHECKSUMS` directive block.
-    Checksums(Vec<LinkEntryAst>),
+    Checksums(LinkBlockAst),
     /// An `.EXPORTS` directive block.
-    Exports(Vec<LinkEntryAst>),
+    Exports(LinkBlockAst),
     /// An `.IMPORT` directive.
     Import(Vec<IdentifierAst>),
     /// A `.LET` directive.
     Let(IdentifierAst, ExprAst),
     /// A `.REGIONS` directive block.
-    Regions(Vec<LinkEntryAst>),
+    Regions(LinkBlockAst),
     /// A `.SECTIONS` directive block.
-    Sections(Vec<LinkEntryAst>),
+    Sections(LinkBlockAst),
     /// A `.USE` directive.
     Use(ExprAst),
 }
 
 impl LinkDirectiveAst {
     fn parser<'a>() -> impl AtmaParser<'a, Self> {
-        let entries_block = symbol(TokenValue::BraceOpen)
-            .ignore_then(linebreak())
-            .ignore_then(LinkEntryAst::parser().repeated().collect::<Vec<_>>())
-            .then_ignore(symbol(TokenValue::BraceClose))
-            .then_ignore(linebreak());
-        let addrspaces_dir = directive(".ADDRSPACES")
-            .ignore_then(entries_block.clone())
+        let addrspaces_dir = directive(LinkBlockAst::ADDRSPACES_DIRECTIVE)
+            .ignore_then(LinkBlockAst::parser())
             .map(LinkDirectiveAst::Addrspaces);
-        let checksums_dir = directive(".CHECKSUMS")
-            .ignore_then(entries_block.clone())
+        let checksums_dir = directive(LinkBlockAst::CHECKSUMS_DIRECTIVE)
+            .ignore_then(LinkBlockAst::parser())
             .map(LinkDirectiveAst::Checksums);
-        let exports_dir = directive(".EXPORTS")
-            .ignore_then(entries_block.clone())
+        let exports_dir = directive(LinkBlockAst::EXPORTS_DIRECTIVE)
+            .ignore_then(LinkBlockAst::parser())
             .map(LinkDirectiveAst::Exports);
         let import_dir = directive(".IMPORT")
             .ignore_then(
@@ -91,11 +87,11 @@ impl LinkDirectiveAst {
             .then(ExprAst::parser())
             .then_ignore(linebreak())
             .map(|(id, expr)| LinkDirectiveAst::Let(id, expr));
-        let regions_dir = directive(".REGIONS")
-            .ignore_then(entries_block.clone())
+        let regions_dir = directive(LinkBlockAst::REGIONS_DIRECTIVE)
+            .ignore_then(LinkBlockAst::parser())
             .map(LinkDirectiveAst::Regions);
-        let sections_dir = directive(".SECTIONS")
-            .ignore_then(entries_block)
+        let sections_dir = directive(LinkBlockAst::SECTIONS_DIRECTIVE)
+            .ignore_then(LinkBlockAst::parser())
             .map(LinkDirectiveAst::Sections);
         let use_dir = directive(".USE")
             .ignore_then(ExprAst::parser())
@@ -116,6 +112,35 @@ impl LinkDirectiveAst {
 
 //===========================================================================//
 
+/// The abstract syntax tree for a linker configuration directive block.
+#[derive(Debug)]
+pub struct LinkBlockAst {
+    /// Key/value attributes used as defaults for all entries in this block.
+    pub base_attrs: Vec<AttributeAst>,
+    /// The entries in this block.
+    pub entries: Vec<LinkEntryAst>,
+}
+
+impl LinkBlockAst {
+    pub(crate) const ADDRSPACES_DIRECTIVE: &str = ".ADDRSPACES";
+    pub(crate) const CHECKSUMS_DIRECTIVE: &str = ".CHECKSUMS";
+    pub(crate) const EXPORTS_DIRECTIVE: &str = ".EXPORTS";
+    pub(crate) const REGIONS_DIRECTIVE: &str = ".REGIONS";
+    pub(crate) const SECTIONS_DIRECTIVE: &str = ".SECTIONS";
+
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
+        attributes()
+            .then_ignore(symbol(TokenValue::BraceOpen))
+            .then_ignore(linebreak())
+            .then(LinkEntryAst::parser().repeated().collect::<Vec<_>>())
+            .then_ignore(symbol(TokenValue::BraceClose))
+            .then_ignore(linebreak())
+            .map(|(base_attrs, entries)| Self { base_attrs, entries })
+    }
+}
+
+//===========================================================================//
+
 /// The abstract syntax tree for one entry in a linker configuration directive
 /// block.
 #[derive(Debug)]
@@ -123,7 +148,7 @@ pub struct LinkEntryAst {
     /// The name of this entry.
     pub id: IdentifierAst,
     /// Key/value attributes associated with this entry.
-    pub attrs: Vec<(IdentifierAst, ExprAst)>,
+    pub attrs: Vec<AttributeAst>,
 }
 
 impl LinkEntryAst {
@@ -138,10 +163,8 @@ impl LinkEntryAst {
 
 //===========================================================================//
 
-fn attributes<'a>() -> impl AtmaParser<'a, Vec<(IdentifierAst, ExprAst)>> {
-    IdentifierAst::parser()
-        .then_ignore(symbol(TokenValue::Equals))
-        .then(ExprAst::parser())
+fn attributes<'a>() -> impl AtmaParser<'a, Vec<AttributeAst>> {
+    AttributeAst::parser()
         .separated_by(symbol(TokenValue::Comma))
         .collect::<Vec<_>>()
 }

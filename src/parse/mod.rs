@@ -3,6 +3,7 @@
 mod ads;
 mod asm;
 mod atom;
+mod attr;
 mod error;
 mod expr;
 mod id;
@@ -19,10 +20,11 @@ pub use asm::{
     AsmStrType, AsmStructAst, AsmStructFieldAst, AsmUseAst, AsmWithAst,
 };
 pub use atom::Language;
+pub use attr::AttributeAst;
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst};
 pub use id::{CompoundIdAst, DeclarationKind, IdentifierAst, IdentifierKind};
-pub use link::{LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
+pub use link::{LinkBlockAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
 pub use lvalue::{LValueAst, LValueAstNode};
 
 //===========================================================================//

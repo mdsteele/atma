@@ -1,6 +1,6 @@
-use super::ConfigVariableOr;
 use super::builtin::make_config_builtin_values;
 use super::error::{ConfigError, ConfigResult};
+use super::variable::ConfigVariableOr;
 use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{

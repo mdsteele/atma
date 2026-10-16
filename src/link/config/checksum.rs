@@ -1,5 +1,5 @@
 use super::super::eval::LinkEvalEnv;
-use super::ConfigVariableOr;
+use super::variable::ConfigVariableOr;
 use crate::error::Errs;
 use crate::expr::{ExprLabel, ExprValue};
 use crate::link::{LinkError, LinkResult, LinkedBinary};
@@ -163,9 +163,10 @@ fn resolve_range(
 
 /// A format for reading/writing a checksum, or a unit of checksum data, in the
 /// finished binary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ChecksumFormat {
     /// An unsigned 8-bit integer.
+    #[default]
     U8,
     /// The complement of an unsigned 8-bit integer.
     U8Cpl,

@@ -28,7 +28,7 @@ impl AsmChunkAttrs {
         env: &AsmTypeEnv,
         kind: AsmChunkKind,
         attrs_ast: Vec<(IdentifierAst, ExprAst)>,
-    ) -> (AsmChunkAttrs, Errs<AsmError>) {
+    ) -> (Self, Errs<AsmError>) {
         let mut errs = Errs::<AsmError>::new();
         let directive = kind.directive();
         let mut attrs = AsmChunkAttrs::default();

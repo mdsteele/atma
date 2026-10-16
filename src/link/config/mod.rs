@@ -1,8 +1,10 @@
+mod attrs;
 mod build;
 mod builtin;
 mod checksum;
 mod env;
 mod error;
+mod variable;
 
 use super::binary::LinkedBinary;
 use super::error::{LinkError, LinkResult};
@@ -19,6 +21,7 @@ pub use checksum::{ChecksumConfig, ChecksumFormat, ChecksumRange};
 pub use error::{ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult};
 use std::collections::HashMap;
 use std::rc::Rc;
+pub use variable::ConfigVariableOr;
 
 //===========================================================================//
 
@@ -263,46 +266,6 @@ pub struct ExportConfig {
     pub space: Rc<str>,
     /// The address of the symbol.
     pub address: ConfigVariableOr<Addr>,
-}
-
-//===========================================================================//
-
-/// Represents a value in a linker configuration that may be variable or
-/// static.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConfigVariableOr<T> {
-    /// The value will come from the linker config variable at this index.
-    Variable(usize),
-    /// The value is statically known.
-    Static(T),
-}
-
-impl<T> ConfigVariableOr<T> {
-    pub(crate) fn map_static<U, F: FnOnce(T) -> U>(
-        self,
-        func: F,
-    ) -> ConfigVariableOr<U> {
-        match self {
-            Self::Variable(index) => ConfigVariableOr::Variable(index),
-            Self::Static(value) => ConfigVariableOr::Static(func(value)),
-        }
-    }
-
-    pub(crate) fn try_map_static<U, E, F: FnOnce(T) -> Result<U, E>>(
-        self,
-        func: F,
-    ) -> Result<ConfigVariableOr<U>, E> {
-        match self {
-            Self::Variable(index) => Ok(ConfigVariableOr::Variable(index)),
-            Self::Static(value) => Ok(ConfigVariableOr::Static(func(value)?)),
-        }
-    }
-}
-
-impl<T: Default> Default for ConfigVariableOr<T> {
-    fn default() -> Self {
-        Self::Static(T::default())
-    }
 }
 
 //===========================================================================//
