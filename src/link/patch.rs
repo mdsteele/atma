@@ -2,9 +2,9 @@ use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::positioned::PositionedBinary;
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::Offset;
+use crate::addr::{Align, Offset};
 use crate::error::Errs;
-use crate::expr::ExprValue;
+use crate::expr::{ExprType, ExprValue};
 use crate::obj::{
     ObjChunk, ObjExpr, ObjFile, ObjPatch, ObjPatchData, ObjPatchIntType,
     ObjPatchRelType, ObjSrcLoc,
@@ -43,6 +43,7 @@ impl PatchedFile {
                 errs.ok(PatchedFile::patch(
                     file,
                     chunk_metadata,
+                    &positioned_binary.address_space_widths,
                     &positioned_binary.external_symbols,
                     internal_symbols,
                 ))
@@ -55,6 +56,7 @@ impl PatchedFile {
     fn patch(
         object_file: ObjFile,
         chunk_metadata: &[ChunkMetadata],
+        address_space_widths: &HashMap<Rc<str>, Align>,
         external_symbols: &HashMap<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>,
         internal_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
     ) -> LinkResult<PatchedFile> {
@@ -84,7 +86,11 @@ impl PatchedFile {
             }
         }
 
-        let mut patcher = FilePatcher::new(chunk_metadata, symbol_addrs);
+        let mut patcher = FilePatcher::new(
+            chunk_metadata,
+            address_space_widths,
+            symbol_addrs,
+        );
         errs.also(patcher.evaluate_variables(object_file.variables));
         let mut patched_chunks = Vec::<PatchedChunk>::new();
         for (chunk_index, chunk) in object_file.chunks.into_iter().enumerate()
@@ -129,10 +135,15 @@ struct FilePatcher<'a> {
 impl<'a> FilePatcher<'a> {
     pub fn new(
         chunk_metadata: &'a [ChunkMetadata],
+        address_space_widths: &'a HashMap<Rc<str>, Align>,
         symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
     ) -> FilePatcher<'a> {
         FilePatcher {
-            context: LinkSymbolContext { chunk_metadata, symbol_addrs },
+            context: LinkSymbolContext {
+                address_space_widths,
+                chunk_metadata,
+                symbol_addrs,
+            },
             env: LinkEvalEnv::new(),
         }
     }
@@ -219,16 +230,22 @@ impl<'a> FilePatcher<'a> {
         data: &mut [u8],
     ) -> LinkResult<()> {
         let bigint = if int_type.is_address() {
-            let absolute = self.eval_addr_expr(expr)?;
+            let absolute = self.eval_addr_expr(&expr)?;
             let metadata = &self.context.chunk_metadata[chunk_index];
-            if absolute.space != metadata.start.space {
-                return Err(Errs::one(LinkError::Misc));
+            if absolute.space.name != metadata.start.space.name {
+                return Err(Errs::one(LinkError::LabelInWrongAddressSpace {
+                    expr_loc: expr.loc,
+                    actual_address: absolute.address,
+                    address_width: absolute.space.width,
+                    actual_space: absolute.space.name,
+                    required_space: metadata.start.space.name.clone(),
+                }));
             }
             BigInt::from(absolute.address)
         } else {
-            self.eval_int_expr(expr)?
+            self.eval_int_expr(&expr)?
         };
-        write_int_patch(int_type, bigint, start, data)
+        write_int_patch(int_type, expr.loc, bigint, start, data)
     }
 
     fn apply_rel_patch(
@@ -240,10 +257,10 @@ impl<'a> FilePatcher<'a> {
         data: &mut [u8],
     ) -> LinkResult<()> {
         let mut errs = Errs::<LinkError>::new();
-        let lhs = errs.ok(self.eval_addr_expr(lhs_expr));
-        let rhs = errs.ok(self.eval_addr_expr(rhs_expr));
+        let lhs = errs.ok(self.eval_addr_expr(&lhs_expr));
+        let rhs = errs.ok(self.eval_addr_expr(&rhs_expr));
         if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
-            if lhs.space != rhs.space {
+            if lhs.space.name != rhs.space.name {
                 errs.push(LinkError::Misc);
             } else {
                 errs.also(write_rel_patch(rel_type, lhs, rhs, start, data))
@@ -252,23 +269,31 @@ impl<'a> FilePatcher<'a> {
         errs.result()
     }
 
-    fn eval_addr_expr(&self, expr: ObjExpr) -> LinkResult<AbsoluteLabel> {
+    fn eval_addr_expr(&self, expr: &ObjExpr) -> LinkResult<AbsoluteLabel> {
         match self.eval_patch_expr(expr)? {
             ExprValue::Label(label) => self.context.resolve_label(&label),
-            _ => Err(Errs::one(LinkError::PatchValueWrongType)),
+            expr_value => Err(Errs::one(LinkError::PatchValueWrongType {
+                expr_loc: expr.loc.clone(),
+                expr_value,
+                required_type: ExprType::Label,
+            })),
         }
     }
 
-    fn eval_int_expr(&self, expr: ObjExpr) -> LinkResult<BigInt> {
+    fn eval_int_expr(&self, expr: &ObjExpr) -> LinkResult<BigInt> {
         match self.eval_patch_expr(expr)? {
             ExprValue::Integer(bigint) => Ok(bigint),
-            _ => Err(Errs::one(LinkError::PatchValueWrongType)),
+            expr_value => Err(Errs::one(LinkError::PatchValueWrongType {
+                expr_loc: expr.loc.clone(),
+                expr_value,
+                required_type: ExprType::Integer,
+            })),
         }
     }
 
     /// Evaluates an expression and returns the result value.
-    fn eval_patch_expr(&self, expr: ObjExpr) -> LinkResult<ExprValue> {
-        self.env.evaluate_expression(&expr, &self.context)
+    fn eval_patch_expr(&self, expr: &ObjExpr) -> LinkResult<ExprValue> {
+        self.env.evaluate_expression(expr, &self.context)
     }
 }
 
@@ -286,18 +311,21 @@ fn write_fill_patch(
 
 fn write_int_patch(
     int_type: ObjPatchIntType,
-    value: BigInt,
+    expr_loc: ObjSrcLoc,
+    expr_value: BigInt,
     offset: usize,
     data: &mut [u8],
 ) -> LinkResult<()> {
-    match int_type.value_in_range(&value) {
+    match int_type.value_in_range(&expr_value) {
         Ok(int) => {
             int_type.write_value_at(int, offset, data);
             Ok(())
         }
-        Err(_range) => {
-            Err(Errs::one(LinkError::PatchValueOutOfRange { int_type, value }))
-        }
+        Err(_range) => Err(Errs::one(LinkError::PatchValueOutOfRange {
+            int_type,
+            expr_loc,
+            expr_value,
+        })),
     }
 }
 

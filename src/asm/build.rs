@@ -205,7 +205,10 @@ impl<'a> Assembler<'a> {
                 None => {
                     let message_span = assert_ast.directive_span;
                     let message_value = ExprValue::from("Assertion failed");
-                    let message_expr = ObjExpr::from(message_value.clone());
+                    let message_expr = ObjExpr::constant(
+                        message_value.clone(),
+                        self.env.make_loc(message_span),
+                    );
                     (message_span, message_expr, Ok(message_value))
                 }
                 Some(message_ast) => {
@@ -217,7 +220,10 @@ impl<'a> Assembler<'a> {
                         ExprType::String,
                     )) {
                         None => {
-                            let message_expr = ObjExpr::from(false);
+                            let message_expr = ObjExpr::constant(
+                                ExprValue::from(false),
+                                self.env.make_loc(message_span),
+                            );
                             let message_static =
                                 Err(ExprNotStaticReason::TypeError);
                             (message_span, message_expr, message_static)
@@ -229,9 +235,9 @@ impl<'a> Assembler<'a> {
                 }
             };
         let failure_expr = {
-            let mut message_ops = message_expr.ops;
-            let mut expr = ObjExpr::from(ExprFunc::Error);
-            expr.ops.append(&mut message_ops);
+            let mut expr = message_expr;
+            let func_value = ExprValue::from(ExprFunc::Error);
+            expr.ops.insert(0, ObjExprOp::Push(func_value));
             expr.ops.push(ObjExprOp::Apply {
                 context: self.env.current_src_context(),
                 arg_span: message_span,

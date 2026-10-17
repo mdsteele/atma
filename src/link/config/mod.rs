@@ -11,7 +11,7 @@ use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
-use super::types::AbsoluteLabel;
+use super::types::{AbsoluteLabel, AddressSpace};
 use crate::addr::{Addr, Align, Range, Size};
 use crate::error::{Errs, SrcCache};
 use crate::expr::ExprValue;
@@ -89,13 +89,55 @@ impl LinkConfig {
         eval_env: &mut LinkEvalEnv,
     ) -> LinkResult<()> {
         let mut errs = Errs::<LinkError>::new();
-        let symbol_context =
-            errs.with(self.resolve_imports(positioned_binary));
-        for expr in &self.variables {
-            errs.also(eval_env.evaluate_variable(expr, &symbol_context));
-        }
+        let symbol_addrs = errs.with(self.resolve_imports(positioned_binary));
+        errs.also(self.evaluate_variables(
+            symbol_addrs,
+            positioned_binary,
+            eval_env,
+        ));
         for export in &self.exports {
             errs.also(self.export_symbol(export, positioned_binary, eval_env));
+        }
+        errs.result()
+    }
+
+    fn resolve_imports(
+        &self,
+        positioned_binary: &PositionedBinary,
+    ) -> (HashMap<Rc<str>, Option<AbsoluteLabel>>, Errs<LinkError>) {
+        let mut errs = Errs::<LinkError>::new();
+        let mut symbol_addrs =
+            HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
+        for import in &self.imports {
+            let opt_absolute_label = positioned_binary
+                .external_symbols
+                .get(&import.name)
+                .map(|(label, _)| label.clone());
+            if opt_absolute_label.is_none() {
+                errs.push(LinkError::SymbolImportUnresolved {
+                    symbol_name: import.name.clone(),
+                    import_loc: import.loc.clone(),
+                });
+            }
+            symbol_addrs.insert(import.name.clone(), opt_absolute_label);
+        }
+        (symbol_addrs, errs)
+    }
+
+    fn evaluate_variables(
+        &self,
+        symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
+        positioned_binary: &PositionedBinary,
+        eval_env: &mut LinkEvalEnv,
+    ) -> LinkResult<()> {
+        let mut errs = Errs::<LinkError>::new();
+        let symbol_context = LinkSymbolContext {
+            address_space_widths: &positioned_binary.address_space_widths,
+            chunk_metadata: &[], // a linker config has no chunks
+            symbol_addrs,
+        };
+        for expr in &self.variables {
+            errs.also(eval_env.evaluate_variable(expr, &symbol_context));
         }
         errs.result()
     }
@@ -114,7 +156,10 @@ impl LinkConfig {
                 })),
             })?;
         let absolute_label = AbsoluteLabel {
-            space: export.space.clone(),
+            space: AddressSpace {
+                name: export.space.clone(),
+                width: positioned_binary.address_space_widths[&export.space],
+            },
             address: symbol_addr,
         };
         let collision = positioned_binary.external_symbols.insert(
@@ -132,33 +177,6 @@ impl LinkConfig {
             }
         }
     }
-
-    fn resolve_imports(
-        &self,
-        positioned_binary: &mut PositionedBinary,
-    ) -> (LinkSymbolContext<'static>, Errs<LinkError>) {
-        let mut errs = Errs::<LinkError>::new();
-        let mut symbol_addrs =
-            HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
-        for import in &self.imports {
-            let opt_absolute_label = positioned_binary
-                .external_symbols
-                .get(&import.name)
-                .map(|(label, _)| label.clone());
-            if opt_absolute_label.is_none() {
-                errs.push(LinkError::SymbolImportUnresolved {
-                    symbol_name: import.name.clone(),
-                    import_loc: import.loc.clone(),
-                });
-            }
-            symbol_addrs.insert(import.name.clone(), opt_absolute_label);
-        }
-        let symbol_context = LinkSymbolContext {
-            chunk_metadata: &[], // a linker config has no chunks
-            symbol_addrs,
-        };
-        (symbol_context, errs)
-    }
 }
 
 //===========================================================================//
@@ -168,10 +186,10 @@ impl LinkConfig {
 pub struct AddrspaceConfig {
     /// The name of this address space.
     pub name: Rc<str>,
-    /// The number of address bits for this address space.
-    pub bits: u32,
-    /// Any padded portions of memory regions in this address space will be
-    /// filled with this byte value by default.
+    /// The bit width of this address space.
+    pub width: Align,
+    /// Any padded portions of non-BSS memory regions in this address space
+    /// will be filled with this byte value by default.
     pub fill: u8,
 }
 

@@ -61,6 +61,14 @@ fn byte_selection_operator() {
 }
 
 #[test]
+fn exponentiation_operator() {
+    assert_eq!(compile_and_run("print 3 ** 3\n"), "27\n");
+    assert_eq!(compile_and_run("print (3 ** 3) ** 3\n"), "19683\n");
+    assert_eq!(compile_and_run("print 3 ** (3 ** 3)\n"), "7625597484987\n");
+    assert_eq!(compile_and_run("print 3 ** 3 ** 3\n"), "7625597484987\n");
+}
+
+#[test]
 fn interpolation_operator() {
     assert_eq!(
         compile_and_run("print \"foo{}\" %% \"bar\"\n"),

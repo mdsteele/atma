@@ -194,6 +194,23 @@ pub enum ObjPatchIntType {
 }
 
 impl ObjPatchIntType {
+    pub(crate) fn type_name(self) -> &'static str {
+        match self {
+            Self::A8 => "A8",
+            Self::S8 => "S8",
+            Self::U8 => "U8",
+            Self::A16be | Self::A16le => "A16",
+            Self::S16be | Self::S16le => "S16",
+            Self::U16be | Self::U16le => "U16",
+            Self::A24be | Self::A24le => "A24",
+            Self::S24be | Self::S24le => "S24",
+            Self::U24be | Self::U24le => "U24",
+            Self::A32be | Self::A32le => "A32",
+            Self::S32be | Self::S32le => "S32",
+            Self::U32be | Self::U32le => "U32",
+        }
+    }
+
     fn num_bytes(self) -> usize {
         match self {
             Self::A8 | Self::S8 | Self::U8 => 1,
@@ -331,7 +348,7 @@ impl ObjPatchIntType {
         }
     }
 
-    fn range(self) -> RangeInclusive<i64> {
+    pub(crate) fn range(self) -> RangeInclusive<i64> {
         match self {
             Self::S8 => RangeInclusive { start: -0x80, last: 0x7f },
             Self::S16be | Self::S16le => {
@@ -557,19 +574,29 @@ impl BinaryIo for ObjPatchRelType {
 mod tests {
     use super::{ObjPatch, ObjPatchData, ObjPatchIntType, ObjPatchRelType};
     use crate::addr::Offset;
+    use crate::error::SrcSpan;
     use crate::expr::ExprValue;
-    use crate::obj::ObjExpr;
     use crate::obj::assert_round_trips;
+    use crate::obj::{ObjExpr, ObjSrcContext, ObjSrcLoc, ObjSrcParent};
     use num_bigint::BigInt;
+    use std::rc::Rc;
+
+    fn int_expr(value: u32) -> ObjExpr {
+        let loc = ObjSrcLoc {
+            span: SrcSpan::from_byte_range(12..34),
+            context: Rc::new(ObjSrcContext {
+                path: Rc::from("foo.asm"),
+                parent: ObjSrcParent::Root,
+            }),
+        };
+        ObjExpr::constant(ExprValue::Integer(BigInt::from(value)), loc)
+    }
 
     #[test]
     fn obj_patch_round_trips() {
         assert_round_trips(ObjPatch {
             offset: Offset::from(17u32),
-            data: ObjPatchData::Integer(
-                ObjPatchIntType::U8,
-                ObjExpr::from(ExprValue::Integer(BigInt::from(0x12))),
-            ),
+            data: ObjPatchData::Integer(ObjPatchIntType::U8, int_expr(0x12)),
         });
     }
 
@@ -580,25 +607,25 @@ mod tests {
         assert_round_trips(ObjPatchData::Fill(0x10000));
         assert_round_trips(ObjPatchData::Integer(
             ObjPatchIntType::U8,
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x12))),
+            int_expr(0x12),
         ));
         assert_round_trips(ObjPatchData::Integer(
             ObjPatchIntType::U16le,
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x1234))),
+            int_expr(0x1234),
         ));
         assert_round_trips(ObjPatchData::Integer(
             ObjPatchIntType::U24le,
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x123456))),
+            int_expr(0x123456),
         ));
         assert_round_trips(ObjPatchData::Relative(
             ObjPatchRelType::R16S8,
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x1234))),
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x1256))),
+            int_expr(0x1234),
+            int_expr(0x1256),
         ));
         assert_round_trips(ObjPatchData::Relative(
             ObjPatchRelType::R16S16le,
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x5678))),
-            ObjExpr::from(ExprValue::Integer(BigInt::from(0x1234))),
+            int_expr(0x5678),
+            int_expr(0x1234),
         ));
     }
 

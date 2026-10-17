@@ -500,13 +500,14 @@ impl AsmTypeEnv {
         &self,
         expr: ExprAst,
     ) -> ((ObjExpr, ExprType, ExprStatic), Errs<AsmError>) {
+        let loc = self.make_loc(expr.span);
         match ExprCompiler::new(self).typecheck(expr) {
             Ok((ops, expr_type, expr_static)) => {
                 debug_assert!(!ops.is_empty());
-                ((ObjExpr { ops }, expr_type, expr_static), Errs::new())
+                ((ObjExpr { ops, loc }, expr_type, expr_static), Errs::new())
             }
             Err(errs) => {
-                let expr = ObjExpr::from(false);
+                let expr = ObjExpr::constant(ExprValue::from(false), loc);
                 let expr_type = ExprType::Undefined;
                 let expr_static = Err(ExprNotStaticReason::TypeError);
                 ((expr, expr_type, expr_static), self.map_type_errors(errs))

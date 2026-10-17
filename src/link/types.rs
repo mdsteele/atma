@@ -1,4 +1,4 @@
-use crate::addr::Addr;
+use crate::addr::{Addr, Align};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -15,10 +15,22 @@ pub(super) struct ChunkId {
 
 //===========================================================================//
 
+/// An address space that an `AbsoluteLabel` exists in.
+#[derive(Clone)]
+pub(super) struct AddressSpace {
+    /// The name of this address space.
+    pub name: Rc<str>,
+    /// The bit width of this address space.
+    pub width: Align,
+}
+
+//===========================================================================//
+
+/// A fully-resolved label address.
 #[derive(Clone)]
 pub(super) struct AbsoluteLabel {
-    /// The name of the address space that the label exists in.
-    pub space: Rc<str>,
+    /// The address space that the label exists in.
+    pub space: AddressSpace,
     /// The address of the label.
     pub address: Addr,
 }

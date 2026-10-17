@@ -56,7 +56,7 @@ impl LinkAddrspaceAttrs {
             match &*attr_ast.id.name {
                 "bits" => {
                     let result = Self::bits_attr(env, attr_ast.expr);
-                    attrs.bits = Some(errs.ok_or_default(result));
+                    attrs.bits = Some(errs.ok_or(result, Addr::BITS));
                 }
                 "fill" => {
                     let result = Self::fill_attr(env, attr_ast.expr);

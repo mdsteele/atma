@@ -26,6 +26,14 @@ impl Align {
     /// The only address that is aligned to this alignment is [`Addr::MIN`].
     pub const MAX: Align = Align(NonZero::new(Addr::BITS as u8 + 1).unwrap());
 
+    /// Returns an alignment to the given number of bits.
+    ///
+    /// Panics if `bits > Addr::BITS`.
+    pub fn with_bits(bits: u32) -> Self {
+        assert!(bits <= Addr::BITS);
+        Align(NonZero::new(bits as u8 + 1).unwrap())
+    }
+
     /// Returns the base-2 logarithm of the alignment.
     ///
     /// This is always exact, as `self` represents a power of two. It is also
@@ -42,7 +50,7 @@ impl Align {
         Addr(!(((1u64 << self.log2()) - 1) as u32))
     }
 
-    pub(crate) fn decode_from_u8(byte: u8) -> io::Result<Align> {
+    pub(crate) fn decode_from_u8(byte: u8) -> io::Result<Self> {
         if (1..=(Addr::BITS as u8 + 1)).contains(&byte) {
             Ok(Align(NonZero::new(byte).unwrap()))
         } else {

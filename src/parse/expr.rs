@@ -316,7 +316,7 @@ impl ExprAst {
 
             let pratt_expr = suffixed_expr.pratt((
                 pratt::infix(
-                    pratt::left(BIND_EXPONENTIATE),
+                    pratt::right(BIND_EXPONENTIATE),
                     symbol(TokenValue::StarStar),
                     |l, o, r, _| ExprAst::binop(BinOpAst::Pow, l, o, r),
                 ),

@@ -2,7 +2,7 @@ use super::config::{AddrspaceConfig, LinkConfig, RegionKind};
 use super::error::LinkError;
 use super::loose::{LooseChunk, LooseSection};
 use super::place::try_place;
-use super::types::ChunkId;
+use super::types::{AddressSpace, ChunkId};
 use crate::addr::{Addr, Align, Offset, Range, Size};
 use crate::error::Errs;
 use crate::obj::{ObjFile, ObjSrcLoc};
@@ -190,8 +190,8 @@ pub(super) struct ArrangedRegion {
     /// The linker config source code location where the memory region was
     /// declared.
     pub name_loc: ObjSrcLoc,
-    /// The name of the address space that this memory region exists in.
-    pub space: Rc<str>,
+    /// The address space that this memory region exists in.
+    pub space: AddressSpace,
     /// The range of addresses covered by this memory region.
     pub range: Range,
     /// The sections in this memory region, listed in the same order in which
@@ -224,7 +224,10 @@ impl ArrangedRegion {
             arranged_regions.push(ArrangedRegion {
                 name: region.name.clone(),
                 name_loc: region.name_loc.clone(),
-                space: region.space.clone(),
+                space: AddressSpace {
+                    name: region.space.clone(),
+                    width: addrspace.width,
+                },
                 range: region.range,
                 sections: Vec::new(),
                 fill: region.fill.unwrap_or(addrspace.fill),

@@ -126,7 +126,7 @@ impl<'a> ConfigBuilder<'a> {
         }
         self.config.addrspaces.push(AddrspaceConfig {
             name: entry.id.name,
-            bits: attrs.bits.unwrap_or(u32::BITS),
+            width: Align::with_bits(attrs.bits.unwrap_or(Addr::BITS)),
             fill: attrs.fill.unwrap_or_default(),
         });
         errs.result()
@@ -358,7 +358,7 @@ impl<'a> ConfigBuilder<'a> {
                 .addrspaces
                 .iter()
                 .find(|addrspace| space == &addrspace.name)
-                .map(|addrspace| addrspace.bits)
+                .map(|addrspace| addrspace.width.log2())
                 .unwrap_or(Addr::BITS)
         } else {
             errs.push(ConfigError::MissingAttr {

@@ -122,6 +122,7 @@ impl ConfigTypeEnv {
         &self,
         expr: ExprAst,
     ) -> ConfigResult<(ObjExpr, ExprType, ExprStatic)> {
+        let loc = self.make_loc(expr.span);
         let (ops, expr_type, expr_static) =
             ExprCompiler::new(self).typecheck(expr).map_err(|errs| {
                 errs.map(|error| ConfigError::ExprTypeError {
@@ -129,7 +130,7 @@ impl ConfigTypeEnv {
                     error,
                 })
             })?;
-        Ok((ObjExpr { ops }, expr_type, expr_static))
+        Ok((ObjExpr { ops, loc }, expr_type, expr_static))
     }
 
     pub fn make_loc(&self, span: SrcSpan) -> ObjSrcLoc {

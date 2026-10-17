@@ -1,10 +1,7 @@
 use super::binary::{BinaryIo, Decoder, Encoder};
-use super::context::ObjSrcContext;
+use super::context::{ObjSrcContext, ObjSrcLoc};
 use crate::error::SrcSpan;
-use crate::expr::{
-    ExprBinOp, ExprFunc, ExprOp, ExprUnOp, ExprValue, Template,
-};
-use num_bigint::BigInt;
+use crate::expr::{ExprBinOp, ExprOp, ExprUnOp, ExprValue, Template};
 use std::io;
 use std::rc::Rc;
 
@@ -33,6 +30,14 @@ pub struct ObjExpr {
     /// The operations to perform to evaluate the expression.  Must be
     /// nonempty.
     pub(crate) ops: Vec<ObjExprOp>,
+    /// The source code location where this expression appears.
+    pub(crate) loc: ObjSrcLoc,
+}
+
+impl ObjExpr {
+    pub(crate) fn constant(value: ExprValue, loc: ObjSrcLoc) -> Self {
+        Self { ops: vec![ObjExprOp::Push(value)], loc }
+    }
 }
 
 impl BinaryIo for ObjExpr {
@@ -43,7 +48,8 @@ impl BinaryIo for ObjExpr {
         if ops.is_empty() {
             Err(io::Error::new(io::ErrorKind::InvalidData, "empty expression"))
         } else {
-            Ok(Self { ops })
+            let loc = ObjSrcLoc::read_from(decoder)?;
+            Ok(Self { ops, loc })
         }
     }
 
@@ -52,14 +58,20 @@ impl BinaryIo for ObjExpr {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         debug_assert!(!self.ops.is_empty());
-        self.ops.write_to(encoder)
+        self.ops.write_to(encoder)?;
+        self.loc.write_to(encoder)
     }
 
     fn read_option_from<R: io::BufRead>(
         decoder: &mut Decoder<R>,
     ) -> io::Result<Option<Self>> {
         let ops = Vec::<ObjExprOp>::read_from(decoder)?;
-        if ops.is_empty() { Ok(None) } else { Ok(Some(Self { ops })) }
+        if ops.is_empty() {
+            Ok(None)
+        } else {
+            let loc = ObjSrcLoc::read_from(decoder)?;
+            Ok(Some(Self { ops, loc }))
+        }
     }
 
     fn write_option_to<W: io::Write>(
@@ -68,35 +80,8 @@ impl BinaryIo for ObjExpr {
     ) -> io::Result<()> {
         match option {
             None => Vec::<ObjExprOp>::new().write_to(encoder),
-            Some(value) => {
-                debug_assert!(!value.ops.is_empty());
-                value.ops.write_to(encoder)
-            }
+            Some(value) => value.write_to(encoder),
         }
-    }
-}
-
-impl From<ExprValue> for ObjExpr {
-    fn from(value: ExprValue) -> Self {
-        Self { ops: vec![ObjExprOp::Push(value)] }
-    }
-}
-
-impl From<bool> for ObjExpr {
-    fn from(value: bool) -> Self {
-        Self::from(ExprValue::from(value))
-    }
-}
-
-impl From<ExprFunc> for ObjExpr {
-    fn from(value: ExprFunc) -> Self {
-        Self::from(ExprValue::from(value))
-    }
-}
-
-impl From<BigInt> for ObjExpr {
-    fn from(value: BigInt) -> Self {
-        Self::from(ExprValue::from(value))
     }
 }
 

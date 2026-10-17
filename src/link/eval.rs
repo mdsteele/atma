@@ -1,7 +1,7 @@
 use super::config::ConfigVariableOr;
 use super::error::{LinkError, LinkResult};
-use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::Addr;
+use super::types::{AbsoluteLabel, AddressSpace, ChunkMetadata};
+use crate::addr::{Addr, Align};
 use crate::error::Errs;
 use crate::expr::{ExprEvalError, ExprFunc, ExprLabel, ExprValue};
 use crate::obj::{ObjExpr, ObjExprOp};
@@ -14,6 +14,8 @@ use std::rc::Rc;
 /// Represents the data needed to resolve symbols in a given evaluation context
 /// during linking, which can either be an object file or the linker config.
 pub(super) struct LinkSymbolContext<'a> {
+    /// The bit width of each known address space.
+    pub address_space_widths: &'a HashMap<Rc<str>, Align>,
     /// Metadata for each chunk in this evaluation context.  For an object
     /// file, this will be metadata for the chunks in that object file; for a
     /// linker config file, this will be empty.
@@ -33,7 +35,10 @@ impl<'a> LinkSymbolContext<'a> {
     ) -> LinkResult<AbsoluteLabel> {
         match label {
             ExprLabel::AddrAbsolute { space, address } => Ok(AbsoluteLabel {
-                space: space.clone(),
+                space: AddressSpace {
+                    name: space.clone(),
+                    width: self.address_space_widths[Rc::as_ref(space)],
+                },
                 address: Addr::wrap_bigint(address),
             }),
             &ExprLabel::ChunkAbsolute { chunk_index, ref address } => {
@@ -339,7 +344,7 @@ impl<'a> ExprEvaluator<'a> {
     fn push_label(&mut self, label: &ExprLabel) -> LinkResult<()> {
         let resolved = self.symbol_context.resolve_label(label)?;
         self.push_value(ExprValue::Label(ExprLabel::AddrAbsolute {
-            space: resolved.space,
+            space: resolved.space.name,
             address: BigInt::from(resolved.address),
         }));
         Ok(())

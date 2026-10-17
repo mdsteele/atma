@@ -1,6 +1,6 @@
-use crate::addr::Size;
+use crate::addr::{Addr, Align, Size};
 use crate::error::{Errs, SourceError};
-use crate::expr::ExprEvalError;
+use crate::expr::{ExprEvalError, ExprType, ExprValue};
 use crate::obj::{ObjPatchIntType, ObjSrcContext, ObjSrcLoc};
 use num_bigint::BigInt;
 use std::range::RangeInclusive;
@@ -71,6 +71,22 @@ pub enum LinkError {
         /// The byte offset for the end of the checksum range.
         end: u64,
     },
+    /// An expression evaluated to a label in one address space, but a
+    /// different address space is required.
+    LabelInWrongAddressSpace {
+        /// The source code location for the expression.
+        expr_loc: ObjSrcLoc,
+        /// The absolute address of the label value that the expression
+        /// evaluates to.
+        actual_address: Addr,
+        /// The bit width of the actual address space.
+        address_width: Align,
+        /// The address space of the label value that the expression evaluates
+        /// to.
+        actual_space: Rc<str>,
+        /// The address space that the label value is supposed to have.
+        required_space: Rc<str>,
+    },
     /// A patch's expression was malformed in some way (e.g. stack
     /// underflow). This shouldn't happen for valid object files (as the
     /// assembler should have generated a valid expression).
@@ -87,13 +103,22 @@ pub enum LinkError {
     PatchValueOutOfRange {
         /// The kind of patch that failed.
         int_type: ObjPatchIntType,
+        /// The source code location for the expression.
+        expr_loc: ObjSrcLoc,
         /// The out-of-range expression value.
-        value: BigInt,
+        expr_value: BigInt,
     },
     /// A patch expression evaluated to a value of the wrong type. This
     /// shouldn't happen for valid object files (as the assembler should have
     /// caught the type error).
-    PatchValueWrongType,
+    PatchValueWrongType {
+        /// The source code location for the expression.
+        expr_loc: ObjSrcLoc,
+        /// The value that the expression evaluated to.
+        expr_value: ExprValue,
+        /// The type that was expected.
+        required_type: ExprType,
+    },
     /// A relative address patch resulted in a delta beyond the permitted
     /// range.
     RelativeAddressOutOfRange {
@@ -163,6 +188,51 @@ impl LinkError {
             }
             Self::ExprEvalError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
+            }
+            Self::LabelInWrongAddressSpace {
+                expr_loc,
+                actual_address,
+                address_width,
+                actual_space,
+                required_space,
+            } => {
+                let message = format!(
+                    "expected a label in address space {required_space:?}, \
+                     not {actual_space:?}"
+                );
+                let byte_width = address_width.log2().div_ceil(4) as usize;
+                let label = format!(
+                    "this evaluates to address \
+                     ${actual_address:0byte_width$x} in {actual_space:?}"
+                );
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
+            Self::PatchValueOutOfRange { int_type, expr_loc, expr_value } => {
+                let range = int_type.range();
+                let message = format!(
+                    "{} value must be between {} and {}",
+                    int_type.type_name(),
+                    range.start,
+                    range.last
+                );
+                let label = format!("this evaluates to {expr_value}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
+            Self::PatchValueWrongType {
+                expr_loc,
+                expr_value,
+                required_type,
+            } => {
+                let message =
+                    format!("expected a patch value of type {required_type}");
+                let label = format!("this evaluates to {expr_value}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
             }
             Self::SectionCannotBePlaced {
                 region_name,

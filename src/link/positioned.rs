@@ -2,8 +2,8 @@ use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::config::{LinkConfig, RegionKind};
 use super::error::{LinkError, LinkResult};
 use super::place::try_place;
-use super::types::{AbsoluteLabel, ChunkId, ChunkMetadata};
-use crate::addr::{Addr, Size};
+use super::types::{AbsoluteLabel, AddressSpace, ChunkId, ChunkMetadata};
+use crate::addr::{Addr, Align, Size};
 use crate::error::Errs;
 use crate::obj::{ObjFile, ObjSrcLoc};
 use rangemap::RangeInclusiveSet;
@@ -107,8 +107,8 @@ impl PositionedSection {
 /// Represents a memory region after its sections have been positioned within
 /// its address space.
 pub(super) struct PositionedRegion {
-    /// The name of the address space that this memory region exists in.
-    pub space: Rc<str>,
+    /// The address space that this memory region exists in.
+    pub space: AddressSpace,
     /// The size of this memory region in the final binary, in bytes, or zero
     /// if this region should not appear in the final binary.
     pub binary_size: u64,
@@ -241,6 +241,8 @@ fn section_ordering(lhs: &ArrangedSection, rhs: &ArrangedSection) -> Ordering {
 
 /// Positioning information for all regions of a complete binary.
 pub(super) struct PositionedBinary {
+    /// The bit width of each address space relevant to this binary.
+    pub address_space_widths: HashMap<Rc<str>, Align>,
     /// The memory regions for this binary.
     pub regions: Vec<PositionedRegion>,
     /// For each object file, metadata about each chunk in that object file.
@@ -317,6 +319,11 @@ impl PositionedBinary {
             .collect::<Vec<_>>();
 
         Ok(PositionedBinary {
+            address_space_widths: config
+                .addrspaces
+                .iter()
+                .map(|addrspace| (addrspace.name.clone(), addrspace.width))
+                .collect(),
             regions: positioned_regions,
             file_chunk_metadata,
             external_symbols,
