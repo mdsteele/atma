@@ -33,9 +33,9 @@ enum Task {
     InterpTemplate(SrcSpan, SrcSpan, ExprAst),
     InterpArgs(Option<Template>, SrcSpan, SrcSpan, SrcSpan),
     ListLiteral(Vec<SrcSpan>),
-    LogBranch(bool, SrcSpan, SrcSpan, ExprAst),
-    LogJoin(bool, usize),
-    LogUnify(bool, SrcSpan, SrcSpan, SrcSpan),
+    LogicBranch(bool, SrcSpan, SrcSpan, ExprAst),
+    LogicJoin(bool, usize),
+    LogicUnify(bool, SrcSpan, SrcSpan, SrcSpan),
     MemoryRead(SrcSpan, SrcSpan),
     PhantomExpr(ExprAst),
     PhantomDone(usize),
@@ -103,16 +103,16 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     );
                 }
                 Task::ListLiteral(spans) => self.do_task_list_literal(spans),
-                Task::LogBranch(identity, op_span, lhs_span, rhs_ast) => {
-                    self.do_task_log_branch(
+                Task::LogicBranch(identity, op_span, lhs_span, rhs_ast) => {
+                    self.do_task_logic_branch(
                         identity, op_span, lhs_span, rhs_ast,
                     );
                 }
-                Task::LogJoin(identity, size) => {
-                    self.do_task_log_join(identity, size);
+                Task::LogicJoin(identity, size) => {
+                    self.do_task_logic_join(identity, size);
                 }
-                Task::LogUnify(identity, op_span, lhs_span, rhs_span) => {
-                    self.do_task_log_unify(
+                Task::LogicUnify(identity, op_span, lhs_span, rhs_span) => {
+                    self.do_task_logic_unify(
                         identity, op_span, lhs_span, rhs_span,
                     );
                 }
@@ -158,11 +158,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::Expr(*lhs_ast));
             }
             ExprAstNode::BinOp(
-                (binop_span, BinOpAst::LogAnd),
+                (binop_span, BinOpAst::LogicAnd),
                 lhs_ast,
                 rhs_ast,
             ) => {
-                self.tasks.push(Task::LogBranch(
+                self.tasks.push(Task::LogicBranch(
                     true,
                     binop_span,
                     lhs_ast.span,
@@ -171,11 +171,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::Expr(*lhs_ast));
             }
             ExprAstNode::BinOp(
-                (binop_span, BinOpAst::LogOr),
+                (binop_span, BinOpAst::LogicOr),
                 lhs_ast,
                 rhs_ast,
             ) => {
-                self.tasks.push(Task::LogBranch(
+                self.tasks.push(Task::LogicBranch(
                     false,
                     binop_span,
                     lhs_ast.span,
@@ -716,14 +716,14 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         self.types.push((ExprType::List(Rc::from(item_type)), list_static));
     }
 
-    fn do_task_log_branch(
+    fn do_task_logic_branch(
         &mut self,
         identity: bool,
         op_span: SrcSpan,
         lhs_span: SrcSpan,
         rhs_ast: ExprAst,
     ) {
-        self.tasks.push(Task::LogUnify(
+        self.tasks.push(Task::LogicUnify(
             identity,
             op_span,
             lhs_span,
@@ -738,16 +738,16 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::PhantomExpr(rhs_ast));
             }
             (_, _) => {
-                self.tasks.push(Task::LogJoin(identity, self.ops.len()));
+                self.tasks.push(Task::LogicJoin(identity, self.ops.len()));
                 self.tasks.push(Task::Expr(rhs_ast));
                 // Add a placeholder operation, which will be replaced with
-                // `skip_if` or `skip_unless` by the `LogUnify` task.
+                // `skip_if` or `skip_unless` by the `LogicUnify` task.
                 self.ops.push(E::Op::skip(0));
             }
         }
     }
 
-    fn do_task_log_join(&mut self, identity: bool, op_index: usize) {
+    fn do_task_logic_join(&mut self, identity: bool, op_index: usize) {
         self.ops[op_index] = if identity {
             E::Op::skip_unless(self.ops.len() - op_index)
         } else {
@@ -757,7 +757,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         self.ops.push(E::Op::literal(ExprValue::Boolean(!identity)));
     }
 
-    fn do_task_log_unify(
+    fn do_task_logic_unify(
         &mut self,
         identity: bool,
         op_span: SrcSpan,
@@ -788,9 +788,9 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.errs.push(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,
                     op: if identity {
-                        BinOpAst::LogAnd
+                        BinOpAst::LogicAnd
                     } else {
-                        BinOpAst::LogOr
+                        BinOpAst::LogicOr
                     },
                     lhs_span,
                     lhs_type,

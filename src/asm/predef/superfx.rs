@@ -361,7 +361,7 @@ fn link_pound_imm_body(
                     let rhs = pool.int_literal_expr(4);
                     pool.binop_expr(BinOpAst::CmpLe, lhs, rhs)
                 };
-                pool.binop_expr(BinOpAst::LogAnd, lhs, rhs)
+                pool.binop_expr(BinOpAst::LogicAnd, lhs, rhs)
             };
             let ok = pool.placeholder_expr(placeholder);
             let err = pool.error_expr(

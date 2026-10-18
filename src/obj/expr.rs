@@ -407,7 +407,7 @@ mod tests {
         assert_round_trips(ObjExprOp::TupleItem(2));
         assert_round_trips(ObjExprOp::UnOp {
             context: context.clone(),
-            unop: ExprUnOp::Neg,
+            unop: ExprUnOp::Negate,
             op_span: SrcSpan::from_byte_range(11..12),
             arg_span: SrcSpan::from_byte_range(13..18),
         });

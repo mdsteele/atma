@@ -10,8 +10,9 @@ use std::io;
 
 const TAG_ADDR_OF: u8 = 0x00;
 const TAG_BIT_NOT: u8 = 0x01;
-const TAG_LENGTH: u8 = 0x02;
-const TAG_NEG: u8 = 0x03;
+const TAG_IDENTITY: u8 = 0x02;
+const TAG_LENGTH: u8 = 0x03;
+const TAG_NEGATE: u8 = 0x04;
 
 //===========================================================================//
 
@@ -54,8 +55,9 @@ impl ExprUnOpEvalError {
 pub(crate) enum ExprUnOp {
     AddrOf,
     BitNot,
+    Identity,
     Length,
-    Neg,
+    Negate,
 }
 
 impl ExprUnOp {
@@ -74,11 +76,14 @@ impl ExprUnOp {
             (UnOpAst::Length, ExprType::List(_) | ExprType::Bottom) => {
                 Ok((Self::Length, ExprType::Integer))
             }
-            (UnOpAst::LogNot, ExprType::Boolean | ExprType::Bottom) => {
+            (UnOpAst::LogicNot, ExprType::Boolean | ExprType::Bottom) => {
                 Ok((Self::BitNot, ExprType::Boolean))
             }
-            (UnOpAst::Neg, ExprType::Integer | ExprType::Bottom) => {
-                Ok((Self::Neg, ExprType::Integer))
+            (UnOpAst::Negate, ExprType::Integer | ExprType::Bottom) => {
+                Ok((Self::Negate, ExprType::Integer))
+            }
+            (UnOpAst::Plus, ExprType::Integer | ExprType::Bottom) => {
+                Ok((Self::Identity, ExprType::Integer))
             }
             // `WithAddr` is special-cased in `ExprCompiler`, and is never
             // passed to this method.
@@ -113,13 +118,14 @@ impl ExprUnOp {
                 ExprValue::Integer(arg) => Ok(ExprValue::Integer(!arg)),
                 _ => Err(ExprUnOpEvalError::InvalidType),
             },
+            Self::Identity => Ok(arg),
             Self::Length => match arg {
                 ExprValue::List(arg) => {
                     Ok(ExprValue::Integer(BigInt::from(arg.len())))
                 }
                 _ => Err(ExprUnOpEvalError::InvalidType),
             },
-            Self::Neg => match arg {
+            Self::Negate => match arg {
                 ExprValue::Integer(arg) => Ok(ExprValue::Integer(-arg)),
                 _ => Err(ExprUnOpEvalError::InvalidType),
             },
@@ -134,8 +140,9 @@ impl BinaryIo for ExprUnOp {
         match u8::read_from(decoder)? {
             TAG_ADDR_OF => Ok(Self::AddrOf),
             TAG_BIT_NOT => Ok(Self::BitNot),
+            TAG_IDENTITY => Ok(Self::Identity),
             TAG_LENGTH => Ok(Self::Length),
-            TAG_NEG => Ok(Self::Neg),
+            TAG_NEGATE => Ok(Self::Negate),
             byte => Err(io::Error::other(format!(
                 "unknown unop tag: 0x{:02x}",
                 byte
@@ -150,8 +157,9 @@ impl BinaryIo for ExprUnOp {
         let tag = match self {
             Self::AddrOf => TAG_ADDR_OF,
             Self::BitNot => TAG_BIT_NOT,
+            Self::Identity => TAG_IDENTITY,
             Self::Length => TAG_LENGTH,
-            Self::Neg => TAG_NEG,
+            Self::Negate => TAG_NEGATE,
         };
         tag.write_to(encoder)
     }
@@ -168,8 +176,9 @@ mod tests {
     fn binary_io_round_trip() {
         assert_round_trips(ExprUnOp::AddrOf);
         assert_round_trips(ExprUnOp::BitNot);
+        assert_round_trips(ExprUnOp::Identity);
         assert_round_trips(ExprUnOp::Length);
-        assert_round_trips(ExprUnOp::Neg);
+        assert_round_trips(ExprUnOp::Negate);
     }
 }
 

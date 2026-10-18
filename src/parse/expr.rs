@@ -72,9 +72,11 @@ pub enum UnOpAst {
     /// Length of list.
     Length,
     /// Logical NOT.
-    LogNot,
+    LogicNot,
     /// Negation.
-    Neg,
+    Negate,
+    /// Unary plus.
+    Plus,
     /// Label with address.
     WithAddr,
 }
@@ -87,8 +89,9 @@ impl UnOpAst {
             UnOpAst::AddrOf => "take address of",
             UnOpAst::BitNot => "bitwise-NOT",
             UnOpAst::Length => "get length of",
-            UnOpAst::LogNot => "logical-NOT",
-            UnOpAst::Neg => "negate",
+            UnOpAst::LogicNot => "logical-NOT",
+            UnOpAst::Negate => "negate",
+            UnOpAst::Plus => "unary-plus",
             UnOpAst::WithAddr => "make label address from",
         }
     }
@@ -130,9 +133,9 @@ pub enum BinOpAst {
     /// Exponentiation.
     Pow,
     /// Logical (short-circuiting) AND.
-    LogAnd,
+    LogicAnd,
     /// Logical (short-circuiting) OR.
-    LogOr,
+    LogicOr,
     /// Modulo.
     Mod,
     /// Multiplication.
@@ -166,8 +169,8 @@ impl BinOpAst {
             | BinOpAst::CmpLt => ("order", "against", false),
             BinOpAst::Concat => ("concatenate", "with", false),
             BinOpAst::Div => ("divide", "by", false),
-            BinOpAst::LogAnd => ("logical-AND", "with", false),
-            BinOpAst::LogOr => ("logical-OR", "with", false),
+            BinOpAst::LogicAnd => ("logical-AND", "with", false),
+            BinOpAst::LogicOr => ("logical-OR", "with", false),
             BinOpAst::Interp => ("interpolate", "into", true),
             BinOpAst::Mod => ("modulo", "by", false),
             BinOpAst::Mul => ("multiply", "by", false),
@@ -334,12 +337,17 @@ impl ExprAst {
                     pratt::prefix(
                         BIND_UNARY_PREFIX,
                         symbol(TokenValue::Bang),
-                        |op, arg, _| ExprAst::unop(UnOpAst::LogNot, op, arg),
+                        |op, arg, _| ExprAst::unop(UnOpAst::LogicNot, op, arg),
                     ),
                     pratt::prefix(
                         BIND_UNARY_PREFIX,
                         symbol(TokenValue::Minus),
-                        |op, arg, _| ExprAst::unop(UnOpAst::Neg, op, arg),
+                        |op, arg, _| ExprAst::unop(UnOpAst::Negate, op, arg),
+                    ),
+                    pratt::prefix(
+                        BIND_UNARY_PREFIX,
+                        symbol(TokenValue::Plus),
+                        |op, arg, _| ExprAst::unop(UnOpAst::Plus, op, arg),
                     ),
                     pratt::prefix(
                         BIND_UNARY_PREFIX,
@@ -455,12 +463,12 @@ impl ExprAst {
                 pratt::infix(
                     pratt::right(BIND_LOGICAL_AND),
                     symbol(TokenValue::AndAnd),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::LogAnd, l, o, r),
+                    |l, o, r, _| ExprAst::binop(BinOpAst::LogicAnd, l, o, r),
                 ),
                 pratt::infix(
                     pratt::right(BIND_LOGICAL_OR),
                     symbol(TokenValue::OrOr),
-                    |l, o, r, _| ExprAst::binop(BinOpAst::LogOr, l, o, r),
+                    |l, o, r, _| ExprAst::binop(BinOpAst::LogicOr, l, o, r),
                 ),
             ));
 

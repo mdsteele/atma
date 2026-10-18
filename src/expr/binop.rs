@@ -302,7 +302,7 @@ impl ExprBinOp {
             // String interpolation and logical AND/OR and are special-cased in
             // `ExprCompiler`, and are never passed to this method.
             (BinOpAst::Interp, _, _) => unreachable!(),
-            (BinOpAst::LogAnd | BinOpAst::LogOr, _, _) => unreachable!(),
+            (BinOpAst::LogicAnd | BinOpAst::LogicOr, _, _) => unreachable!(),
             (op, lhs_type, rhs_type) => {
                 Err(Errs::one(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,

@@ -44,7 +44,7 @@ fn cannot_apply_unary_op_to_type() {
         expr_errors(source).as_slice(),
         [ExprTypeError::CannotApplyUnaryOpToType {
             op_span: _,
-            op: UnOpAst::LogNot,
+            op: UnOpAst::LogicNot,
             arg_span: _,
             arg_type: ExprType::Integer,
         }]

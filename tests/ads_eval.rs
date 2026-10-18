@@ -104,6 +104,14 @@ fn length_operator() {
     assert_eq!(compile_and_run("print {{}, {1, 2}}[1]#\n"), "2\n");
 }
 
+#[test]
+fn unary_prefix_operators() {
+    assert_eq!(compile_and_run("print -(1 + 2)\n"), "-3\n");
+    assert_eq!(compile_and_run("print +(1 - 3)\n"), "-2\n");
+    assert_eq!(compile_and_run("print ~(1 + 2)\n"), "-4\n");
+    assert_eq!(compile_and_run("print !(1 == 3)\n"), "%true\n");
+}
+
 //===========================================================================//
 // Variables:
 
