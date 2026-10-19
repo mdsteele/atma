@@ -147,11 +147,8 @@ fn memory_lvalue() {
       when read 0 {
         print DATA
       }
-      when read 1 {
-        print DATA
-      }
       step
-      step
+      print [$01]
     "#;
     assert_eq!(compile_and_run(source), "37\n42\n");
 }

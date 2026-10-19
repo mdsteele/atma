@@ -97,6 +97,13 @@ pub enum AdsError {
         /// The source code location for the constant's declaration.
         decl_loc: AdsSrcLoc,
     },
+    /// An error message was specified using a non-string expression.
+    ErrorMessageTypeError {
+        /// The source code location for the non-string expression.
+        expr_loc: AdsSrcLoc,
+        /// The type of the expression.
+        expr_type: ExprType,
+    },
     /// An expression failed to typecheck.
     ExprTypeError {
         /// The context that the expression appeared within.
@@ -196,6 +203,16 @@ impl AdsError {
                     .with_primary_label(label2)
                     .with_context(&*lvalue_loc.context)
             }
+            Self::ErrorMessageTypeError { expr_loc, expr_type } => {
+                let message = format!(
+                    "error message must be of type {}, not {expr_type}",
+                    ExprType::String
+                );
+                let label = format!("this has type {expr_type}");
+                SourceError::new(expr_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*expr_loc.context)
+            }
             Self::ExprTypeError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
             }
@@ -293,6 +310,13 @@ impl AdsError {
 /// An error that can occur while executing an Atma Debugger Script program.
 #[derive(Debug)]
 pub enum AdsRuntimeError {
+    /// Failed an `assert` or executed an `error` command.
+    AssertionFailed {
+        /// The source code location for the assertion.
+        loc: AdsSrcLoc,
+        /// The error message.
+        message: Rc<str>,
+    },
     /// An error occurred while evaluating an expression at runtime.
     ExprEvalError {
         /// The context in which the evaluation error occurred.
@@ -313,6 +337,11 @@ impl AdsRuntimeError {
     /// Converts the error into a `SourceError`.
     pub fn to_source_error(self) -> SourceError {
         match self {
+            Self::AssertionFailed { loc, message } => {
+                SourceError::new(loc.primary(), message)
+                    .with_primary_label("")
+                    .with_context(&*loc.context)
+            }
             Self::ExprEvalError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)
             }

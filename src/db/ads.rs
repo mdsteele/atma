@@ -131,6 +131,13 @@ impl<W: Write> AdsEnvironment<W> {
                     return self.jump(*offset);
                 }
             }
+            AdsInstruction::Error { loc } => {
+                let message = self.value_stack.pop().unwrap().unwrap_str();
+                return Err(AdsRuntimeError::AssertionFailed {
+                    loc: loc.clone(),
+                    message,
+                });
+            }
             AdsInstruction::Exit => return Ok(true),
             AdsInstruction::ExpandTuple => {
                 let values = self.value_stack.pop().unwrap().unwrap_tuple();

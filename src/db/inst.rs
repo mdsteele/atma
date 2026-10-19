@@ -43,7 +43,13 @@ pub(crate) enum AdsInstruction {
     /// Pops the top value from the value stack (which must be a boolean).  If
     /// the value is false, adds the given offset to the ADS program counter.
     BranchUnless(isize),
-    /// Exits the program.
+    /// Pops the top value from the value stack (which must be a string) and
+    /// exits the program using that string as an error message.
+    Error {
+        /// The source code location for the error message expression.
+        loc: AdsSrcLoc,
+    },
+    /// Exits the program successfully.
     Exit,
     /// Pops the top value from the value stack (which must be a tuple), and
     /// pushes its elements onto the stack in order, such that the last element
@@ -100,7 +106,7 @@ pub(crate) enum AdsInstruction {
     PopValue,
     /// Pops the top value from the value stack and prints it to stdout.
     Print {
-        /// The source code location for the print operation.
+        /// The source code location for the printed expression.
         loc: AdsSrcLoc,
     },
     /// Pops the top value from the value stack and uses it as the argument for

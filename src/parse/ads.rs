@@ -47,9 +47,14 @@ impl AdsModuleAst {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AdsStmtAst {
     // TODO: Allow tuple/wildcard LValues in Declare and For statements
+    /// Exits the script (with an optional error message) if the condition
+    /// isn't met.
+    Assert(ExprAst, Option<ExprAst>),
     /// Declares a constant or variable.
     Declare(DeclarationKind, IdentifierAst, ExprAst),
-    /// Exits the script.
+    /// Exits the script with an error message.
+    Error(ExprAst),
+    /// Exits the script sucessfully.
     Exit,
     /// Executes the loop once for each value in the sequence.
     For(Option<IdentifierAst>, ExprAst, Vec<AdsStmtAst>),
@@ -119,7 +124,9 @@ impl AdsStmtAst {
                 .then_ignore(linebreak())
                 .map(|(proc, block)| AdsStmtAst::With(proc, block));
             chumsky::prelude::choice((
+                assert_statement(),
                 declare_statement(),
+                error_statement(),
                 exit_statement(),
                 for_statement,
                 if_statement,
@@ -172,6 +179,16 @@ impl BreakpointAst {
 
 //===========================================================================//
 
+fn assert_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
+    keyword("assert")
+        .ignore_then(ExprAst::parser())
+        .then(
+            symbol(TokenValue::Comma).ignore_then(ExprAst::parser()).or_not(),
+        )
+        .then_ignore(linebreak())
+        .map(|(predicate, message)| AdsStmtAst::Assert(predicate, message))
+}
+
 fn declare_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     // TODO: Allow declaring a tuple of identifiers/wildcards.
     chumsky::prelude::choice((
@@ -183,6 +200,13 @@ fn declare_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     .then(ExprAst::parser())
     .then_ignore(linebreak())
     .map(|((kind, id), expr)| AdsStmtAst::Declare(kind, id, expr))
+}
+
+fn error_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
+    keyword("error")
+        .ignore_then(ExprAst::parser())
+        .then_ignore(linebreak())
+        .map(AdsStmtAst::Error)
 }
 
 fn exit_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {

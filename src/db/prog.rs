@@ -76,8 +76,14 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         match statement {
+            AdsStmtAst::Assert(pred_ast, message_ast) => {
+                self.compile_assert_statement(pred_ast, message_ast, out)
+            }
             AdsStmtAst::Declare(kind, id, expr_ast) => {
                 self.compile_declare_statement(kind, id, expr_ast, out)
+            }
+            AdsStmtAst::Error(expr_ast) => {
+                self.compile_error_statement(expr_ast, out)
             }
             AdsStmtAst::Exit => {
                 out.push(AdsInstruction::Exit);
@@ -123,6 +129,37 @@ impl<'a> AdsCompiler<'a> {
         }
     }
 
+    fn compile_assert_statement(
+        &mut self,
+        pred_ast: ExprAst,
+        opt_message_ast: Option<ExprAst>,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        let pred_span = pred_ast.span;
+        let mut pred_insts = Vec::<AdsInstruction>::new();
+        let static_pred =
+            errs.with(self.compile_predicate(pred_ast, &mut pred_insts));
+        let mut message_insts = Vec::<AdsInstruction>::new();
+        if let Some(msg_ast) = opt_message_ast {
+            errs.also(self.compile_error_message(msg_ast, &mut message_insts));
+        } else {
+            let value = ExprValue::String(Rc::from("assertion failed"));
+            message_insts.push(AdsInstruction::PushValue(value));
+        }
+        if static_pred.is_none() {
+            out.append(&mut pred_insts);
+            out.push(AdsInstruction::BranchIf(
+                (message_insts.len() + 1) as isize,
+            ));
+        }
+        if static_pred != Some(true) {
+            out.append(&mut message_insts);
+            out.push(AdsInstruction::Error { loc: self.make_loc(pred_span) });
+        }
+        errs.result()
+    }
+
     fn compile_declare_statement(
         &mut self,
         kind: DeclarationKind,
@@ -139,6 +176,17 @@ impl<'a> AdsCompiler<'a> {
         };
         self.env.add_declaration(kind, id, expr_type);
         errs.result()
+    }
+
+    fn compile_error_statement(
+        &mut self,
+        expr_ast: ExprAst,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let loc = self.make_loc(expr_ast.span);
+        self.compile_error_message(expr_ast, out)?;
+        out.push(AdsInstruction::Error { loc });
+        Ok(())
     }
 
     fn compile_for_statement(
@@ -235,22 +283,32 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
-        let _static_pred = errs.with(self.compile_predicate(pred_ast, out));
-        // TODO: use static_pred to elide predicate and dead branch
-        self.env.push_scope();
+        let mut pred_insts = Vec::<AdsInstruction>::new();
+        let static_pred =
+            errs.with(self.compile_predicate(pred_ast, &mut pred_insts));
         let mut then_stmts = Vec::<AdsInstruction>::new();
+        self.env.push_scope();
         errs.also(self.compile_statements(then_ast, &mut then_stmts));
         self.env.pop_scope(&mut then_stmts);
-        self.env.push_scope();
         let mut else_stmts = Vec::<AdsInstruction>::new();
+        self.env.push_scope();
         errs.also(self.compile_statements(else_ast, &mut else_stmts));
         self.env.pop_scope(&mut else_stmts);
-        if !else_stmts.is_empty() {
-            then_stmts.push(AdsInstruction::Jump(else_stmts.len() as isize));
+        match static_pred {
+            None => {
+                out.append(&mut pred_insts);
+                if !else_stmts.is_empty() {
+                    let else_stmts_len = else_stmts.len() as isize;
+                    then_stmts.push(AdsInstruction::Jump(else_stmts_len));
+                }
+                let then_stmts_len = then_stmts.len() as isize;
+                out.push(AdsInstruction::BranchUnless(then_stmts_len));
+                out.append(&mut then_stmts);
+                out.append(&mut else_stmts);
+            }
+            Some(true) => out.append(&mut then_stmts),
+            Some(false) => out.append(&mut else_stmts),
         }
-        out.push(AdsInstruction::BranchUnless(then_stmts.len() as isize));
-        out.append(&mut then_stmts);
-        out.append(&mut else_stmts);
         errs.result()
     }
 
@@ -262,12 +320,7 @@ impl<'a> AdsCompiler<'a> {
         let expr_span = expr_ast.span;
         let (_, errs) = self.compile_expr(expr_ast, out);
         errs.result()?;
-        out.push(AdsInstruction::Print {
-            loc: AdsSrcLoc {
-                span: expr_span,
-                context: self.env.current_src_context(),
-            },
-        });
+        out.push(AdsInstruction::Print { loc: self.make_loc(expr_span) });
         Ok(())
     }
 
@@ -497,6 +550,23 @@ impl<'a> AdsCompiler<'a> {
         (type_static, errs)
     }
 
+    fn compile_error_message(
+        &self,
+        expr_ast: ExprAst,
+        out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        let expr_span = expr_ast.span;
+        let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
+        if !expr_type.is_subtype_of(&ExprType::String) {
+            errs.push(AdsError::ErrorMessageTypeError {
+                expr_loc: self.make_loc(expr_span),
+                expr_type,
+            });
+        }
+        errs.result()
+    }
+
     fn compile_predicate(
         &self,
         expr_ast: ExprAst,
@@ -719,6 +789,23 @@ mod tests {
     }
 
     #[test]
+    fn if_false_statement() {
+        assert_matches!(
+            compile("if %false {\nprint 1\n}\n").as_slice(),
+            [AdsInstruction::Exit]
+        );
+    }
+
+    #[test]
+    fn if_true_statement() {
+        assert_matches!(compile("if %true {\nprint 1\n}\n").as_slice(), [
+            AdsInstruction::PushValue(int_value_1),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Exit,
+        ] if *int_value_1 == int_value(1));
+    }
+
+    #[test]
     fn if_statement() {
         assert_matches!(compile("if pc == 1 {\nexit\n}\n").as_slice(), [
             AdsInstruction::GetPc,
@@ -731,11 +818,34 @@ mod tests {
     }
 
     #[test]
-    fn if_else_statement() {
+    fn if_false_else_statement() {
         let instructions =
             compile("if %false {\nprint 1\n} else {\nprint 2\n}\n");
         assert_matches!(instructions.as_slice(), [
-            AdsInstruction::PushValue(ExprValue::Boolean(false)),
+            AdsInstruction::PushValue(int_value_2),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Exit,
+        ] if *int_value_2 == int_value(2));
+    }
+
+    #[test]
+    fn if_true_else_statement() {
+        let instructions =
+            compile("if %true {\nprint 1\n} else {\nprint 2\n}\n");
+        assert_matches!(instructions.as_slice(), [
+            AdsInstruction::PushValue(int_value_1),
+            AdsInstruction::Print { .. },
+            AdsInstruction::Exit,
+        ] if *int_value_1 == int_value(1));
+    }
+
+    #[test]
+    fn if_else_statement() {
+        let instructions =
+            compile("var x = %true\nif x {\nprint 1\n} else {\nprint 2\n}\n");
+        assert_matches!(instructions.as_slice(), [
+            AdsInstruction::PushValue(ExprValue::Boolean(true)),
+            AdsInstruction::GetValue(AdsFrameRef(0), 0),
             AdsInstruction::BranchUnless(3),
             AdsInstruction::PushValue(int_value_1),
             AdsInstruction::Print { .. },
