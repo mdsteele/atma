@@ -112,7 +112,7 @@ impl LinkConfig {
             let opt_absolute_label = positioned_binary
                 .external_symbols
                 .get(&import.name)
-                .map(|(label, _)| label.clone());
+                .map(|symbol| symbol.absolute.clone());
             if opt_absolute_label.is_none() {
                 errs.push(LinkError::SymbolImportUnresolved {
                     symbol_name: import.name.clone(),
@@ -155,27 +155,18 @@ impl LinkConfig {
                     message: Rc::from("link export addr is not an integer"),
                 })),
             })?;
-        let absolute_label = AbsoluteLabel {
+        let absolute = AbsoluteLabel {
             space: AddressSpace {
                 name: export.space.clone(),
                 width: positioned_binary.address_space_widths[&export.space],
             },
             address: symbol_addr,
         };
-        let collision = positioned_binary.external_symbols.insert(
-            export.name.clone(),
-            (absolute_label, export.name_loc.clone()),
-        );
-        match collision {
-            None => Ok(()),
-            Some((_, prev_loc)) => {
-                Err(Errs::one(LinkError::SymbolExportCollision {
-                    symbol_name: export.name.clone(),
-                    export_loc: export.name_loc.clone(),
-                    prev_loc,
-                }))
-            }
-        }
+        positioned_binary.add_external_symbol(
+            &export.name,
+            &export.name_loc,
+            absolute,
+        )
     }
 }
 

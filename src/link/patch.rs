@@ -1,8 +1,8 @@
 use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
-use super::positioned::PositionedBinary;
+use super::positioned::{PositionedBinary, PositionedSymbol};
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::{Align, Offset};
+use crate::addr::Align;
 use crate::error::Errs;
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::{
@@ -16,7 +16,7 @@ use std::rc::Rc;
 //===========================================================================//
 
 /// An object file that has had all of its link-time patches applied.
-pub struct PatchedFile {
+pub(super) struct PatchedFile {
     /// The patched chunks from this object file.
     pub chunks: Vec<PatchedChunk>,
 }
@@ -57,8 +57,8 @@ impl PatchedFile {
         object_file: ObjFile,
         chunk_metadata: &[ChunkMetadata],
         address_space_widths: &HashMap<Rc<str>, Align>,
-        external_symbols: &HashMap<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>,
-        internal_symbols: &HashMap<Rc<str>, AbsoluteLabel>,
+        external_symbols: &HashMap<Rc<str>, PositionedSymbol>,
+        internal_symbols: &HashMap<Rc<str>, PositionedSymbol>,
     ) -> LinkResult<PatchedFile> {
         let mut errs = Errs::<LinkError>::new();
         let mut symbol_addrs =
@@ -66,7 +66,7 @@ impl PatchedFile {
         for import in object_file.imports {
             let opt_absolute_label = external_symbols
                 .get(&import.full_name)
-                .map(|(label, _)| label.clone());
+                .map(|symbol| symbol.absolute.clone());
             if opt_absolute_label.is_none() {
                 errs.push(LinkError::SymbolImportUnresolved {
                     symbol_name: import.full_name.clone(),
@@ -78,9 +78,9 @@ impl PatchedFile {
         for chunk in &object_file.chunks {
             for symbol in chunk.symbols.iter() {
                 let absolute_label = if symbol.exported {
-                    external_symbols.get(&symbol.name).unwrap().0.clone()
+                    external_symbols[&symbol.name].absolute.clone()
                 } else {
-                    internal_symbols.get(&symbol.name).unwrap().clone()
+                    internal_symbols[&symbol.name].absolute.clone()
                 };
                 symbol_addrs.insert(symbol.name.clone(), Some(absolute_label));
             }
@@ -111,18 +111,9 @@ impl PatchedFile {
 
 /// A data chunk of an object file that has had all of its link-time patches
 /// applied.
-pub struct PatchedChunk {
+pub(super) struct PatchedChunk {
     /// The patched chunk data.
     pub data: Box<[u8]>,
-    /// The offset from the start of the chunk, in bytes, for each symbol
-    /// exported by the chunk.
-    pub exported_symbols: HashMap<Rc<str>, Offset>,
-}
-
-impl PatchedChunk {
-    pub fn take_data(&mut self) -> Box<[u8]> {
-        std::mem::take(&mut self.data)
-    }
 }
 
 //===========================================================================//
@@ -170,13 +161,7 @@ impl<'a> FilePatcher<'a> {
             errs.also(self.apply_patch(chunk_index, patch, &mut data));
         }
         errs.result()?;
-        let exported_symbols = chunk
-            .symbols
-            .into_iter()
-            .filter(|symbol| symbol.exported)
-            .map(|symbol| (symbol.name, symbol.offset))
-            .collect::<HashMap<Rc<str>, Offset>>();
-        Ok(PatchedChunk { data, exported_symbols })
+        Ok(PatchedChunk { data })
     }
 
     fn apply_patch(

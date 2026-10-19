@@ -11,7 +11,7 @@ mod place;
 mod positioned;
 mod types;
 
-pub use binary::LinkedBinary;
+pub use binary::{BinarySymbol, LinkedBinary};
 pub use config::{
     AddrspaceConfig, ChecksumConfig, ChecksumFormat, ChecksumRange,
     ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult, ConfigVariableOr,

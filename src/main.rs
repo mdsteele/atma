@@ -55,6 +55,9 @@ enum Command {
         config: PathBuf,
         /// The object files to link together.
         objects: Vec<PathBuf>,
+        /// The path of the labels file.
+        #[arg(short = 'L', long)]
+        labels: Option<PathBuf>,
         /// The path of the output file.
         #[arg(short, long)]
         output: Option<PathBuf>,
@@ -114,8 +117,8 @@ fn run_cli() -> Result<(), ExitCode> {
         Command::Db { format, binary, script } => {
             command_db(format, binary, script)
         }
-        Command::Ld { config, objects, output } => {
-            command_ld(config, objects, output)
+        Command::Ld { config, objects, labels, output } => {
+            command_ld(config, objects, labels, output)
         }
         Command::Obj { objfile } => command_obj(objfile),
     };
@@ -242,6 +245,7 @@ fn command_db(
 fn command_ld(
     config_path: PathBuf,
     objfile_paths: Vec<PathBuf>,
+    opt_labels_path: Option<PathBuf>,
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let mut cache = FileSrcCache::new();
@@ -271,12 +275,17 @@ fn command_ld(
         let source_errors = errs.map(LinkError::to_source_error);
         CliError::Source(cache, source_errors)
     })?;
+    if let Some(labels_path) = opt_labels_path {
+        let mut writer = io::BufWriter::new(fs::File::create(labels_path)?);
+        linked_binary.write_symbols_to(&mut writer)?;
+        writer.flush()?;
+    }
     if let Some(output_path) = opt_output_path {
         let mut writer = io::BufWriter::new(fs::File::create(output_path)?);
         linked_binary.write_to(&mut writer)?;
         writer.flush()?;
     } else {
-        eprintln!("Link successful.");
+        eprintln!("Link successful, but no output path was specified.");
     }
     Ok(())
 }

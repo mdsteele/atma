@@ -13,14 +13,28 @@ use std::rc::Rc;
 
 //===========================================================================//
 
+/// Represents a symbol that has been positioned within its address space.
+pub(super) struct PositionedSymbol {
+    /// The absolute address of the symbol.
+    pub absolute: AbsoluteLabel,
+    /// The source code location where the symbol name is declared.
+    pub name_loc: ObjSrcLoc,
+    /// The byte offset into the final binary for the symbol, or `None` if the
+    /// symbol doesn't have a meaningful location in the binary.
+    pub binary_offset: Option<u64>,
+}
+
+//===========================================================================//
+
 /// Represents a data chunk that has been positioned within its memory region.
 pub(super) struct PositionedChunk {
     /// The ID for this chunk.
     pub id: ChunkId,
-    /// The offset into the final binary where this chunk's data should be
-    /// written.
-    pub binary_offset: u64,
-    /// The size of this chunk in the final binary, in bytes.
+    /// The byte offset into the final binary where this chunk's data should be
+    /// written, or `None` if this chunk won't be included in the binary.
+    pub binary_offset: Option<u64>,
+    /// The size of this chunk in the final binary, in bytes, or zero if this
+    /// chunk won't be included in the binary.
     pub binary_size: u64,
     /// The absolute starting address of this chunk within its address space.
     pub start: Addr,
@@ -38,9 +52,9 @@ impl PositionedChunk {
         let chunk_start = section_start + chunk.offset;
         let (binary_offset, binary_size) = match section_binary_offset {
             Some(offset) => {
-                (offset + u64::from(chunk.offset), chunk.size.into_u64())
+                (Some(offset + u64::from(chunk.offset)), chunk.size.into_u64())
             }
-            None => (0, 0),
+            None => (None, 0),
         };
         PositionedChunk {
             id: chunk.id,
@@ -58,10 +72,10 @@ impl PositionedChunk {
 /// region.
 pub(super) struct PositionedSection {
     /// The offset into the final binary where this section's data should be
-    /// written.
-    pub binary_offset: u64,
+    /// written, or `None` if this section won't be included in the binary.
+    pub binary_offset: Option<u64>,
     /// The size of this section in the final binary, in bytes, or zero if this
-    /// region should not appear in the final binary.
+    /// section won't be included in the binary.
     pub binary_size: u64,
     /// The chunks in this section, sorted by their offsets within the binary.
     pub chunks: Vec<PositionedChunk>,
@@ -78,8 +92,8 @@ impl PositionedSection {
         region_fill: u8,
     ) -> PositionedSection {
         let (binary_offset, binary_size) = match section_binary_offset {
-            Some(offset) => (offset, section.size.into_u64()),
-            None => (0, 0),
+            Some(offset) => (Some(offset), section.size.into_u64()),
+            None => (None, 0),
         };
         let section_fill = section.fill.unwrap_or(region_fill);
         PositionedSection {
@@ -110,7 +124,7 @@ pub(super) struct PositionedRegion {
     /// The address space that this memory region exists in.
     pub space: AddressSpace,
     /// The size of this memory region in the final binary, in bytes, or zero
-    /// if this region should not appear in the final binary.
+    /// if this region won't be included in the binary.
     pub binary_size: u64,
     /// The sections in this memory region, sorted by their offsets within the
     /// binary.
@@ -248,10 +262,10 @@ pub(super) struct PositionedBinary {
     /// For each object file, metadata about each chunk in that object file.
     pub file_chunk_metadata: Vec<Vec<ChunkMetadata>>,
     /// The address of each external symbol across the binary.
-    pub external_symbols: HashMap<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>,
+    pub external_symbols: HashMap<Rc<str>, PositionedSymbol>,
     /// For each object file, the address of each internal symbol in that
     /// object files.
-    pub internal_symbols: Vec<HashMap<Rc<str>, AbsoluteLabel>>,
+    pub internal_symbols: Vec<HashMap<Rc<str>, PositionedSymbol>>,
 }
 
 impl PositionedBinary {
@@ -264,40 +278,45 @@ impl PositionedBinary {
         let chunk_metadata =
             PositionedBinary::make_chunk_metadata(&positioned_regions);
 
-        let mut external_symbols =
-            HashMap::<Rc<str>, (AbsoluteLabel, ObjSrcLoc)>::new();
+        let mut external_symbols = HashMap::<Rc<str>, PositionedSymbol>::new();
         let mut internal_symbols =
-            Vec::<HashMap<Rc<str>, AbsoluteLabel>>::with_capacity(
+            Vec::<HashMap<Rc<str>, PositionedSymbol>>::with_capacity(
                 object_files.len(),
             );
         let mut errs = Errs::<LinkError>::new();
         for (object_index, object_file) in object_files.iter().enumerate() {
             let mut file_internal_symbols =
-                HashMap::<Rc<str>, AbsoluteLabel>::new();
+                HashMap::<Rc<str>, PositionedSymbol>::new();
             for (chunk_index, chunk) in object_file.chunks.iter().enumerate() {
                 let chunk_id = ChunkId { object_index, chunk_index };
-                let chunk_start = chunk_metadata[&chunk_id].start.clone();
+                let metadata = &chunk_metadata[&chunk_id];
+                let chunk_start = metadata.start.clone();
                 for symbol in chunk.symbols.iter() {
-                    let symbol_addr = chunk_start.address + symbol.offset;
-                    let symbol_label = AbsoluteLabel {
-                        space: chunk_start.space.clone(),
-                        address: symbol_addr,
+                    let positioned_symbol = PositionedSymbol {
+                        absolute: AbsoluteLabel {
+                            space: chunk_start.space.clone(),
+                            address: chunk_start.address + symbol.offset,
+                        },
+                        name_loc: symbol.loc.clone(),
+                        binary_offset: metadata.binary_offset.map(
+                            |chunk_binary_offset| {
+                                chunk_binary_offset + u64::from(symbol.offset)
+                            },
+                        ),
                     };
                     if symbol.exported {
-                        let collision = external_symbols.insert(
-                            symbol.name.clone(),
-                            (symbol_label, symbol.loc.clone()),
-                        );
-                        if let Some((_, prev_loc)) = collision {
+                        let collision = external_symbols
+                            .insert(symbol.name.clone(), positioned_symbol);
+                        if let Some(prev) = collision {
                             errs.push(LinkError::SymbolExportCollision {
                                 symbol_name: symbol.name.clone(),
                                 export_loc: symbol.loc.clone(),
-                                prev_loc,
+                                prev_loc: prev.name_loc,
                             });
                         }
                     } else {
                         file_internal_symbols
-                            .insert(symbol.name.clone(), symbol_label);
+                            .insert(symbol.name.clone(), positioned_symbol);
                     }
                 }
             }
@@ -344,12 +363,38 @@ impl PositionedBinary {
                             address: chunk.start,
                         },
                         fill: chunk.fill,
+                        binary_offset: chunk.binary_offset,
                     };
                     chunk_metadata.insert(chunk.id, metadata);
                 }
             }
         }
         chunk_metadata
+    }
+
+    /// Adds an external symbol (with no offset within the binary).
+    pub(super) fn add_external_symbol(
+        &mut self,
+        name: &Rc<str>,
+        name_loc: &ObjSrcLoc,
+        absolute: AbsoluteLabel,
+    ) -> LinkResult<()> {
+        let collision = self.external_symbols.insert(
+            name.clone(),
+            PositionedSymbol {
+                absolute,
+                name_loc: name_loc.clone(),
+                binary_offset: None,
+            },
+        );
+        match collision {
+            None => Ok(()),
+            Some(prev) => Err(Errs::one(LinkError::SymbolExportCollision {
+                symbol_name: name.clone(),
+                export_loc: name_loc.clone(),
+                prev_loc: prev.name_loc,
+            })),
+        }
     }
 }
 

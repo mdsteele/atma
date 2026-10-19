@@ -53,6 +53,10 @@ pub(super) struct ChunkMetadata {
     pub start: AbsoluteLabel,
     /// The fill byte to use for any `Fill` patches in the chunk.
     pub fill: u8,
+    /// The offset into the final binary where this chunk's data should be
+    /// written, or `None` if this chunk will not be included in the final
+    /// binary.
+    pub binary_offset: Option<u64>,
 }
 
 //===========================================================================//

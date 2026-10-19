@@ -2,10 +2,37 @@ use super::config::ChecksumFormat;
 use super::patch::PatchedFile;
 use super::positioned::{
     PositionedBinary, PositionedChunk, PositionedRegion, PositionedSection,
+    PositionedSymbol,
 };
+use crate::addr::{Addr, Align};
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io;
 use std::rc::Rc;
+
+//===========================================================================//
+
+/// Represents a symbol in a linked binary.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct BinarySymbol {
+    /// The fully qualified name of the symbol.
+    ///
+    /// Note that a linked binary can contain multiple symbols with the same
+    /// name, but `external` will be true for at most one of those symbols.
+    pub name: Rc<str>,
+    /// The address space that the symbol exists in.
+    pub space: Rc<str>,
+    /// The bit width of the symbol address.
+    pub width: Align,
+    /// The address of the symbol within its address space.
+    pub address: Addr,
+    /// The byte offset into the binary for the symbol, or `None` if the symbol
+    /// doesn't have a meaningful location in the binary.
+    pub binary_offset: Option<u64>,
+    /// True if this symbol is external.  A linked binary will not contain two
+    /// external symbols with the same `name`.
+    pub external: bool,
+}
 
 //===========================================================================//
 
@@ -13,7 +40,8 @@ use std::rc::Rc;
 /// together.
 pub struct LinkedBinary {
     fragments: Vec<(LinkFragment, u64)>,
-    exported_symbols: HashMap<Rc<str>, u64>,
+    symbols: Vec<BinarySymbol>,
+    external_symbol_offsets: HashMap<Rc<str>, u64>,
 }
 
 impl LinkedBinary {
@@ -25,32 +53,38 @@ impl LinkedBinary {
         }
     }
 
+    /// Returns a list of all symbols in the binary.
+    pub fn symbols(&self) -> &[BinarySymbol] {
+        &self.symbols
+    }
+
     /// Returns the byte offset into the binary for the given fully-qualified
     /// symbol name, or `None` if that symbol doesn't have a meaningful
     /// location in the binary.
     pub fn get_symbol_offset(&self, name: &str) -> Option<u64> {
-        self.exported_symbols.get(name).copied()
+        self.external_symbol_offsets.get(name).copied()
     }
 
     pub(super) fn from_patched_files(
         patched_files: Vec<PatchedFile>,
         positioned_binary: &PositionedBinary,
     ) -> LinkedBinary {
-        let mut builder = FragmentBuilder {
+        let mut builder = BinaryBuilder {
             total_size: 0,
             patched_files,
             fragments: Vec::new(),
-            exported_symbols: HashMap::new(),
+            symbols: Vec::new(),
         };
         for region in &positioned_binary.regions {
             builder.add_region(region);
         }
-        LinkedBinary::new(builder.fragments, builder.exported_symbols)
+        builder.collect_symbols(positioned_binary);
+        LinkedBinary::new(builder.fragments, builder.symbols)
     }
 
     fn new(
         fragments: Vec<LinkFragment>,
-        exported_symbols: HashMap<Rc<str>, u64>,
+        symbols: Vec<BinarySymbol>,
     ) -> LinkedBinary {
         let mut frag_end: u64 = 0;
         let fragments = fragments
@@ -60,7 +94,16 @@ impl LinkedBinary {
                 (fragment, frag_end)
             })
             .collect::<Vec<(LinkFragment, u64)>>();
-        LinkedBinary { fragments, exported_symbols }
+        let external_symbol_offsets = symbols
+            .iter()
+            .filter(|symbol| symbol.external)
+            .filter_map(|symbol| {
+                symbol
+                    .binary_offset
+                    .map(|offset| (symbol.name.clone(), offset))
+            })
+            .collect::<HashMap<Rc<str>, u64>>();
+        LinkedBinary { fragments, symbols, external_symbol_offsets }
     }
 
     pub(super) fn calculate_checksum(
@@ -236,16 +279,59 @@ impl LinkedBinary {
         }
         Ok(())
     }
+
+    /// Writes the binary's symbol table to an output writer in a plain-text
+    /// format.
+    pub fn write_symbols_to(
+        &self,
+        writer: &mut impl io::Write,
+    ) -> io::Result<()> {
+        let offset_digits: usize =
+            self.size().bit_width().div_ceil(4).max(1) as usize;
+        let mut max_space_chars: usize = 1;
+        let mut max_addr_digits: usize = 1;
+        for symbol in &self.symbols {
+            max_space_chars =
+                max_space_chars.max(symbol.space.chars().count());
+            max_addr_digits =
+                max_addr_digits.max(symbol.width.log2().div_ceil(4) as usize);
+        }
+        for symbol in &self.symbols {
+            let offset_string = if let Some(offset) = symbol.binary_offset {
+                format!("${0:01$x}", offset, offset_digits)
+            } else {
+                format!(" {0:1$}", "", offset_digits)
+            };
+            let addr_string = format!(
+                "${0:01$x}",
+                symbol.address,
+                symbol.width.log2().div_ceil(4) as usize
+            );
+            writeln!(
+                writer,
+                "{offset_string} | {0:1$} | {2:>03$} | {4}",
+                symbol.space,
+                max_space_chars,
+                addr_string,
+                1 + max_addr_digits,
+                symbol.name
+            )?;
+        }
+        Ok(())
+    }
 }
 
 //===========================================================================//
 
 /// Represents one piece of a final binary file.
 #[derive(Debug, Eq, PartialEq)]
-pub(super) enum LinkFragment {
+enum LinkFragment {
     /// A slice of data that should be written into the binary.
     Data {
         /// The data to write.
+        ///
+        /// This is a `Vec<u8>` rather than `Box<[u8]>` because it sometimes
+        /// needs to be resized when writing checksums into the linked binary.
         data: Vec<u8>,
     },
     /// A span of the given size that should be filled with the given byte.
@@ -333,19 +419,54 @@ impl LinkFragment {
 
 //===========================================================================//
 
-struct FragmentBuilder {
+struct BinaryBuilder {
     total_size: u64,
     patched_files: Vec<PatchedFile>,
     fragments: Vec<LinkFragment>,
-    exported_symbols: HashMap<Rc<str>, u64>,
+    symbols: Vec<BinarySymbol>,
 }
 
-impl FragmentBuilder {
+impl BinaryBuilder {
+    fn collect_symbols(&mut self, positioned_binary: &PositionedBinary) {
+        self.add_symbols(&positioned_binary.external_symbols, true);
+        for internal_symbols in &positioned_binary.internal_symbols {
+            self.add_symbols(internal_symbols, false);
+        }
+        self.symbols.sort_by(Self::symbol_ordering);
+    }
+
+    fn add_symbols(
+        &mut self,
+        symbol_map: &HashMap<Rc<str>, PositionedSymbol>,
+        external: bool,
+    ) {
+        self.symbols.extend(symbol_map.iter().map(|(name, symbol)| {
+            BinarySymbol {
+                name: name.clone(),
+                space: symbol.absolute.space.name.clone(),
+                width: symbol.absolute.space.width,
+                address: symbol.absolute.address,
+                binary_offset: symbol.binary_offset,
+                external,
+            }
+        }));
+    }
+
+    fn symbol_ordering(lhs: &BinarySymbol, rhs: &BinarySymbol) -> Ordering {
+        lhs.binary_offset
+            .cmp(&rhs.binary_offset)
+            .then_with(|| lhs.space.cmp(&rhs.space))
+            .then_with(|| lhs.address.cmp(&rhs.address))
+            .then_with(|| lhs.name.cmp(&rhs.name))
+    }
+
     fn add_region(&mut self, region: &PositionedRegion) {
         let region_end = self.total_size + region.binary_size;
         for section in &region.sections {
-            self.fill_to(section.binary_offset, region.fill);
-            self.add_section(section);
+            if let Some(binary_offset) = section.binary_offset {
+                self.fill_to(binary_offset, region.fill);
+                self.add_section(section);
+            }
         }
         self.fill_to(region_end, region.fill);
     }
@@ -353,8 +474,10 @@ impl FragmentBuilder {
     fn add_section(&mut self, section: &PositionedSection) {
         let section_end = self.total_size + section.binary_size;
         for chunk in &section.chunks {
-            self.fill_to(chunk.binary_offset, section.fill);
-            self.add_chunk(chunk);
+            if let Some(binary_offset) = chunk.binary_offset {
+                self.fill_to(binary_offset, section.fill);
+                self.add_chunk(chunk);
+            }
         }
         self.fill_to(section_end, section.fill);
     }
@@ -363,13 +486,7 @@ impl FragmentBuilder {
         let chunk_end = self.total_size + chunk.binary_size;
         let patched = &mut self.patched_files[chunk.id.object_index].chunks
             [chunk.id.chunk_index];
-        for (name, symbol_offset) in &patched.exported_symbols {
-            self.exported_symbols.insert(
-                name.clone(),
-                chunk.binary_offset + u64::from(*symbol_offset),
-            );
-        }
-        let data = Vec::from(patched.take_data());
+        let data = Vec::from(std::mem::take(&mut patched.data));
         self.total_size += data.len() as u64;
         self.fragments.push(LinkFragment::Data { data });
         self.fill_to(chunk_end, chunk.fill);
@@ -390,11 +507,10 @@ impl FragmentBuilder {
 mod tests {
     use super::{LinkFragment, LinkedBinary};
     use crate::link::ChecksumFormat;
-    use std::collections::HashMap;
     use std::io::Cursor;
 
     fn binary_from_fragments(fragments: Vec<LinkFragment>) -> LinkedBinary {
-        LinkedBinary::new(fragments, HashMap::new())
+        LinkedBinary::new(fragments, Vec::new())
     }
 
     fn binary_to_vec(binary: &LinkedBinary) -> Vec<u8> {
