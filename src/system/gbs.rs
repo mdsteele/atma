@@ -103,8 +103,9 @@ pub fn load_gbs_binary<R: Read + Seek>(
     let mut cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("SP", u32::from(stack_pointer));
-    let processors = vec![(Rc::from("cpu"), (cpu, cpu_bus))];
-    Ok(SimSystem::new(processors))
+    let processors = vec![(Rc::from("CPU"), (cpu, cpu_bus))];
+    // TODO: Populate metadata
+    Ok(SimSystem::new(processors, Vec::new()))
 }
 
 //===========================================================================//

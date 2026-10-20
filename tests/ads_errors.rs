@@ -12,9 +12,12 @@ fn ads_errors(source: &str) -> Vec<AdsError> {
     let path = Rc::<str>::from("input");
     let bus = atma::bus::new_ram_bus(Box::new([0u8; 0x100]));
     let cpu = atma::proc::NopProc::new();
-    let sim = SimSystem::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
+    let system = SimSystem::new(
+        vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
+        Vec::new(),
+    );
     let output = Vec::<u8>::new();
-    match AdsEnvironment::create(&mut cache, path, source, sim, output) {
+    match AdsEnvironment::create(&mut cache, path, source, system, output) {
         Ok(_) => vec![],
         Err(errs) => errs.into_iter().collect::<Vec<_>>(),
     }

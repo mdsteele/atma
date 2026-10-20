@@ -16,9 +16,12 @@ fn expr_errors(source: &str) -> Vec<ExprTypeError> {
     let ads = format!("print {source}\n");
     let bus = atma::bus::new_open_bus(0);
     let cpu = atma::proc::NopProc::new();
-    let sim = SimSystem::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
+    let system = SimSystem::new(
+        vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
+        Vec::new(),
+    );
     let output = Vec::<u8>::new();
-    match AdsEnvironment::create(&mut cache, path, &ads, sim, output) {
+    match AdsEnvironment::create(&mut cache, path, &ads, system, output) {
         Ok(_) => vec![],
         Err(errs) => errs
             .into_iter()

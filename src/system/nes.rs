@@ -93,8 +93,8 @@ pub fn load_nes_binary<R: Read + Seek>(
 
     let bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
-    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimSystem::new(processors))
+    let processors = vec![(Rc::from("CPU"), (cpu, bus))];
+    Ok(SimSystem::new(processors, Vec::new()))
 }
 
 //===========================================================================//

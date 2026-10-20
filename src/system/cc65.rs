@@ -50,8 +50,8 @@ pub fn load_sim65_binary<R: Read + Seek>(
     cursor.write_u16::<LittleEndian>(reset_addr)?;
     let bus = new_ram_bus(ram);
     let cpu = Box::new(Mos6502::new());
-    processors.push((Rc::from("cpu"), (cpu, bus)));
-    Ok(SimSystem::new(processors))
+    processors.push((Rc::from("CPU"), (cpu, bus)));
+    Ok(SimSystem::new(processors, Vec::new()))
 }
 
 //===========================================================================//

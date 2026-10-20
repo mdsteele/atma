@@ -44,15 +44,16 @@ pub fn load_spc_binary<R: Read + Seek>(
     reader.read_exact(&mut ram)?;
 
     let bus = new_snes_ssmp_bus(new_ram_bus(ram.into_boxed_slice()));
-    let mut cpu: Box<dyn SimProc> = Box::new(Spc700::new());
-    cpu.set_pc(Addr::from(pc));
-    cpu.set_register("A", u32::from(reg_a));
-    cpu.set_register("X", u32::from(reg_x));
-    cpu.set_register("Y", u32::from(reg_y));
-    cpu.set_register("PSW", u32::from(reg_psw));
-    cpu.set_register("SP", u32::from(reg_sp));
-    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimSystem::new(processors))
+    let mut smp: Box<dyn SimProc> = Box::new(Spc700::new());
+    smp.set_pc(Addr::from(pc));
+    smp.set_register("A", u32::from(reg_a));
+    smp.set_register("X", u32::from(reg_x));
+    smp.set_register("Y", u32::from(reg_y));
+    smp.set_register("PSW", u32::from(reg_psw));
+    smp.set_register("SP", u32::from(reg_sp));
+    let processors = vec![(Rc::from("SMP"), (smp, bus))];
+    // TODO: Populate metadata
+    Ok(SimSystem::new(processors, Vec::new()))
 }
 
 //===========================================================================//

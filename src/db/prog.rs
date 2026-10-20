@@ -772,9 +772,11 @@ mod tests {
         let path = Rc::<str>::from("input");
         let bus = new_open_bus(16);
         let cpu = Mos6502::new();
-        let sim =
-            SimSystem::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
-        AdsProgram::compile_source(&mut cache, path, source, &sim)
+        let system = SimSystem::new(
+            vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
+            Vec::new(),
+        );
+        AdsProgram::compile_source(&mut cache, path, source, &system)
             .unwrap()
             .instructions
     }

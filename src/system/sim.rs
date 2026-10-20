@@ -40,12 +40,16 @@ impl EnvProc {
 pub struct SimSystem {
     selected_processor: Rc<str>,
     processors: HashMap<Rc<str>, EnvProc>,
+    metadata: Vec<(Rc<str>, Rc<str>)>,
 }
 
 impl SimSystem {
     /// Constructs a new simulated system with the given list of processors.
     /// Panics if `processors` is empty.
-    pub fn new(processors: Vec<(Rc<str>, ProcBus)>) -> Self {
+    pub fn new(
+        processors: Vec<(Rc<str>, ProcBus)>,
+        metadata: Vec<(Rc<str>, Rc<str>)>,
+    ) -> Self {
         if processors.is_empty() {
             panic!("must provide non-empty list of processors");
         }
@@ -54,14 +58,14 @@ impl SimSystem {
             .into_iter()
             .map(|(name, (proc, bus))| (name, EnvProc::new(proc, bus)))
             .collect();
-        Self { selected_processor, processors }
+        Self { selected_processor, processors, metadata }
     }
 
     /// Creates a new simulated system with a single `NopProc` CPU.
     pub fn with_nop_cpu() -> Self {
         let bus = crate::bus::new_open_bus(Addr::BITS);
         let cpu = crate::proc::NopProc::new();
-        Self::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))])
+        Self::new(vec![(Rc::from("CPU"), (Box::new(cpu), bus))], Vec::new())
     }
 
     /// Returns a human-readable, multi-line description of this simulated
@@ -76,6 +80,12 @@ impl SimSystem {
 
     fn describe_processor((name, proc): (&Rc<str>, &EnvProc)) -> String {
         format!("{name}: {}\n", proc.description())
+    }
+
+    /// Returns a list of key/value pairs of human-readable metadata about the
+    /// simulated system.
+    pub fn metadata(&self) -> &[(Rc<str>, Rc<str>)] {
+        &self.metadata
     }
 
     /// Returns a sorted list of the names of all processors that exist in this

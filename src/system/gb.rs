@@ -101,8 +101,9 @@ pub fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     reader.read_exact(&mut rom_data)?;
     let bus = mapper.make_cpu_bus(ram_size, rom_data.into_boxed_slice());
     let cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
-    let processors = vec![(Rc::from("cpu"), (cpu, bus))];
-    Ok(SimSystem::new(processors))
+    let processors = vec![(Rc::from("CPU"), (cpu, bus))];
+    // TODO: Populate metadata
+    Ok(SimSystem::new(processors, Vec::new()))
 }
 
 //===========================================================================//

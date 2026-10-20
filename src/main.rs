@@ -176,6 +176,9 @@ fn command_db(
         load_binary_with_format(binary_format, io::BufReader::new(file))?
     };
     print!("{}", system.description());
+    for (key, value) in system.metadata() {
+        println!("{key}: {value}");
+    }
     if let Some(ads_path) = opt_ads_path {
         let mut cache = FileSrcCache::new();
         let mut ads_env = {

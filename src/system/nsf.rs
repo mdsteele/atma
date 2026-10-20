@@ -26,11 +26,13 @@ pub fn load_nsf_binary<R: Read + Seek>(
         return Err(io::Error::other(message));
     }
 
+    let mut metadata = Vec::<(Rc<str>, Rc<str>)>::new();
     let total_songs = header[0x06];
     if total_songs == 0 {
         let message = "cannot load NSF with 0 total songs";
         return Err(io::Error::other(message));
     }
+    metadata.push((Rc::from("Songs"), Rc::from(total_songs.to_string())));
 
     let starting_song = header[0x07];
     if !(1..=total_songs).contains(&starting_song) {
@@ -57,6 +59,17 @@ pub fn load_nsf_binary<R: Read + Seek>(
         return Err(io::Error::other(message));
     }
 
+    metadata.push((Rc::from("Title"), string_field(&header[0x0e..0x2e])));
+    metadata.push((Rc::from("Author"), string_field(&header[0x2e..0x4e])));
+    metadata.push((Rc::from("Copyright"), string_field(&header[0x4e..0x6e])));
+
+    let region = match header[0x7a] & 0x03 {
+        0 => "NTSC",
+        1 => "PAL",
+        _ => "NTSC/PAL",
+    };
+    metadata.push((Rc::from("Region"), Rc::from(region)));
+
     if header[0x70..0x78] != [0, 0, 0, 0, 0, 0, 0, 0] {
         let message = "NSF bank switching is not yet supported";
         return Err(io::Error::other(message));
@@ -67,6 +80,8 @@ pub fn load_nsf_binary<R: Read + Seek>(
         let message = format!("invalid NSF NTSC/PAL byte: ${platform:02x}");
         return Err(io::Error::other(message));
     }
+
+    // TODO: metadata for extra sound chips reported in `header[0x7b]`
 
     let data_len = (usize::from(header[0x7f]) << 16)
         | (usize::from(header[0x7e]) << 8)
@@ -104,8 +119,14 @@ pub fn load_nsf_binary<R: Read + Seek>(
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
-    let processors = vec![(Rc::from("cpu"), (cpu, cpu_bus))];
-    Ok(SimSystem::new(processors))
+    let processors = vec![(Rc::from("CPU"), (cpu, cpu_bus))];
+    Ok(SimSystem::new(processors, metadata))
+}
+
+//===========================================================================//
+
+fn string_field(bytes: &[u8]) -> Rc<str> {
+    Rc::from(String::from_utf8_lossy(bytes).trim_end_matches('\0').trim())
 }
 
 //===========================================================================//

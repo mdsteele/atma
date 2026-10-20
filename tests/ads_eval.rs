@@ -14,8 +14,11 @@ fn make_nop_proc_env<'a>(
     let path = Rc::<str>::from("input");
     let bus = atma::bus::new_ram_bus(Box::new([0u8; 0x100]));
     let cpu = atma::proc::NopProc::new();
-    let sim = SimSystem::new(vec![(Rc::from("cpu"), (Box::new(cpu), bus))]);
-    AdsEnvironment::create(&mut cache, path, source, sim, output).unwrap()
+    let system = SimSystem::new(
+        vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
+        Vec::new(),
+    );
+    AdsEnvironment::create(&mut cache, path, source, system, output).unwrap()
 }
 
 fn run_to_completion<W: Write>(env: &mut AdsEnvironment<W>) {
