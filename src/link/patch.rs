@@ -2,7 +2,7 @@ use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::positioned::{PositionedBinary, PositionedSymbol};
 use super::types::{AbsoluteLabel, ChunkMetadata};
-use crate::addr::Align;
+use crate::addr::BitWidth;
 use crate::error::Errs;
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::{
@@ -56,7 +56,7 @@ impl PatchedFile {
     fn patch(
         object_file: ObjFile,
         chunk_metadata: &[ChunkMetadata],
-        address_space_widths: &HashMap<Rc<str>, Align>,
+        address_space_widths: &HashMap<Rc<str>, BitWidth>,
         external_symbols: &HashMap<Rc<str>, PositionedSymbol>,
         internal_symbols: &HashMap<Rc<str>, PositionedSymbol>,
     ) -> LinkResult<PatchedFile> {
@@ -126,7 +126,7 @@ struct FilePatcher<'a> {
 impl<'a> FilePatcher<'a> {
     pub fn new(
         chunk_metadata: &'a [ChunkMetadata],
-        address_space_widths: &'a HashMap<Rc<str>, Align>,
+        address_space_widths: &'a HashMap<Rc<str>, BitWidth>,
         symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
     ) -> FilePatcher<'a> {
         FilePatcher {
@@ -221,7 +221,7 @@ impl<'a> FilePatcher<'a> {
                 return Err(Errs::one(LinkError::LabelInWrongAddressSpace {
                     expr_loc: expr.loc,
                     actual_address: absolute.address,
-                    address_width: absolute.space.width,
+                    address_width: absolute.space.bit_width,
                     actual_space: absolute.space.name,
                     required_space: metadata.start.space.name.clone(),
                 }));

@@ -1,4 +1,5 @@
-use super::{Addr, SimBus, WatchId, WatchKind};
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -6,17 +7,15 @@ use bimap::BiHashMap;
 /// Returns a simulated bus, with the given number of address bits, that's not
 /// connected to anything.  All writes will be ignored, and all reads will
 /// return zero.
-pub fn new_open_bus(addr_bits: u32) -> Box<dyn SimBus> {
-    assert!(addr_bits <= 32);
-    let storage = OpenBus { addr_bits };
+pub fn new_open_bus(bit_width: BitWidth) -> Box<dyn SimBus> {
+    let storage = OpenBus { bit_width };
     Box::new(RandomAccessBus::new(Box::new(storage)))
 }
 
 /// Creates a simulated RAM bus with the given initial contents.  Panics if the
 /// length of the byte array is not a power of 2.
 pub fn new_ram_bus(contents: Box<[u8]>) -> Box<dyn SimBus> {
-    assert!(contents.len().is_power_of_two());
-    let storage = RamStorage { contents, read_only: false };
+    let storage = RamStorage::new(contents, false);
     Box::new(RandomAccessBus::new(Box::new(storage)))
 }
 
@@ -24,8 +23,7 @@ pub fn new_ram_bus(contents: Box<[u8]>) -> Box<dyn SimBus> {
 /// bus will be ignored.  Panics if the length of the byte array is not a power
 /// of 2.
 pub fn new_rom_bus(contents: Box<[u8]>) -> Box<dyn SimBus> {
-    assert!(contents.len().is_power_of_two());
-    let storage = RamStorage { contents, read_only: true };
+    let storage = RamStorage::new(contents, true);
     Box::new(RandomAccessBus::new(Box::new(storage)))
 }
 
@@ -47,17 +45,21 @@ impl SimBus for RandomAccessBus {
         self.storage.description()
     }
 
+    fn bit_width(&self) -> BitWidth {
+        self.storage.bit_width()
+    }
+
     fn label_at(&self, _addr: Addr) -> Option<&str> {
         None
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr & self.storage.addr_mask();
+        let addr = self.storage.bit_width().wrap(addr);
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
-        let addr = addr & self.storage.addr_mask();
+        let addr = self.storage.bit_width().wrap(addr);
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -97,23 +99,22 @@ impl SimBus for RandomAccessBus {
 
 trait Storage {
     fn description(&self) -> String;
-    fn addr_mask(&self) -> Addr;
+    fn bit_width(&self) -> BitWidth;
     fn read_byte(&self, addr: Addr) -> u8;
     fn write_byte(&mut self, addr: Addr, data: u8);
 }
 
 struct OpenBus {
-    addr_bits: u32,
+    bit_width: BitWidth,
 }
 
 impl Storage for OpenBus {
     fn description(&self) -> String {
-        format!("{}-bit open bus", self.addr_bits)
+        format!("{}-bit open bus", self.bit_width)
     }
 
-    fn addr_mask(&self) -> Addr {
-        debug_assert!(self.addr_bits <= 32);
-        Addr::wrap_usize((1usize << self.addr_bits) - 1)
+    fn bit_width(&self) -> BitWidth {
+        self.bit_width
     }
 
     fn read_byte(&self, _addr: Addr) -> u8 {
@@ -123,9 +124,20 @@ impl Storage for OpenBus {
     fn write_byte(&mut self, _addr: Addr, _data: u8) {}
 }
 
+//===========================================================================//
+
 struct RamStorage {
     contents: Box<[u8]>,
+    bit_width: BitWidth,
     read_only: bool,
+}
+
+impl RamStorage {
+    fn new(contents: Box<[u8]>, read_only: bool) -> Self {
+        assert!(contents.len().is_power_of_two());
+        let bit_width = BitWidth::new(contents.len().ilog2());
+        Self { contents, bit_width, read_only }
+    }
 }
 
 impl Storage for RamStorage {
@@ -142,20 +154,17 @@ impl Storage for RamStorage {
         format!("{size}{unit} {kind}")
     }
 
-    fn addr_mask(&self) -> Addr {
-        debug_assert!(self.contents.len().is_power_of_two());
-        Addr::wrap_usize(self.contents.len() - 1)
+    fn bit_width(&self) -> BitWidth {
+        self.bit_width
     }
 
     fn read_byte(&self, addr: Addr) -> u8 {
-        let addr = addr & self.addr_mask();
-        self.contents[addr.as_usize()]
+        self.contents[self.bit_width.wrap(addr).as_usize()]
     }
 
     fn write_byte(&mut self, addr: Addr, data: u8) {
         if !self.read_only {
-            let addr = addr & self.addr_mask();
-            self.contents[addr.as_usize()] = data;
+            self.contents[self.bit_width.wrap(addr).as_usize()] = data;
         }
     }
 }

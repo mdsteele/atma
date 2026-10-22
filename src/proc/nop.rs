@@ -84,12 +84,12 @@ impl SimProc for NopProc {
 #[cfg(test)]
 mod tests {
     use super::{NopProc, SimBreak, SimProc};
-    use crate::addr::Addr;
+    use crate::addr::{Addr, BitWidth};
     use crate::bus::{WatchKind, new_open_bus};
 
     #[test]
     fn set_pc_mid_instruction() {
-        let mut bus = new_open_bus(16);
+        let mut bus = new_open_bus(BitWidth::SIXTEEN);
         let mut proc = NopProc::new();
         let id = bus.watch_address(Addr::from(0x0000u16), WatchKind::Read);
         assert_eq!(

@@ -1,4 +1,6 @@
-use super::{Addr, SimBus, WatchId, WatchKind, new_rom_bus};
+use super::ram::new_rom_bus;
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -79,6 +81,10 @@ impl SimBus for SsmpBus {
         format!("S-SMP with {}", self.ram.description())
     }
 
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::SIXTEEN
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
         self.sub_bus(addr).label_at(addr)
     }
@@ -133,7 +139,7 @@ impl SimBus for SsmpBus {
 //===========================================================================//
 
 pub struct SsmpRegBus {
-    watchpoints: BiHashMap<(u16, WatchKind), WatchId>,
+    watchpoints: BiHashMap<(u8, WatchKind), WatchId>,
     reg_control: u8,
     reg_dspaddr: u8,
     reg_auxio4: u8,
@@ -141,6 +147,9 @@ pub struct SsmpRegBus {
 }
 
 impl SsmpRegBus {
+    const BIT_WIDTH: BitWidth = BitWidth::new(4);
+    const ADDR_MASK: u8 = 0x0f;
+
     pub fn new() -> SsmpRegBus {
         SsmpRegBus {
             watchpoints: BiHashMap::new(),
@@ -161,36 +170,40 @@ impl SimBus for SsmpRegBus {
         "S-SMP registers".to_string()
     }
 
+    fn bit_width(&self) -> BitWidth {
+        Self::BIT_WIDTH
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
-        let addr = addr.as_u16();
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match addr {
-            0x00f0 => Some("TEST"),
-            0x00f1 => Some("CONTROL"),
-            0x00f2 => Some("DSPADDR"),
-            0x00f3 => Some("DSPDATA"),
-            0x00f4 => Some("CPUIO0"),
-            0x00f5 => Some("CPUIO1"),
-            0x00f6 => Some("CPUIO2"),
-            0x00f7 => Some("CPUIO3"),
-            0x00f8 => Some("AUXIO4"),
-            0x00f9 => Some("AUXIO5"),
-            0x00fa => Some("T0DIV"),
-            0x00fb => Some("T1DIV"),
-            0x00fc => Some("T2DIV"),
-            0x00fd => Some("T0OUT"),
-            0x00fe => Some("T1OUT"),
-            0x00ff => Some("T2OUT"),
-            _ => None,
+            0x0 => Some("TEST"),
+            0x1 => Some("CONTROL"),
+            0x2 => Some("DSPADDR"),
+            0x3 => Some("DSPDATA"),
+            0x4 => Some("CPUIO0"),
+            0x5 => Some("CPUIO1"),
+            0x6 => Some("CPUIO2"),
+            0x7 => Some("CPUIO3"),
+            0x8 => Some("AUXIO4"),
+            0x9 => Some("AUXIO5"),
+            0xa => Some("T0DIV"),
+            0xb => Some("T1DIV"),
+            0xc => Some("T2DIV"),
+            0xd => Some("T0OUT"),
+            0xe => Some("T1OUT"),
+            0xf => Some("T2OUT"),
+            _ => unreachable!(),
         }
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr.as_u16();
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
-        let addr = addr.as_u16();
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -207,22 +220,22 @@ impl SimBus for SsmpRegBus {
         kind: WatchKind,
     ) -> Option<WatchId> {
         let addr: u8 = match label {
-            "TEST" => 0x00f0,
-            "CONTROL" => 0x00f1,
-            "DSPADDR" => 0x00f2,
-            "DSPDATA" => 0x00f3,
-            "CPUIO0" => 0x00f4,
-            "CPUIO1" => 0x00f5,
-            "CPUIO2" => 0x00f6,
-            "CPUIO3" => 0x00f7,
-            "AUXIO4" => 0x00f8,
-            "AUXIO5" => 0x00f9,
-            "T0DIV" => 0x00fa,
-            "T1DIV" => 0x00fb,
-            "T2DIV" => 0x00fc,
-            "T0OUT" => 0x00fd,
-            "T1OUT" => 0x00fe,
-            "T2OUT" => 0x00ff,
+            "TEST" => 0x0,
+            "CONTROL" => 0x1,
+            "DSPADDR" => 0x2,
+            "DSPDATA" => 0x3,
+            "CPUIO0" => 0x4,
+            "CPUIO1" => 0x5,
+            "CPUIO2" => 0x6,
+            "CPUIO3" => 0x7,
+            "AUXIO4" => 0x8,
+            "AUXIO5" => 0x9,
+            "T0DIV" => 0xa,
+            "T1DIV" => 0xb,
+            "T2DIV" => 0xc,
+            "T0OUT" => 0xd,
+            "T1OUT" => 0xe,
+            "T2OUT" => 0xf,
             _ => return None,
         };
         Some(self.watch_address(Addr::from(addr), kind))
@@ -233,10 +246,10 @@ impl SimBus for SsmpRegBus {
     }
 
     fn peek_byte(&self, addr: Addr) -> u8 {
-        match addr.as_u16() {
-            0x00f2 => self.reg_dspaddr,
-            0x00f8 => self.reg_auxio4,
-            0x00f9 => self.reg_auxio5,
+        match addr.as_u8() & Self::ADDR_MASK {
+            0x2 => self.reg_dspaddr,
+            0x8 => self.reg_auxio4,
+            0x9 => self.reg_auxio5,
             _ => 0, // TODO
         }
     }
@@ -246,11 +259,11 @@ impl SimBus for SsmpRegBus {
     }
 
     fn write_byte(&mut self, addr: Addr, data: u8) {
-        match addr.as_u16() {
-            0x00f1 => self.reg_control = data,
-            0x00f2 => self.reg_dspaddr = data,
-            0x00f8 => self.reg_auxio4 = data,
-            0x00f9 => self.reg_auxio5 = data,
+        match addr.as_u8() & Self::ADDR_MASK {
+            0x1 => self.reg_control = data,
+            0x2 => self.reg_dspaddr = data,
+            0x8 => self.reg_auxio4 = data,
+            0x9 => self.reg_auxio5 = data,
             _ => {} // TODO
         }
     }

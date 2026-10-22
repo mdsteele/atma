@@ -1,4 +1,6 @@
-use super::{Addr, SimBus, WatchId, WatchKind, new_open_bus};
+use super::ram::new_open_bus;
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 
 //===========================================================================//
 
@@ -7,7 +9,11 @@ pub fn new_snes_lorom_cart_bus(
     rom_bus: Box<dyn SimBus>,
     sram_bus: Option<Box<dyn SimBus>>,
 ) -> Box<dyn SimBus> {
-    Box::new(LoRomBus { rom: rom_bus, sram: sram_bus, open: new_open_bus(24) })
+    Box::new(LoRomBus {
+        rom: rom_bus,
+        sram: sram_bus,
+        open: new_open_bus(BitWidth::TWENTY_FOUR),
+    })
 }
 
 //===========================================================================//
@@ -64,6 +70,10 @@ impl SimBus for LoRomBus {
         } else {
             format!("LoROM cartridge with {}", self.rom.description())
         }
+    }
+
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::TWENTY_FOUR
     }
 
     fn label_at(&self, addr: Addr) -> Option<&str> {

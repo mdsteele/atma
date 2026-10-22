@@ -226,7 +226,7 @@ impl ArrangedRegion {
                 name_loc: region.name_loc.clone(),
                 space: AddressSpace {
                     name: region.space.clone(),
-                    width: addrspace.width,
+                    bit_width: addrspace.bit_width,
                 },
                 range: region.range,
                 sections: Vec::new(),

@@ -1,8 +1,10 @@
 use super::sim::SimSystem;
+use super::util::{new_rom_bus_with_binary_symbols, with_offset_free_symbols};
+use crate::addr::BitWidth;
 use crate::bus::{
     SimBus, new_dmg_cpu_bus, new_gb_mbc5_cart_bus, new_open_bus, new_ram_bus,
-    new_rom_bus,
 };
+use crate::parse::SymbolTable;
 use crate::proc::{SharpSm83, SimProc};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
@@ -15,6 +17,11 @@ pub(super) const GB_HEADER_LOGO: &[u8; 0x30] = &[
     0xdc, 0xcc, 0x6e, 0xe6, 0xdd, 0xdd, 0xd9, 0x99, 0xbb, 0xbb, 0x67, 0x63,
     0x6e, 0x0e, 0xec, 0xcc, 0xdd, 0xdc, 0x99, 0x9f, 0xbb, 0xb9, 0x33, 0x3e,
 ];
+
+//===========================================================================//
+
+// Constant used for processer/address space names.
+const CPU: &str = "CPU";
 
 //===========================================================================//
 
@@ -36,19 +43,22 @@ impl GbMapper {
     fn make_cpu_bus(
         &self,
         sram_size: usize,
-        rom: Box<[u8]>,
+        rom_data: Box<[u8]>,
+        rom_start: u64,
+        symbols: &SymbolTable,
     ) -> Box<dyn SimBus> {
         let ram_bus = if sram_size == 0 {
-            new_open_bus(16)
+            new_open_bus(BitWidth::SIXTEEN)
         } else {
             new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
         };
-        let rom_bus = new_rom_bus(rom);
+        let rom_bus =
+            new_rom_bus_with_binary_symbols(rom_data, rom_start, CPU, symbols);
         let cart_bus = match *self {
             GbMapper::RomOnly => rom_bus,
             GbMapper::Mbc5 => new_gb_mbc5_cart_bus(rom_bus, ram_bus),
         };
-        new_dmg_cpu_bus(cart_bus)
+        with_offset_free_symbols(new_dmg_cpu_bus(cart_bus), CPU, symbols)
     }
 }
 
@@ -56,7 +66,10 @@ impl GbMapper {
 
 /// Reads a compiled GB or GBC binary file, and returns a simulated system that
 /// represents it.
-pub fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
+pub fn load_gb_binary<R: Read + Seek>(
+    symbols: SymbolTable,
+    mut reader: R,
+) -> io::Result<SimSystem> {
     // See https://gbdev.io/pandocs/The_Cartridge_Header.html
     reader.seek(SeekFrom::Start(0x0147))?;
     let mut metadata = [0u8; 3];
@@ -99,9 +112,15 @@ pub fn load_gb_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     let mut rom_data = vec![0u8; rom_size];
     reader.rewind()?;
     reader.read_exact(&mut rom_data)?;
-    let bus = mapper.make_cpu_bus(ram_size, rom_data.into_boxed_slice());
+
+    let bus = mapper.make_cpu_bus(
+        ram_size,
+        rom_data.into_boxed_slice(),
+        0,
+        &symbols,
+    );
     let cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
-    let processors = vec![(Rc::from("CPU"), (cpu, bus))];
+    let processors = vec![(Rc::from(CPU), (cpu, bus))];
     // TODO: Populate metadata
     Ok(SimSystem::new(processors, Vec::new()))
 }

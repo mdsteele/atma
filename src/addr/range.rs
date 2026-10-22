@@ -1,4 +1,4 @@
-use super::{Addr, Align, Offset, Size};
+use super::{Addr, Align, BitWidth, Offset, Size};
 use std::ops;
 
 //===========================================================================//
@@ -14,13 +14,10 @@ impl Range {
     /// A range that covers all possible addresses.
     pub const FULL: Range = Range { first: Addr::MIN, last: Addr::MAX };
 
-    /// Returns an address range that contains all addresses that fit within
-    /// `bits` bits.
-    ///
-    /// Panics if `bits > Addr::BITS`.
-    pub fn with_bits(bits: u32) -> Range {
-        assert!(bits <= Addr::BITS);
-        Range { first: Addr::MIN, last: Addr(((1u64 << bits) - 1) as u32) }
+    /// Returns an address range that contains all addresses with the given bit
+    /// width.
+    pub fn with_bits(width: BitWidth) -> Range {
+        Range { first: Addr::MIN, last: Addr(((1u64 << width.0) - 1) as u32) }
     }
 
     /// Returns an address range that contains `first`, `last`, and all
@@ -146,19 +143,20 @@ impl std::iter::FusedIterator for Subranges {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Addr, Align, Range, Size};
+    use super::Range;
+    use crate::addr::{Addr, Align, BitWidth, Size};
 
     #[test]
     fn range_with_bits() {
         assert_eq!(
-            Range::with_bits(0),
+            Range::with_bits(BitWidth::MIN),
             Range::with_bounds(Addr::MIN, Addr::MIN)
         );
         assert_eq!(
-            Range::with_bits(16),
+            Range::with_bits(BitWidth::SIXTEEN),
             Range::with_bounds(Addr::MIN, Addr::from(0xffffu32))
         );
-        assert_eq!(Range::with_bits(Addr::BITS), Range::FULL);
+        assert_eq!(Range::with_bits(BitWidth::MAX), Range::FULL);
     }
 
     #[test]

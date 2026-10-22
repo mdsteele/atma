@@ -6,6 +6,7 @@ use atma::db::{AdsEnvironment, AdsError};
 use atma::error::{Errs, SourceError, SrcCache, SrcCacheError, SrcLoc};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{BinaryIo, ObjFile};
+use atma::parse::SymbolTable;
 use atma::proc::SimBreak;
 use atma::system::{BinaryFormat, SimSystem, load_binary_with_format};
 use clap::builder::{PossibleValuesParser, TypedValueParser};
@@ -44,6 +45,9 @@ enum Command {
         #[arg(short, long, default_value="auto",
               value_parser = binary_format_parser())]
         format: BinaryFormat,
+        /// Read in a symbol map from this path.
+        #[arg(short = 'M', long)]
+        map: Option<PathBuf>,
         /// The compiled binary file to load and debug.
         binary: PathBuf,
         /// The debugger script to run, or none for interactive mode.
@@ -55,10 +59,10 @@ enum Command {
         config: PathBuf,
         /// The object files to link together.
         objects: Vec<PathBuf>,
-        /// The path of the labels file.
-        #[arg(short = 'L', long)]
-        labels: Option<PathBuf>,
-        /// The path of the output file.
+        /// Output the symbol map to this path.
+        #[arg(short = 'M', long)]
+        map: Option<PathBuf>,
+        /// Output the linked binary to this path.
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
@@ -114,11 +118,11 @@ fn main() -> ExitCode {
 fn run_cli() -> Result<(), ExitCode> {
     let result = match Cli::parse().command {
         Command::Asm { source, output } => command_asm(source, output),
-        Command::Db { format, binary, script } => {
-            command_db(format, binary, script)
+        Command::Db { format, map, binary, script } => {
+            command_db(format, map, binary, script)
         }
-        Command::Ld { config, objects, labels, output } => {
-            command_ld(config, objects, labels, output)
+        Command::Ld { config, objects, map, output } => {
+            command_ld(config, objects, map, output)
         }
         Command::Obj { objfile } => command_obj(objfile),
     };
@@ -168,19 +172,39 @@ fn command_asm(
 
 fn command_db(
     binary_format: BinaryFormat,
+    opt_map_path: Option<PathBuf>,
     binary_path: PathBuf,
     opt_ads_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
+    let mut cache = FileSrcCache::new();
+    let symbols = if let Some(map_path) = opt_map_path {
+        let file = fs::File::open(&map_path)?;
+        let source = io::read_to_string(file)?;
+        match SymbolTable::parse_source(&source) {
+            Ok(symbols) => symbols,
+            Err(parse_errors) => {
+                let src_path = Rc::<str>::from(map_path.to_string_lossy());
+                let source_errors =
+                    parse_errors.map(|error| error.to_source_error(&src_path));
+                return Err(CliError::Source(cache, source_errors));
+            }
+        }
+    } else {
+        SymbolTable::default()
+    };
     let mut system = {
         let file = fs::File::open(&binary_path)?;
-        load_binary_with_format(binary_format, io::BufReader::new(file))?
+        load_binary_with_format(
+            binary_format,
+            symbols,
+            io::BufReader::new(file),
+        )?
     };
     print!("{}", system.description());
     for (key, value) in system.metadata() {
         println!("{key}: {value}");
     }
     if let Some(ads_path) = opt_ads_path {
-        let mut cache = FileSrcCache::new();
         let mut ads_env = {
             let src_path = Rc::<str>::from(ads_path.to_string_lossy());
             let file = fs::File::open(&ads_path)?;
@@ -248,7 +272,7 @@ fn command_db(
 fn command_ld(
     config_path: PathBuf,
     objfile_paths: Vec<PathBuf>,
-    opt_labels_path: Option<PathBuf>,
+    opt_map_path: Option<PathBuf>,
     opt_output_path: Option<PathBuf>,
 ) -> Result<(), CliError> {
     let mut cache = FileSrcCache::new();
@@ -278,8 +302,8 @@ fn command_ld(
         let source_errors = errs.map(LinkError::to_source_error);
         CliError::Source(cache, source_errors)
     })?;
-    if let Some(labels_path) = opt_labels_path {
-        let mut writer = io::BufWriter::new(fs::File::create(labels_path)?);
+    if let Some(map_path) = opt_map_path {
+        let mut writer = io::BufWriter::new(fs::File::create(map_path)?);
         linked_binary.write_symbols_to(&mut writer)?;
         writer.flush()?;
     }

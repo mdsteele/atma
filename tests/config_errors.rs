@@ -1,4 +1,4 @@
-use atma::addr::AlignTryFromError;
+use atma::addr::{AlignTryFromError, BitWidth};
 use atma::expr::{
     ExprEvalError, ExprFuncEvalError, ExprNotStaticReason, ExprType,
 };
@@ -255,7 +255,7 @@ fn non_static_attr() {
 fn out_of_range_attr() {
     let source = r#"\
     .ADDRSPACES {
-        CPU: bits=0
+        CPU: bits=99
     }
     "#;
     assert_matches!(config_errors(source).as_slice(), [
@@ -264,7 +264,7 @@ fn out_of_range_attr() {
             value,
             ..
         },
-    ] if *value == BigInt::ZERO);
+    ] if *value == BigInt::from(99));
 }
 
 #[test]
@@ -323,12 +323,13 @@ fn region_range_overflow() {
             entry_name,
             start,
             size,
-            bits: 16,
+            bit_width,
             ..
         },
     ] if (&**entry_name == "ROM"
           && u64::from(*start) == 0xc000
-          && u128::from(*size) == 0x8000));
+          && u128::from(*size) == 0x8000)
+          && *bit_width == BitWidth::SIXTEEN);
 }
 
 //===========================================================================//

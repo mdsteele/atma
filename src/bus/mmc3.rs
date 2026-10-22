@@ -1,4 +1,5 @@
-use super::{Addr, SimBus, WatchId, WatchKind};
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 
 //===========================================================================//
 
@@ -71,6 +72,10 @@ impl SimBus for Mmc3Bus {
             self.ram.description(),
             self.rom.description()
         )
+    }
+
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::SIXTEEN
     }
 
     fn label_at(&self, addr: Addr) -> Option<&str> {

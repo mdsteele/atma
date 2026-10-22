@@ -759,6 +759,7 @@ mod tests {
     use super::{
         AdsFrameRef, AdsInstruction, AdsProgram, ExprValue, SimSystem,
     };
+    use crate::addr::BitWidth;
     use crate::bus::{WatchKind, new_open_bus};
     use crate::error::StrSrcCache;
     use crate::expr::ExprBinOp;
@@ -770,7 +771,7 @@ mod tests {
     fn compile(source: &str) -> Vec<AdsInstruction> {
         let mut cache = StrSrcCache::new();
         let path = Rc::<str>::from("input");
-        let bus = new_open_bus(16);
+        let bus = new_open_bus(BitWidth::SIXTEEN);
         let cpu = Mos6502::new();
         let system = SimSystem::new(
             vec![(Rc::from("CPU"), (Box::new(cpu), bus))],

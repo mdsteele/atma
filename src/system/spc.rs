@@ -1,15 +1,23 @@
 use super::sim::SimSystem;
+use super::util::with_symbols;
 use crate::addr::Addr;
 use crate::bus::{new_ram_bus, new_snes_ssmp_bus};
+use crate::parse::SymbolTable;
 use crate::proc::{SimProc, Spc700};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
 
 //===========================================================================//
 
+// Constant used for processer/address space names.
+const SMP: &str = "SMP";
+
+//===========================================================================//
+
 /// Reads a compiled SPC binary file, and returns a simulated system that
 /// represents it.
 pub fn load_spc_binary<R: Read + Seek>(
+    symbols: SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // See https://wiki.superfamicom.org/spc-and-rsn-file-format
@@ -43,7 +51,11 @@ pub fn load_spc_binary<R: Read + Seek>(
     let mut ram = vec![0u8; 1 << 16];
     reader.read_exact(&mut ram)?;
 
-    let bus = new_snes_ssmp_bus(new_ram_bus(ram.into_boxed_slice()));
+    let bus = with_symbols(
+        new_snes_ssmp_bus(new_ram_bus(ram.into_boxed_slice())),
+        SMP,
+        &symbols,
+    );
     let mut smp: Box<dyn SimProc> = Box::new(Spc700::new());
     smp.set_pc(Addr::from(pc));
     smp.set_register("A", u32::from(reg_a));
@@ -51,7 +63,7 @@ pub fn load_spc_binary<R: Read + Seek>(
     smp.set_register("Y", u32::from(reg_y));
     smp.set_register("PSW", u32::from(reg_psw));
     smp.set_register("SP", u32::from(reg_sp));
-    let processors = vec![(Rc::from("SMP"), (smp, bus))];
+    let processors = vec![(Rc::from(SMP), (smp, bus))];
     // TODO: Populate metadata
     Ok(SimSystem::new(processors, Vec::new()))
 }

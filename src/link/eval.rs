@@ -1,7 +1,7 @@
 use super::config::ConfigVariableOr;
 use super::error::{LinkError, LinkResult};
 use super::types::{AbsoluteLabel, AddressSpace, ChunkMetadata};
-use crate::addr::{Addr, Align};
+use crate::addr::{Addr, BitWidth};
 use crate::error::Errs;
 use crate::expr::{ExprEvalError, ExprFunc, ExprLabel, ExprValue};
 use crate::obj::{ObjExpr, ObjExprOp};
@@ -15,7 +15,7 @@ use std::rc::Rc;
 /// during linking, which can either be an object file or the linker config.
 pub(super) struct LinkSymbolContext<'a> {
     /// The bit width of each known address space.
-    pub address_space_widths: &'a HashMap<Rc<str>, Align>,
+    pub address_space_widths: &'a HashMap<Rc<str>, BitWidth>,
     /// Metadata for each chunk in this evaluation context.  For an object
     /// file, this will be metadata for the chunks in that object file; for a
     /// linker config file, this will be empty.
@@ -37,7 +37,7 @@ impl<'a> LinkSymbolContext<'a> {
             ExprLabel::AddrAbsolute { space, address } => Ok(AbsoluteLabel {
                 space: AddressSpace {
                     name: space.clone(),
-                    width: self.address_space_widths[Rc::as_ref(space)],
+                    bit_width: self.address_space_widths[Rc::as_ref(space)],
                 },
                 address: Addr::wrap_bigint(address),
             }),

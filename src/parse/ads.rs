@@ -21,14 +21,14 @@ pub struct AdsModuleAst {
 impl AdsModuleAst {
     /// Reads the abstract syntax tree for an Atma Debugger Script module from
     /// a file.
-    pub fn parse_source(source: &str) -> ParseResult<AdsModuleAst> {
+    pub fn parse_source(source: &str) -> ParseResult<Self> {
         let tokens = tokenize(source)?;
-        AdsModuleAst::parse(&tokens)
+        Self::parse(&tokens)
     }
 
     /// Parses a sequence of tokens into an Atma Debugger Script module.
-    pub fn parse(tokens: &[Token]) -> ParseResult<AdsModuleAst> {
-        parse_tokens(AdsModuleAst::parser(), tokens)
+    pub fn parse(tokens: &[Token]) -> ParseResult<Self> {
+        parse_tokens(Self::parser(), tokens)
     }
 
     fn parser<'a>() -> impl AtmaParser<'a, Self> {

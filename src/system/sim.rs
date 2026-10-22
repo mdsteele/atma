@@ -1,4 +1,4 @@
-use crate::addr::Addr;
+use crate::addr::{Addr, BitWidth};
 use crate::bus::{SimBus, WatchId, WatchKind};
 use crate::proc::{SimBreak, SimProc};
 use std::collections::HashMap;
@@ -63,7 +63,7 @@ impl SimSystem {
 
     /// Creates a new simulated system with a single `NopProc` CPU.
     pub fn with_nop_cpu() -> Self {
-        let bus = crate::bus::new_open_bus(Addr::BITS);
+        let bus = crate::bus::new_open_bus(BitWidth::MAX);
         let cpu = crate::proc::NopProc::new();
         Self::new(vec![(Rc::from("CPU"), (Box::new(cpu), bus))], Vec::new())
     }

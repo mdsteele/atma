@@ -1,4 +1,6 @@
-use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus, new_rom_bus};
+use super::ram::{new_ram_bus, new_rom_bus};
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 
 //===========================================================================//
 
@@ -60,6 +62,10 @@ impl SimBus for NsfBus {
             self.ram.description(),
             self.rom.description()
         )
+    }
+
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::SIXTEEN
     }
 
     fn label_at(&self, addr: Addr) -> Option<&str> {

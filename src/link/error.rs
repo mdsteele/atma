@@ -1,4 +1,4 @@
-use crate::addr::{Addr, Align, Size};
+use crate::addr::{Addr, BitWidth, Size};
 use crate::error::{Errs, SourceError};
 use crate::expr::{ExprEvalError, ExprType, ExprValue};
 use crate::obj::{ObjPatchIntType, ObjSrcContext, ObjSrcLoc};
@@ -80,7 +80,7 @@ pub enum LinkError {
         /// evaluates to.
         actual_address: Addr,
         /// The bit width of the actual address space.
-        address_width: Align,
+        address_width: BitWidth,
         /// The address space of the label value that the expression evaluates
         /// to.
         actual_space: Rc<str>,
@@ -200,10 +200,10 @@ impl LinkError {
                     "expected a label in address space {required_space:?}, \
                      not {actual_space:?}"
                 );
-                let byte_width = address_width.log2().div_ceil(4) as usize;
+                let addr_digits = address_width.hex_digits();
                 let label = format!(
                     "this evaluates to address \
-                     ${actual_address:0byte_width$x} in {actual_space:?}"
+                     ${actual_address:0addr_digits$x} in {actual_space:?}"
                 );
                 SourceError::new(expr_loc.primary(), message)
                     .with_primary_label(label)

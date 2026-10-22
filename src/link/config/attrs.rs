@@ -6,7 +6,7 @@ use super::checksum::ChecksumFormat;
 use super::env::ConfigTypeEnv;
 use super::error::{ConfigAttr, ConfigEntryKind, ConfigError, ConfigResult};
 use super::variable::ConfigVariableOr;
-use crate::addr::{Addr, Align, Size};
+use crate::addr::{Addr, Align, BitWidth, Size};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::ExprType;
 use crate::obj::ObjExpr;
@@ -26,7 +26,7 @@ pub(super) const ENTITY_SECTION: &str = "section";
 
 #[derive(Default)]
 pub(super) struct LinkAddrspaceAttrs {
-    pub bits: Option<u32>,
+    pub bits: Option<BitWidth>,
     pub fill: Option<u8>,
 }
 
@@ -56,7 +56,7 @@ impl LinkAddrspaceAttrs {
             match &*attr_ast.id.name {
                 "bits" => {
                     let result = Self::bits_attr(env, attr_ast.expr);
-                    attrs.bits = Some(errs.ok_or(result, Addr::BITS));
+                    attrs.bits = Some(errs.ok_or(result, BitWidth::MAX));
                 }
                 "fill" => {
                     let result = Self::fill_attr(env, attr_ast.expr);
@@ -72,18 +72,20 @@ impl LinkAddrspaceAttrs {
         (attrs, errs)
     }
 
-    fn bits_attr(env: &ConfigTypeEnv, expr_ast: ExprAst) -> ConfigResult<u32> {
+    fn bits_attr(
+        env: &ConfigTypeEnv,
+        expr_ast: ExprAst,
+    ) -> ConfigResult<BitWidth> {
         let expr_span = expr_ast.span;
         let bigint =
             static_int_attr(env, ConfigAttr::AddrspaceBits, expr_ast)?;
-        match bigint.to_u32() {
-            Some(int) if (1..=Addr::BITS).contains(&int) => Ok(int),
-            _ => Err(Errs::one(ConfigError::OutOfRangeAttr {
+        BitWidth::try_from(&bigint).map_err(|()| {
+            Errs::one(ConfigError::OutOfRangeAttr {
                 attribute: ConfigAttr::AddrspaceBits,
                 expr_loc: env.make_loc(expr_span),
                 value: bigint,
-            })),
-        }
+            })
+        })
     }
 
     fn fill_attr(env: &ConfigTypeEnv, expr_ast: ExprAst) -> ConfigResult<u8> {

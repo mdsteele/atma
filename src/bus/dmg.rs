@@ -1,5 +1,5 @@
 use super::{SimBus, WatchId, WatchKind, new_open_bus, new_ram_bus};
-use crate::addr::Addr;
+use crate::addr::{Addr, BitWidth};
 
 //===========================================================================//
 
@@ -18,7 +18,7 @@ struct DmgBus {
     vram: Box<dyn SimBus>,
     wram: Box<dyn SimBus>,
     oam: Box<dyn SimBus>,
-    unused: Box<dyn SimBus>,
+    open: Box<dyn SimBus>,
     io_regs: Box<dyn SimBus>,
     hiram: Box<dyn SimBus>,
 }
@@ -32,7 +32,7 @@ impl DmgBus {
             vram: new_ram_bus(Box::new([0u8; 0x2000])),
             wram: new_ram_bus(Box::new([0u8; 0x2000])),
             oam: new_ram_bus(Box::new([0u8; 0x100])),
-            unused: new_open_bus(16),
+            open: new_open_bus(BitWidth::SIXTEEN),
             io_regs: new_ram_bus(Box::new([0u8; 0x80])), // TODO
             hiram: new_ram_bus(Box::new([0u8; 0x80])),
         }
@@ -44,6 +44,10 @@ impl SimBus for DmgBus {
         format!("DMG with {}", self.cart.description())
     }
 
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::SIXTEEN
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
         match addr.as_u16() {
             0x0000..0x8000 => self.cart.label_at(addr),
@@ -51,7 +55,7 @@ impl SimBus for DmgBus {
             0xa000..0xc000 => self.cart.label_at(addr),
             0xc000..0xfe00 => self.wram.label_at(addr),
             0xfe00..0xfea0 => self.oam.label_at(addr),
-            0xfea0..0xff00 => self.unused.label_at(addr),
+            0xfea0..0xff00 => self.open.label_at(addr),
             0xff00..0xff80 => self.io_regs.label_at(addr),
             0xff80..0xffff => self.hiram.label_at(addr),
             0xffff => Some("IE"),
@@ -65,7 +69,7 @@ impl SimBus for DmgBus {
             0xa000..0xc000 => self.cart.watchpoint_at(addr, kind),
             0xc000..0xfe00 => self.wram.watchpoint_at(addr, kind),
             0xfe00..0xfea0 => self.oam.watchpoint_at(addr, kind),
-            0xfea0..0xff00 => self.unused.watchpoint_at(addr, kind),
+            0xfea0..0xff00 => self.open.watchpoint_at(addr, kind),
             0xff00..0xff80 => self.io_regs.watchpoint_at(addr, kind),
             0xff80.. => self.hiram.watchpoint_at(addr, kind),
         }
@@ -78,7 +82,7 @@ impl SimBus for DmgBus {
             0xa000..0xc000 => self.cart.watch_address(addr, kind),
             0xc000..0xfe00 => self.wram.watch_address(addr, kind),
             0xfe00..0xfea0 => self.oam.watch_address(addr, kind),
-            0xfea0..0xff00 => self.unused.watch_address(addr, kind),
+            0xfea0..0xff00 => self.open.watch_address(addr, kind),
             0xff00..0xff80 => self.io_regs.watch_address(addr, kind),
             0xff80.. => self.hiram.watch_address(addr, kind),
         }
@@ -110,7 +114,7 @@ impl SimBus for DmgBus {
         self.vram.unwatch(id);
         self.wram.unwatch(id);
         self.oam.unwatch(id);
-        self.unused.unwatch(id);
+        self.open.unwatch(id);
         self.io_regs.unwatch(id);
         self.hiram.unwatch(id);
     }
@@ -122,7 +126,7 @@ impl SimBus for DmgBus {
             0xa000..0xc000 => self.cart.peek_byte(addr),
             0xc000..0xfe00 => self.wram.peek_byte(addr),
             0xfe00..0xfea0 => self.oam.peek_byte(addr),
-            0xfea0..0xff00 => self.unused.peek_byte(addr),
+            0xfea0..0xff00 => self.open.peek_byte(addr),
             0xff00..0xff80 => self.io_regs.peek_byte(addr),
             0xff80.. => self.hiram.peek_byte(addr),
         }
@@ -135,7 +139,7 @@ impl SimBus for DmgBus {
             0xa000..0xc000 => self.cart.read_byte(addr),
             0xc000..0xfe00 => self.wram.read_byte(addr),
             0xfe00..0xfea0 => self.oam.read_byte(addr),
-            0xfea0..0xff00 => self.unused.read_byte(addr),
+            0xfea0..0xff00 => self.open.read_byte(addr),
             0xff00..0xff80 => self.io_regs.read_byte(addr),
             0xff80.. => self.hiram.read_byte(addr),
         }
@@ -148,7 +152,7 @@ impl SimBus for DmgBus {
             0xa000..0xc000 => self.cart.write_byte(addr, data),
             0xc000..0xfe00 => self.wram.write_byte(addr, data),
             0xfe00..0xfea0 => self.oam.write_byte(addr, data),
-            0xfea0..0xff00 => self.unused.write_byte(addr, data),
+            0xfea0..0xff00 => self.open.write_byte(addr, data),
             0xff00..0xff80 => self.io_regs.write_byte(addr, data),
             0xff80.. => self.hiram.write_byte(addr, data),
         }

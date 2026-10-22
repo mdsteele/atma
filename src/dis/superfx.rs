@@ -642,8 +642,9 @@ fn next_word(bus: &dyn SimBus, pc: u32) -> u16 {
 mod tests {
     use super::Instruction;
     use crate::addr::Addr;
-    use crate::bus::{LabeledBus, SimBus, new_rom_bus};
+    use crate::bus::{SimBus, new_labeled_bus, new_rom_bus};
     use std::collections::HashMap;
+    use std::rc::Rc;
 
     fn make_test_bus(code: &[u8]) -> Box<dyn SimBus> {
         let mut rom = vec![0u8; 1 << 4];
@@ -661,9 +662,9 @@ mod tests {
         addr: u32,
         label: &str,
     ) -> String {
-        let labels = HashMap::from([(label.to_string(), Addr::from(addr))]);
-        let bus = LabeledBus::new(make_test_bus(code), labels);
-        disassemble_with_bus(code, alt, &bus)
+        let labels = HashMap::from([(Addr::from(addr), Rc::from(label))]);
+        let bus = new_labeled_bus(make_test_bus(code), labels);
+        disassemble_with_bus(code, alt, Box::as_ref(&bus))
     }
 
     fn disassemble_with_bus(code: &[u8], alt: u8, bus: &dyn SimBus) -> String {

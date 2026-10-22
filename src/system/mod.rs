@@ -9,6 +9,7 @@ mod nsf;
 mod sfc;
 mod sim;
 mod spc;
+mod util;
 
 pub use cc65::load_sim65_binary;
 pub use gb::load_gb_binary;

@@ -9,6 +9,7 @@ mod expr;
 mod id;
 mod link;
 mod lvalue;
+mod symbols;
 
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
 pub use asm::{
@@ -26,5 +27,6 @@ pub use expr::{BinOpAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst};
 pub use id::{CompoundIdAst, DeclarationKind, IdentifierAst, IdentifierKind};
 pub use link::{LinkBlockAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
 pub use lvalue::{LValueAst, LValueAstNode};
+pub use symbols::{SymbolEntry, SymbolTable};
 
 //===========================================================================//

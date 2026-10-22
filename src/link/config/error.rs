@@ -1,5 +1,5 @@
 use super::checksum::ChecksumFormat;
-use crate::addr::{Addr, Align, AlignTryFromError, Size};
+use crate::addr::{Addr, Align, AlignTryFromError, BitWidth, Size};
 use crate::error::{Errs, SourceError, SrcCacheError, SrcLoc, SrcSpan};
 use crate::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
@@ -186,7 +186,7 @@ pub enum ConfigError {
         /// The size of the memory region.
         size: Size,
         /// The bit width of the memory region's address space.
-        bits: u32,
+        bit_width: BitWidth,
     },
     /// Encountered an error while trying to fetch data from a file.
     SrcCacheError {
@@ -429,11 +429,11 @@ impl ConfigError {
                 entry_loc,
                 start,
                 size,
-                bits,
+                bit_width,
             } => {
                 let message = format!(
-                    "`{entry_name}` memory range overflows {bits}-bit address \
-                     size (start=${start:x}, size=${size:x})"
+                    "`{entry_name}` memory range overflows {bit_width}-bit \
+                     address size (start=${start:x}, size=${size:x})"
                 );
                 SourceError::new(entry_loc.primary(), message)
                     .with_primary_label("")

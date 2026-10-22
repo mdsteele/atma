@@ -1,11 +1,21 @@
 use super::sim::SimSystem;
-use crate::bus::{
-    SimBus, new_ram_bus, new_rom_bus, new_snes_cpu_bus,
-    new_snes_lorom_cart_bus, new_snes_ssmp_bus,
+use super::util::{
+    new_rom_bus_with_binary_symbols, with_offset_free_symbols, with_symbols,
 };
+use crate::bus::{
+    SimBus, new_ram_bus, new_snes_cpu_bus, new_snes_lorom_cart_bus,
+    new_snes_ssmp_bus,
+};
+use crate::parse::SymbolTable;
 use crate::proc::{SimProc, Spc700, Wdc65c816};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
+
+//===========================================================================//
+
+// Constants used for processer/address space names.
+const CPU: &str = "CPU";
+const SMP: &str = "SMP";
 
 //===========================================================================//
 
@@ -132,8 +142,14 @@ impl SnesRomHeader {
         Err(io::Error::other("could not find any SNES ROM header"))
     }
 
-    pub fn make_cpu_bus(&self, rom_data: Box<[u8]>) -> Box<dyn SimBus> {
-        let rom_bus = new_rom_bus(rom_data);
+    pub fn make_cpu_bus(
+        &self,
+        rom_data: Box<[u8]>,
+        rom_start: u64,
+        symbols: &SymbolTable,
+    ) -> Box<dyn SimBus> {
+        let rom_bus =
+            new_rom_bus_with_binary_symbols(rom_data, rom_start, CPU, symbols);
         let sram_bus = if self.sram_size == 0 {
             None
         } else {
@@ -146,7 +162,7 @@ impl SnesRomHeader {
             SnesMappingMode::HiRom => rom_bus, // TODO: sram
             _ => todo!("{:?}", self.mode),
         };
-        new_snes_cpu_bus(cart_bus)
+        with_offset_free_symbols(new_snes_cpu_bus(cart_bus), CPU, symbols)
     }
 }
 
@@ -155,6 +171,7 @@ impl SnesRomHeader {
 /// Reads a compiled SFC (or SMC) binary file, and returns a simulated system
 /// that represents it.
 pub fn load_sfc_binary<R: Read + Seek>(
+    symbols: SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // From https://snes.nesdev.org/wiki/ROM_file_formats: "The data contained
@@ -191,14 +208,18 @@ pub fn load_sfc_binary<R: Read + Seek>(
 
     let header = SnesRomHeader::detect(&rom_data)?;
 
-    let cpu_bus = header.make_cpu_bus(rom_data.into_boxed_slice());
+    let cpu_bus =
+        header.make_cpu_bus(rom_data.into_boxed_slice(), rom_start, &symbols);
     let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
-    let smp_bus =
-        new_snes_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice()));
+    let smp_bus = with_symbols(
+        new_snes_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice())),
+        SMP,
+        &symbols,
+    );
     let smp_proc: Box<dyn SimProc> = Box::new(Spc700::new());
     let processors = vec![
-        (Rc::from("CPU"), (cpu_proc, cpu_bus)),
-        (Rc::from("SMP"), (smp_proc, smp_bus)),
+        (Rc::from(CPU), (cpu_proc, cpu_bus)),
+        (Rc::from(SMP), (smp_proc, smp_bus)),
     ];
     Ok(SimSystem::new(processors, header.metadata))
 }

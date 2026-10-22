@@ -1,5 +1,7 @@
 use super::sim::SimSystem;
+use super::util::with_symbols;
 use crate::bus::{SimBus, new_ram_bus};
+use crate::parse::SymbolTable;
 use crate::proc::{Mos6502, SimProc};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -7,9 +9,15 @@ use std::rc::Rc;
 
 //===========================================================================//
 
+// Constant used for processer/address space names.
+const CPU: &str = "CPU";
+
+//===========================================================================//
+
 /// Reads a compiled NSF binary file, and returns a simulated system that
 /// represents it.
 pub fn load_sim65_binary<R: Read + Seek>(
+    symbols: SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     let mut header = [0u8; 8];
@@ -48,9 +56,9 @@ pub fn load_sim65_binary<R: Read + Seek>(
     // Copy reset_addr into RAM at the reset vector.
     cursor.seek(SeekFrom::Start(0xfffc))?;
     cursor.write_u16::<LittleEndian>(reset_addr)?;
-    let bus = new_ram_bus(ram);
+    let bus = with_symbols(new_ram_bus(ram), CPU, &symbols);
     let cpu = Box::new(Mos6502::new());
-    processors.push((Rc::from("CPU"), (cpu, bus)));
+    processors.push((Rc::from(CPU), (cpu, bus)));
     Ok(SimSystem::new(processors, Vec::new()))
 }
 

@@ -1,4 +1,4 @@
-use crate::addr::{Addr, Align};
+use crate::addr::{Addr, BitWidth};
 use num_bigint::BigInt;
 use std::rc::Rc;
 
@@ -21,7 +21,7 @@ pub(super) struct AddressSpace {
     /// The name of this address space.
     pub name: Rc<str>,
     /// The bit width of this address space.
-    pub width: Align,
+    pub bit_width: BitWidth,
 }
 
 //===========================================================================//

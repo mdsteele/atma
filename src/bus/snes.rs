@@ -1,4 +1,6 @@
-use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus};
+use super::ram::new_ram_bus;
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 use bimap::BiHashMap;
 
 //===========================================================================//
@@ -72,6 +74,10 @@ impl SimBus for SnesBus {
         format!("SNES with {}", self.cart.description())
     }
 
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::TWENTY_FOUR
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
         let (bus, addr) = self.sub_bus(addr);
         bus.label_at(addr)
@@ -133,6 +139,9 @@ pub struct CpuRegBus {
 }
 
 impl CpuRegBus {
+    const BIT_WIDTH: BitWidth = BitWidth::new(5);
+    const ADDR_MASK: u8 = 0x1f;
+
     pub fn new() -> CpuRegBus {
         CpuRegBus { watchpoints: BiHashMap::new() }
     }
@@ -143,8 +152,12 @@ impl SimBus for CpuRegBus {
         "SNES CPU registers".to_string()
     }
 
+    fn bit_width(&self) -> BitWidth {
+        Self::BIT_WIDTH
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
-        let addr = addr.as_u8() & 0x1f;
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match addr {
             0x00 => Some("NMITIMEN"),
             0x01 => Some("WRIO"),
@@ -181,12 +194,12 @@ impl SimBus for CpuRegBus {
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr.as_u8() & 0x1f;
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
-        let addr = addr.as_u8() & 0x1f;
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -262,6 +275,9 @@ pub struct DmaRegBus {
 }
 
 impl DmaRegBus {
+    const BIT_WIDTH: BitWidth = BitWidth::new(7);
+    const ADDR_MASK: u8 = 0x7f;
+
     pub fn new() -> DmaRegBus {
         DmaRegBus { watchpoints: BiHashMap::new() }
     }
@@ -272,8 +288,12 @@ impl SimBus for DmaRegBus {
         "SNES DMA registers".to_string()
     }
 
+    fn bit_width(&self) -> BitWidth {
+        Self::BIT_WIDTH
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
-        match addr.as_u8() {
+        match addr.as_u8() & Self::ADDR_MASK {
             0x00 => Some("DMAP0"),
             0x10 => Some("DMAP1"),
             0x20 => Some("DMAP2"),
@@ -367,12 +387,12 @@ impl SimBus for DmaRegBus {
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr.as_u8();
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
-        let addr = addr.as_u8();
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -506,6 +526,9 @@ pub struct JoyRegBus {
 }
 
 impl JoyRegBus {
+    const BIT_WIDTH: BitWidth = BitWidth::new(1);
+    const ADDR_MASK: u8 = 0x01;
+
     pub fn new() -> JoyRegBus {
         JoyRegBus { watchpoints: BiHashMap::new() }
     }
@@ -516,8 +539,12 @@ impl SimBus for JoyRegBus {
         "SNES Joypad registers".to_string()
     }
 
+    fn bit_width(&self) -> BitWidth {
+        Self::BIT_WIDTH
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
-        let addr = addr.as_u8() & 0x1;
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match addr {
             0 => Some("JOYSER0"),
             1 => Some("JOYSER1"),
@@ -526,12 +553,12 @@ impl SimBus for JoyRegBus {
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr.as_u8() & 0x1;
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
-        let addr = addr.as_u8() & 0x1;
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {
@@ -579,6 +606,8 @@ pub struct PpuRegBus {
 }
 
 impl PpuRegBus {
+    const BIT_WIDTH: BitWidth = BitWidth::new(8);
+
     pub fn new() -> PpuRegBus {
         PpuRegBus { watchpoints: BiHashMap::new() }
     }
@@ -587,6 +616,10 @@ impl PpuRegBus {
 impl SimBus for PpuRegBus {
     fn description(&self) -> String {
         "SNES PPU registers".to_string()
+    }
+
+    fn bit_width(&self) -> BitWidth {
+        Self::BIT_WIDTH
     }
 
     fn label_at(&self, addr: Addr) -> Option<&str> {

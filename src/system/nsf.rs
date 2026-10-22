@@ -1,15 +1,23 @@
 use super::sim::SimSystem;
+use super::util::with_symbols;
 use crate::addr::Addr;
 use crate::bus::{new_nes_cpu_bus, new_nes_nsf_cart_bus};
+use crate::parse::SymbolTable;
 use crate::proc::{Mos6502, SimProc};
 use std::io::{self, Read, Seek};
 use std::rc::Rc;
 
 //===========================================================================//
 
+// Constant used for processer/address space names.
+const CPU: &str = "CPU";
+
+//===========================================================================//
+
 /// Reads a compiled NSF binary file, and returns a simulated system that
 /// represents it.
 pub fn load_nsf_binary<R: Read + Seek>(
+    symbols: SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // See https://www.nesdev.org/wiki/NSF
@@ -113,13 +121,13 @@ pub fn load_nsf_binary<R: Read + Seek>(
     };
 
     let cart_bus = new_nes_nsf_cart_bus(rom_data, init_addr, play_addr);
-    let cpu_bus = new_nes_cpu_bus(cart_bus);
+    let cpu_bus = with_symbols(new_nes_cpu_bus(cart_bus), CPU, &symbols);
     let mut cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
     cpu.set_pc(Addr::from(0x4800u16));
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("X", u32::from(platform & 0x01));
     cpu.set_register("S", 0xff);
-    let processors = vec![(Rc::from("CPU"), (cpu, cpu_bus))];
+    let processors = vec![(Rc::from(CPU), (cpu, cpu_bus))];
     Ok(SimSystem::new(processors, metadata))
 }
 

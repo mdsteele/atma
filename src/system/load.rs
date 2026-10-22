@@ -6,6 +6,7 @@ use super::nsf::load_nsf_binary;
 use super::sfc::load_sfc_binary;
 use super::sim::SimSystem;
 use super::spc::load_spc_binary;
+use crate::parse::SymbolTable;
 use std::io::{self, Read, Seek, SeekFrom};
 
 //===========================================================================//
@@ -38,17 +39,18 @@ pub enum BinaryFormat {
 /// simulated system that represents it.
 pub fn load_binary_with_format<R: Read + Seek>(
     format: BinaryFormat,
+    symbols: SymbolTable,
     reader: R,
 ) -> io::Result<SimSystem> {
     match format {
-        BinaryFormat::Auto => load_binary(reader),
-        BinaryFormat::Gb => load_gb_binary(reader),
-        BinaryFormat::Gbs => load_gbs_binary(reader),
-        BinaryFormat::Nes => load_nes_binary(reader),
-        BinaryFormat::Nsf => load_nsf_binary(reader),
-        BinaryFormat::Sfc => load_sfc_binary(reader),
-        BinaryFormat::Sim65 => load_sim65_binary(reader),
-        BinaryFormat::Spc => load_spc_binary(reader),
+        BinaryFormat::Auto => load_binary(symbols, reader),
+        BinaryFormat::Gb => load_gb_binary(symbols, reader),
+        BinaryFormat::Gbs => load_gbs_binary(symbols, reader),
+        BinaryFormat::Nes => load_nes_binary(symbols, reader),
+        BinaryFormat::Nsf => load_nsf_binary(symbols, reader),
+        BinaryFormat::Sfc => load_sfc_binary(symbols, reader),
+        BinaryFormat::Sim65 => load_sim65_binary(symbols, reader),
+        BinaryFormat::Spc => load_spc_binary(symbols, reader),
     }
 }
 
@@ -67,28 +69,31 @@ pub fn load_binary_with_format<R: Read + Seek>(
 /// * sim65 (6502 mode only)
 /// * SFC/SMC
 /// * SPC
-pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
+pub fn load_binary<R: Read + Seek>(
+    symbols: SymbolTable,
+    mut reader: R,
+) -> io::Result<SimSystem> {
     let mut header = [0u8; 8];
     reader.read_exact(&mut header)?;
     if &header[..4] == b"GBS\x01" {
         reader.rewind()?;
-        return load_gbs_binary(reader);
+        return load_gbs_binary(symbols, reader);
     }
     if &header[..4] == b"NES\x1a" {
         reader.rewind()?;
-        return load_nes_binary(reader);
+        return load_nes_binary(symbols, reader);
     }
     if &header[..5] == b"NESM\x1a" {
         reader.rewind()?;
-        return load_nsf_binary(reader);
+        return load_nsf_binary(symbols, reader);
     }
     if &header == b"SNES-SPC" {
         reader.rewind()?;
-        return load_spc_binary(reader);
+        return load_spc_binary(symbols, reader);
     }
     if &header[..5] == b"sim65" {
         reader.rewind()?;
-        return load_sim65_binary(reader);
+        return load_sim65_binary(symbols, reader);
     }
 
     reader.seek(SeekFrom::Start(0x0104))?;
@@ -96,11 +101,11 @@ pub fn load_binary<R: Read + Seek>(mut reader: R) -> io::Result<SimSystem> {
     reader.read_exact(&mut logo)?;
     if &logo == GB_HEADER_LOGO {
         reader.rewind()?;
-        return load_gb_binary(reader);
+        return load_gb_binary(symbols, reader);
     }
 
     reader.rewind()?;
-    load_sfc_binary(reader)
+    load_sfc_binary(symbols, reader)
 }
 
 //===========================================================================//

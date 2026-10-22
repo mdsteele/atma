@@ -1,11 +1,18 @@
 use super::sim::SimSystem;
+use super::util::{new_rom_bus_with_binary_symbols, with_offset_free_symbols};
+use crate::addr::BitWidth;
 use crate::bus::{
     SimBus, new_nes_cpu_bus, new_nes_mmc3_cart_bus, new_open_bus, new_ram_bus,
-    new_rom_bus,
 };
+use crate::parse::SymbolTable;
 use crate::proc::{Mos6502, SimProc};
 use std::io::{self, Read, Seek};
 use std::rc::Rc;
+
+//===========================================================================//
+
+// Constant used for processer/address space names.
+const CPU: &str = "CPU";
 
 //===========================================================================//
 
@@ -27,19 +34,24 @@ impl NesMapper {
     fn make_cpu_bus(
         &self,
         sram_size: usize,
-        rom: Box<[u8]>,
+        rom_data: Box<[u8]>,
+        rom_start: u64,
+        symbols: &SymbolTable,
     ) -> Box<dyn SimBus> {
         let ram_bus = if sram_size == 0 {
-            new_open_bus(16)
+            new_open_bus(BitWidth::SIXTEEN)
         } else {
             new_ram_bus(vec![0u8; sram_size].into_boxed_slice())
         };
-        let rom_bus = new_rom_bus(rom);
+        let rom_bus =
+            new_rom_bus_with_binary_symbols(rom_data, rom_start, CPU, symbols);
         let cart_bus = match *self {
             NesMapper::Nrom => rom_bus,
             NesMapper::Mmc3 => new_nes_mmc3_cart_bus(rom_bus, ram_bus),
         };
-        new_nes_cpu_bus(cart_bus)
+        // TODO: Make PPU bus using symbols for PPU address space, and provide
+        // that to the CPU bus via the PPUADDR/PPUDATA hardware registers.
+        with_offset_free_symbols(new_nes_cpu_bus(cart_bus), CPU, symbols)
     }
 }
 
@@ -48,6 +60,7 @@ impl NesMapper {
 /// Reads a compiled iNES or NES 2.0 binary file, and returns a simulated
 /// system that represents it.
 pub fn load_nes_binary<R: Read + Seek>(
+    symbols: SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     let mut header = [0u8; 16];
@@ -91,9 +104,14 @@ pub fn load_nes_binary<R: Read + Seek>(
     let mut prg_rom = vec![0u8; prg_rom_size];
     reader.read_exact(&mut prg_rom)?;
 
-    let bus = mapper.make_cpu_bus(sram_size, prg_rom.into_boxed_slice());
+    let bus = mapper.make_cpu_bus(
+        sram_size,
+        prg_rom.into_boxed_slice(),
+        header.len() as u64,
+        &symbols,
+    );
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
-    let processors = vec![(Rc::from("CPU"), (cpu, bus))];
+    let processors = vec![(Rc::from(CPU), (cpu, bus))];
     Ok(SimSystem::new(processors, Vec::new()))
 }
 

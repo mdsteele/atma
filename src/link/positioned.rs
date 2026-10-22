@@ -3,7 +3,7 @@ use super::config::{LinkConfig, RegionKind};
 use super::error::{LinkError, LinkResult};
 use super::place::try_place;
 use super::types::{AbsoluteLabel, AddressSpace, ChunkId, ChunkMetadata};
-use crate::addr::{Addr, Align, Size};
+use crate::addr::{Addr, BitWidth, Size};
 use crate::error::Errs;
 use crate::obj::{ObjFile, ObjSrcLoc};
 use rangemap::RangeInclusiveSet;
@@ -256,7 +256,7 @@ fn section_ordering(lhs: &ArrangedSection, rhs: &ArrangedSection) -> Ordering {
 /// Positioning information for all regions of a complete binary.
 pub(super) struct PositionedBinary {
     /// The bit width of each address space relevant to this binary.
-    pub address_space_widths: HashMap<Rc<str>, Align>,
+    pub address_space_widths: HashMap<Rc<str>, BitWidth>,
     /// The memory regions for this binary.
     pub regions: Vec<PositionedRegion>,
     /// For each object file, metadata about each chunk in that object file.
@@ -341,7 +341,7 @@ impl PositionedBinary {
             address_space_widths: config
                 .addrspaces
                 .iter()
-                .map(|addrspace| (addrspace.name.clone(), addrspace.width))
+                .map(|addrspace| (addrspace.name.clone(), addrspace.bit_width))
                 .collect(),
             regions: positioned_regions,
             file_chunk_metadata,

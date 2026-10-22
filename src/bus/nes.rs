@@ -1,10 +1,14 @@
-use super::{Addr, SimBus, WatchId, WatchKind, new_ram_bus};
+use super::ram::new_ram_bus;
+use super::{SimBus, WatchId, WatchKind};
+use crate::addr::{Addr, BitWidth};
 use bimap::BiHashMap;
 
 //===========================================================================//
 
 /// Returns a simulated NES CPU memory bus.
 pub fn new_nes_cpu_bus(cartridge_bus: Box<dyn SimBus>) -> Box<dyn SimBus> {
+    // TODO: Also take a PPU bus, and provide that to the CPU bus via the
+    // PPUADDR/PPUDATA hardware registers.
     Box::new(NesBus::with_cartridge(cartridge_bus))
 }
 
@@ -35,6 +39,10 @@ impl NesBus {
 impl SimBus for NesBus {
     fn description(&self) -> String {
         format!("NES with {}", self.cart.description())
+    }
+
+    fn bit_width(&self) -> BitWidth {
+        BitWidth::SIXTEEN
     }
 
     fn label_at(&self, addr: Addr) -> Option<&str> {
@@ -113,10 +121,13 @@ impl SimBus for NesBus {
 //===========================================================================//
 
 pub struct PpuRegBus {
-    watchpoints: BiHashMap<(Addr, WatchKind), WatchId>,
+    watchpoints: BiHashMap<(u8, WatchKind), WatchId>,
 }
 
 impl PpuRegBus {
+    const BIT_WIDTH: BitWidth = BitWidth::new(3);
+    const ADDR_MASK: u8 = 0x07;
+
     pub fn new() -> PpuRegBus {
         PpuRegBus { watchpoints: BiHashMap::new() }
     }
@@ -127,8 +138,12 @@ impl SimBus for PpuRegBus {
         "PPU registers".to_string()
     }
 
+    fn bit_width(&self) -> BitWidth {
+        Self::BIT_WIDTH
+    }
+
     fn label_at(&self, addr: Addr) -> Option<&str> {
-        match addr.as_u8() & 0x7 {
+        match addr.as_u8() & Self::ADDR_MASK {
             0 => Some("PPUCTRL"),
             1 => Some("PPUMASK"),
             2 => Some("PPUSTATUS"),
@@ -142,12 +157,12 @@ impl SimBus for PpuRegBus {
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
-        let addr = addr & Addr::from(0x7u8);
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         self.watchpoints.get_by_left(&(addr, kind)).cloned()
     }
 
     fn watch_address(&mut self, addr: Addr, kind: WatchKind) -> WatchId {
-        let addr = addr & Addr::from(0x7u8);
+        let addr = addr.as_u8() & Self::ADDR_MASK;
         match self.watchpoints.get_by_left(&(addr, kind)) {
             Some(id) => *id,
             None => {

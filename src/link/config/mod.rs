@@ -12,7 +12,7 @@ use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
 use super::types::{AbsoluteLabel, AddressSpace};
-use crate::addr::{Addr, Align, Range, Size};
+use crate::addr::{Addr, Align, BitWidth, Range, Size};
 use crate::error::{Errs, SrcCache};
 use crate::expr::ExprValue;
 use crate::obj::{ObjExpr, ObjFile, ObjSrcLoc};
@@ -158,7 +158,8 @@ impl LinkConfig {
         let absolute = AbsoluteLabel {
             space: AddressSpace {
                 name: export.space.clone(),
-                width: positioned_binary.address_space_widths[&export.space],
+                bit_width: positioned_binary.address_space_widths
+                    [&export.space],
             },
             address: symbol_addr,
         };
@@ -178,7 +179,7 @@ pub struct AddrspaceConfig {
     /// The name of this address space.
     pub name: Rc<str>,
     /// The bit width of this address space.
-    pub width: Align,
+    pub bit_width: BitWidth,
     /// Any padded portions of non-BSS memory regions in this address space
     /// will be filled with this byte value by default.
     pub fill: u8,

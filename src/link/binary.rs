@@ -4,7 +4,7 @@ use super::positioned::{
     PositionedBinary, PositionedChunk, PositionedRegion, PositionedSection,
     PositionedSymbol,
 };
-use crate::addr::{Addr, Align};
+use crate::addr::{Addr, BitWidth};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io;
@@ -18,12 +18,12 @@ pub struct BinarySymbol {
     /// The fully qualified name of the symbol.
     ///
     /// Note that a linked binary can contain multiple symbols with the same
-    /// name, but `external` will be true for at most one of those symbols.
+    /// name, but `is_external` will be true for at most one of those symbols.
     pub name: Rc<str>,
-    /// The address space that the symbol exists in.
+    /// The name of the address space that the symbol exists in.
     pub space: Rc<str>,
     /// The bit width of the symbol address.
-    pub width: Align,
+    pub bit_width: BitWidth,
     /// The address of the symbol within its address space.
     pub address: Addr,
     /// The byte offset into the binary for the symbol, or `None` if the symbol
@@ -31,7 +31,7 @@ pub struct BinarySymbol {
     pub binary_offset: Option<u64>,
     /// True if this symbol is external.  A linked binary will not contain two
     /// external symbols with the same `name`.
-    pub external: bool,
+    pub is_external: bool,
 }
 
 //===========================================================================//
@@ -96,7 +96,7 @@ impl LinkedBinary {
             .collect::<Vec<(LinkFragment, u64)>>();
         let external_symbol_offsets = symbols
             .iter()
-            .filter(|symbol| symbol.external)
+            .filter(|symbol| symbol.is_external)
             .filter_map(|symbol| {
                 symbol
                     .binary_offset
@@ -294,7 +294,7 @@ impl LinkedBinary {
             max_space_chars =
                 max_space_chars.max(symbol.space.chars().count());
             max_addr_digits =
-                max_addr_digits.max(symbol.width.log2().div_ceil(4) as usize);
+                max_addr_digits.max(symbol.bit_width.hex_digits());
         }
         for symbol in &self.symbols {
             let offset_string = if let Some(offset) = symbol.binary_offset {
@@ -305,15 +305,15 @@ impl LinkedBinary {
             let addr_string = format!(
                 "${0:01$x}",
                 symbol.address,
-                symbol.width.log2().div_ceil(4) as usize
+                symbol.bit_width.hex_digits()
             );
             writeln!(
                 writer,
-                "{offset_string} | {0:1$} | {2:>03$} | {4}",
+                "{offset_string} | {0:max_space_chars$} | \
+                 {addr_string:>01$} | {2} {3}",
                 symbol.space,
-                max_space_chars,
-                addr_string,
                 1 + max_addr_digits,
+                if symbol.is_external { '+' } else { '-' },
                 symbol.name
             )?;
         }
@@ -438,16 +438,16 @@ impl BinaryBuilder {
     fn add_symbols(
         &mut self,
         symbol_map: &HashMap<Rc<str>, PositionedSymbol>,
-        external: bool,
+        is_external: bool,
     ) {
         self.symbols.extend(symbol_map.iter().map(|(name, symbol)| {
             BinarySymbol {
                 name: name.clone(),
                 space: symbol.absolute.space.name.clone(),
-                width: symbol.absolute.space.width,
+                bit_width: symbol.absolute.space.bit_width,
                 address: symbol.absolute.address,
                 binary_offset: symbol.binary_offset,
-                external,
+                is_external,
             }
         }));
     }
@@ -457,6 +457,7 @@ impl BinaryBuilder {
             .cmp(&rhs.binary_offset)
             .then_with(|| lhs.space.cmp(&rhs.space))
             .then_with(|| lhs.address.cmp(&rhs.address))
+            .then_with(|| rhs.is_external.cmp(&lhs.is_external))
             .then_with(|| lhs.name.cmp(&rhs.name))
     }
 

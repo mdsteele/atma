@@ -10,7 +10,7 @@ use super::{
     AddrspaceConfig, ExportConfig, ImportConfig, LinkConfig, RegionConfig,
     SectionConfig,
 };
-use crate::addr::{Addr, Align, Range};
+use crate::addr::{Addr, Align, BitWidth, Range};
 use crate::error::{Errs, SrcCache};
 use crate::expr::{ExprType, ExprValue};
 use crate::obj::{ObjSrcContext, ObjSrcLoc, ObjSrcParent};
@@ -126,7 +126,7 @@ impl<'a> ConfigBuilder<'a> {
         }
         self.config.addrspaces.push(AddrspaceConfig {
             name: entry.id.name,
-            width: Align::with_bits(attrs.bits.unwrap_or(Addr::BITS)),
+            bit_width: attrs.bits.unwrap_or(BitWidth::MAX),
             fill: attrs.fill.unwrap_or_default(),
         });
         errs.result()
@@ -353,22 +353,22 @@ impl<'a> ConfigBuilder<'a> {
             entry.attrs,
         ));
         let attrs = base_attrs.clone_with_overrides(attrs);
-        let addrspace_bits = if let Some(space) = &attrs.space {
+        let addrspace_width = if let Some(space) = &attrs.space {
             self.config
                 .addrspaces
                 .iter()
                 .find(|addrspace| space == &addrspace.name)
-                .map(|addrspace| addrspace.width.log2())
-                .unwrap_or(Addr::BITS)
+                .map(|addrspace| addrspace.bit_width)
+                .unwrap_or(BitWidth::MAX)
         } else {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
                 entry_loc: self.env.make_loc(entry.id.span),
                 attribute: ConfigAttr::RegionSpace,
             });
-            Addr::BITS
+            BitWidth::MAX
         };
-        let addrspace_range = Range::with_bits(addrspace_bits);
+        let addrspace_range = Range::with_bits(addrspace_width);
         if attrs.start.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
@@ -392,7 +392,7 @@ impl<'a> ConfigBuilder<'a> {
                         entry_loc: self.env.make_loc(entry.id.span),
                         start,
                         size,
-                        bits: addrspace_bits,
+                        bit_width: addrspace_width,
                     });
                     start.range_within(Align::MAX)
                 }

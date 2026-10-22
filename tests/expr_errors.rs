@@ -1,3 +1,4 @@
+use atma::addr::BitWidth;
 use atma::db::{AdsEnvironment, AdsError};
 use atma::error::StrSrcCache;
 use atma::expr::{
@@ -14,7 +15,7 @@ fn expr_errors(source: &str) -> Vec<ExprTypeError> {
     let mut cache = StrSrcCache::new();
     let path = Rc::<str>::from("input");
     let ads = format!("print {source}\n");
-    let bus = atma::bus::new_open_bus(0);
+    let bus = atma::bus::new_open_bus(BitWidth::MIN);
     let cpu = atma::proc::NopProc::new();
     let system = SimSystem::new(
         vec![(Rc::from("CPU"), (Box::new(cpu), bus))],

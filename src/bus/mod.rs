@@ -13,9 +13,9 @@ mod ram;
 mod snes;
 mod ssmp;
 
-use crate::addr::Addr;
+use crate::addr::{Addr, BitWidth};
 pub use dmg::new_dmg_cpu_bus;
-pub use label::LabeledBus;
+pub use label::new_labeled_bus;
 pub use lorom::new_snes_lorom_cart_bus;
 pub use mbc5::new_gb_mbc5_cart_bus;
 pub use mmc3::new_nes_mmc3_cart_bus;
@@ -66,6 +66,9 @@ pub enum WatchKind {
 pub trait SimBus {
     /// Returns a human-readable description of this simulated memory bus.
     fn description(&self) -> String;
+
+    /// Returns the bit width of the address bus.
+    fn bit_width(&self) -> BitWidth;
 
     /// Returns a label for the given address, if there is one.
     fn label_at(&self, addr: Addr) -> Option<&str>;

@@ -1,16 +1,24 @@
 use super::sim::SimSystem;
+use super::util::with_offset_free_symbols;
 use crate::bus::{
     new_dmg_cpu_bus, new_gb_mbc5_cart_bus, new_ram_bus, new_rom_bus,
 };
+use crate::parse::SymbolTable;
 use crate::proc::{SharpSm83, SimProc};
 use std::io::{self, Read, Seek};
 use std::rc::Rc;
 
 //===========================================================================//
 
+// Constant used for processer/address space names.
+const CPU: &str = "CPU";
+
+//===========================================================================//
+
 /// Reads a compiled GBS binary file, and returns a simulated system that
 /// represents it.
 pub fn load_gbs_binary<R: Read + Seek>(
+    symbols: SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // See https://ocremix.org/info/GBS_Format_Specification
@@ -97,13 +105,15 @@ pub fn load_gbs_binary<R: Read + Seek>(
         .copy_from_slice(&load_data);
 
     let ram_bus = new_ram_bus(vec![0u8; 0x2000].into_boxed_slice());
+    // TODO: apply binary symbols to ROM bus
     let rom_bus = new_rom_bus(rom_data.into_boxed_slice());
     let cart_bus = new_gb_mbc5_cart_bus(rom_bus, ram_bus);
-    let cpu_bus = new_dmg_cpu_bus(cart_bus);
+    let cpu_bus =
+        with_offset_free_symbols(new_dmg_cpu_bus(cart_bus), CPU, &symbols);
     let mut cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
     cpu.set_register("A", u32::from(starting_song - 1));
     cpu.set_register("SP", u32::from(stack_pointer));
-    let processors = vec![(Rc::from("CPU"), (cpu, cpu_bus))];
+    let processors = vec![(Rc::from(CPU), (cpu, cpu_bus))];
     // TODO: Populate metadata
     Ok(SimSystem::new(processors, Vec::new()))
 }
