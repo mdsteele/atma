@@ -377,7 +377,7 @@ mod tests {
         });
         assert_round_trips(ObjExprOp::BinOp {
             context: context.clone(),
-            binop: ExprBinOp::BitOr,
+            binop: ExprBinOp::Or,
             op_span: SrcSpan::from_byte_range(11..12),
             lhs_span: SrcSpan::from_byte_range(5..10),
             rhs_span: SrcSpan::from_byte_range(13..18),

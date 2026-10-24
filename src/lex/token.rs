@@ -34,6 +34,8 @@ pub enum TokenValue {
     Builtin(Rc<str>),
     /// A "`^`" symbol.
     Caret,
+    /// A "`^^`" symbol.
+    CaretCaret,
     /// A "`:`" symbol.
     Colon,
     /// A "`::`" symbol.
@@ -133,6 +135,7 @@ impl TokenValue {
             TokenValue::BracketOpen => "`[`",
             TokenValue::Builtin(_) => "builtin",
             TokenValue::Caret => "`^`",
+            TokenValue::CaretCaret => "`^^`",
             TokenValue::Colon => "`:`",
             TokenValue::ColonColon => "`::`",
             TokenValue::Comma => "`,`",

@@ -108,6 +108,14 @@ fn length_operator() {
 }
 
 #[test]
+fn logical_operators() {
+    assert_eq!(compile_and_run("print 1 == 1 ^^ 1 == 2\n"), "%true\n");
+    assert_eq!(compile_and_run("print 1 == 1 ^^ 2 == 2\n"), "%false\n");
+    assert_eq!(compile_and_run("print 1 == 1 || {}[0]\n"), "%true\n");
+    assert_eq!(compile_and_run("print 1 == 2 && {}[0]\n"), "%false\n");
+}
+
+#[test]
 fn unary_prefix_operators() {
     assert_eq!(compile_and_run("print -(1 + 2)\n"), "-3\n");
     assert_eq!(compile_and_run("print +(1 - 3)\n"), "-2\n");

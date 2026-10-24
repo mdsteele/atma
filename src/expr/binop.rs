@@ -12,24 +12,24 @@ use std::rc::Rc;
 //===========================================================================//
 
 const TAG_ADD: u8 = 0x00;
-const TAG_BIT_AND: u8 = 0x01;
-const TAG_BIT_OR: u8 = 0x02;
-const TAG_BIT_XOR: u8 = 0x03;
-const TAG_BYTE: u8 = 0x04;
-const TAG_CMP_EQ: u8 = 0x05;
+const TAG_AND: u8 = 0x01;
+const TAG_BYTE: u8 = 0x02;
+const TAG_CMP_EQ: u8 = 0x03;
+const TAG_CMP_GE: u8 = 0x04;
+const TAG_CMP_GT: u8 = 0x05;
 const TAG_CMP_LE: u8 = 0x06;
 const TAG_CMP_LT: u8 = 0x07;
-const TAG_CMP_GE: u8 = 0x08;
-const TAG_CMP_GT: u8 = 0x09;
-const TAG_CMP_NE: u8 = 0x0a;
-const TAG_CONCAT: u8 = 0x0b;
-const TAG_DIV: u8 = 0x0c;
-const TAG_MOD: u8 = 0x0d;
-const TAG_MUL: u8 = 0x0e;
-const TAG_POW: u8 = 0x0f;
-const TAG_SHL: u8 = 0x10;
-const TAG_SHR: u8 = 0x11;
-const TAG_SUB: u8 = 0x12;
+const TAG_CMP_NE: u8 = 0x08;
+const TAG_CONCAT: u8 = 0x09;
+const TAG_DIV: u8 = 0x0a;
+const TAG_MOD: u8 = 0x0b;
+const TAG_MUL: u8 = 0x0c;
+const TAG_OR: u8 = 0x0d;
+const TAG_POW: u8 = 0x0e;
+const TAG_SHL: u8 = 0x0f;
+const TAG_SHR: u8 = 0x10;
+const TAG_SUB: u8 = 0x11;
+const TAG_XOR: u8 = 0x12;
 
 //===========================================================================//
 
@@ -157,24 +157,24 @@ impl BinOpSide {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ExprBinOp {
     Add,
-    BitAnd,
-    BitOr,
-    BitXor,
+    And,
     Byte,
     CmpEq,
-    CmpLe,
-    CmpLt,
     CmpGe,
     CmpGt,
+    CmpLe,
+    CmpLt,
     CmpNe,
     Concat,
     Div,
     Mod,
     Mul,
+    Or,
     Pow,
     Shl,
     Shr,
     Sub,
+    Xor,
 }
 
 impl ExprBinOp {
@@ -188,123 +188,154 @@ impl ExprBinOp {
         // TODO: Allow one or both operands to have type `Bottom`, with result
         // type `Bottom`, as long as the other operand has a valid type.
         // (e.g. bottom & int is OK, but bottom & str is not OK.)
-        match (op, lhs_type, rhs_type) {
+        match (op, &lhs_type, &rhs_type) {
+            // String interpolation and logical AND/OR and are special-cased in
+            // `ExprCompiler`, and are never passed to this method.
+            (BinOpAst::Interp, _, _) => unreachable!(),
+            (BinOpAst::LogicAnd | BinOpAst::LogicOr, _, _) => unreachable!(),
             (BinOpAst::Add, ExprType::Integer, ExprType::Integer) => {
                 Ok((Self::Add, ExprType::Integer))
             }
-            (BinOpAst::Add, ExprType::Integer, ExprType::Label) => {
+            (BinOpAst::Add, ExprType::Integer, ExprType::Label)
+            | (BinOpAst::Add, ExprType::Bottom, ExprType::Label)
+            | (BinOpAst::Add, ExprType::Label, ExprType::Integer)
+            | (BinOpAst::Add, ExprType::Label, ExprType::Bottom) => {
                 Ok((Self::Add, ExprType::Label))
-            }
-            (BinOpAst::Add, ExprType::Label, ExprType::Integer) => {
-                Ok((Self::Add, ExprType::Label))
-            }
-            (BinOpAst::BitAnd, ExprType::Boolean, ExprType::Boolean) => {
-                Ok((Self::BitAnd, ExprType::Boolean))
             }
             (BinOpAst::BitAnd, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::BitAnd, ExprType::Integer))
+                Ok((Self::And, ExprType::Integer))
             }
-            (BinOpAst::BitAnd, ExprType::Integer, ExprType::Label) => {
-                Ok((Self::BitAnd, ExprType::Label))
+            (BinOpAst::BitAnd, ExprType::Integer, ExprType::Label)
+            | (BinOpAst::BitAnd, ExprType::Bottom, ExprType::Label)
+            | (BinOpAst::BitAnd, ExprType::Label, ExprType::Integer)
+            | (BinOpAst::BitAnd, ExprType::Label, ExprType::Bottom) => {
+                Ok((Self::And, ExprType::Label))
             }
-            (BinOpAst::BitAnd, ExprType::Label, ExprType::Integer) => {
-                Ok((Self::BitAnd, ExprType::Label))
-            }
-            (BinOpAst::BitOr, ExprType::Boolean, ExprType::Boolean) => {
-                Ok((Self::BitOr, ExprType::Boolean))
-            }
-            (BinOpAst::BitOr, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::BitOr, ExprType::Integer))
-            }
-            (BinOpAst::BitXor, ExprType::Boolean, ExprType::Boolean) => {
-                Ok((Self::BitXor, ExprType::Boolean))
-            }
-            (BinOpAst::BitXor, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::BitXor, ExprType::Integer))
-            }
-            (BinOpAst::Byte, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Byte, ExprType::Integer))
-            }
-            (BinOpAst::Byte, ExprType::Label, ExprType::Integer) => {
-                Ok((Self::Byte, ExprType::Integer))
-            }
+            (
+                BinOpAst::BitOr,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Or, ExprType::Integer)),
+            (
+                BinOpAst::BitXor,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Xor, ExprType::Integer)),
+            (
+                BinOpAst::Byte,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Byte, ExprType::Integer)),
+            (
+                BinOpAst::Byte,
+                ExprType::Label,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Byte, ExprType::Integer)),
             (BinOpAst::CmpEq, t1, t2)
-                if let Some(t3) = t1.union(&t2)
+                if let Some(t3) = t1.union(t2)
                     && is_ordered_type(&t3) =>
             {
                 Ok((Self::CmpEq, ExprType::Boolean))
             }
             (BinOpAst::CmpLe, t1, t2)
-                if let Some(t3) = t1.union(&t2)
+                if let Some(t3) = t1.union(t2)
                     && is_ordered_type(&t3) =>
             {
                 Ok((Self::CmpLe, ExprType::Boolean))
             }
             (BinOpAst::CmpLt, t1, t2)
-                if let Some(t3) = t1.union(&t2)
+                if let Some(t3) = t1.union(t2)
                     && is_ordered_type(&t3) =>
             {
                 Ok((Self::CmpLt, ExprType::Boolean))
             }
             (BinOpAst::CmpGe, t1, t2)
-                if let Some(t3) = t1.union(&t2)
+                if let Some(t3) = t1.union(t2)
                     && is_ordered_type(&t3) =>
             {
                 Ok((Self::CmpGe, ExprType::Boolean))
             }
             (BinOpAst::CmpGt, t1, t2)
-                if let Some(t3) = t1.union(&t2)
+                if let Some(t3) = t1.union(t2)
                     && is_ordered_type(&t3) =>
             {
                 Ok((Self::CmpGt, ExprType::Boolean))
             }
             (BinOpAst::CmpNe, t1, t2)
-                if let Some(t3) = t1.union(&t2)
+                if let Some(t3) = t1.union(t2)
                     && is_ordered_type(&t3) =>
             {
                 Ok((Self::CmpNe, ExprType::Boolean))
             }
             (BinOpAst::Concat, ExprType::List(t1), ExprType::List(t2))
-                if let Some(t3) = t1.union(&t2) =>
+                if let Some(t3) = t1.union(t2) =>
             {
                 Ok((Self::Concat, ExprType::List(Rc::new(t3))))
             }
-            (BinOpAst::Concat, ExprType::String, ExprType::String) => {
+            (BinOpAst::Concat, ExprType::List(t), ExprType::Bottom)
+            | (BinOpAst::Concat, ExprType::Bottom, ExprType::List(t)) => {
+                Ok((Self::Concat, ExprType::List(t.clone())))
+            }
+            (BinOpAst::Concat, ExprType::String, ExprType::String)
+            | (BinOpAst::Concat, ExprType::Bottom, ExprType::String)
+            | (BinOpAst::Concat, ExprType::String, ExprType::Bottom) => {
                 Ok((Self::Concat, ExprType::String))
             }
-            (BinOpAst::Div, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Div, ExprType::Integer))
-            }
-            (BinOpAst::Mod, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Mod, ExprType::Integer))
-            }
-            (BinOpAst::Mul, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Mul, ExprType::Integer))
-            }
-            (BinOpAst::Pow, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Pow, ExprType::Integer))
-            }
-            (BinOpAst::Shl, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Shl, ExprType::Integer))
-            }
-            (BinOpAst::Shr, ExprType::Integer, ExprType::Integer) => {
-                Ok((Self::Shr, ExprType::Integer))
-            }
-            (BinOpAst::Sub, ExprType::Integer, ExprType::Integer) => {
+            (
+                BinOpAst::Div,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Div, ExprType::Integer)),
+            (
+                BinOpAst::LogicXor,
+                ExprType::Boolean | ExprType::Bottom,
+                ExprType::Boolean | ExprType::Bottom,
+            ) => Ok((Self::Xor, ExprType::Boolean)),
+            (
+                BinOpAst::Mod,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Mod, ExprType::Integer)),
+            (
+                BinOpAst::Mul,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Mul, ExprType::Integer)),
+            (
+                BinOpAst::Pow,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Pow, ExprType::Integer)),
+            (
+                BinOpAst::Shl,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Shl, ExprType::Integer)),
+            (
+                BinOpAst::Shr,
+                ExprType::Integer | ExprType::Bottom,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Shr, ExprType::Integer)),
+            (BinOpAst::Sub, ExprType::Integer, ExprType::Integer)
+            | (BinOpAst::Sub, ExprType::Integer, ExprType::Bottom)
+            | (BinOpAst::Sub, ExprType::Label, ExprType::Label)
+            | (BinOpAst::Sub, ExprType::Bottom, ExprType::Label) => {
                 Ok((Self::Sub, ExprType::Integer))
             }
             (BinOpAst::Sub, ExprType::Label, ExprType::Integer) => {
                 Ok((Self::Sub, ExprType::Label))
             }
-            (BinOpAst::Sub, ExprType::Label, ExprType::Label) => {
-                Ok((Self::Sub, ExprType::Integer))
-            }
-            // String interpolation and logical AND/OR and are special-cased in
-            // `ExprCompiler`, and are never passed to this method.
-            (BinOpAst::Interp, _, _) => unreachable!(),
-            (BinOpAst::LogicAnd | BinOpAst::LogicOr, _, _) => unreachable!(),
-            (op, lhs_type, rhs_type) => {
-                Err(Errs::one(ExprTypeError::CannotApplyBinaryOpToTypes {
+            (BinOpAst::Add, ExprType::Bottom, ExprType::Bottom)
+            | (BinOpAst::Add, ExprType::Integer, ExprType::Bottom)
+            | (BinOpAst::Add, ExprType::Bottom, ExprType::Integer)
+            | (BinOpAst::BitAnd, ExprType::Bottom, ExprType::Bottom)
+            | (BinOpAst::BitAnd, ExprType::Integer, ExprType::Bottom)
+            | (BinOpAst::BitAnd, ExprType::Bottom, ExprType::Integer)
+            | (BinOpAst::Concat, ExprType::Bottom, ExprType::Bottom)
+            | (BinOpAst::Sub, ExprType::Bottom, ExprType::Bottom)
+            | (BinOpAst::Sub, ExprType::Bottom, ExprType::Integer)
+            | (BinOpAst::Sub, ExprType::Label, ExprType::Bottom) => {
+                Err(Errs::one(ExprTypeError::AmbiguousBinaryOpResultType {
                     op_span,
                     op,
                     lhs_span,
@@ -313,6 +344,14 @@ impl ExprBinOp {
                     rhs_type,
                 }))
             }
+            _ => Err(Errs::one(ExprTypeError::CannotApplyBinaryOpToTypes {
+                op_span,
+                op,
+                lhs_span,
+                lhs_type,
+                rhs_span,
+                rhs_type,
+            })),
         }
     }
 
@@ -332,10 +371,7 @@ impl ExprBinOp {
                 }
                 _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
-            Self::BitAnd => match (lhs, rhs) {
-                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
-                    Ok(ExprValue::Boolean(lhs & rhs))
-                }
+            Self::And => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     Ok(ExprValue::Integer(lhs & rhs))
                 }
@@ -351,24 +387,6 @@ impl ExprBinOp {
                     .ok_or(ExprBinOpEvalError::LabelAddressUnresolved(
                         BinOpSide::Lhs,
                     )),
-                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
-            },
-            Self::BitOr => match (lhs, rhs) {
-                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
-                    Ok(ExprValue::Boolean(lhs | rhs))
-                }
-                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
-                    Ok(ExprValue::Integer(lhs | rhs))
-                }
-                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
-            },
-            Self::BitXor => match (lhs, rhs) {
-                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
-                    Ok(ExprValue::Boolean(lhs ^ rhs))
-                }
-                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
-                    Ok(ExprValue::Integer(lhs ^ rhs))
-                }
                 _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
             Self::Byte => byte_select_value(lhs, rhs),
@@ -425,6 +443,12 @@ impl ExprBinOp {
                 }
                 _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
+            Self::Or => match (lhs, rhs) {
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs | rhs))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
+            },
             Self::Pow => match (lhs, rhs) {
                 (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
                     if rhs.is_negative() {
@@ -458,6 +482,15 @@ impl ExprBinOp {
                 }
                 (ExprValue::Label(lhs), ExprValue::Label(rhs)) => {
                     Ok(ExprValue::Integer(lhs.try_subtract(&rhs)?))
+                }
+                _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
+            },
+            Self::Xor => match (lhs, rhs) {
+                (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
+                    Ok(ExprValue::Boolean(lhs ^ rhs))
+                }
+                (ExprValue::Integer(lhs), ExprValue::Integer(rhs)) => {
+                    Ok(ExprValue::Integer(lhs ^ rhs))
                 }
                 _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
@@ -553,24 +586,24 @@ impl BinaryIo for ExprBinOp {
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
             TAG_ADD => Ok(Self::Add),
-            TAG_BIT_AND => Ok(Self::BitAnd),
-            TAG_BIT_OR => Ok(Self::BitOr),
-            TAG_BIT_XOR => Ok(Self::BitXor),
+            TAG_AND => Ok(Self::And),
             TAG_BYTE => Ok(Self::Byte),
             TAG_CMP_EQ => Ok(Self::CmpEq),
-            TAG_CMP_LE => Ok(Self::CmpLe),
-            TAG_CMP_LT => Ok(Self::CmpLt),
             TAG_CMP_GE => Ok(Self::CmpGe),
             TAG_CMP_GT => Ok(Self::CmpGt),
+            TAG_CMP_LE => Ok(Self::CmpLe),
+            TAG_CMP_LT => Ok(Self::CmpLt),
             TAG_CMP_NE => Ok(Self::CmpNe),
             TAG_CONCAT => Ok(Self::Concat),
             TAG_DIV => Ok(Self::Div),
             TAG_MOD => Ok(Self::Mod),
             TAG_MUL => Ok(Self::Mul),
+            TAG_OR => Ok(Self::Or),
             TAG_POW => Ok(Self::Pow),
             TAG_SHL => Ok(Self::Shl),
             TAG_SHR => Ok(Self::Shr),
             TAG_SUB => Ok(Self::Sub),
+            TAG_XOR => Ok(Self::Xor),
             byte => Err(io::Error::other(format!(
                 "unknown binop tag: 0x{:02x}",
                 byte
@@ -584,24 +617,24 @@ impl BinaryIo for ExprBinOp {
     ) -> io::Result<()> {
         let tag = match self {
             Self::Add => TAG_ADD,
-            Self::BitAnd => TAG_BIT_AND,
-            Self::BitOr => TAG_BIT_OR,
-            Self::BitXor => TAG_BIT_XOR,
+            Self::And => TAG_AND,
             Self::Byte => TAG_BYTE,
             Self::CmpEq => TAG_CMP_EQ,
-            Self::CmpLe => TAG_CMP_LE,
-            Self::CmpLt => TAG_CMP_LT,
             Self::CmpGe => TAG_CMP_GE,
             Self::CmpGt => TAG_CMP_GT,
+            Self::CmpLe => TAG_CMP_LE,
+            Self::CmpLt => TAG_CMP_LT,
             Self::CmpNe => TAG_CMP_NE,
             Self::Concat => TAG_CONCAT,
             Self::Div => TAG_DIV,
             Self::Mod => TAG_MOD,
             Self::Mul => TAG_MUL,
+            Self::Or => TAG_OR,
             Self::Pow => TAG_POW,
             Self::Shl => TAG_SHL,
             Self::Shr => TAG_SHR,
             Self::Sub => TAG_SUB,
+            Self::Xor => TAG_XOR,
         };
         tag.write_to(encoder)
     }
@@ -708,24 +741,24 @@ mod tests {
     #[test]
     fn binary_io_round_trip() {
         assert_round_trips(ExprBinOp::Add);
-        assert_round_trips(ExprBinOp::BitAnd);
-        assert_round_trips(ExprBinOp::BitOr);
-        assert_round_trips(ExprBinOp::BitXor);
+        assert_round_trips(ExprBinOp::And);
         assert_round_trips(ExprBinOp::Byte);
         assert_round_trips(ExprBinOp::CmpEq);
-        assert_round_trips(ExprBinOp::CmpLe);
-        assert_round_trips(ExprBinOp::CmpLt);
         assert_round_trips(ExprBinOp::CmpGe);
         assert_round_trips(ExprBinOp::CmpGt);
+        assert_round_trips(ExprBinOp::CmpLe);
+        assert_round_trips(ExprBinOp::CmpLt);
         assert_round_trips(ExprBinOp::CmpNe);
         assert_round_trips(ExprBinOp::Concat);
         assert_round_trips(ExprBinOp::Div);
         assert_round_trips(ExprBinOp::Mod);
         assert_round_trips(ExprBinOp::Mul);
+        assert_round_trips(ExprBinOp::Or);
         assert_round_trips(ExprBinOp::Pow);
         assert_round_trips(ExprBinOp::Shl);
         assert_round_trips(ExprBinOp::Shr);
         assert_round_trips(ExprBinOp::Sub);
+        assert_round_trips(ExprBinOp::Xor);
     }
 }
 

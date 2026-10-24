@@ -767,7 +767,11 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
         let (rhs_type, rhs_static) = self.types.pop().unwrap();
         let (lhs_type, lhs_static) = self.types.pop().unwrap();
         self.types.push(match (lhs_type, rhs_type) {
-            (ExprType::Boolean, ExprType::Boolean) => {
+            (ExprType::Undefined, _) | (_, ExprType::Undefined) => TYPE_ERROR,
+            (
+                ExprType::Boolean | ExprType::Bottom,
+                ExprType::Boolean | ExprType::Bottom,
+            ) => {
                 let static_value = match lhs_static {
                     Ok(value) => {
                         if value.unwrap_bool() == identity {
@@ -783,7 +787,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 };
                 (ExprType::Boolean, static_value)
             }
-            (ExprType::Undefined, _) | (_, ExprType::Undefined) => TYPE_ERROR,
             (lhs_type, rhs_type) => {
                 self.errs.push(ExprTypeError::CannotApplyBinaryOpToTypes {
                     op_span,

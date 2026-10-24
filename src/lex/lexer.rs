@@ -129,6 +129,8 @@ enum TokenKind {
     Builtin,
     #[token("^")]
     Caret,
+    #[token("^^")]
+    CaretCaret,
     #[token(":")]
     Colon,
     #[token("::")]
@@ -235,6 +237,7 @@ impl TokenKind {
             TokenKind::BracketOpen => TokenValue::BracketOpen,
             TokenKind::Builtin => TokenValue::Builtin(Rc::from(lexer.slice())),
             TokenKind::Caret => TokenValue::Caret,
+            TokenKind::CaretCaret => TokenValue::CaretCaret,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::ColonColon => TokenValue::ColonColon,
             TokenKind::Comma => TokenValue::Comma,

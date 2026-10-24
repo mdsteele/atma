@@ -19,6 +19,23 @@ pub type ExprTypeResult<T> = Result<T, Errs<ExprTypeError>>;
 /// An error encountered while typechecking an expression.
 #[derive(Debug)]
 pub enum ExprTypeError {
+    /// Found a binary operator whose result type is ambiguous given its
+    /// arguments' expression types.
+    AmbiguousBinaryOpResultType {
+        /// The source code span for the binary operator.
+        op_span: SrcSpan,
+        /// The binary operator.
+        op: BinOpAst,
+        /// The source code span for the left-hand side of the binary operator.
+        lhs_span: SrcSpan,
+        /// The expression type of the left-hand side of the binary operator.
+        lhs_type: ExprType,
+        /// The source code span for the right-hand side of the binary
+        /// operator.
+        rhs_span: SrcSpan,
+        /// The expression type of the right-hand side of the binary operator.
+        rhs_type: ExprType,
+    },
     /// An anonymous label reference tried to refer to an anonymous label index
     /// that doesn't exist in the current scope.
     AnonymousLabelReferenceOutOfBounds {
@@ -244,6 +261,23 @@ impl ExprTypeError {
     /// source file containing the expression.
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
+            Self::AmbiguousBinaryOpResultType {
+                op_span,
+                op,
+                lhs_span,
+                lhs_type,
+                rhs_span,
+                rhs_type,
+            } => {
+                let (verb, _, _) = op.verb_conj_rev();
+                let message = format!("ambiguous result type for {verb}");
+                let lhs_label = format!("this has type {lhs_type}");
+                let rhs_label = format!("this has type {rhs_type}");
+                // TODO: Add a note indicating the possible result types.
+                SourceError::new(SrcLoc::new(path, op_span), message)
+                    .with_label(SrcLoc::new(path, lhs_span), lhs_label)
+                    .with_label(SrcLoc::new(path, rhs_span), rhs_label)
+            }
             Self::AnonymousLabelReferenceOutOfBounds {
                 reference_span,
                 forward,
@@ -275,9 +309,9 @@ impl ExprTypeError {
             } => {
                 let (verb, conj, rev) = op.verb_conj_rev();
                 let message = if rev {
-                    format!("Cannot {verb} {rhs_type} {conj} {lhs_type}")
+                    format!("cannot {verb} {rhs_type} {conj} {lhs_type}")
                 } else {
-                    format!("Cannot {verb} {lhs_type} {conj} {rhs_type}")
+                    format!("cannot {verb} {lhs_type} {conj} {rhs_type}")
                 };
                 let lhs_label = format!("this has type {lhs_type}");
                 let rhs_label = format!("this has type {rhs_type}");
@@ -292,6 +326,15 @@ impl ExprTypeError {
                             "To concatenate, use the `++` operator instead",
                         );
                     }
+                    (
+                        BinOpAst::BitXor,
+                        ExprType::Boolean,
+                        ExprType::Boolean,
+                    ) => {
+                        error = error.with_note(
+                            "To logical-XOR, use the `^^` operator instead",
+                        );
+                    }
                     _ => {}
                 }
                 error
@@ -303,7 +346,7 @@ impl ExprTypeError {
                 arg_type,
             } => {
                 let verb = op.verb();
-                let message = format!("Cannot {verb} {arg_type}");
+                let message = format!("cannot {verb} {arg_type}");
                 let label = format!("this has type {arg_type}");
                 SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_label(SrcLoc::new(path, arg_span), label)

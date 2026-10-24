@@ -16,16 +16,17 @@ use std::rc::Rc;
 
 // The binding power of various classes of operators:
 const BIND_LOGICAL_OR: u16 = 1;
-const BIND_LOGICAL_AND: u16 = 2;
-const BIND_COMPARISON: u16 = 3;
-const BIND_BIT_OR: u16 = 4;
-const BIND_BIT_XOR: u16 = 5;
-const BIND_BIT_AND: u16 = 6;
-const BIND_BIT_SHIFT: u16 = 7;
-const BIND_ADDITIVE: u16 = 8;
-const BIND_MULTIPLICATIVE: u16 = 9;
-const BIND_UNARY_PREFIX: u16 = 10;
-const BIND_EXPONENTIATE: u16 = 11;
+const BIND_LOGICAL_XOR: u16 = 2;
+const BIND_LOGICAL_AND: u16 = 3;
+const BIND_COMPARISON: u16 = 4;
+const BIND_BITWISE_OR: u16 = 5;
+const BIND_BITWISE_XOR: u16 = 6;
+const BIND_BITWISE_AND: u16 = 7;
+const BIND_BIT_SHIFT: u16 = 8;
+const BIND_ADDITIVE: u16 = 9;
+const BIND_MULTIPLICATIVE: u16 = 10;
+const BIND_UNARY_PREFIX: u16 = 11;
+const BIND_EXPONENTIATE: u16 = 12;
 
 //===========================================================================//
 
@@ -136,6 +137,8 @@ pub enum BinOpAst {
     LogicAnd,
     /// Logical (short-circuiting) OR.
     LogicOr,
+    /// Logical XOR.
+    LogicXor,
     /// Modulo.
     Mod,
     /// Multiplication.
@@ -171,6 +174,7 @@ impl BinOpAst {
             BinOpAst::Div => ("divide", "by", false),
             BinOpAst::LogicAnd => ("logical-AND", "with", false),
             BinOpAst::LogicOr => ("logical-OR", "with", false),
+            BinOpAst::LogicXor => ("logical-XOR", "with", false),
             BinOpAst::Interp => ("interpolate", "into", true),
             BinOpAst::Mod => ("modulo", "by", false),
             BinOpAst::Mul => ("multiply", "by", false),
@@ -408,23 +412,23 @@ impl ExprAst {
                 ),
                 (
                     pratt::infix(
-                        pratt::left(BIND_BIT_AND),
+                        pratt::left(BIND_BITWISE_AND),
                         symbol(TokenValue::Bang),
                         |l, o, r, _| ExprAst::binop(BinOpAst::Byte, l, o, r),
                     ),
                     pratt::infix(
-                        pratt::left(BIND_BIT_AND),
+                        pratt::left(BIND_BITWISE_AND),
                         symbol(TokenValue::And),
                         |l, o, r, _| ExprAst::binop(BinOpAst::BitAnd, l, o, r),
                     ),
                 ),
                 pratt::infix(
-                    pratt::left(BIND_BIT_XOR),
+                    pratt::left(BIND_BITWISE_XOR),
                     symbol(TokenValue::Caret),
                     |l, o, r, _| ExprAst::binop(BinOpAst::BitXor, l, o, r),
                 ),
                 pratt::infix(
-                    pratt::left(BIND_BIT_OR),
+                    pratt::left(BIND_BITWISE_OR),
                     symbol(TokenValue::Or),
                     |l, o, r, _| ExprAst::binop(BinOpAst::BitOr, l, o, r),
                 ),
@@ -464,6 +468,11 @@ impl ExprAst {
                     pratt::right(BIND_LOGICAL_AND),
                     symbol(TokenValue::AndAnd),
                     |l, o, r, _| ExprAst::binop(BinOpAst::LogicAnd, l, o, r),
+                ),
+                pratt::infix(
+                    pratt::left(BIND_LOGICAL_XOR),
+                    symbol(TokenValue::CaretCaret),
+                    |l, o, r, _| ExprAst::binop(BinOpAst::LogicXor, l, o, r),
                 ),
                 pratt::infix(
                     pratt::right(BIND_LOGICAL_OR),
