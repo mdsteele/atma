@@ -81,11 +81,19 @@ impl Spc700 {
             addr: VECTOR_RESET,
             data: 0,
             temp: 0,
+            // https://github.com/gilligan/snesdev/blob/master/docs/spc700.txt
+            // says that "After power on, on entry to the first user code
+            // loaded the registers have the following values: A=0, X=0, Y=0,
+            // PSW=$02, SP=$EF".  A, X, Y, and SP are all initialized by the
+            // boot ROM, but most PSW flags are not touched, and so should be
+            // be initialized to those values here.  In fact, since debugger
+            // scripts may skip executing the boot ROM, just initialize all
+            // registers to their post-boot-ROM values here.
             reg_a: 0,
             reg_x: 0,
             reg_y: 0,
-            reg_sp: 0,
-            reg_psw: 0,
+            reg_sp: 0xef,
+            reg_psw: PROC_FLAG_I,
             microcode: vec![
                 Microcode::Jump,
                 Microcode::MakeAddrAbs,

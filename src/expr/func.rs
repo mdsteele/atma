@@ -3,7 +3,7 @@ use crate::error::{SourceError, SrcLoc};
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::{BigInt, BigUint};
 use num_integer::Integer;
-use num_traits::{Euclid, Signed};
+use num_traits::{Euclid, FromPrimitive, Signed, ToPrimitive};
 use std::cmp::Ordering;
 use std::fmt;
 use std::io;
@@ -11,32 +11,49 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-const TAG_DIVC: u8 = 0;
-const TAG_DIVF: u8 = 1;
-const TAG_DIVR: u8 = 2;
-const TAG_DIVU: u8 = 3;
-const TAG_DIVX: u8 = 4;
-const TAG_DIVZ: u8 = 5;
-const TAG_ERROR: u8 = 6;
-const TAG_LOG2C: u8 = 7;
-const TAG_LOG2F: u8 = 8;
-const TAG_LOG2X: u8 = 9;
-const TAG_MODC: u8 = 10;
-const TAG_MODF: u8 = 11;
-const TAG_MODR: u8 = 12;
-const TAG_MODU: u8 = 13;
-const TAG_MODZ: u8 = 15;
-const TAG_SQRTC: u8 = 16;
-const TAG_SQRTF: u8 = 17;
-const TAG_SQRTX: u8 = 18;
+const TAG_ATAN2: u8 = 0;
+const TAG_COS: u8 = 1;
+const TAG_DIVC: u8 = 2;
+const TAG_DIVF: u8 = 3;
+const TAG_DIVR: u8 = 4;
+const TAG_DIVU: u8 = 5;
+const TAG_DIVX: u8 = 6;
+const TAG_DIVZ: u8 = 7;
+const TAG_ERROR: u8 = 8;
+const TAG_LOG2C: u8 = 9;
+const TAG_LOG2F: u8 = 10;
+const TAG_LOG2X: u8 = 11;
+const TAG_MODC: u8 = 12;
+const TAG_MODF: u8 = 13;
+const TAG_MODR: u8 = 14;
+const TAG_MODU: u8 = 15;
+const TAG_MODZ: u8 = 16;
+const TAG_SIN: u8 = 17;
+const TAG_SQRTC: u8 = 18;
+const TAG_SQRTF: u8 = 19;
+const TAG_SQRTX: u8 = 20;
 
 //===========================================================================//
 
 /// A built-in function that can be applied to an [`ExprValue`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum ExprFunc {
-    // TODO: atan2 (integer atan2)
-    // TODO: cos (integer cosine)
+    /// Integer arctangent; takes a triple of integers `(y, x, d)`, and returns
+    /// `atan2(y, x)/TAU * d` rounded to the nearest integer, with the result
+    /// always ranging from `0` inclusive to `d` exclusive (or `d` exclusive to
+    /// `0` inclusive, if `d` is negative).
+    ///
+    /// (Effectively, if the `d` specifies the number of "degrees" in a full
+    /// circle, then the return value is measured in "degrees".)
+    Atan2,
+    /// Integer cosine; takes a triple of integers `(t, d, a)`, and returns
+    /// `cos(t / d) * a` rounded to the nearest integer (using true division,
+    /// not integer division).
+    ///
+    /// (Effectively, if `d` specifies the number of "degrees" in a full
+    /// circle, then `t` is the input angle "theta" measured in "degrees";
+    /// meanwhile, `a` specifies the amplitude of the sinusoid.)
+    Cos,
     /// Ceiling division; takes a pair of integers and divides the first by the
     /// second, rounding towards positive infinity.
     ///
@@ -114,7 +131,14 @@ pub enum ExprFunc {
     ///
     /// `%divz(a, b) * b + %modz(a, b) == a` for all `a` and (nonzero) `b`.
     Modz,
-    // TODO: sin (integer sine)
+    /// Integer sine; takes a triple of integers `(t, d, a)`, and returns
+    /// `sin(t / d) * a` rounded to the nearest integer (using true division,
+    /// not integer division).
+    ///
+    /// (Effectively, if `d` specifies the number of "degrees" in a full
+    /// circle, then `t` is the input angle "theta" measured in "degrees";
+    /// meanwhile, `a` specifies the amplitude of the sinusoid.)
+    Sin,
     /// Ceiling of square root; computes the square root of the integer
     /// argument, rounding towards positive infinity.
     Sqrtc,
@@ -134,6 +158,16 @@ impl ExprFunc {
         arg: ExprValue,
     ) -> Result<ExprValue, ExprFuncEvalError> {
         match self {
+            Self::Atan2 => {
+                let (y, x, mul) = get_int_triple(arg)?;
+                let radians = to_float(&y).atan2(to_float(&x));
+                let res = multiply(radians / std::f64::consts::TAU, &mul);
+                Ok(ExprValue::Integer(res.mod_floor(&mul)))
+            }
+            Self::Cos => {
+                let (radians, amp) = get_sin_cos_args(arg)?;
+                Ok(ExprValue::Integer(multiply(radians.cos(), &amp)))
+            }
             Self::Divc => {
                 let (lhs, rhs) = get_div_pair(arg)?;
                 Ok(ExprValue::Integer(lhs.div_ceil(&rhs)))
@@ -143,14 +177,8 @@ impl ExprFunc {
                 Ok(ExprValue::Integer(lhs.div_floor(&rhs)))
             }
             Self::Divr => {
-                let (mut lhs, rhs) = get_div_pair(arg)?;
-                lhs <<= 1;
-                let mut quotient = lhs / rhs;
-                if quotient > BigInt::ZERO {
-                    quotient.inc();
-                }
-                quotient >>= 1;
-                Ok(ExprValue::Integer(quotient))
+                let (lhs, rhs) = get_div_pair(arg)?;
+                Ok(ExprValue::Integer(div_round(lhs, rhs)))
             }
             Self::Divu => {
                 let (lhs, rhs) = get_div_pair(arg)?;
@@ -215,6 +243,10 @@ impl ExprFunc {
                 let (lhs, rhs) = get_mod_pair(arg)?;
                 Ok(ExprValue::Integer(lhs % rhs))
             }
+            Self::Sin => {
+                let (radians, amp) = get_sin_cos_args(arg)?;
+                Ok(ExprValue::Integer(multiply(radians.sin(), &amp)))
+            }
             Self::Sqrtc => {
                 let mut arg = get_sqrt_arg(arg)?;
                 if arg == BigUint::ZERO {
@@ -245,6 +277,8 @@ impl ExprFunc {
     /// Returns the identifier name of this built-in function.
     pub fn name(&self) -> &'static str {
         match self {
+            Self::Atan2 => "%atan2",
+            Self::Cos => "%cos",
             Self::Divc => "%divc",
             Self::Divf => "%divf",
             Self::Divr => "%divr",
@@ -260,6 +294,7 @@ impl ExprFunc {
             Self::Modr => "%modr",
             Self::Modu => "%modu",
             Self::Modz => "%modz",
+            Self::Sin => "%sin",
             Self::Sqrtc => "%sqrtc",
             Self::Sqrtf => "%sqrtf",
             Self::Sqrtx => "%sqrtx",
@@ -272,6 +307,8 @@ impl BinaryIo for ExprFunc {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
+            TAG_ATAN2 => Ok(ExprFunc::Atan2),
+            TAG_COS => Ok(ExprFunc::Cos),
             TAG_DIVC => Ok(ExprFunc::Divc),
             TAG_DIVF => Ok(ExprFunc::Divf),
             TAG_DIVR => Ok(ExprFunc::Divr),
@@ -287,6 +324,7 @@ impl BinaryIo for ExprFunc {
             TAG_MODR => Ok(ExprFunc::Modr),
             TAG_MODU => Ok(ExprFunc::Modu),
             TAG_MODZ => Ok(ExprFunc::Modz),
+            TAG_SIN => Ok(ExprFunc::Sin),
             TAG_SQRTC => Ok(ExprFunc::Sqrtc),
             TAG_SQRTF => Ok(ExprFunc::Sqrtf),
             TAG_SQRTX => Ok(ExprFunc::Sqrtx),
@@ -302,6 +340,8 @@ impl BinaryIo for ExprFunc {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         let tag = match self {
+            Self::Atan2 => TAG_ATAN2,
+            Self::Cos => TAG_COS,
             Self::Divc => TAG_DIVC,
             Self::Divf => TAG_DIVF,
             Self::Divr => TAG_DIVR,
@@ -317,6 +357,7 @@ impl BinaryIo for ExprFunc {
             Self::Modr => TAG_MODR,
             Self::Modu => TAG_MODU,
             Self::Modz => TAG_MODZ,
+            Self::Sin => TAG_SIN,
             Self::Sqrtc => TAG_SQRTC,
             Self::Sqrtf => TAG_SQRTF,
             Self::Sqrtx => TAG_SQRTX,
@@ -431,6 +472,19 @@ fn get_div_pair(
     Ok((lhs, rhs))
 }
 
+fn get_sin_cos_args(
+    input: ExprValue,
+) -> Result<(f64, BigInt), ExprFuncEvalError> {
+    let (num, div, amp) = get_int_triple(input)?;
+    if div == BigInt::ZERO {
+        return Err(ExprFuncEvalError::DivideByZero);
+    }
+    let num = &num % &div;
+    let turns = num.to_f64().unwrap() / div.to_f64().unwrap();
+    let radians = turns * std::f64::consts::TAU;
+    Ok((radians, amp))
+}
+
 fn get_int(input: ExprValue) -> Result<BigInt, ExprFuncEvalError> {
     match input {
         ExprValue::Integer(bigint) => Ok(bigint),
@@ -447,6 +501,28 @@ fn get_int_pair(
                 Rc::as_ref(&items)
             {
                 Ok((first.clone(), second.clone()))
+            } else {
+                Err(ExprFuncEvalError::InvalidArgumentType(ExprValue::Tuple(
+                    items,
+                )))
+            }
+        }
+        other => Err(ExprFuncEvalError::InvalidArgumentType(other)),
+    }
+}
+
+fn get_int_triple(
+    input: ExprValue,
+) -> Result<(BigInt, BigInt, BigInt), ExprFuncEvalError> {
+    match input {
+        ExprValue::Tuple(items) => {
+            if let [
+                ExprValue::Integer(first),
+                ExprValue::Integer(second),
+                ExprValue::Integer(third),
+            ] = Rc::as_ref(&items)
+            {
+                Ok((first.clone(), second.clone(), third.clone()))
             } else {
                 Err(ExprFuncEvalError::InvalidArgumentType(ExprValue::Tuple(
                     items,
@@ -492,6 +568,29 @@ fn get_str(input: ExprValue) -> Result<Rc<str>, ExprFuncEvalError> {
 
 //===========================================================================/
 
+fn div_round(mut lhs: BigInt, rhs: BigInt) -> BigInt {
+    lhs <<= 1;
+    let mut quotient = lhs / rhs;
+    if quotient > BigInt::ZERO {
+        quotient.inc();
+    }
+    quotient >>= 1;
+    quotient
+}
+
+fn multiply(float: f64, int: &BigInt) -> BigInt {
+    debug_assert!((-1.0..=1.0).contains(&float));
+    const FACTOR: u64 = 1u64 << f64::MANTISSA_DIGITS;
+    let scaled = BigInt::from_f64((float * (FACTOR as f64)).round()).unwrap();
+    div_round(&scaled * int, BigInt::from(FACTOR))
+}
+
+fn to_float(int: &BigInt) -> f64 {
+    int.to_f64().unwrap()
+}
+
+//===========================================================================/
+
 #[cfg(test)]
 mod tests {
     use super::{ExprFunc, ExprFuncEvalError};
@@ -506,6 +605,14 @@ mod tests {
 
     fn int_pair(first: i32, second: i32) -> ExprValue {
         ExprValue::Tuple(Rc::from([int_value(first), int_value(second)]))
+    }
+
+    fn int_triple(first: i32, second: i32, third: i32) -> ExprValue {
+        ExprValue::Tuple(Rc::from([
+            int_value(first),
+            int_value(second),
+            int_value(third),
+        ]))
     }
 
     fn str_value(value: &str) -> ExprValue {
@@ -880,7 +987,97 @@ mod tests {
     }
 
     #[test]
+    fn call_atan2_func() {
+        let func = ExprFunc::Atan2;
+        assert_eq!(func.call(int_triple(0, 1, 360)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(1, 0, 360)), Ok(int_value(90)));
+        assert_eq!(func.call(int_triple(0, -1, 360)), Ok(int_value(180)));
+        assert_eq!(func.call(int_triple(-1, 0, 360)), Ok(int_value(270)));
+        assert_eq!(func.call(int_triple(1, 1, 0x100)), Ok(int_value(0x20)));
+        assert_eq!(func.call(int_triple(1, -1, 0x100)), Ok(int_value(0x60)));
+        assert_eq!(func.call(int_triple(-1, -1, 0x100)), Ok(int_value(0xa0)));
+        assert_eq!(func.call(int_triple(-1, 1, 0x100)), Ok(int_value(0xe0)));
+        // Test that the third argument can be negative.
+        assert_eq!(func.call(int_triple(0, 1, -360)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(1, 0, -360)), Ok(int_value(-90)));
+        assert_eq!(func.call(int_triple(0, -1, -360)), Ok(int_value(-180)));
+        assert_eq!(func.call(int_triple(-1, 0, -360)), Ok(int_value(-270)));
+        // Test that arctangents just above zero turns and just below one full
+        // turn both round to zero (not to the third argument).
+        assert_eq!(func.call(int_triple(1, 9999999, 360)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(-1, 9999999, 360)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(1, 9999999, -360)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(-1, 9999999, -360)), Ok(int_value(0)));
+    }
+
+    #[test]
+    fn call_cos_func() {
+        let func = ExprFunc::Cos;
+        assert_eq!(func.call(int_triple(0, 360, 100)), Ok(int_value(100)));
+        assert_eq!(func.call(int_triple(60, 360, 100)), Ok(int_value(50)));
+        assert_eq!(func.call(int_triple(90, 360, 100)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(180, 360, 100)), Ok(int_value(-100)));
+        assert_eq!(func.call(int_triple(-480, 360, 100)), Ok(int_value(-50)));
+        assert_eq!(func.call(int_triple(32, 256, 100)), Ok(int_value(71)));
+        assert_eq!(func.call(int_triple(96, 256, 100)), Ok(int_value(-71)));
+        assert_eq!(func.call(int_triple(-32, 256, 100)), Ok(int_value(71)));
+        assert_eq!(func.call(int_triple(-96, -256, 100)), Ok(int_value(-71)));
+        // Test that we don't lose precision when multiplying the amplitude
+        // argument by the floating-point cosine value.
+        let big = BigInt::from(14804586976661478719u64)
+            * BigInt::from(15434780323124709403u64);
+        let triple = ExprValue::Tuple(Rc::from([
+            int_value(0),
+            int_value(1),
+            ExprValue::Integer(big.clone()),
+        ]));
+        assert_eq!(func.call(triple), Ok(ExprValue::Integer(big)));
+    }
+
+    #[test]
+    fn call_sin_func() {
+        let func = ExprFunc::Sin;
+        assert_eq!(func.call(int_triple(0, 360, 100)), Ok(int_value(0)));
+        assert_eq!(func.call(int_triple(30, 360, 100)), Ok(int_value(50)));
+        assert_eq!(func.call(int_triple(90, 360, 100)), Ok(int_value(100)));
+        assert_eq!(func.call(int_triple(270, 360, 100)), Ok(int_value(-100)));
+        assert_eq!(func.call(int_triple(-510, 360, 100)), Ok(int_value(-50)));
+        assert_eq!(func.call(int_triple(32, 256, 100)), Ok(int_value(71)));
+        assert_eq!(func.call(int_triple(96, 256, 100)), Ok(int_value(71)));
+        assert_eq!(func.call(int_triple(-32, 256, 100)), Ok(int_value(-71)));
+        assert_eq!(func.call(int_triple(96, -256, 100)), Ok(int_value(-71)));
+        // Test that we don't lose precision when multiplying the amplitude
+        // argument by the floating-point sine value.
+        let big = BigInt::from(14804586976661478719u64)
+            * BigInt::from(15434780323124709403u64);
+        let triple = ExprValue::Tuple(Rc::from([
+            int_value(1),
+            int_value(4),
+            ExprValue::Integer(big.clone()),
+        ]));
+        assert_eq!(func.call(triple), Ok(ExprValue::Integer(big)));
+    }
+
+    #[test]
+    fn trig_errors() {
+        for func in [ExprFunc::Atan2, ExprFunc::Cos, ExprFunc::Sin] {
+            assert_eq!(
+                func.call(int_value(3)),
+                Err(ExprFuncEvalError::InvalidArgumentType(int_value(3)))
+            );
+        }
+        for func in [ExprFunc::Cos, ExprFunc::Sin] {
+            assert_eq!(
+                func.call(int_triple(180, 0, 255)),
+                Err(ExprFuncEvalError::DivideByZero)
+            );
+        }
+    }
+
+    #[test]
     fn round_trips() {
+        assert_round_trips(ExprFunc::Atan2);
+        assert_round_trips(ExprFunc::Cos);
         assert_round_trips(ExprFunc::Divc);
         assert_round_trips(ExprFunc::Divf);
         assert_round_trips(ExprFunc::Divr);
@@ -896,6 +1093,7 @@ mod tests {
         assert_round_trips(ExprFunc::Modr);
         assert_round_trips(ExprFunc::Modu);
         assert_round_trips(ExprFunc::Modz);
+        assert_round_trips(ExprFunc::Sin);
         assert_round_trips(ExprFunc::Sqrtc);
         assert_round_trips(ExprFunc::Sqrtf);
         assert_round_trips(ExprFunc::Sqrtx);
