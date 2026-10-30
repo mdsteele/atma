@@ -53,8 +53,6 @@ pub enum AsmStmtAst {
     Cond(AsmCondAst),
     /// A `.LET` or `.VAR` directive.
     Declare(AsmDeclareAst),
-    /// A `.DEFMACRO` directive.
-    DefMacro(AsmDefMacroAst),
     /// An `.IMPORT` directive.
     Import(IdentifierAst),
     /// An integer data directive (e.g. `.U8` or `.U16LE`).
@@ -63,6 +61,8 @@ pub enum AsmStmtAst {
     Invoke(AsmInvokeAst),
     /// A label.
     Label(AsmLabelAst),
+    /// A `.MACRO` definition directive.
+    Macro(AsmMacroAst),
     /// A relative address directive (e.g. `.A16R8` or `.A16R16LE`).
     RelAddr(AsmRelAddrAst),
     /// A `.REPEAT` directive.
@@ -134,7 +134,11 @@ impl AsmStmtAst {
                         else_block,
                     })
                 });
-            let def_macro_dir = directive(AsmDefMacroAst::DIRECTIVE)
+            let import_dir = directive(".IMPORT")
+                .ignore_then(IdentifierAst::parser())
+                .then_ignore(linebreak())
+                .map(AsmStmtAst::Import);
+            let macro_dir = directive(AsmMacroAst::DIRECTIVE)
                 .ignore_then(IdentifierAst::parser())
                 .then(
                     AsmMacroArgAst::parser()
@@ -144,12 +148,8 @@ impl AsmStmtAst {
                 .then(braced_stmts.clone().with_ctx(Language::Macro))
                 .then_ignore(linebreak())
                 .map(|((id, params), body)| {
-                    AsmStmtAst::DefMacro(AsmDefMacroAst { id, params, body })
+                    AsmStmtAst::Macro(AsmMacroAst { id, params, body })
                 });
-            let import_dir = directive(".IMPORT")
-                .ignore_then(IdentifierAst::parser())
-                .then_ignore(linebreak())
-                .map(AsmStmtAst::Import);
             let repeat_dir = directive(AsmRepeatAst::DIRECTIVE)
                 .ignore_then(
                     IdentifierAst::parser()
@@ -210,11 +210,11 @@ impl AsmStmtAst {
                 chunk_dir,
                 cond_dir,
                 AsmDeclareAst::parser().map(AsmStmtAst::Declare),
-                def_macro_dir,
                 AsmEnumAst::parser().map(AsmStmtAst::Enum),
                 import_dir,
                 AsmIntDataAst::parser().map(AsmStmtAst::IntData),
                 AsmInvokeAst::parser().map(AsmStmtAst::Invoke),
+                macro_dir,
                 AsmRelAddrAst::parser().map(AsmStmtAst::RelAddr),
                 repeat_dir,
                 AsmReserveAst::parser().map(AsmStmtAst::Reserve),
@@ -452,23 +452,6 @@ impl AsmDeclareAst {
             expression,
         })
     }
-}
-
-//===========================================================================//
-
-/// The abstract syntax tree for a macro definition in an assembly file.
-#[derive(Clone, Debug)]
-pub struct AsmDefMacroAst {
-    /// The name of the macro.
-    pub id: IdentifierAst,
-    /// The parameters for the macro, if any.
-    pub params: Vec<AsmMacroArgAst>,
-    /// The statements inside the macro body.
-    pub body: Vec<AsmStmtAst>,
-}
-
-impl AsmDefMacroAst {
-    pub(crate) const DIRECTIVE: &str = ".DEFMACRO";
 }
 
 //===========================================================================//
@@ -797,6 +780,23 @@ impl AsmLabelAst {
                 .map(|token| Self::Anonymous { span: token.span }))
             .then_ignore(symbol(TokenValue::Colon))
     }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for a macro definition in an assembly file.
+#[derive(Clone, Debug)]
+pub struct AsmMacroAst {
+    /// The name of the macro.
+    pub id: IdentifierAst,
+    /// The parameters for the macro, if any.
+    pub params: Vec<AsmMacroArgAst>,
+    /// The statements inside the macro body.
+    pub body: Vec<AsmStmtAst>,
+}
+
+impl AsmMacroAst {
+    pub(crate) const DIRECTIVE: &str = ".MACRO";
 }
 
 //===========================================================================//

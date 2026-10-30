@@ -14,9 +14,9 @@ mod symbols;
 pub use ads::{AdsModuleAst, AdsStmtAst, BreakpointAst};
 pub use asm::{
     AsmAssertAst, AsmBinaryAst, AsmCharmapAst, AsmChunkAst, AsmChunkKind,
-    AsmCondAst, AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst, AsmEnumAst,
-    AsmEnumFieldAst, AsmIntDataAst, AsmIntType, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmModuleAst, AsmRelAddrAst, AsmRelType, AsmRepeatAst,
+    AsmCondAst, AsmDataTypeAst, AsmDeclareAst, AsmEnumAst, AsmEnumFieldAst,
+    AsmIntDataAst, AsmIntType, AsmInvokeAst, AsmLabelAst, AsmMacroArgAst,
+    AsmMacroAst, AsmModuleAst, AsmRelAddrAst, AsmRelType, AsmRepeatAst,
     AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst, AsmStrDataAst,
     AsmStrType, AsmStructAst, AsmStructFieldAst, AsmUseAst, AsmWithAst,
 };

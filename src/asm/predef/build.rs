@@ -3,7 +3,7 @@ use super::super::macros::MacroTable;
 use super::addrmode::AddrMode;
 use super::pool::RcPool;
 use crate::obj::ObjSrcContext;
-use crate::parse::AsmDefMacroAst;
+use crate::parse::AsmMacroAst;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -37,7 +37,7 @@ impl BuiltinBuilder {
         let params = addr_mode.macro_args(&mut self.pool);
         let body = addr_mode.macro_body(&mut self.pool, prefix_bytes);
         let definition =
-            AsmDefMacroAst { id: self.pool.standard_id(name), params, body };
+            AsmMacroAst { id: self.pool.standard_id(name), params, body };
         let reserved = self.arch_tree.reserved_names(arch);
         self.macros
             .define(self.context.clone(), arch, reserved, definition)

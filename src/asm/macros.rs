@@ -3,8 +3,8 @@ use crate::error::{Errs, SrcSpan};
 use crate::lex::{Token, TokenValue};
 use crate::obj::{ObjSrcContext, ObjSrcLoc};
 use crate::parse::{
-    AsmAssertAst, AsmDefMacroAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst,
-    AsmMacroArgAst, AsmRelAddrAst, AsmRepeatAst, AsmStmtAst, CompoundIdAst,
+    AsmAssertAst, AsmIntDataAst, AsmInvokeAst, AsmLabelAst, AsmMacroArgAst,
+    AsmMacroAst, AsmRelAddrAst, AsmRepeatAst, AsmStmtAst, CompoundIdAst,
     ExprAst, ExprAstNode, IdentifierAst, IdentifierKind, Language,
     ParseResult,
 };
@@ -69,25 +69,25 @@ impl MacroTable {
         context: Rc<ObjSrcContext>,
         arch: &Rc<str>,
         reserved: &HashSet<Rc<str>>,
-        def_macro_ast: AsmDefMacroAst,
+        macro_ast: AsmMacroAst,
     ) -> AsmResult<()> {
         let mut errs = Errs::<AsmError>::new();
-        let num_args = def_macro_ast.params.len();
+        let num_args = macro_ast.params.len();
         let mut builder = errs.with(MacroBuilder::new(
             context,
-            &def_macro_ast.id.name,
-            def_macro_ast.params,
+            &macro_ast.id.name,
+            macro_ast.params,
             reserved,
         ));
-        errs.also(builder.scan_statements(&def_macro_ast.body));
+        errs.also(builder.scan_statements(&macro_ast.body));
         let Some(params) = errs.ok(builder.build()) else {
             return Err(errs);
         };
         errs.result()?;
-        let definition = MacroDefinition { params, body: def_macro_ast.body };
+        let definition = MacroDefinition { params, body: macro_ast.body };
         let signature = MacroSignature {
             arch: arch.clone(),
-            name: normalize_macro_name(&def_macro_ast.id.name),
+            name: normalize_macro_name(&macro_ast.id.name),
             num_args,
         };
         self.insert(signature, definition);

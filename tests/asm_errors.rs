@@ -438,7 +438,7 @@ fn duplicate_attr_name() {
 #[test]
 fn duplicate_macro_placeholder() {
     let source = r#"\
-    .DEFMACRO FOO %BAR, %BAR {
+    .MACRO FOO %BAR, %BAR {
         .u8 %BAR
         .u8 %BAR
     }
@@ -542,7 +542,7 @@ fn invalid_unicode_scalar_value() {
 #[test]
 fn multiple_macro_placeholders() {
     let source = r#"\
-    .DEFMACRO FOO [%BAR + %BAZ] {
+    .MACRO FOO [%BAR + %BAZ] {
         .u8 %BAR
         .u8 %BAZ
     }
@@ -822,7 +822,7 @@ fn unknown_charmap() {
 #[test]
 fn unknown_macro_placeholder() {
     let source = r#"\
-    .DEFMACRO FOO %BAR {
+    .MACRO FOO %BAR {
         .u8 %BAZ
     }
     "#;

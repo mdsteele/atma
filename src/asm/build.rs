@@ -21,8 +21,8 @@ use crate::obj::{
 };
 use crate::parse::{
     AsmAssertAst, AsmBinaryAst, AsmCharmapAst, AsmChunkAst, AsmCondAst,
-    AsmDataTypeAst, AsmDeclareAst, AsmDefMacroAst, AsmEnumAst, AsmIntDataAst,
-    AsmInvokeAst, AsmLabelAst, AsmModuleAst, AsmRelAddrAst, AsmRelType,
+    AsmDataTypeAst, AsmDeclareAst, AsmEnumAst, AsmIntDataAst, AsmInvokeAst,
+    AsmLabelAst, AsmMacroAst, AsmModuleAst, AsmRelAddrAst, AsmRelType,
     AsmRepeatAst, AsmReserveAst, AsmScopeAst, AsmSetAst, AsmStmtAst,
     AsmStrDataAst, AsmStructAst, AsmUseAst, AsmWithAst, DeclarationKind,
     ExprAst, IdentifierAst,
@@ -109,12 +109,12 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Chunk(ast) => self.predeclare_statements(&ast.body),
             AsmStmtAst::Cond(_) => Ok(()),
             AsmStmtAst::Declare(_) => Ok(()),
-            AsmStmtAst::DefMacro(_) => Ok(()),
             AsmStmtAst::Enum(_) => Ok(()),
             AsmStmtAst::Import(id) => self.env.declare_import(id),
             AsmStmtAst::IntData(_) => Ok(()),
             AsmStmtAst::Invoke(_) => Ok(()),
             AsmStmtAst::Label(ast) => self.predeclare_label(ast),
+            AsmStmtAst::Macro(_) => Ok(()),
             AsmStmtAst::RelAddr(_) => Ok(()),
             AsmStmtAst::Repeat(_) => Ok(()),
             AsmStmtAst::Reserve(_) => Ok(()),
@@ -174,12 +174,12 @@ impl<'a> Assembler<'a> {
             AsmStmtAst::Chunk(ast) => self.expand_chunk(ast),
             AsmStmtAst::Cond(ast) => self.expand_conditional(ast),
             AsmStmtAst::Declare(ast) => self.expand_declaration(ast),
-            AsmStmtAst::DefMacro(ast) => self.expand_macro_definition(ast),
             AsmStmtAst::Enum(ast) => self.expand_enum(ast),
             AsmStmtAst::Import(id) => self.expand_import(id),
             AsmStmtAst::IntData(ast) => self.expand_int_data(ast),
             AsmStmtAst::Invoke(ast) => self.expand_macro_invocation(ast),
             AsmStmtAst::Label(ast) => self.expand_label(ast),
+            AsmStmtAst::Macro(ast) => self.expand_macro_definition(ast),
             AsmStmtAst::RelAddr(ast) => self.expand_rel_addr(ast),
             AsmStmtAst::Repeat(ast) => self.expand_repeat(ast),
             AsmStmtAst::Reserve(ast) => self.expand_reserve(ast),
@@ -466,7 +466,7 @@ impl<'a> Assembler<'a> {
 
     fn expand_macro_definition(
         &mut self,
-        def_macro_ast: AsmDefMacroAst,
+        macro_ast: AsmMacroAst,
     ) -> AsmResult<()> {
         let arch = self.env.current_arch();
         let reserved = self.env.arch_tree().reserved_names(arch);
@@ -474,7 +474,7 @@ impl<'a> Assembler<'a> {
             self.env.current_src_context(),
             arch,
             reserved,
-            def_macro_ast,
+            macro_ast,
         )
     }
 
