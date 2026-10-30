@@ -93,11 +93,8 @@ impl PatchedFile {
         );
         errs.also(patcher.evaluate_variables(object_file.variables));
         let mut patched_chunks = Vec::<PatchedChunk>::new();
-        for (chunk_index, chunk) in object_file.chunks.into_iter().enumerate()
-        {
-            if let Some(patched_chunk) =
-                errs.ok(patcher.patch_chunk(chunk_index, chunk))
-            {
+        for chunk in object_file.chunks {
+            if let Some(patched_chunk) = errs.ok(patcher.patch_chunk(chunk)) {
                 patched_chunks.push(patched_chunk);
             }
         }
@@ -150,36 +147,27 @@ impl<'a> FilePatcher<'a> {
         errs.result()
     }
 
-    pub fn patch_chunk(
-        &self,
-        chunk_index: usize,
-        chunk: ObjChunk,
-    ) -> LinkResult<PatchedChunk> {
+    pub fn patch_chunk(&self, chunk: ObjChunk) -> LinkResult<PatchedChunk> {
         let mut errs = Errs::<LinkError>::new();
         let mut data = chunk.data;
         for patch in chunk.patches.into_iter() {
-            errs.also(self.apply_patch(chunk_index, patch, &mut data));
+            errs.also(self.apply_patch(patch, &mut data));
         }
         errs.result()?;
         Ok(PatchedChunk { data })
     }
 
-    fn apply_patch(
-        &self,
-        chunk_index: usize,
-        patch: ObjPatch,
-        data: &mut [u8],
-    ) -> LinkResult<()> {
+    fn apply_patch(&self, patch: ObjPatch, data: &mut [u8]) -> LinkResult<()> {
         if let Ok(start) = usize::try_from(patch.offset)
             && let Some(end) = start.checked_add(patch.data.num_bytes())
             && end <= data.len()
         {
             match patch.data {
                 ObjPatchData::Fill(size) => {
-                    self.apply_fill_patch(chunk_index, size, start, data)
+                    self.apply_fill_patch(patch.chunk_index, size, start, data)
                 }
                 ObjPatchData::Integer(int_type, expr) => self.apply_int_patch(
-                    chunk_index,
+                    patch.chunk_index,
                     int_type,
                     expr,
                     start,

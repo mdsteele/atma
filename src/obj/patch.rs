@@ -46,6 +46,16 @@ pub struct ObjPatch {
     /// The offset from the start of the chunk to the start of the patch, in
     /// bytes.
     pub offset: Offset,
+    /// The index, within this object file, of the innermost chunk that this
+    /// patch occurs within, and whose metadata should be used when evaluating
+    /// the value to patch in.  In most cases, this is the same as the chunk
+    /// whose data this patch is actually modifying (i.e. the `ObjCheck` struct
+    /// that contains this `ObjPatch`), but they will be different for patches
+    /// that occur in `.LOADABLE` chunks: in that case, this `chunk_index`
+    /// field will refer to the `.LOADABLE` chunk, but the `ObjPatch` will
+    /// belong to the containing `.SECTION` (or `.ELSEWHERE`) chunk that
+    /// actually contains the data.
+    pub chunk_index: usize,
     /// The patch type and value to apply.
     pub data: ObjPatchData,
 }
@@ -55,8 +65,9 @@ impl BinaryIo for ObjPatch {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         let offset = Offset::read_from(decoder)?;
+        let chunk_index = usize::read_from(decoder)?;
         let data = ObjPatchData::read_from(decoder)?;
-        Ok(ObjPatch { offset, data })
+        Ok(ObjPatch { offset, chunk_index, data })
     }
 
     fn write_to<W: io::Write>(
@@ -64,6 +75,7 @@ impl BinaryIo for ObjPatch {
         encoder: &mut Encoder<W>,
     ) -> io::Result<()> {
         self.offset.write_to(encoder)?;
+        self.chunk_index.write_to(encoder)?;
         self.data.write_to(encoder)?;
         Ok(())
     }
@@ -596,6 +608,7 @@ mod tests {
     fn obj_patch_round_trips() {
         assert_round_trips(ObjPatch {
             offset: Offset::from(17u32),
+            chunk_index: 3,
             data: ObjPatchData::Integer(ObjPatchIntType::U8, int_expr(0x12)),
         });
     }

@@ -235,10 +235,25 @@ impl AsmTypeEnv {
         chunk_env
     }
 
+    /// Calls the given function with (1) the index of the current chunk
+    /// (i.e. the one whose address space is current), and (2) a mutable
+    /// reference to the `CheckEnv` for the innermost non-`Loadable` chunk
+    /// (i.e. the one to which data/patches should actually be added).  After
+    /// the function is called, all `Loadable` chunks at the top of the chunk
+    /// stack will have padding added equal to however much data/padding was
+    /// added to the passed `ChunkEnv`.
+    ///
+    /// If there is no current chunk, this does nothing and emits no error; the
+    /// caller is expected to have already emitted an error.
     fn with_mutable_chunk<F>(&mut self, func: F) -> AsmResult<()>
     where
-        F: FnOnce(&mut ChunkEnv) -> AsmResult<()>,
+        F: FnOnce(usize, &mut ChunkEnv) -> AsmResult<()>,
     {
+        let Some(chunk_index) =
+            self.current_chunk().map(|chunk_env| chunk_env.chunk_index)
+        else {
+            return Ok(());
+        };
         let mut errs = Errs::<AsmError>::new();
         let mut i = self.chunk_stack.len();
         while i > 0 {
@@ -248,7 +263,7 @@ impl AsmTypeEnv {
                 AsmChunkKind::Loadable => {}
                 AsmChunkKind::Section | AsmChunkKind::Elsewhere => {
                     let old_size = chunk_env.total_size();
-                    errs.also(func(chunk_env));
+                    errs.also(func(chunk_index, chunk_env));
                     let new_size = chunk_env.total_size();
                     debug_assert!(new_size >= old_size);
                     let added = new_size - old_size;
@@ -274,14 +289,14 @@ impl AsmTypeEnv {
     /// caller is expected to have already emitted a single error for whichever
     /// directive is appending data.
     pub fn append_chunk_data(&mut self, data: &[u8]) -> AsmResult<()> {
-        self.with_mutable_chunk(|chunk_env| chunk_env.append_data(data))
+        self.with_mutable_chunk(|_, chunk_env| chunk_env.append_data(data))
     }
 
     pub fn with_chunk_data<F>(&mut self, func: F) -> AsmResult<()>
     where
         F: FnOnce(&mut Vec<u8>) -> AsmResult<()>,
     {
-        self.with_mutable_chunk(|chunk_env| func(chunk_env.data_mut()))
+        self.with_mutable_chunk(|_, chunk_env| func(chunk_env.data_mut()))
     }
 
     /// Appends the specified number of padding bytes to the current chunk, if
@@ -294,7 +309,9 @@ impl AsmTypeEnv {
     /// caller is expected to have already emitted a single error for whichever
     /// directive is appending padding.
     pub fn append_chunk_padding(&mut self, padding: usize) -> AsmResult<()> {
-        self.with_mutable_chunk(|chunk_env| chunk_env.append_padding(padding))
+        self.with_mutable_chunk(|_, chunk_env| {
+            chunk_env.append_padding(padding)
+        })
     }
 
     /// Appends the given patch to the current chunk, if any.  If the current
@@ -306,7 +323,9 @@ impl AsmTypeEnv {
     /// caller is expected to have already emitted a single error for whichever
     /// directive is appending data.
     pub fn append_chunk_patch(&mut self, data: ObjPatchData) -> AsmResult<()> {
-        self.with_mutable_chunk(|chunk_env| chunk_env.append_patch(data))
+        self.with_mutable_chunk(|chunk_index, chunk_env| {
+            chunk_env.append_patch(chunk_index, data)
+        })
     }
 
     pub fn append_chunk_symbol(
@@ -792,6 +811,7 @@ impl ChunkEnv {
                 self.patches.push(ObjPatch {
                     // TODO: check for overflow
                     offset: Offset::try_from(self.data.len()).unwrap(),
+                    chunk_index: self.chunk_index,
                     data: ObjPatchData::Fill(self.padding),
                 });
                 0u8
@@ -814,12 +834,21 @@ impl ChunkEnv {
         Ok(())
     }
 
-    fn append_patch(&mut self, data: ObjPatchData) -> AsmResult<()> {
+    /// Appends zero bytes equal to the size of the given patch data to this
+    /// chunk's data, and adds a patch to update those bytes at link time.
+    /// `chunk_index` gives the index of the innermost chunk that the patch
+    /// takes place in; usually that's this chunk, but it could be a different
+    /// one if this chunk is holding data for a different, `Loadable` chunk.
+    fn append_patch(
+        &mut self,
+        chunk_index: usize,
+        data: ObjPatchData,
+    ) -> AsmResult<()> {
         let old_size = self.total_size();
         // TODO: Error instead of crash if offset is too large.
         let offset = Offset::try_from(old_size).unwrap();
         self.data_mut().resize(old_size + data.num_bytes(), 0u8);
-        self.patches.push(ObjPatch { offset, data });
+        self.patches.push(ObjPatch { offset, chunk_index, data });
         Ok(())
     }
 
