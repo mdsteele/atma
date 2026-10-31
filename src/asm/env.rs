@@ -1100,7 +1100,7 @@ impl AsmScopeEnv {
     }
 
     fn generate_unlabeled_scope_name(&mut self) -> Rc<str> {
-        let name = format!("$${:x}", self.next_unlabeled_scope_number);
+        let name = format!("${:x}", self.next_unlabeled_scope_number);
         self.next_unlabeled_scope_number += 1;
         Rc::from(name)
     }

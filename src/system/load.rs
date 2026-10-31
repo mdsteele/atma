@@ -39,7 +39,7 @@ pub enum BinaryFormat {
 /// simulated system that represents it.
 pub fn load_binary_with_format<R: Read + Seek>(
     format: BinaryFormat,
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     reader: R,
 ) -> io::Result<SimSystem> {
     match format {
@@ -70,7 +70,7 @@ pub fn load_binary_with_format<R: Read + Seek>(
 /// * SFC/SMC
 /// * SPC
 pub fn load_binary<R: Read + Seek>(
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     let mut header = [0u8; 8];

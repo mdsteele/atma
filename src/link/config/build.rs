@@ -318,7 +318,7 @@ impl<'a> ConfigBuilder<'a> {
                 ),
                 None => (
                     ExprType::Undefined,
-                    ConfigVariableOr::Static(ExprValue::Boolean(false)),
+                    ConfigVariableOr::Static(ExprValue::FALSE),
                 ),
             };
         self.env.add_declaration(id_ast, expr_type, value);

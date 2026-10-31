@@ -5,6 +5,7 @@ use crate::addr::Addr;
 use crate::bus::WatchId;
 use crate::error::SrcCache;
 use crate::expr::{ExprEvalError, ExprLabel, ExprValue};
+use crate::parse::SymbolTable;
 use crate::proc::SimBreak;
 use crate::system::SimSystem;
 use num_bigint::BigInt;
@@ -60,11 +61,13 @@ impl<W: Write> AdsEnvironment<W> {
         src_path: Rc<str>,
         source: &str,
         system: SimSystem,
+        symbols: &SymbolTable,
         output: W,
-    ) -> AdsResult<AdsEnvironment<W>> {
-        let program =
-            AdsProgram::compile_source(cache, src_path, source, &system)?;
-        Ok(AdsEnvironment {
+    ) -> AdsResult<Self> {
+        let program = AdsProgram::compile_source(
+            cache, src_path, source, &system, symbols,
+        )?;
+        Ok(Self {
             system,
             program,
             pc: 0,
@@ -229,6 +232,8 @@ impl<W: Write> AdsEnvironment<W> {
                 };
                 let destination_address = self.destination(offset);
                 let data = HandlerData { parent_index, destination_address };
+                // TODO: If top of stack is a label with symbol provenance, use
+                // watch_label here rather than watch_address.
                 let addr = self.pop_address_value();
                 let id = self.system.watch_address(addr, kind);
                 self.handlers.entry(id).or_default().push(data);
@@ -372,6 +377,7 @@ impl<W: Write> AdsEnvironment<W> {
 mod tests {
     use super::{AdsEnvironment, SimSystem};
     use crate::error::StrSrcCache;
+    use crate::parse::SymbolTable;
     use std::rc::Rc;
 
     fn make_env<'a>(
@@ -380,8 +386,12 @@ mod tests {
     ) -> AdsEnvironment<&'a mut Vec<u8>> {
         let mut cache = StrSrcCache::new();
         let path = Rc::<str>::from("input");
-        let sim = SimSystem::with_nop_cpu();
-        AdsEnvironment::create(&mut cache, path, source, sim, output).unwrap()
+        let system = SimSystem::with_nop_cpu();
+        let symbols = SymbolTable::default();
+        AdsEnvironment::create(
+            &mut cache, path, source, system, &symbols, output,
+        )
+        .unwrap()
     }
 
     #[test]

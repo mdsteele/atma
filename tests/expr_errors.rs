@@ -4,25 +4,33 @@ use atma::error::StrSrcCache;
 use atma::expr::{
     ExprNotStaticReason, ExprType, ExprTypeError, TemplateParseError,
 };
-use atma::parse::UnOpAst;
+use atma::parse::{SymbolTable, UnOpAst};
 use atma::system::SimSystem;
 use std::assert_matches;
 use std::rc::Rc;
 
 //===========================================================================//
 
-fn expr_errors(source: &str) -> Vec<ExprTypeError> {
+fn expr_errors(expr_source: &str) -> Vec<ExprTypeError> {
     let mut cache = StrSrcCache::new();
     let path = Rc::<str>::from("input");
-    let ads = format!("print {source}\n");
+    let ads_source = format!("print {expr_source}\n");
     let bus = atma::bus::new_open_bus(BitWidth::MIN);
     let cpu = atma::proc::NopProc::new();
     let system = SimSystem::new(
         vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
         Vec::new(),
     );
+    let symbols = SymbolTable::default();
     let output = Vec::<u8>::new();
-    match AdsEnvironment::create(&mut cache, path, &ads, system, output) {
+    match AdsEnvironment::create(
+        &mut cache,
+        path,
+        &ads_source,
+        system,
+        &symbols,
+        output,
+    ) {
         Ok(_) => vec![],
         Err(errs) => errs
             .into_iter()

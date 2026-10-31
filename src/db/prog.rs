@@ -11,10 +11,9 @@ use crate::expr::{
 };
 use crate::parse::{
     AdsStmtAst, BreakpointAst, DeclarationKind, ExprAst, IdentifierAst,
-    LValueAst, LValueAstNode,
+    LValueAst, LValueAstNode, SymbolTable,
 };
 use crate::system::SimSystem;
-use num_bigint::BigInt;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -32,8 +31,9 @@ impl AdsProgram {
         src_path: Rc<str>,
         source_code: &str,
         system: &SimSystem,
+        symbols: &SymbolTable,
     ) -> AdsResult<AdsProgram> {
-        let mut compiler = AdsCompiler::new(cache, src_path, system);
+        let mut compiler = AdsCompiler::new(cache, src_path, system, symbols);
         let module = compiler.env.parse_source(source_code)?;
         let mut instructions = Vec::<AdsInstruction>::new();
         compiler.compile_statements(module.statements, &mut instructions)?;
@@ -54,8 +54,9 @@ impl<'a> AdsCompiler<'a> {
         cache: &'a mut dyn SrcCache,
         root_path: Rc<str>,
         system: &'a SimSystem,
+        symbols: &SymbolTable,
     ) -> AdsCompiler<'a> {
-        AdsCompiler { cache, env: AdsTypeEnv::new(system, root_path) }
+        AdsCompiler { cache, env: AdsTypeEnv::new(root_path, system, symbols) }
     }
 
     fn compile_statements(
@@ -217,7 +218,7 @@ impl<'a> AdsCompiler<'a> {
         };
         // Set up index of iteration:
         let index_index = self.env.add_internal_variable();
-        out.push(AdsInstruction::PushValue(ExprValue::Integer(BigInt::ZERO)));
+        out.push(AdsInstruction::PushValue(ExprValue::ZERO));
         // Compile loop body:
         let mut do_stmts = Vec::<AdsInstruction>::new();
         self.env.push_scope();
@@ -245,7 +246,7 @@ impl<'a> AdsCompiler<'a> {
         out.append(&mut do_stmts);
         // Add instructions to increment index of iteration:
         out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
-        out.push(AdsInstruction::PushValue(ExprValue::Integer(BigInt::ONE)));
+        out.push(AdsInstruction::PushValue(ExprValue::ONE));
         out.push(AdsInstruction::BinOp {
             context: self.env.current_src_context(),
             binop: ExprBinOp::Add,
@@ -331,12 +332,12 @@ impl<'a> AdsCompiler<'a> {
     ) -> AdsResult<()> {
         self.env.push_scope();
         let is_done_index = self.env.add_internal_variable();
-        out.push(AdsInstruction::PushValue(ExprValue::Boolean(false)));
+        out.push(AdsInstruction::PushValue(ExprValue::FALSE));
         let breakpoint_kind = self.compile_breakpoint(breakpoint_ast, out)?;
         self.env.add_handler();
         out.push(AdsInstruction::PushHandler(breakpoint_kind, 1));
         out.push(AdsInstruction::Jump(3));
-        out.push(AdsInstruction::PushValue(ExprValue::Boolean(true)));
+        out.push(AdsInstruction::PushValue(ExprValue::TRUE));
         out.push(AdsInstruction::SetValue(AdsFrameRef(1), is_done_index));
         out.push(AdsInstruction::Return);
         out.push(AdsInstruction::Step);
@@ -763,6 +764,7 @@ mod tests {
     use crate::bus::{WatchKind, new_open_bus};
     use crate::error::StrSrcCache;
     use crate::expr::ExprBinOp;
+    use crate::parse::SymbolTable;
     use crate::proc::Mos6502;
     use num_bigint::BigInt;
     use std::assert_matches;
@@ -777,7 +779,8 @@ mod tests {
             vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
             Vec::new(),
         );
-        AdsProgram::compile_source(&mut cache, path, source, &system)
+        let symbols = SymbolTable::default();
+        AdsProgram::compile_source(&mut cache, path, source, &system, &symbols)
             .unwrap()
             .instructions
     }

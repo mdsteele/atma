@@ -14,6 +14,7 @@ pub enum ExprLabel {
         space: Rc<str>,
         /// The memory address.
         address: BigInt,
+        // TODO: add optional symbol provenance
     },
     /// A reference to an absolute address in the address space of a given
     /// chunk in the current object file.
@@ -22,6 +23,7 @@ pub enum ExprLabel {
         chunk_index: usize,
         /// The memory address.
         address: BigInt,
+        // TODO: add optional symbol provenance
     },
     /// A reference to a memory location relative to the start of a given chunk
     /// in the current object file.
@@ -30,6 +32,7 @@ pub enum ExprLabel {
         chunk_index: usize,
         /// The byte offset from the start of the chunk.
         offset: BigInt,
+        // TODO: add optional symbol provenance
     },
     /// A reference to a memory location relative to a declared symbol.
     SymbolRelative {

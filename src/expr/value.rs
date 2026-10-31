@@ -1,7 +1,7 @@
 use super::func::ExprFunc;
 use super::label::ExprLabel;
 use crate::obj::{BinaryIo, Decoder, Encoder};
-use num_bigint::BigInt;
+use num_bigint::{BigInt, BigUint};
 use std::fmt;
 use std::io;
 use std::rc::Rc;
@@ -208,6 +208,18 @@ pub enum ExprValue {
 }
 
 impl ExprValue {
+    /// A boolean value of false.
+    pub const FALSE: Self = Self::Boolean(false);
+
+    /// A boolean value of true.
+    pub const TRUE: Self = Self::Boolean(true);
+
+    /// An integer value of zero.
+    pub const ZERO: Self = Self::Integer(BigInt::ZERO);
+
+    /// An integer value of one.
+    pub const ONE: Self = Self::Integer(BigInt::ONE);
+
     /// Returns the contained [`Boolean`](ExprValue::Boolean) value, or panics
     /// if this value is not a boolean.
     pub fn unwrap_bool(&self) -> bool {
@@ -304,8 +316,8 @@ impl BinaryIo for ExprValue {
         decoder: &mut Decoder<R>,
     ) -> io::Result<Self> {
         match u8::read_from(decoder)? {
-            TAG_FALSE => Ok(ExprValue::Boolean(false)),
-            TAG_TRUE => Ok(ExprValue::Boolean(true)),
+            TAG_FALSE => Ok(ExprValue::FALSE),
+            TAG_TRUE => Ok(ExprValue::TRUE),
             TAG_ENTITY => {
                 Ok(ExprValue::Entity(Rc::<str>::read_from(decoder)?))
             }
@@ -437,6 +449,12 @@ impl From<ExprFunc> for ExprValue {
 impl From<BigInt> for ExprValue {
     fn from(value: BigInt) -> Self {
         Self::Integer(value)
+    }
+}
+
+impl From<BigUint> for ExprValue {
+    fn from(value: BigUint) -> Self {
+        Self::Integer(BigInt::from(value))
     }
 }
 

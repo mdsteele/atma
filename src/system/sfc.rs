@@ -171,7 +171,7 @@ impl SnesRomHeader {
 /// Reads a compiled SFC (or SMC) binary file, and returns a simulated system
 /// that represents it.
 pub fn load_sfc_binary<R: Read + Seek>(
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // From https://snes.nesdev.org/wiki/ROM_file_formats: "The data contained
@@ -209,12 +209,12 @@ pub fn load_sfc_binary<R: Read + Seek>(
     let header = SnesRomHeader::detect(&rom_data)?;
 
     let cpu_bus =
-        header.make_cpu_bus(rom_data.into_boxed_slice(), rom_start, &symbols);
+        header.make_cpu_bus(rom_data.into_boxed_slice(), rom_start, symbols);
     let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
     let smp_bus = with_symbols(
         new_snes_ssmp_bus(new_ram_bus(vec![0u8; 1 << 16].into_boxed_slice())),
         SMP,
-        &symbols,
+        symbols,
     );
     let smp_proc: Box<dyn SimProc> = Box::new(Spc700::new());
     let processors = vec![

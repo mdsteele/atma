@@ -17,7 +17,7 @@ const CPU: &str = "CPU";
 /// Reads a compiled NSF binary file, and returns a simulated system that
 /// represents it.
 pub fn load_nsf_binary<R: Read + Seek>(
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // See https://www.nesdev.org/wiki/NSF
@@ -121,7 +121,7 @@ pub fn load_nsf_binary<R: Read + Seek>(
     };
 
     let cart_bus = new_nes_nsf_cart_bus(rom_data, init_addr, play_addr);
-    let cpu_bus = with_symbols(new_nes_cpu_bus(cart_bus), CPU, &symbols);
+    let cpu_bus = with_symbols(new_nes_cpu_bus(cart_bus), CPU, symbols);
     let mut cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
     cpu.set_pc(Addr::from(0x4800u16));
     cpu.set_register("A", u32::from(starting_song - 1));

@@ -17,7 +17,7 @@ const SMP: &str = "SMP";
 /// Reads a compiled SPC binary file, and returns a simulated system that
 /// represents it.
 pub fn load_spc_binary<R: Read + Seek>(
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // See https://wiki.superfamicom.org/spc-and-rsn-file-format
@@ -54,7 +54,7 @@ pub fn load_spc_binary<R: Read + Seek>(
     let bus = with_symbols(
         new_snes_ssmp_bus(new_ram_bus(ram.into_boxed_slice())),
         SMP,
-        &symbols,
+        symbols,
     );
     let mut smp: Box<dyn SimProc> = Box::new(Spc700::new());
     smp.set_pc(Addr::from(pc));

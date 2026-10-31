@@ -1,6 +1,7 @@
 use atma::db::{AdsEnvironment, AdsError};
 use atma::error::StrSrcCache;
 use atma::expr::{ExprNotStaticReason, ExprType, ExprTypeError};
+use atma::parse::SymbolTable;
 use atma::system::SimSystem;
 use std::assert_matches;
 use std::rc::Rc;
@@ -16,8 +17,11 @@ fn ads_errors(source: &str) -> Vec<AdsError> {
         vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
         Vec::new(),
     );
+    let symbols = SymbolTable::default();
     let output = Vec::<u8>::new();
-    match AdsEnvironment::create(&mut cache, path, source, system, output) {
+    match AdsEnvironment::create(
+        &mut cache, path, source, system, &symbols, output,
+    ) {
         Ok(_) => vec![],
         Err(errs) => errs.into_iter().collect::<Vec<_>>(),
     }

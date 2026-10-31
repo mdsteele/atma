@@ -393,7 +393,7 @@ mod tests {
         assert_round_trips(ObjExprOp::MakeList(3));
         assert_round_trips(ObjExprOp::MakeTuple(0));
         assert_round_trips(ObjExprOp::MakeTuple(2));
-        assert_round_trips(ObjExprOp::Push(ExprValue::Boolean(false)));
+        assert_round_trips(ObjExprOp::Push(ExprValue::FALSE));
         assert_round_trips(ObjExprOp::Push(ExprValue::Integer(BigInt::from(
             12345u32,
         ))));

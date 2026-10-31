@@ -67,7 +67,7 @@ impl GbMapper {
 /// Reads a compiled GB or GBC binary file, and returns a simulated system that
 /// represents it.
 pub fn load_gb_binary<R: Read + Seek>(
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     // See https://gbdev.io/pandocs/The_Cartridge_Header.html
@@ -113,12 +113,8 @@ pub fn load_gb_binary<R: Read + Seek>(
     reader.rewind()?;
     reader.read_exact(&mut rom_data)?;
 
-    let bus = mapper.make_cpu_bus(
-        ram_size,
-        rom_data.into_boxed_slice(),
-        0,
-        &symbols,
-    );
+    let bus =
+        mapper.make_cpu_bus(ram_size, rom_data.into_boxed_slice(), 0, symbols);
     let cpu: Box<dyn SimProc> = Box::new(SharpSm83::new());
     let processors = vec![(Rc::from(CPU), (cpu, bus))];
     // TODO: Populate metadata

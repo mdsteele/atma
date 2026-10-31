@@ -7,7 +7,7 @@ use crate::expr::{
     make_global_builtin_values,
 };
 use crate::parse::AdsModuleAst;
-use crate::parse::{ExprAst, HereLabelKind, IdentifierAst};
+use crate::parse::{ExprAst, HereLabelKind, IdentifierAst, SymbolTable};
 use crate::system::SimSystem;
 use num_bigint::BigInt;
 use std::collections::HashMap;
@@ -95,19 +95,26 @@ impl AdsScope {
 pub(super) struct AdsTypeEnv<'a> {
     system: &'a SimSystem,
     builtins: HashMap<Rc<str>, (ExprValue, ExprType)>,
+    symbols: HashMap<Rc<str>, ExprLabel>,
     context_stack: Vec<Rc<AdsSrcContext>>,
     frame_stack: Vec<Vec<AdsScope>>,
 }
 
 impl<'a> AdsTypeEnv<'a> {
-    pub fn new(system: &'a SimSystem, root_path: Rc<str>) -> AdsTypeEnv<'a> {
+    pub fn new(
+        root_path: Rc<str>,
+        system: &'a SimSystem,
+        symbols: &SymbolTable,
+    ) -> AdsTypeEnv<'a> {
         let root_context = Rc::new(AdsSrcContext::root(root_path));
         let default_proc_name = system.selected_processor_name();
+        let root_scope = AdsScope::new(0, default_proc_name);
         AdsTypeEnv {
             system,
             builtins: make_global_builtin_values(),
+            symbols: collect_symbols(symbols),
             context_stack: vec![root_context],
-            frame_stack: vec![vec![AdsScope::new(0, default_proc_name)]],
+            frame_stack: vec![vec![root_scope]],
         }
     }
 
@@ -336,6 +343,11 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
                 expr_static,
             ));
         }
+        if let Some(label) = self.symbols.get(name) {
+            let value = ExprValue::Label(label.clone());
+            let op = AdsInstruction::PushValue(value.clone());
+            return Ok((op, ExprType::Label, Ok(value)));
+        }
         if let Some((value, expr_type)) = self.builtins.get(name) {
             let op = AdsInstruction::PushValue(value.clone());
             return Ok((op, expr_type.clone(), Ok(value.clone())));
@@ -411,6 +423,25 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
 
 //===========================================================================//
 
+fn collect_symbols(table: &SymbolTable) -> HashMap<Rc<str>, ExprLabel> {
+    let mut map = HashMap::<Rc<str>, ExprLabel>::new();
+    for symbol in &table.entries {
+        // If two or more symbols have the same name, prefer the external one
+        // if any, otherwise prefer the first one in the table.
+        if symbol.is_external || !map.contains_key(&symbol.name) {
+            let label = ExprLabel::AddrAbsolute {
+                space: symbol.space.clone(),
+                address: BigInt::from(symbol.address),
+                // TODO: include symbol provenance
+            };
+            map.insert(symbol.name.clone(), label);
+        }
+    }
+    map
+}
+
+//===========================================================================//
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -421,6 +452,7 @@ mod tests {
     use crate::expr::ExprNotStaticReason;
     use crate::parse::{
         CompoundIdAst, ExprAst, ExprAstNode, IdentifierAst, IdentifierKind,
+        SymbolTable,
     };
     use num_bigint::BigInt;
     use std::assert_matches;
@@ -455,7 +487,8 @@ mod tests {
     #[test]
     fn typecheck_identifier_expr() {
         let system = SimSystem::with_nop_cpu();
-        let mut env = AdsTypeEnv::new(&system, Rc::from("input"));
+        let symbols = SymbolTable::default();
+        let mut env = AdsTypeEnv::new(Rc::from("input"), &system, &symbols);
         env.add_declaration(
             AdsDeclKind::Constant(Err(ExprNotStaticReason::Phantom)),
             IdentifierAst {
@@ -478,7 +511,8 @@ mod tests {
     #[test]
     fn typecheck_int_literal_expr() {
         let system = SimSystem::with_nop_cpu();
-        let env = AdsTypeEnv::new(&system, Rc::from("input"));
+        let symbols = SymbolTable::default();
+        let env = AdsTypeEnv::new(Rc::from("input"), &system, &symbols);
         let (instructions, expr_type, expr_static) =
             env.typecheck_expression(int_ast(42, 0..2)).unwrap();
         assert_eq!(expr_type, ExprType::Integer);

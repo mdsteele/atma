@@ -196,7 +196,7 @@ fn command_db(
         let file = fs::File::open(&binary_path)?;
         load_binary_with_format(
             binary_format,
-            symbols,
+            &symbols,
             io::BufReader::new(file),
         )?
     };
@@ -214,6 +214,7 @@ fn command_db(
                 src_path,
                 &source,
                 system,
+                &symbols,
                 io::stdout(),
             ) {
                 Ok(ads_env) => ads_env,

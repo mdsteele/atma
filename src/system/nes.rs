@@ -60,7 +60,7 @@ impl NesMapper {
 /// Reads a compiled iNES or NES 2.0 binary file, and returns a simulated
 /// system that represents it.
 pub fn load_nes_binary<R: Read + Seek>(
-    symbols: SymbolTable,
+    symbols: &SymbolTable,
     mut reader: R,
 ) -> io::Result<SimSystem> {
     let mut header = [0u8; 16];
@@ -108,7 +108,7 @@ pub fn load_nes_binary<R: Read + Seek>(
         sram_size,
         prg_rom.into_boxed_slice(),
         header.len() as u64,
-        &symbols,
+        symbols,
     );
     let cpu: Box<dyn SimProc> = Box::new(Mos6502::new());
     let processors = vec![(Rc::from(CPU), (cpu, bus))];

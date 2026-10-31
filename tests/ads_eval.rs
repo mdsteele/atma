@@ -1,5 +1,6 @@
 use atma::db::AdsEnvironment;
 use atma::error::StrSrcCache;
+use atma::parse::SymbolTable;
 use atma::system::SimSystem;
 use std::io::Write;
 use std::rc::Rc;
@@ -18,7 +19,9 @@ fn make_nop_proc_env<'a>(
         vec![(Rc::from("CPU"), (Box::new(cpu), bus))],
         Vec::new(),
     );
-    AdsEnvironment::create(&mut cache, path, source, system, output).unwrap()
+    let symbols = SymbolTable::default();
+    AdsEnvironment::create(&mut cache, path, source, system, &symbols, output)
+        .unwrap()
 }
 
 fn run_to_completion<W: Write>(env: &mut AdsEnvironment<W>) {

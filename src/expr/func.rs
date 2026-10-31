@@ -250,23 +250,23 @@ impl ExprFunc {
             Self::Sqrtc => {
                 let mut arg = get_sqrt_arg(arg)?;
                 if arg == BigUint::ZERO {
-                    Ok(ExprValue::Integer(BigInt::ZERO))
+                    Ok(ExprValue::ZERO)
                 } else {
                     arg.dec();
                     let mut sqrt = arg.sqrt();
                     sqrt.inc();
-                    Ok(ExprValue::Integer(BigInt::from(sqrt)))
+                    Ok(ExprValue::from(sqrt))
                 }
             }
             Self::Sqrtf => {
                 let arg = get_sqrt_arg(arg)?;
-                Ok(ExprValue::Integer(BigInt::from(arg.sqrt())))
+                Ok(ExprValue::from(arg.sqrt()))
             }
             Self::Sqrtx => {
                 let arg = get_sqrt_arg(arg)?;
                 let sqrt = arg.sqrt();
                 if &sqrt * &sqrt == arg {
-                    Ok(ExprValue::Integer(BigInt::from(sqrt)))
+                    Ok(ExprValue::from(sqrt))
                 } else {
                     Err(ExprFuncEvalError::InexactSquareRoot(arg))
                 }
