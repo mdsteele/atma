@@ -654,6 +654,14 @@ pub enum ExprEvalError {
         /// operation.
         rhs_span: SrcSpan,
     },
+    /// Tried to select a word at the given negative index.
+    WordSelectByNegative {
+        /// The source code span for the right-hand side of the word-select
+        /// operation.
+        rhs_span: SrcSpan,
+        /// The value of the right-hand side of the word-select operation.
+        rhs_value: BigInt,
+    },
 }
 
 impl ExprEvalError {
@@ -758,6 +766,12 @@ impl ExprEvalError {
                 SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_label(SrcLoc::new(path, lhs_span), "")
                     .with_label(SrcLoc::new(path, rhs_span), "")
+            }
+            Self::WordSelectByNegative { rhs_span, rhs_value } => {
+                let message = "word-select index cannot be negative";
+                let label = format!("this evaluates to {rhs_value}");
+                SourceError::new(SrcLoc::new(path, rhs_span), message)
+                    .with_primary_label(label)
             }
         }
     }

@@ -18,6 +18,8 @@ pub enum TokenValue {
     ArrowRight,
     /// A "`!`" symbol.
     Bang,
+    /// A "`!!`" symbol.
+    BangBang,
     /// A "`!=`" symbol.
     BangEquals,
     /// An boolean literal.
@@ -127,6 +129,7 @@ impl TokenValue {
             TokenValue::ArrowLeft => "`<-`",
             TokenValue::ArrowRight => "`->`",
             TokenValue::Bang => "`!`",
+            TokenValue::BangBang => "`!!`",
             TokenValue::BangEquals => "`!=`",
             TokenValue::BoolLiteral(_) => "boolean literal",
             TokenValue::BraceClose => "`}`",

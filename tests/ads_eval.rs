@@ -123,6 +123,18 @@ fn unary_prefix_operators() {
     assert_eq!(compile_and_run("print !(1 == 3)\n"), "%true\n");
 }
 
+#[test]
+fn word_selection_operator() {
+    assert_eq!(compile_and_run("print $090507 !! 0\n"), "1287\n");
+    assert_eq!(compile_and_run("print $090507 !! 1\n"), "2309\n");
+    assert_eq!(compile_and_run("print $090507 !! 2\n"), "9\n");
+    assert_eq!(compile_and_run("print $090507 !! 3\n"), "0\n");
+    assert_eq!(compile_and_run("print -$fcf4f8 !! 0\n"), "2824\n");
+    assert_eq!(compile_and_run("print -$fcf4f8 !! 1\n"), "779\n");
+    assert_eq!(compile_and_run("print -$fcf4f8 !! 2\n"), "65283\n");
+    assert_eq!(compile_and_run("print -$fcf4f8 !! 3\n"), "65535\n");
+}
+
 //===========================================================================//
 // Variables:
 

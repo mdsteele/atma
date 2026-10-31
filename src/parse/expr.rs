@@ -149,6 +149,8 @@ pub enum BinOpAst {
     Shr,
     /// Subtraction.
     Sub,
+    /// Word selection.
+    Word,
 }
 
 impl BinOpAst {
@@ -181,6 +183,7 @@ impl BinOpAst {
             BinOpAst::Pow => ("exponentiate", "by", false),
             BinOpAst::Shl | BinOpAst::Shr => ("shift", "by", false),
             BinOpAst::Sub => ("subtract", "from", true),
+            BinOpAst::Word => ("word-select", "by", false),
         }
     }
 }
@@ -415,6 +418,11 @@ impl ExprAst {
                         pratt::left(BIND_BITWISE_AND),
                         symbol(TokenValue::Bang),
                         |l, o, r, _| ExprAst::binop(BinOpAst::Byte, l, o, r),
+                    ),
+                    pratt::infix(
+                        pratt::left(BIND_BITWISE_AND),
+                        symbol(TokenValue::BangBang),
+                        |l, o, r, _| ExprAst::binop(BinOpAst::Word, l, o, r),
                     ),
                     pratt::infix(
                         pratt::left(BIND_BITWISE_AND),

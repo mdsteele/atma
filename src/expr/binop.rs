@@ -29,7 +29,8 @@ const TAG_POW: u8 = 0x0e;
 const TAG_SHL: u8 = 0x0f;
 const TAG_SHR: u8 = 0x10;
 const TAG_SUB: u8 = 0x11;
-const TAG_XOR: u8 = 0x12;
+const TAG_WORD: u8 = 0x12;
+const TAG_XOR: u8 = 0x13;
 
 //===========================================================================//
 
@@ -67,6 +68,8 @@ pub(crate) enum ExprBinOpEvalError {
     /// Tried to subtract one label from another, but the labels have not yet
     /// been resolved relative to each other, and the delta is not yet known.
     SubtractLabelsUnresolved,
+    /// Tried to select a word at the given negative index.
+    WordSelectByNegative(BigInt),
 }
 
 impl ExprBinOpEvalError {
@@ -117,6 +120,9 @@ impl ExprBinOpEvalError {
                     lhs_span,
                     rhs_span,
                 }
+            }
+            Self::WordSelectByNegative(rhs_value) => {
+                ExprEvalError::WordSelectByNegative { rhs_span, rhs_value }
             }
         }
     }
@@ -174,6 +180,7 @@ pub(crate) enum ExprBinOp {
     Shl,
     Shr,
     Sub,
+    Word,
     Xor,
 }
 
@@ -223,12 +230,7 @@ impl ExprBinOp {
             ) => Ok((Self::Xor, ExprType::Integer)),
             (
                 BinOpAst::Byte,
-                ExprType::Integer | ExprType::Bottom,
-                ExprType::Integer | ExprType::Bottom,
-            ) => Ok((Self::Byte, ExprType::Integer)),
-            (
-                BinOpAst::Byte,
-                ExprType::Label,
+                ExprType::Integer | ExprType::Bottom | ExprType::Label,
                 ExprType::Integer | ExprType::Bottom,
             ) => Ok((Self::Byte, ExprType::Integer)),
             (BinOpAst::CmpEq, t1, t2)
@@ -325,6 +327,11 @@ impl ExprBinOp {
             (BinOpAst::Sub, ExprType::Label, ExprType::Integer) => {
                 Ok((Self::Sub, ExprType::Label))
             }
+            (
+                BinOpAst::Word,
+                ExprType::Integer | ExprType::Bottom | ExprType::Label,
+                ExprType::Integer | ExprType::Bottom,
+            ) => Ok((Self::Word, ExprType::Integer)),
             (BinOpAst::Add, ExprType::Bottom, ExprType::Bottom)
             | (BinOpAst::Add, ExprType::Integer, ExprType::Bottom)
             | (BinOpAst::Add, ExprType::Bottom, ExprType::Integer)
@@ -485,6 +492,7 @@ impl ExprBinOp {
                 }
                 _ => Err(ExprBinOpEvalError::InvalidType(BinOpSide::Both)),
             },
+            Self::Word => word_select_value(lhs, rhs),
             Self::Xor => match (lhs, rhs) {
                 (ExprValue::Boolean(lhs), ExprValue::Boolean(rhs)) => {
                     Ok(ExprValue::Boolean(lhs ^ rhs))
@@ -603,6 +611,7 @@ impl BinaryIo for ExprBinOp {
             TAG_SHL => Ok(Self::Shl),
             TAG_SHR => Ok(Self::Shr),
             TAG_SUB => Ok(Self::Sub),
+            TAG_WORD => Ok(Self::Word),
             TAG_XOR => Ok(Self::Xor),
             byte => Err(io::Error::other(format!(
                 "unknown binop tag: 0x{:02x}",
@@ -634,6 +643,7 @@ impl BinaryIo for ExprBinOp {
             Self::Shl => TAG_SHL,
             Self::Shr => TAG_SHR,
             Self::Sub => TAG_SUB,
+            Self::Word => TAG_WORD,
             Self::Xor => TAG_XOR,
         };
         tag.write_to(encoder)
@@ -653,10 +663,54 @@ fn byte_select_bigint(lhs: &BigInt, rhs: &BigUint) -> u8 {
     }
 }
 
+fn word_select_bigint(lhs: &BigInt, rhs: &BigUint) -> u16 {
+    let bytes = lhs.to_signed_bytes_le();
+    if *rhs < BigUint::from(bytes.len()) {
+        let index = usize::try_from(rhs).unwrap();
+        let lo = bytes[index];
+        let hi = if index + 1 < bytes.len() {
+            bytes[index + 1]
+        } else if let Sign::Minus = lhs.sign() {
+            0xffu8
+        } else {
+            0x00u8
+        };
+        (u16::from(hi) << 8) | u16::from(lo)
+    } else if let Sign::Minus = lhs.sign() {
+        0xffffu16
+    } else {
+        0x0000u16
+    }
+}
+
 fn byte_select_value(
     lhs: ExprValue,
     rhs: ExprValue,
 ) -> Result<ExprValue, ExprBinOpEvalError> {
+    let (lhs, rhs) = get_select_args(lhs, rhs)?;
+    if let Sign::Minus = rhs.sign() {
+        return Err(ExprBinOpEvalError::ByteSelectByNegative(rhs));
+    }
+    let byte = byte_select_bigint(&lhs, rhs.magnitude());
+    Ok(ExprValue::Integer(BigInt::from(byte)))
+}
+
+fn word_select_value(
+    lhs: ExprValue,
+    rhs: ExprValue,
+) -> Result<ExprValue, ExprBinOpEvalError> {
+    let (lhs, rhs) = get_select_args(lhs, rhs)?;
+    if let Sign::Minus = rhs.sign() {
+        return Err(ExprBinOpEvalError::WordSelectByNegative(rhs));
+    }
+    let word = word_select_bigint(&lhs, rhs.magnitude());
+    Ok(ExprValue::Integer(BigInt::from(word)))
+}
+
+fn get_select_args(
+    lhs: ExprValue,
+    rhs: ExprValue,
+) -> Result<(BigInt, BigInt), ExprBinOpEvalError> {
     let ExprValue::Integer(rhs) = rhs else {
         return Err(ExprBinOpEvalError::InvalidType(BinOpSide::Rhs));
     };
@@ -665,11 +719,7 @@ fn byte_select_value(
         ExprValue::Label(label) => label_address(BinOpSide::Lhs, label)?,
         _ => return Err(ExprBinOpEvalError::InvalidType(BinOpSide::Lhs)),
     };
-    if let Sign::Minus = rhs.sign() {
-        return Err(ExprBinOpEvalError::ByteSelectByNegative(rhs));
-    }
-    let byte = byte_select_bigint(&lhs, rhs.magnitude());
-    Ok(ExprValue::Integer(BigInt::from(byte)))
+    Ok((lhs, rhs))
 }
 
 fn label_address(
@@ -758,6 +808,7 @@ mod tests {
         assert_round_trips(ExprBinOp::Shl);
         assert_round_trips(ExprBinOp::Shr);
         assert_round_trips(ExprBinOp::Sub);
+        assert_round_trips(ExprBinOp::Word);
         assert_round_trips(ExprBinOp::Xor);
     }
 }

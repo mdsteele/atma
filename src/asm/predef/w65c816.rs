@@ -244,8 +244,7 @@ impl AddrMode for W65c816 {
 
 fn bang_bang_addr_arg(pool: &mut RcPool) -> AsmMacroArgAst {
     macro_arg(vec![
-        token(TokenValue::Bang),
-        token(TokenValue::Bang),
+        token(TokenValue::BangBang),
         pool.placeholder_token(PLACEHOLDER_ADDR),
     ])
 }

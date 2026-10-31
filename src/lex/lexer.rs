@@ -111,6 +111,8 @@ enum TokenKind {
     Backslash,
     #[token("!")]
     Bang,
+    #[token("!!")]
+    BangBang,
     #[token("!=")]
     BangEquals,
     #[token("%false")]
@@ -228,6 +230,7 @@ impl TokenKind {
             TokenKind::ArrowRight => TokenValue::ArrowRight,
             TokenKind::Backslash => unreachable!(),
             TokenKind::Bang => TokenValue::Bang,
+            TokenKind::BangBang => TokenValue::BangBang,
             TokenKind::BangEquals => TokenValue::BangEquals,
             TokenKind::BoolLiteralFalse => TokenValue::BoolLiteral(false),
             TokenKind::BoolLiteralTrue => TokenValue::BoolLiteral(true),
