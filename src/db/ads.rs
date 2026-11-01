@@ -266,16 +266,16 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::Step => {
                 let pc = self.system.pc();
+                let digits = self.system.bit_width().hex_digits();
                 let instruction = self.system.disassemble(self.system.pc()).1;
-                eprintln!("${pc:04x} | {instruction:16}");
-                if let Some(finished) = self.step_processor() {
-                    return Ok(finished);
-                }
+                eprintln!("${pc:0digits$x} | {instruction}");
+                self.pc += 1;
+                return Ok(self.step_processor());
             }
             AdsInstruction::Return => {
                 self.pc = self.call_stack.pop().unwrap().return_address;
                 if self.system.is_mid_instruction() {
-                    return Ok(self.step_processor().unwrap_or(false));
+                    return Ok(self.step_processor());
                 }
                 return Ok(false);
             }
@@ -303,9 +303,11 @@ impl<W: Write> AdsEnvironment<W> {
         Ok(false)
     }
 
-    fn step_processor(&mut self) -> Option<bool> {
+    /// Steps the current processor forward by one instruction, then returns
+    /// true if the processor is now halted, false otherwise.
+    fn step_processor(&mut self) -> bool {
         match self.system.step() {
-            Ok(()) => None,
+            Ok(()) => false,
             Err(SimBreak::Watchpoint(kind, id)) => {
                 eprintln!("{kind:?} watchpoint reached");
                 debug_assert!(self.handlers.contains_key(&id));
@@ -315,14 +317,14 @@ impl<W: Write> AdsEnvironment<W> {
                 self.call_stack.push(CallFrame {
                     parent_index: data.parent_index,
                     frame_start: self.value_stack.len(),
-                    return_address: self.pc + 1,
+                    return_address: self.pc,
                 });
                 self.pc = data.destination_address;
-                Some(false)
+                false
             }
             Err(SimBreak::HaltOpcode(mnemonic, opcode)) => {
                 eprintln!("Halted by {mnemonic} opcode ${opcode:02x}");
-                Some(true)
+                true
             }
         }
     }

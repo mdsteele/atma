@@ -157,6 +157,11 @@ impl SimSystem {
         self.current_processor_mut().proc.set_register(name, value);
     }
 
+    /// Returns the bit width of the currently selected processor's memory bus.
+    pub fn bit_width(&self) -> BitWidth {
+        self.current_processor().bus.bit_width()
+    }
+
     /// Gets a single byte from memory using the currently selected processor's
     /// memory bus, without provoking any hardware register side effects.
     pub fn peek_byte(&self, addr: Addr) -> u8 {

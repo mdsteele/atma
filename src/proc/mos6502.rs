@@ -907,9 +907,9 @@ impl Mos6502 {
     fn add(&mut self, rhs: u8) {
         let lhs: u8 = self.reg_a;
         let sum: u8 = if self.get_flag(PROC_FLAG_D) {
-            0 // TODO: implement decimal mode
+            todo!("decimal mode")
         } else {
-            let mut sum: u16 = (lhs as u16) + (rhs as u16);
+            let mut sum: u16 = u16::from(lhs) + u16::from(rhs);
             if self.get_flag(PROC_FLAG_C) {
                 sum += 1;
             }
