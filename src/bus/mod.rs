@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 mod dmg;
+mod gsu;
 mod label;
 mod lorom;
 mod mbc5;
@@ -10,11 +11,13 @@ mod mmc3;
 mod nes;
 mod nsf;
 mod ram;
+mod shared;
 mod snes;
 mod ssmp;
 
 use crate::addr::{Addr, BitWidth};
 pub use dmg::new_dmg_cpu_bus;
+pub use gsu::{SuperFxState, new_snes_gsu_busses};
 pub use label::new_labeled_bus;
 pub use lorom::new_snes_lorom_cart_bus;
 pub use mbc5::new_gb_mbc5_cart_bus;
@@ -71,7 +74,7 @@ pub trait SimBus {
     fn bit_width(&self) -> BitWidth;
 
     /// Returns a label for the given address, if there is one.
-    fn label_at(&self, addr: Addr) -> Option<&str>;
+    fn label_at(&self, addr: Addr) -> Option<String>;
 
     /// Returns a watchpoint for the given address, if there is one.
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId>;
@@ -89,6 +92,11 @@ pub trait SimBus {
     /// Returns the value of a single byte in memory, if the processor were to
     /// read it, but without triggering any watchpoints or performing any side
     /// effects that would occur if the processor actually read the byte.
+    ///
+    /// This method is used for disassembling code, so when called on
+    /// e.g. write-only hardware registers, it should return the value the
+    /// processor would actually get when reading, not the underlying internal
+    /// value.
     fn peek_byte(&self, addr: Addr) -> u8;
 
     /// Reads a single byte from memory.

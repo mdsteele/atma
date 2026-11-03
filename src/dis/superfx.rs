@@ -464,7 +464,7 @@ impl Operand {
 fn format_abs(bus: &dyn SimBus, bank: u8, abs: u16) -> String {
     let addr = (Addr::from(bank) << 16) | Addr::from(abs);
     match bus.label_at(addr) {
-        Some(label) => label.to_string(),
+        Some(label) => label,
         None => format!("*${abs:04x}"),
     }
 }

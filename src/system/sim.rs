@@ -1,7 +1,7 @@
 use crate::addr::{Addr, BitWidth};
 use crate::bus::{SimBus, WatchId, WatchKind};
 use crate::proc::{SimBreak, SimProc};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 //===========================================================================//
@@ -39,7 +39,7 @@ impl EnvProc {
 /// address spaces.
 pub struct SimSystem {
     selected_processor: Rc<str>,
-    processors: HashMap<Rc<str>, EnvProc>,
+    processors: BTreeMap<Rc<str>, EnvProc>,
     metadata: Vec<(Rc<str>, Rc<str>)>,
 }
 

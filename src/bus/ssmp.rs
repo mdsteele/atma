@@ -85,7 +85,7 @@ impl SimBus for SsmpBus {
         BitWidth::SIXTEEN
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         self.sub_bus(addr).label_at(addr)
     }
 
@@ -174,27 +174,28 @@ impl SimBus for SsmpRegBus {
         Self::BIT_WIDTH
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         let addr = addr.as_u8() & Self::ADDR_MASK;
-        match addr {
-            0x0 => Some("TEST"),
-            0x1 => Some("CONTROL"),
-            0x2 => Some("DSPADDR"),
-            0x3 => Some("DSPDATA"),
-            0x4 => Some("CPUIO0"),
-            0x5 => Some("CPUIO1"),
-            0x6 => Some("CPUIO2"),
-            0x7 => Some("CPUIO3"),
-            0x8 => Some("AUXIO4"),
-            0x9 => Some("AUXIO5"),
-            0xa => Some("T0DIV"),
-            0xb => Some("T1DIV"),
-            0xc => Some("T2DIV"),
-            0xd => Some("T0OUT"),
-            0xe => Some("T1OUT"),
-            0xf => Some("T2OUT"),
+        let label = match addr {
+            0x0 => "TEST",
+            0x1 => "CONTROL",
+            0x2 => "DSPADDR",
+            0x3 => "DSPDATA",
+            0x4 => "CPUIO0",
+            0x5 => "CPUIO1",
+            0x6 => "CPUIO2",
+            0x7 => "CPUIO3",
+            0x8 => "AUXIO4",
+            0x9 => "AUXIO5",
+            0xa => "T0DIV",
+            0xb => "T1DIV",
+            0xc => "T2DIV",
+            0xd => "T0OUT",
+            0xe => "T1OUT",
+            0xf => "T2OUT",
             _ => unreachable!(),
-        }
+        };
+        Some(label.to_string())
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {

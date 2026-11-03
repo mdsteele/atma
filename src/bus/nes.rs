@@ -45,7 +45,7 @@ impl SimBus for NesBus {
         BitWidth::SIXTEEN
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         match addr.as_u16() {
             0x0000..0x2000 => self.ram.label_at(addr),
             0x2000..0x4000 => self.ppu_regs.label_at(addr),
@@ -142,18 +142,19 @@ impl SimBus for PpuRegBus {
         Self::BIT_WIDTH
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
-        match addr.as_u8() & Self::ADDR_MASK {
-            0 => Some("PPUCTRL"),
-            1 => Some("PPUMASK"),
-            2 => Some("PPUSTATUS"),
-            3 => Some("OAMADDR"),
-            4 => Some("OAMDATA"),
-            5 => Some("PPUSCROLL"),
-            6 => Some("PPUADDR"),
-            7 => Some("PPUDATA"),
+    fn label_at(&self, addr: Addr) -> Option<String> {
+        let label = match addr.as_u8() & Self::ADDR_MASK {
+            0 => "PPUCTRL",
+            1 => "PPUMASK",
+            2 => "PPUSTATUS",
+            3 => "OAMADDR",
+            4 => "OAMDATA",
+            5 => "PPUSCROLL",
+            6 => "PPUADDR",
+            7 => "PPUDATA",
             _ => unreachable!(),
-        }
+        };
+        Some(label.to_string())
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {

@@ -41,9 +41,9 @@ impl SimBus for LabeledBus {
         self.inner.bit_width()
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         match self.address_labels.get(&self.bit_width().wrap(addr)) {
-            Some(label) => Some(Rc::as_ref(label)),
+            Some(label) => Some(label.to_string()),
             None => self.inner.label_at(addr),
         }
     }
@@ -111,8 +111,14 @@ mod tests {
         labels.insert(Addr::from(0x0100u16), Rc::from("foo"));
         labels.insert(Addr::from(0x0200u16), Rc::from("bar"));
         let bus = new_labeled_bus(new_open_bus(BitWidth::SIXTEEN), labels);
-        assert_eq!(bus.label_at(Addr::from(0x0100u16)), Some("foo"));
-        assert_eq!(bus.label_at(Addr::from(0x0200u16)), Some("bar"));
+        assert_eq!(
+            bus.label_at(Addr::from(0x0100u16)),
+            Some("foo".to_string())
+        );
+        assert_eq!(
+            bus.label_at(Addr::from(0x0200u16)),
+            Some("bar".to_string())
+        );
         assert_eq!(bus.label_at(Addr::from(0x0300u16)), None);
     }
 
@@ -126,9 +132,18 @@ mod tests {
         labels.insert(Addr::from(0x0200u16), Rc::from("quux"));
         labels.insert(Addr::from(0x0300u16), Rc::from("baz"));
         let bus = new_labeled_bus(bus, labels);
-        assert_eq!(bus.label_at(Addr::from(0x0100u16)), Some("foo"));
-        assert_eq!(bus.label_at(Addr::from(0x0200u16)), Some("quux"));
-        assert_eq!(bus.label_at(Addr::from(0x0300u16)), Some("baz"));
+        assert_eq!(
+            bus.label_at(Addr::from(0x0100u16)),
+            Some("foo".to_string())
+        );
+        assert_eq!(
+            bus.label_at(Addr::from(0x0200u16)),
+            Some("quux".to_string())
+        );
+        assert_eq!(
+            bus.label_at(Addr::from(0x0300u16)),
+            Some("baz".to_string())
+        );
         assert_eq!(bus.label_at(Addr::from(0x0400u16)), None);
     }
 }

@@ -68,7 +68,7 @@ impl SimBus for NsfBus {
         BitWidth::SIXTEEN
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         match addr.as_u16() {
             0x0000..0x6000 => self.driver.label_at(addr),
             0x6000..0x8000 => self.ram.label_at(addr),

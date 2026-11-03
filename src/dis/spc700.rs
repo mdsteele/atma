@@ -251,8 +251,8 @@ impl Operand {
 
 fn format_address(bus: &dyn SimBus, addr: u16) -> String {
     match bus.label_at(Addr::from(addr)) {
+        Some(label) => label,
         None => format!("*${addr:04x}"),
-        Some(label) => label.to_string(),
     }
 }
 
@@ -262,15 +262,15 @@ fn format_direct_page(bus: &dyn SimBus, dp: u8) -> String {
         .label_at(addr)
         .or_else(|| bus.label_at(Addr::from(0x0100u16) | addr))
     {
+        Some(label) => label,
         None => format!("*${dp:02x}"),
-        Some(label) => label.to_string(),
     }
 }
 
 fn format_high_page(bus: &dyn SimBus, hp: u8) -> String {
     match bus.label_at(Addr::from(0xff00u16) | Addr::from(hp)) {
+        Some(label) => label,
         None => format!("*$ff{hp:02x}"),
-        Some(label) => label.to_string(),
     }
 }
 

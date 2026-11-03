@@ -899,8 +899,8 @@ fn format_relative(
 
 fn format_address(bus: &dyn SimBus, addr: u16) -> String {
     match bus.label_at(Addr::from(addr)) {
+        Some(label) => label,
         None => format!("*${addr:04x}"),
-        Some(label) => label.to_string(),
     }
 }
 

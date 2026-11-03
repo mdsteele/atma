@@ -2,12 +2,14 @@ use super::sim::SimSystem;
 use super::util::{
     new_rom_bus_with_binary_symbols, with_offset_free_symbols, with_symbols,
 };
+use crate::addr::BitWidth;
 use crate::bus::{
-    SimBus, new_ram_bus, new_snes_cpu_bus, new_snes_lorom_cart_bus,
-    new_snes_ssmp_bus,
+    SimBus, SuperFxState, new_open_bus, new_ram_bus, new_snes_cpu_bus,
+    new_snes_gsu_busses, new_snes_lorom_cart_bus, new_snes_ssmp_bus,
 };
 use crate::parse::SymbolTable;
-use crate::proc::{SimProc, Spc700, Wdc65c816};
+use crate::proc::{SimProc, Spc700, SuperFx, Wdc65c816};
+use std::cell::RefCell;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
 
@@ -15,7 +17,12 @@ use std::rc::Rc;
 
 // Constants used for processer/address space names.
 const CPU: &str = "CPU";
+const GSU: &str = "GSU";
 const SMP: &str = "SMP";
+
+//===========================================================================//
+
+type Coprocessor = (&'static str, (Box<dyn SimProc>, Box<dyn SimBus>));
 
 //===========================================================================//
 
@@ -65,6 +72,7 @@ impl SnesMappingMode {
 struct SnesRomHeader {
     mode: SnesMappingMode,
     sram_size: usize,
+    is_superfx: bool,
     metadata: Vec<(Rc<str>, Rc<str>)>,
 }
 
@@ -137,7 +145,12 @@ impl SnesRomHeader {
             let sram_size =
                 if sram_shift == 0 { 0 } else { 1024 << sram_shift };
             metadata.push(rom_version_metadata(rom_version));
-            return Ok(SnesRomHeader { mode, sram_size, metadata });
+            return Ok(SnesRomHeader {
+                mode,
+                sram_size,
+                is_superfx,
+                metadata,
+            });
         }
         Err(io::Error::other("could not find any SNES ROM header"))
     }
@@ -147,7 +160,7 @@ impl SnesRomHeader {
         rom_data: Box<[u8]>,
         rom_start: u64,
         symbols: &SymbolTable,
-    ) -> Box<dyn SimBus> {
+    ) -> (Box<dyn SimBus>, Option<Coprocessor>) {
         let rom_bus =
             new_rom_bus_with_binary_symbols(rom_data, rom_start, CPU, symbols);
         let sram_bus = if self.sram_size == 0 {
@@ -155,14 +168,35 @@ impl SnesRomHeader {
         } else {
             Some(new_ram_bus(vec![0u8; self.sram_size].into_boxed_slice()))
         };
-        let cart_bus: Box<dyn SimBus> = match self.mode {
-            SnesMappingMode::LoRom => {
-                new_snes_lorom_cart_bus(rom_bus, sram_bus)
-            }
-            SnesMappingMode::HiRom => rom_bus, // TODO: sram
-            _ => todo!("{:?}", self.mode),
+        let (cart_bus, coprocessor) = if self.is_superfx {
+            let superfx_state = Rc::new(RefCell::new(SuperFxState::default()));
+            let (cart_bus, superfx_bus) = new_snes_gsu_busses(
+                rom_bus,
+                sram_bus
+                    .unwrap_or_else(|| new_open_bus(BitWidth::TWENTY_FOUR)),
+                superfx_state.clone(),
+            );
+            let superfx_proc: Box<dyn SimProc> =
+                Box::new(SuperFx::new(superfx_state));
+            // The SuperFX only has access to a subset of the CPU bus, but it
+            // uses the same address space as the CPU.
+            // TODO: Filter out symbols for addresses the GSU can't access.
+            let superfx_bus =
+                with_offset_free_symbols(superfx_bus, CPU, symbols);
+            (cart_bus, Some((GSU, (superfx_proc, superfx_bus))))
+        } else {
+            let cart_bus: Box<dyn SimBus> = match self.mode {
+                SnesMappingMode::LoRom => {
+                    new_snes_lorom_cart_bus(rom_bus, sram_bus)
+                }
+                SnesMappingMode::HiRom => rom_bus, // TODO: sram
+                _ => todo!("{:?}", self.mode),
+            };
+            (cart_bus, None)
         };
-        with_offset_free_symbols(new_snes_cpu_bus(cart_bus), CPU, symbols)
+        let cpu_bus =
+            with_offset_free_symbols(new_snes_cpu_bus(cart_bus), CPU, symbols);
+        (cpu_bus, coprocessor)
     }
 }
 
@@ -207,8 +241,7 @@ pub fn load_sfc_binary<R: Read + Seek>(
     reader.read_exact(&mut rom_data[..rom_size])?;
 
     let header = SnesRomHeader::detect(&rom_data)?;
-
-    let cpu_bus =
+    let (cpu_bus, coprocessor) =
         header.make_cpu_bus(rom_data.into_boxed_slice(), rom_start, symbols);
     let cpu_proc: Box<dyn SimProc> = Box::new(Wdc65c816::new());
     let smp_bus = with_symbols(
@@ -217,10 +250,13 @@ pub fn load_sfc_binary<R: Read + Seek>(
         symbols,
     );
     let smp_proc: Box<dyn SimProc> = Box::new(Spc700::new());
-    let processors = vec![
+    let mut processors = vec![
         (Rc::from(CPU), (cpu_proc, cpu_bus)),
         (Rc::from(SMP), (smp_proc, smp_bus)),
     ];
+    if let Some((name, proc_and_bus)) = coprocessor {
+        processors.push((Rc::from(name), proc_and_bus));
+    }
     Ok(SimSystem::new(processors, header.metadata))
 }
 

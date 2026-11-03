@@ -49,7 +49,7 @@ impl SimBus for RandomAccessBus {
         self.storage.bit_width()
     }
 
-    fn label_at(&self, _addr: Addr) -> Option<&str> {
+    fn label_at(&self, _addr: Addr) -> Option<String> {
         None
     }
 

@@ -78,7 +78,7 @@ impl SimBus for SnesBus {
         BitWidth::TWENTY_FOUR
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         let (bus, addr) = self.sub_bus(addr);
         bus.label_at(addr)
     }
@@ -156,41 +156,42 @@ impl SimBus for CpuRegBus {
         Self::BIT_WIDTH
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         let addr = addr.as_u8() & Self::ADDR_MASK;
-        match addr {
-            0x00 => Some("NMITIMEN"),
-            0x01 => Some("WRIO"),
-            0x02 => Some("WRMPYA"),
-            0x03 => Some("WRMPYB"),
-            0x04 => Some("WRDIVL"),
-            0x05 => Some("WRDIVH"),
-            0x06 => Some("WRDIVB"),
-            0x07 => Some("HTIMEL"),
-            0x08 => Some("HTIMEH"),
-            0x09 => Some("VTIMEL"),
-            0x0a => Some("VTIMEH"),
-            0x0b => Some("MDMAEN"),
-            0x0c => Some("HDMAEN"),
-            0x0d => Some("MEMSEL"),
-            0x10 => Some("RDNMI"),
-            0x11 => Some("TIMEUP"),
-            0x12 => Some("HVBJOY"),
-            0x13 => Some("RDIO"),
-            0x14 => Some("RDDIVL"),
-            0x15 => Some("RDDIVH"),
-            0x16 => Some("RDMPYL"),
-            0x17 => Some("RDMPYH"),
-            0x18 => Some("JOY1L"),
-            0x19 => Some("JOY1H"),
-            0x1a => Some("JOY2L"),
-            0x1b => Some("JOY2H"),
-            0x1c => Some("JOY3L"),
-            0x1d => Some("JOY3H"),
-            0x1e => Some("JOY4L"),
-            0x1f => Some("JOY4H"),
+        let label = match addr {
+            0x00 => "NMITIMEN",
+            0x01 => "WRIO",
+            0x02 => "WRMPYA",
+            0x03 => "WRMPYB",
+            0x04 => "WRDIVL",
+            0x05 => "WRDIVH",
+            0x06 => "WRDIVB",
+            0x07 => "HTIMEL",
+            0x08 => "HTIMEH",
+            0x09 => "VTIMEL",
+            0x0a => "VTIMEH",
+            0x0b => "MDMAEN",
+            0x0c => "HDMAEN",
+            0x0d => "MEMSEL",
+            0x10 => "RDNMI",
+            0x11 => "TIMEUP",
+            0x12 => "HVBJOY",
+            0x13 => "RDIO",
+            0x14 => "RDDIVL",
+            0x15 => "RDDIVH",
+            0x16 => "RDMPYL",
+            0x17 => "RDMPYH",
+            0x18 => "JOY1L",
+            0x19 => "JOY1H",
+            0x1a => "JOY2L",
+            0x1b => "JOY2H",
+            0x1c => "JOY3L",
+            0x1d => "JOY3H",
+            0x1e => "JOY4L",
+            0x1f => "JOY4H",
             _ => unreachable!(),
-        }
+        };
+        Some(label.to_string())
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
@@ -292,8 +293,8 @@ impl SimBus for DmaRegBus {
         Self::BIT_WIDTH
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
-        match addr.as_u8() & Self::ADDR_MASK {
+    fn label_at(&self, addr: Addr) -> Option<String> {
+        let label = match addr.as_u8() & Self::ADDR_MASK {
             0x00 => Some("DMAP0"),
             0x10 => Some("DMAP1"),
             0x20 => Some("DMAP2"),
@@ -383,7 +384,8 @@ impl SimBus for DmaRegBus {
             0x6a => Some("NTLR6"),
             0x7a => Some("NTLR7"),
             _ => None,
-        }
+        };
+        label.map(str::to_string)
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
@@ -543,13 +545,14 @@ impl SimBus for JoyRegBus {
         Self::BIT_WIDTH
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         let addr = addr.as_u8() & Self::ADDR_MASK;
-        match addr {
-            0 => Some("JOYSER0"),
-            1 => Some("JOYSER1"),
+        let label = match addr {
+            0 => "JOYSER0",
+            1 => "JOYSER1",
             _ => unreachable!(),
-        }
+        };
+        Some(label.to_string())
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {
@@ -622,8 +625,8 @@ impl SimBus for PpuRegBus {
         Self::BIT_WIDTH
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
-        match addr.as_u8() {
+    fn label_at(&self, addr: Addr) -> Option<String> {
+        let label = match addr.as_u8() {
             0x00 => Some("INIDISP"),
             0x01 => Some("OBSEL"),
             0x02 => Some("OAMADDL"),
@@ -697,7 +700,8 @@ impl SimBus for PpuRegBus {
             0x82 => Some("WMADDM"),
             0x83 => Some("WMADDH"),
             _ => None,
-        }
+        };
+        label.map(str::to_string)
     }
 
     fn watchpoint_at(&self, addr: Addr, kind: WatchKind) -> Option<WatchId> {

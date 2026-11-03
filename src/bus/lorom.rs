@@ -76,7 +76,7 @@ impl SimBus for LoRomBus {
         BitWidth::TWENTY_FOUR
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         let (bus, addr) = self.sub_bus(addr);
         bus.label_at(addr)
     }

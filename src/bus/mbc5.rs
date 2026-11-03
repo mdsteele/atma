@@ -55,7 +55,7 @@ impl SimBus for Mbc5Bus {
         BitWidth::SIXTEEN
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         match addr.as_u16() {
             0x0000..0x8000 => {
                 self.rom.label_at(self.translate_rom_address(addr))

@@ -78,7 +78,7 @@ impl SimBus for Mmc3Bus {
         BitWidth::SIXTEEN
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         match addr.as_u16() {
             0x0000..0x6000 => None,
             0x6000..0x8000 => self.ram.label_at(addr),

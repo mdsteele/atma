@@ -695,7 +695,7 @@ impl Operand {
 fn format_dp(bus: &dyn SimBus, dpr: u16, dp: u8) -> String {
     let addr = Addr::from(dpr.wrapping_add(u16::from(dp)));
     match bus.label_at(addr) {
-        Some(label) => label.to_string(),
+        Some(label) => label,
         None => format!("*${dp:02x}"),
     }
 }
@@ -703,7 +703,7 @@ fn format_dp(bus: &dyn SimBus, dpr: u16, dp: u8) -> String {
 fn format_abs(bus: &dyn SimBus, bank: u8, abs: u16) -> String {
     let addr = (Addr::from(bank) << 16) | Addr::from(abs);
     match bus.label_at(addr) {
-        Some(label) => label.to_string(),
+        Some(label) => label,
         None => format!("*${abs:04x}"),
     }
 }
@@ -711,7 +711,7 @@ fn format_abs(bus: &dyn SimBus, bank: u8, abs: u16) -> String {
 fn format_long(bus: &dyn SimBus, long: u32) -> String {
     let addr = Addr::from(long);
     match bus.label_at(addr) {
-        Some(label) => label.to_string(),
+        Some(label) => label,
         None => format!("*${long:06x}"),
     }
 }

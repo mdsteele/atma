@@ -48,7 +48,7 @@ impl SimBus for DmgBus {
         BitWidth::SIXTEEN
     }
 
-    fn label_at(&self, addr: Addr) -> Option<&str> {
+    fn label_at(&self, addr: Addr) -> Option<String> {
         match addr.as_u16() {
             0x0000..0x8000 => self.cart.label_at(addr),
             0x8000..0xa000 => self.vram.label_at(addr),
@@ -58,7 +58,7 @@ impl SimBus for DmgBus {
             0xfea0..0xff00 => self.open.label_at(addr),
             0xff00..0xff80 => self.io_regs.label_at(addr),
             0xff80..0xffff => self.hiram.label_at(addr),
-            0xffff => Some("IE"),
+            0xffff => Some("IE".to_string()),
         }
     }
 

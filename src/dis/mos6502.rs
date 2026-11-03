@@ -677,14 +677,14 @@ impl Operand {
 
 fn format_zp(zp: u8, bus: &dyn SimBus) -> String {
     match bus.label_at(Addr::from(zp)) {
-        Some(label) => label.to_string(),
+        Some(label) => label,
         None => format!("*${zp:02x}"),
     }
 }
 
 fn format_abs(abs: u16, bus: &dyn SimBus) -> String {
     match bus.label_at(Addr::from(abs)) {
-        Some(label) => label.to_string(),
+        Some(label) => label,
         None => format!("*${abs:04x}"),
     }
 }
