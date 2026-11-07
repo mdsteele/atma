@@ -28,9 +28,9 @@ fn backslash_callback(
     }
 }
 
-fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
-    debug_assert!(lex.slice().starts_with("%"));
-    let digits: Vec<u8> = lex.slice()["%".len()..]
+fn binary_literal_callback(lexer: &mut logos::Lexer<TokenKind>) -> BigInt {
+    debug_assert!(lexer.slice().starts_with("%"));
+    let digits: Vec<u8> = lexer.slice()["%".len()..]
         .chars()
         .filter(|chr| *chr != '_')
         .map(|chr| chr as u8 - b'0')
@@ -38,8 +38,8 @@ fn binary_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     BigInt::from_radix_be(Sign::Plus, &digits, 2).unwrap()
 }
 
-fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
-    let digits: Vec<u8> = lex
+fn decimal_literal_callback(lexer: &mut logos::Lexer<TokenKind>) -> BigInt {
+    let digits: Vec<u8> = lexer
         .slice()
         .chars()
         .filter(|chr| *chr != '_')
@@ -49,15 +49,26 @@ fn decimal_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
 }
 
 fn dollar_plus_minus_callback(
-    lex: &mut logos::Lexer<TokenKind>,
+    lexer: &mut logos::Lexer<TokenKind>,
 ) -> NonZero<usize> {
-    debug_assert!(lex.slice().starts_with("$"));
-    NonZero::new(lex.slice()["$".len()..].len()).unwrap()
+    debug_assert!(lexer.slice().starts_with("$"));
+    NonZero::new(lexer.slice()["$".len()..].len()).unwrap()
 }
 
-fn hex_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
-    debug_assert!(lex.slice().starts_with("$"));
-    let digits: Vec<u8> = lex.slice()["$".len()..]
+fn double_backslash_callback(
+    lexer: &mut logos::Lexer<TokenKind>,
+) -> Result<(), LexerError> {
+    let span = SrcSpan::from_byte_range(lexer.span());
+    if let Some(previous_span) = lexer.extras.backslash {
+        Err(LexerError::BackslashBeforeDoubleBackslash(previous_span, span))
+    } else {
+        Ok(())
+    }
+}
+
+fn hex_literal_callback(lexer: &mut logos::Lexer<TokenKind>) -> BigInt {
+    debug_assert!(lexer.slice().starts_with("$"));
+    let digits: Vec<u8> = lexer.slice()["$".len()..]
         .chars()
         .filter(|chr| *chr != '_')
         .map(|chr| hex_digit_value(chr).unwrap())
@@ -65,9 +76,9 @@ fn hex_literal_callback(lex: &mut logos::Lexer<TokenKind>) -> BigInt {
     BigInt::from_radix_be(Sign::Plus, &digits, 16).unwrap()
 }
 
-fn newline_callback(lex: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
-    if lex.extras.backslash.is_some() {
-        lex.extras.backslash = None;
+fn newline_callback(lexer: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
+    if lexer.extras.backslash.is_some() {
+        lexer.extras.backslash = None;
         logos::Filter::Skip
     } else {
         logos::Filter::Emit(())
@@ -75,12 +86,13 @@ fn newline_callback(lex: &mut logos::Lexer<TokenKind>) -> logos::Filter<()> {
 }
 
 fn string_literal_callback(
-    lex: &mut logos::Lexer<TokenKind>,
+    lexer: &mut logos::Lexer<TokenKind>,
 ) -> Result<Rc<str>, LexerError> {
-    debug_assert!(lex.slice().starts_with("\""));
-    debug_assert!(lex.slice().ends_with("\""));
-    let contents = &lex.slice()["\"".len()..(lex.slice().len() - "\"".len())];
-    let contents_start = lex.span().start + "\"".len();
+    debug_assert!(lexer.slice().starts_with("\""));
+    debug_assert!(lexer.slice().ends_with("\""));
+    let contents =
+        &lexer.slice()["\"".len()..(lexer.slice().len() - "\"".len())];
+    let contents_start = lexer.span().start + "\"".len();
     unescape_string_literal(contents, contents_start)
 }
 
@@ -177,6 +189,7 @@ enum TokenKind {
     LessLess,
     #[token("<")]
     LessThan,
+    #[token("\\\\", double_backslash_callback)]
     #[regex(r"\n", newline_callback)]
     Linebreak,
     #[token("-")]
@@ -510,10 +523,33 @@ mod tests {
     }
 
     #[test]
+    fn double_backslash() {
+        assert_eq!(
+            read_all("1 \\\\ 2"),
+            vec![
+                token(0..1, TokenValue::IntLiteral(BigInt::from(1))),
+                token(2..4, TokenValue::Linebreak),
+                token(5..6, TokenValue::IntLiteral(BigInt::from(2))),
+            ]
+        );
+    }
+
+    #[test]
     fn backslash_before_linebreak() {
         assert_eq!(
             read_all("  \\  \n42"),
             vec![token(6..8, TokenValue::IntLiteral(BigInt::from(42)))]
+        );
+    }
+
+    #[test]
+    fn backslash_before_double_backslash() {
+        assert_eq!(
+            expect_error("\\ \\\\"),
+            LexerError::BackslashBeforeDoubleBackslash(
+                SrcSpan::from_byte_range(0..1),
+                SrcSpan::from_byte_range(2..4),
+            )
         );
     }
 

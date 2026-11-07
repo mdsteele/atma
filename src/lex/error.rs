@@ -9,6 +9,8 @@ use std::rc::Rc;
 pub enum LexerError {
     /// Found a backslash escaping another backslash.
     BackslashBeforeBackslash(SrcSpan, SrcSpan),
+    /// Found a backslash escaping a double backslash.
+    BackslashBeforeDoubleBackslash(SrcSpan, SrcSpan),
     /// Found a stray backslash at the end of the source file.
     BackslashBeforeEof(SrcSpan),
     /// Found a backslash escaping a token that's ineligable for escaping.
@@ -25,9 +27,14 @@ impl LexerError {
     /// source file being lexed.
     pub fn to_source_error(self, path: &Rc<str>) -> SourceError {
         match self {
-            LexerError::BackslashBeforeBackslash(first_span, _second_span) => {
+            LexerError::BackslashBeforeBackslash(backslash_span, _) => {
                 let message = "unexpected backslash before backslash";
-                SourceError::new(SrcLoc::new(path, first_span), message)
+                SourceError::new(SrcLoc::new(path, backslash_span), message)
+                    .with_primary_label("")
+            }
+            LexerError::BackslashBeforeDoubleBackslash(backslash_span, _) => {
+                let message = "unexpected backslash before `\\\\`";
+                SourceError::new(SrcLoc::new(path, backslash_span), message)
                     .with_primary_label("")
             }
             LexerError::BackslashBeforeEof(backslash_span) => {

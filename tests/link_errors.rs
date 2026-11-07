@@ -8,16 +8,10 @@ use std::rc::Rc;
 
 //===========================================================================//
 
-const COMMON_CONFIG: &str = r#"\
-.ADDRSPACES {
-CPU: bits=16
-}
-.REGIONS {
-MAIN: space=CPU, start=$0000, size=$10000
-}
-.SECTIONS {
-CODE: region=MAIN, start=$0000
-}
+const COMMON_CONFIG: &str = r#"
+.ADDRSPACES { \\ CPU: bits=16 \\ }
+.REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
+.SECTIONS { \\ CODE: region=MAIN, start=$0000 \\ }
 "#;
 
 //===========================================================================//
@@ -51,7 +45,7 @@ fn link_errors(config_source: &str, asm_sources: &[&str]) -> Vec<LinkError> {
 
 #[test]
 fn chunk_in_mirror_section() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "CODE"
         .u8 0
     .END
@@ -59,16 +53,12 @@ fn chunk_in_mirror_section() {
         .u8 1
     .END
     "#;
-    let config = r#"\
-    .ADDRSPACES {
-    CPU: bits=16
-    }
-    .REGIONS {
-    MAIN: space=CPU, start=$0000, size=$10000
-    }
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16 \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
     .SECTIONS {
-    CODE: region=MAIN
-    COPY: region=MAIN, mirror=CODE
+      CODE: region=MAIN
+      COPY: region=MAIN, mirror=CODE
     }
     "#;
     assert_matches!(link_errors(config, &[asm0]).as_slice(), [
@@ -82,7 +72,7 @@ fn chunk_in_mirror_section() {
 
 #[test]
 fn chunk_section_does_not_exist() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "CODE"
         .u8 0
     .END
@@ -100,26 +90,20 @@ fn chunk_section_does_not_exist() {
 
 #[test]
 fn label_in_wrong_address_space_direct() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .IMPORT Foo
     .SECTION "CODE"
         .a16le Foo
     .END
     "#;
-    let config = r#"\
+    let config = r#"
     .ADDRSPACES {
-    CPU: bits=16
-    PPU: bits=15
+      CPU: bits=16
+      PPU: bits=15
     }
-    .REGIONS {
-    MAIN: space=CPU, start=$0000, size=$10000
-    }
-    .SECTIONS {
-    CODE: region=MAIN
-    }
-    .EXPORTS {
-    Foo: space=PPU, addr=$1234
-    }
+    .REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
+    .SECTIONS { \\ CODE: region=MAIN \\ }
+    .EXPORTS { \\ Foo: space=PPU, addr=$1234 \\ }
     "#;
     assert_matches!(link_errors(config, &[asm0]).as_slice(), [
         LinkError::LabelInWrongAddressSpace{
@@ -137,7 +121,7 @@ fn label_in_wrong_address_space_direct() {
 
 #[test]
 fn label_in_wrong_address_space_loadable() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .IMPORT Foo
     .SECTION "CODE"
     .LOADABLE "AUDIO"
@@ -145,22 +129,20 @@ fn label_in_wrong_address_space_loadable() {
     .END
     .END
     "#;
-    let config = r#"\
+    let config = r#"
     .ADDRSPACES {
-    APU: bits=16
-    CPU: bits=24
+      APU: bits=16
+      CPU: bits=24
     }
     .REGIONS {
-    ARAM: space=APU, start=$0000, size=$10000
-    MAIN: space=CPU, start=$000000, size=$1000000
+      ARAM: space=APU, start=$0000, size=$10000
+      MAIN: space=CPU, start=$000000, size=$1000000
     }
     .SECTIONS {
-    AUDIO: region=ARAM
-    CODE:  region=MAIN
+      AUDIO: region=ARAM
+      CODE:  region=MAIN
     }
-    .EXPORTS {
-    Foo: space=CPU, addr=$123456
-    }
+    .EXPORTS { \\ Foo: space=CPU, addr=$123456 \\ }
     "#;
     assert_matches!(link_errors(config, &[asm0]).as_slice(), [
         LinkError::LabelInWrongAddressSpace{
@@ -178,12 +160,12 @@ fn label_in_wrong_address_space_loadable() {
 
 #[test]
 fn patch_value_out_of_range() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "CODE", start=$123
     .EXPORT Foo: .u8 0
     .END
     "#;
-    let asm1 = r#"\
+    let asm1 = r#"
     .IMPORT Foo
     .SECTION "CODE"
         .a8 Foo
@@ -200,26 +182,20 @@ fn patch_value_out_of_range() {
 
 #[test]
 fn section_is_empty() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "FOO"
         .u8 0
     .END
     "#;
-    let config = r#"\
-    .ADDRSPACES {
-    CPU: bits=16
-    }
-    .REGIONS {
-    MAIN: space=CPU, start=$0000, size=$10000
-    }
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16 \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
     .SECTIONS {
-    FOO: region=MAIN
-    BAR: region=MAIN
+      FOO: region=MAIN
+      BAR: region=MAIN
     }
     .IMPORT Foo
-    .EXPORTS {
-    Bar: space=CPU, addr=&Foo
-    }
+    .EXPORTS { \\ Bar: space=CPU, addr=&Foo \\ }
     "#;
     assert_matches!(link_errors(config, &[asm0]).as_slice(), [
         LinkError::SectionIsEmpty{
@@ -231,24 +207,16 @@ fn section_is_empty() {
 
 #[test]
 fn symbol_export_collision_between_obj_and_config() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "CODE"
     .EXPORT Foo: .u8 0
     .END
     "#;
-    let config = r#"\
-    .ADDRSPACES {
-    CPU: bits=16
-    }
-    .REGIONS {
-    MAIN: space=CPU, start=$0000, size=$10000
-    }
-    .SECTIONS {
-    CODE: region=MAIN
-    }
-    .EXPORTS {
-    Foo: space=CPU, addr=$1234
-    }
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16 \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
+    .SECTIONS { \\ CODE: region=MAIN \\ }
+    .EXPORTS { \\ Foo: space=CPU, addr=$1234 \\ }
     "#;
     assert_matches!(link_errors(config, &[asm0]).as_slice(), [
         LinkError::SymbolExportCollision{
@@ -260,12 +228,12 @@ fn symbol_export_collision_between_obj_and_config() {
 
 #[test]
 fn symbol_export_collision_between_two_obj_files() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "CODE"
     .EXPORT Foo: .u8 0
     .END
     "#;
-    let asm1 = r#"\
+    let asm1 = r#"
     .SECTION "CODE"
     .EXPORT Foo: .u8 1
     .END
@@ -280,25 +248,17 @@ fn symbol_export_collision_between_two_obj_files() {
 
 #[test]
 fn symbol_import_unresolved_in_config() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .SECTION "CODE"
     Foo: .u8 0
     .END
     "#;
-    let config = r#"\
-    .ADDRSPACES {
-    CPU: bits=16
-    }
-    .REGIONS {
-    MAIN: space=CPU, start=$0000, size=$10000
-    }
-    .SECTIONS {
-    CODE: region=MAIN
-    }
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16 \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
+    .SECTIONS { \\ CODE: region=MAIN \\ }
     .IMPORT Foo
-    .EXPORTS {
-    Bar: space=CPU, addr=&Foo
-    }
+    .EXPORTS { \\ Bar: space=CPU, addr=&Foo \\ }
     "#;
     assert_matches!(link_errors(config, &[asm0]).as_slice(), [
         LinkError::SymbolImportUnresolved{
@@ -310,7 +270,7 @@ fn symbol_import_unresolved_in_config() {
 
 #[test]
 fn symbol_import_unresolved_in_obj_file() {
-    let asm0 = r#"\
+    let asm0 = r#"
     .IMPORT Foo
     .SECTION "CODE"
         .u8 &Foo

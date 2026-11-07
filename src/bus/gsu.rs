@@ -46,7 +46,7 @@ pub struct SuperFxState {
     ///
     /// Note that GSU back-up RAM is currently unsupported in ATMA, because no
     /// commercial games used it (see
-    /// https://forums.nesdev.org/viewtopic.php?t=5964&start=15)
+    /// <https://forums.nesdev.org/viewtopic.php?t=5964&start=15>).
     pub(crate) bramr: u8,
     /// The Program Bank Register (upper 8 bits of the 24-bit PC).
     pub(crate) pbr: u8,
