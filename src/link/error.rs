@@ -35,8 +35,26 @@ pub enum LinkError {
         /// The declared size of the chunk.
         chunk_size: Size,
     },
-    /// A chunk in an object file belongs to a section that is not declared in
-    /// the linker config.
+    /// A chunk in an object file was assigned to a section that is a mirror of
+    /// another section.
+    ChunkInMirrorSection {
+        /// The name of the section to which the chunk was assigned.
+        section_name: Rc<str>,
+        /// The name of the other section that the chunk's section is
+        /// mirroring.
+        mirror_name: Rc<str>,
+        /// The source code location for the expression in the chunk
+        /// declaration that evaluated to this section name.
+        chunk_section_name_loc: ObjSrcLoc,
+        /// The source code location where the section was declared in the
+        /// linker configuration.
+        config_section_name_loc: ObjSrcLoc,
+        /// The source code location where the chunk's section was declared as
+        /// mirroring the other section.
+        config_mirror_name_loc: ObjSrcLoc,
+    },
+    /// A chunk in an object file was assigned to a section that is not
+    /// declared in the linker config.
     ChunkSectionDoesNotExist {
         /// The name of the nonexistent linker section to which the chunk
         /// should belong.
@@ -94,6 +112,8 @@ pub enum LinkError {
         /// A message indicating the nature of the error.
         message: Rc<str>,
     },
+    /// A section that is a mirror of another's data is in a BSS region.
+    MirrorBssSection,
     /// A patch's offset/size was out of range for the size of the chunk
     /// data. This shouldn't happen for valid object files (as the assembler
     /// should have generated a valid patch offset).
@@ -174,6 +194,25 @@ impl LinkError {
     /// Converts the error into a `SourceError`.
     pub fn to_source_error(self) -> SourceError {
         match self {
+            Self::ChunkInMirrorSection {
+                section_name,
+                mirror_name,
+                chunk_section_name_loc,
+                config_section_name_loc,
+                config_mirror_name_loc,
+            } => {
+                let message =
+                    "assigned chunk to a section that is a mirror of another";
+                let label1 = format!("{section_name:?} defined here...");
+                let label2 = format!("...as a mirror of {mirror_name:?}");
+                let label3 =
+                    format!("chunk assigned to {section_name:?} here");
+                SourceError::new(chunk_section_name_loc.primary(), message)
+                    .with_label(config_section_name_loc.primary(), label1)
+                    .with_label(config_mirror_name_loc.primary(), label2)
+                    .with_primary_label(label3)
+                    .with_context(&*chunk_section_name_loc.context)
+            }
             Self::ChunkSectionDoesNotExist {
                 section_name,
                 section_name_loc,

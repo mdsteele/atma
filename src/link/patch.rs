@@ -110,7 +110,13 @@ impl PatchedFile {
 /// applied.
 pub(super) struct PatchedChunk {
     /// The patched chunk data.
-    pub data: Box<[u8]>,
+    ///
+    /// The slightly awkward double-indirected type here is to help avoid
+    /// having to copy the full chunk data in most cases.  The `Rc` layer
+    /// allows this data to be shared by multiple `LinkFragment`s later on (in
+    /// cases where a chunk is mirrored), and the `Box` layer allows the data
+    /// to have been moved into the `Rc` without making a copy.
+    pub data: Rc<Box<[u8]>>,
 }
 
 //===========================================================================//
@@ -154,7 +160,7 @@ impl<'a> FilePatcher<'a> {
             errs.also(self.apply_patch(patch, &mut data));
         }
         errs.result()?;
-        Ok(PatchedChunk { data })
+        Ok(PatchedChunk { data: Rc::new(data) })
     }
 
     fn apply_patch(&self, patch: ObjPatch, data: &mut [u8]) -> LinkResult<()> {

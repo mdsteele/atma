@@ -214,7 +214,7 @@ fn missing_attr() {
 }
 
 #[test]
-fn mutually_exclusive_attrs() {
+fn mutually_exclusive_checksum_attrs() {
     let source = r#"\
     .CHECKSUMS {
         HeaderChecksum: sum={"u8"}, start=0, size=$4000, end=$8000
@@ -226,7 +226,39 @@ fn mutually_exclusive_attrs() {
             attribute_1: ConfigAttr::ChecksumSize,
             attribute_2: ConfigAttr::ChecksumEnd,
             ..
-        },]
+        }]
+    );
+}
+
+#[test]
+fn mutually_exclusive_section_attrs() {
+    let source = r#"\
+    .ADDRSPACES {
+        CPU: bits=16
+    }
+    .REGIONS {
+        ROM: space=CPU, start=0, size=$8000
+    }
+    .SECTIONS region=ROM {
+        Foo: size=$100
+        Bar: size=$200, mirror=Foo
+        Baz: mirror=Foo, fill=$ff
+    }
+    "#;
+    assert_matches!(
+        config_errors(source).as_slice(),
+        [
+            ConfigError::MutuallyExclusiveAttrs {
+                attribute_1: ConfigAttr::SectionSize,
+                attribute_2: ConfigAttr::SectionMirror,
+                ..
+            },
+            ConfigError::MutuallyExclusiveAttrs {
+                attribute_1: ConfigAttr::SectionMirror,
+                attribute_2: ConfigAttr::SectionFill,
+                ..
+            }
+        ]
     );
 }
 

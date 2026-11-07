@@ -63,6 +63,9 @@ pub(super) struct ArrangedSection {
     /// this byte value. Otherwise, they will be filled with this sections's
     /// memory region's fill byte.
     pub fill: Option<u8>,
+    /// If set, then this section will mirror the data of the section at this
+    /// index.
+    pub mirror_index: Option<usize>,
     /// The total size of this section's data, in bytes.
     pub size: Size,
     /// The chunks in this section, sorted by their section-relative offsets.
@@ -79,19 +82,44 @@ impl ArrangedSection {
         let mut errs = Errs::<LinkError>::new();
         let loose_sections =
             errs.with(LooseSection::collect(config, object_files));
-        let arranged_sections = loose_sections
+        let section_index_by_name = loose_sections
+            .iter()
+            .enumerate()
+            .map(|(index, loose_section)| (loose_section.name.clone(), index))
+            .collect::<HashMap<Rc<str>, usize>>();
+        let mut arranged_sections = loose_sections
             .into_iter()
             .map(|loose_section| {
-                errs.with(ArrangedSection::arrange_one(loose_section))
+                errs.with(ArrangedSection::arrange_one(
+                    loose_section,
+                    &section_index_by_name,
+                ))
             })
             .collect::<Vec<ArrangedSection>>();
+        Self::assign_sizes_to_mirror_sections(&mut arranged_sections);
         (arranged_sections, errs)
+    }
+
+    /// Sets the size of each mirror section in `arranged_sections` to the size
+    /// of the section that it's mirroring.
+    fn assign_sizes_to_mirror_sections(
+        arranged_sections: &mut [ArrangedSection],
+    ) {
+        for section_index in 0..arranged_sections.len() {
+            if let Some(mirror_index) =
+                arranged_sections[section_index].mirror_index
+            {
+                arranged_sections[section_index].size =
+                    arranged_sections[mirror_index].size;
+            }
+        }
     }
 
     /// Arranges the chunks relative to the eventual starting address of the
     /// section.
     fn arrange_one(
         mut section: LooseSection,
+        section_index_by_name: &HashMap<Rc<str>, usize>,
     ) -> (ArrangedSection, Errs<LinkError>) {
         let mut errs = Errs::<LinkError>::new();
         let relative_range = Addr::MIN
@@ -175,6 +203,9 @@ impl ArrangedSection {
             align: section.align,
             within: section.within,
             fill: section.fill,
+            mirror_index: section
+                .mirror
+                .map(|(_loc, name)| section_index_by_name[&name]),
             size: section_size,
             chunks: arranged,
         };

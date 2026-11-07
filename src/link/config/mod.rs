@@ -250,6 +250,8 @@ pub struct SectionConfig {
     /// this byte value. Otherwise, they will be filled with this sections's
     /// memory region's fill byte.
     pub fill: Option<u8>,
+    /// If set, then this section will mirror the data of the named section.
+    pub mirror: Option<(ObjSrcLoc, Rc<str>)>,
 }
 
 //===========================================================================//

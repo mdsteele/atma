@@ -30,12 +30,15 @@ pub(super) struct PositionedSymbol {
 pub(super) struct PositionedChunk {
     /// The ID for this chunk.
     pub id: ChunkId,
+    /// The byte offset into this chunk's section where this chunk's data
+    /// starts.
+    pub section_offset: u64,
     /// The byte offset into the final binary where this chunk's data should be
-    /// written, or `None` if this chunk won't be included in the binary.
+    /// written, or `None` if this chunk's region won't be included in the
+    /// binary.
     pub binary_offset: Option<u64>,
-    /// The size of this chunk in the final binary, in bytes, or zero if this
-    /// chunk won't be included in the binary.
-    pub binary_size: u64,
+    /// The size of this chunk, in bytes.
+    pub size: u64,
     /// The absolute starting address of this chunk within its address space.
     pub start: Addr,
     /// Any padded portions of this chunk will be filled with this byte value.
@@ -48,20 +51,33 @@ impl PositionedChunk {
         section_start: Addr,
         section_binary_offset: Option<u64>,
         section_fill: u8,
-    ) -> PositionedChunk {
+    ) -> Self {
         let chunk_start = section_start + chunk.offset;
-        let (binary_offset, binary_size) = match section_binary_offset {
-            Some(offset) => {
-                (Some(offset + u64::from(chunk.offset)), chunk.size.into_u64())
-            }
-            None => (None, 0),
-        };
-        PositionedChunk {
+        let chunk_binary_offset = section_binary_offset
+            .map(|section_offset| section_offset + u64::from(chunk.offset));
+        Self {
             id: chunk.id,
-            binary_offset,
-            binary_size,
+            section_offset: u64::from(chunk.offset),
+            binary_offset: chunk_binary_offset,
+            size: chunk.size.into_u64(),
             start: chunk_start,
             fill: chunk.fill.unwrap_or(section_fill),
+        }
+    }
+
+    fn mirror_with_section_offset(
+        &self,
+        section_binary_offset: Option<u64>,
+    ) -> Self {
+        let binary_offset = section_binary_offset
+            .map(|binary_offset| binary_offset + self.section_offset);
+        Self {
+            id: self.id,
+            section_offset: self.section_offset,
+            binary_offset,
+            size: self.size,
+            start: self.start,
+            fill: self.fill,
         }
     }
 }
@@ -72,11 +88,11 @@ impl PositionedChunk {
 /// region.
 pub(super) struct PositionedSection {
     /// The offset into the final binary where this section's data should be
-    /// written, or `None` if this section won't be included in the binary.
+    /// written, or `None` if this section's region won't be included in the
+    /// binary.
     pub binary_offset: Option<u64>,
-    /// The size of this section in the final binary, in bytes, or zero if this
-    /// section won't be included in the binary.
-    pub binary_size: u64,
+    /// The total size of this section, in bytes.
+    pub size: u64,
     /// The chunks in this section, sorted by their offsets within the binary.
     pub chunks: Vec<PositionedChunk>,
     /// Any padded portions of this section will be filled with this byte
@@ -90,16 +106,22 @@ impl PositionedSection {
         section_start: Addr,
         section_binary_offset: Option<u64>,
         region_fill: u8,
+        previous_sections: &[PositionedSection],
     ) -> PositionedSection {
-        let (binary_offset, binary_size) = match section_binary_offset {
-            Some(offset) => (Some(offset), section.size.into_u64()),
-            None => (None, 0),
-        };
-        let section_fill = section.fill.unwrap_or(region_fill);
-        PositionedSection {
-            binary_offset,
-            binary_size,
-            chunks: section
+        let (chunks, fill) = if let Some(mirror_index) = section.mirror_index {
+            let mirror_section = &previous_sections[mirror_index];
+            let section_fill = mirror_section.fill;
+            let chunks = mirror_section
+                .chunks
+                .iter()
+                .map(|chunk| {
+                    chunk.mirror_with_section_offset(section_binary_offset)
+                })
+                .collect();
+            (chunks, section_fill)
+        } else {
+            let section_fill = section.fill.unwrap_or(region_fill);
+            let chunks = section
                 .chunks
                 .into_iter()
                 .map(|chunk| {
@@ -110,8 +132,14 @@ impl PositionedSection {
                         section_fill,
                     )
                 })
-                .collect(),
-            fill: section_fill,
+                .collect();
+            (chunks, section_fill)
+        };
+        PositionedSection {
+            binary_offset: section_binary_offset,
+            size: section.size.into_u64(),
+            chunks,
+            fill,
         }
     }
 }
@@ -123,9 +151,9 @@ impl PositionedSection {
 pub(super) struct PositionedRegion {
     /// The address space that this memory region exists in.
     pub space: AddressSpace,
-    /// The size of this memory region in the final binary, in bytes, or zero
+    /// The size of this memory region in the final binary, in bytes, or `None`
     /// if this region won't be included in the binary.
-    pub binary_size: u64,
+    pub binary_size: Option<u64>,
     /// The sections in this memory region, sorted by their offsets within the
     /// binary.
     pub sections: Vec<PositionedSection>,
@@ -195,6 +223,7 @@ impl PositionedRegion {
                     section_range.start(),
                     section_binary_offset,
                     region.fill,
+                    &positioned_sections,
                 ));
                 range_set.insert(section_range.into());
             } else {
@@ -217,15 +246,15 @@ impl PositionedRegion {
                 && let Some(sum) = cumulative_offset.checked_add(size)
             {
                 *cumulative_offset = sum;
-                size
+                Some(size)
             } else {
                 errs.push(LinkError::BinaryTooLarge {
                     region_name: region.name.clone(),
                 });
-                0
+                None
             }
         } else {
-            0
+            None
         };
         errs.result()?;
         Ok(PositionedRegion {
@@ -357,15 +386,16 @@ impl PositionedBinary {
         for region in positioned_regions {
             for section in &region.sections {
                 for chunk in &section.chunks {
-                    let metadata = ChunkMetadata {
-                        start: AbsoluteLabel {
-                            space: region.space.clone(),
-                            address: chunk.start,
-                        },
-                        fill: chunk.fill,
-                        binary_offset: chunk.binary_offset,
-                    };
-                    chunk_metadata.insert(chunk.id, metadata);
+                    chunk_metadata.entry(chunk.id).or_insert_with(|| {
+                        ChunkMetadata {
+                            start: AbsoluteLabel {
+                                space: region.space.clone(),
+                                address: chunk.start,
+                            },
+                            fill: chunk.fill,
+                            binary_offset: chunk.binary_offset,
+                        }
+                    });
                 }
             }
         }

@@ -120,17 +120,14 @@ pub enum ConfigError {
     },
     /// A config entry contained two attributes that cannot be used together.
     MutuallyExclusiveAttrs {
-        /// The source code location for the name of the entry that contains
-        /// the two mutually exclusive attributes.
-        entry_loc: ObjSrcLoc,
         /// The first attribute.
         attribute_1: ConfigAttr,
         /// The second attribute.
         attribute_2: ConfigAttr,
-        /// The source code span for the first attribute name.
-        attr_span_1: SrcSpan,
-        /// The source code span for the second attribute name.
-        attr_span_2: SrcSpan,
+        /// The source code location for the first attribute name.
+        attr_loc_1: ObjSrcLoc,
+        /// The source code location for the second attribute name.
+        attr_loc_2: ObjSrcLoc,
     },
     /// A config attribute that requires a static value was given a non-static
     /// expression.
@@ -361,11 +358,10 @@ impl ConfigError {
                     .with_context(&*entry_loc.context)
             }
             Self::MutuallyExclusiveAttrs {
-                entry_loc,
                 attribute_1,
                 attribute_2,
-                attr_span_1,
-                attr_span_2,
+                attr_loc_1,
+                attr_loc_2,
             } => {
                 let message = format!(
                     "a {} cannot specify both `{}` and `{}`",
@@ -373,11 +369,10 @@ impl ConfigError {
                     attribute_1.attr_name(),
                     attribute_2.attr_name()
                 );
-                let path = &entry_loc.context.path;
-                SourceError::new(entry_loc.primary(), message)
-                    .with_label(SrcLoc::new(path, attr_span_1), "")
-                    .with_label(SrcLoc::new(path, attr_span_2), "")
-                    .with_context(&*entry_loc.context)
+                SourceError::new(attr_loc_2.primary(), message)
+                    .with_label(attr_loc_1.primary(), "")
+                    .with_primary_label("")
+                    .with_context(&*attr_loc_2.context)
             }
             Self::NonStaticAttr { attribute, expr_loc, reason } => {
                 let message = format!(
@@ -503,6 +498,7 @@ impl ConfigEntryKind {
             Self::Section => &[
                 ConfigAttr::SectionAlign,
                 ConfigAttr::SectionFill,
+                ConfigAttr::SectionMirror,
                 ConfigAttr::SectionRegion,
                 ConfigAttr::SectionSize,
                 ConfigAttr::SectionStart,
@@ -555,6 +551,8 @@ pub enum ConfigAttr {
     SectionAlign,
     /// The `fill` attribute of a section entry.
     SectionFill,
+    /// The `mirror` attribute of a section entry.
+    SectionMirror,
     /// The `region` attribute of a section entry.
     SectionRegion,
     /// The `size` attribute of a section entry.
@@ -585,6 +583,7 @@ impl ConfigAttr {
             | Self::RegionStart => ConfigEntryKind::Region,
             Self::SectionAlign
             | Self::SectionFill
+            | Self::SectionMirror
             | Self::SectionRegion
             | Self::SectionSize
             | Self::SectionStart
@@ -603,6 +602,7 @@ impl ConfigAttr {
                 "fill"
             }
             Self::RegionKind => "kind",
+            Self::SectionMirror => "mirror",
             Self::SectionRegion => "region",
             Self::ChecksumSize | Self::RegionSize | Self::SectionSize => {
                 "size"

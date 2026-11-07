@@ -24,27 +24,37 @@ pub(super) const ENTITY_SECTION: &str = "section";
 
 //===========================================================================//
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LinkAddrspaceAttrs {
     pub bits: Option<BitWidth>,
     pub fill: Option<u8>,
 }
 
 impl LinkAddrspaceAttrs {
-    pub(super) fn clone_with_overrides(&self, overrides: Self) -> Self {
-        Self {
-            bits: self.bits.or(overrides.bits),
-            fill: self.fill.or(overrides.fill),
-        }
-    }
-
     pub(super) fn build(
         env: &ConfigTypeEnv,
         entry_name: &Rc<str>,
         attrs_ast: Vec<AttributeAst>,
     ) -> (Self, Errs<ConfigError>) {
+        Self::default().apply_overrides(env, entry_name, attrs_ast)
+    }
+
+    pub(super) fn with_overrides(
+        &self,
+        env: &ConfigTypeEnv,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
+        self.clone().apply_overrides(env, entry_name, attrs_ast)
+    }
+
+    fn apply_overrides(
+        mut self,
+        env: &ConfigTypeEnv,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
-        let mut attrs = LinkAddrspaceAttrs::default();
         let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for attr_ast in attrs_ast {
             errs.also(declare_attr(
@@ -56,11 +66,11 @@ impl LinkAddrspaceAttrs {
             match &*attr_ast.id.name {
                 "bits" => {
                     let result = Self::bits_attr(env, attr_ast.expr);
-                    attrs.bits = Some(errs.ok_or(result, BitWidth::MAX));
+                    self.bits = Some(errs.ok_or(result, BitWidth::MAX));
                 }
                 "fill" => {
                     let result = Self::fill_attr(env, attr_ast.expr);
-                    attrs.fill = Some(errs.ok_or_default(result));
+                    self.fill = Some(errs.ok_or_default(result));
                 }
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Addrspace,
@@ -69,7 +79,7 @@ impl LinkAddrspaceAttrs {
                 }),
             }
         }
-        (attrs, errs)
+        (self, errs)
     }
 
     fn bits_attr(
@@ -95,7 +105,7 @@ impl LinkAddrspaceAttrs {
 
 //===========================================================================//
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LinkChecksumAttrs {
     pub sum: Option<ConfigVariableOr<Rc<[ChecksumFormat]>>>,
     pub unit: Option<ConfigVariableOr<ChecksumFormat>>,
@@ -105,24 +115,33 @@ pub(super) struct LinkChecksumAttrs {
 }
 
 impl LinkChecksumAttrs {
-    pub(super) fn clone_with_overrides(&self, overrides: Self) -> Self {
-        Self {
-            sum: self.sum.clone().or(overrides.sum),
-            unit: self.unit.or(overrides.unit),
-            start: self.start.or(overrides.start),
-            end: self.end.or(overrides.end),
-            size: self.size.or(overrides.size),
-        }
-    }
-
     pub(super) fn build(
         env: &ConfigTypeEnv,
         vars: &mut Vec<ObjExpr>,
         entry_name: &Rc<str>,
         attrs_ast: Vec<AttributeAst>,
     ) -> (Self, Errs<ConfigError>) {
+        Self::default().apply_overrides(env, vars, entry_name, attrs_ast)
+    }
+
+    pub(super) fn with_overrides(
+        &self,
+        env: &ConfigTypeEnv,
+        vars: &mut Vec<ObjExpr>,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
+        self.clone().apply_overrides(env, vars, entry_name, attrs_ast)
+    }
+
+    fn apply_overrides(
+        mut self,
+        env: &ConfigTypeEnv,
+        vars: &mut Vec<ObjExpr>,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
-        let mut attrs = LinkChecksumAttrs::default();
         let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for attr_ast in attrs_ast {
             errs.also(declare_attr(
@@ -133,29 +152,21 @@ impl LinkChecksumAttrs {
             ));
             match &*attr_ast.id.name {
                 "sum" => {
-                    attrs.sum = Some(errs.ok_or_else(
+                    self.sum = Some(errs.ok_or_else(
                         Self::sum_attr(env, vars, attr_ast.expr),
                         || ConfigVariableOr::Static(Rc::from([])),
                     ))
                 }
                 "unit" => {
                     let result = Self::unit_attr(env, vars, attr_ast.expr);
-                    attrs.unit = Some(errs.ok_or_default(result));
+                    self.unit = Some(errs.ok_or_default(result));
                 }
                 "start" => {
                     let result = Self::start_attr(env, vars, attr_ast.expr);
-                    attrs.start = Some(errs.ok_or_default(result));
+                    self.start = Some(errs.ok_or_default(result));
                 }
-                "end" => {
-                    let result = Self::end_attr(env, vars, attr_ast.expr);
-                    let end = errs.ok_or_default(result);
-                    attrs.end = Some((attr_ast.id.span, end));
-                }
-                "size" => {
-                    let result = Self::size_attr(env, vars, attr_ast.expr);
-                    let size = errs.ok_or_default(result);
-                    attrs.size = Some((attr_ast.id.span, size));
-                }
+                "end" => errs.also(self.set_end_attr(env, vars, attr_ast)),
+                "size" => errs.also(self.set_size_attr(env, vars, attr_ast)),
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Checksum,
                     attr_name: attr_ast.id.name.clone(),
@@ -163,7 +174,52 @@ impl LinkChecksumAttrs {
                 }),
             }
         }
-        (attrs, errs)
+        (self, errs)
+    }
+
+    fn set_end_attr(
+        &mut self,
+        env: &ConfigTypeEnv,
+        vars: &mut Vec<ObjExpr>,
+        attr_ast: AttributeAst,
+    ) -> ConfigResult<()> {
+        let mut errs = Errs::<ConfigError>::new();
+        let end = errs.ok_or_default(Self::end_attr(env, vars, attr_ast.expr));
+        if self.end.is_none()
+            && let Some((size_span, _)) = self.size
+        {
+            errs.push(ConfigError::MutuallyExclusiveAttrs {
+                attribute_1: ConfigAttr::ChecksumSize,
+                attribute_2: ConfigAttr::ChecksumEnd,
+                attr_loc_1: env.make_loc(size_span),
+                attr_loc_2: env.make_loc(attr_ast.id.span),
+            });
+        }
+        self.end = Some((attr_ast.id.span, end));
+        errs.result()
+    }
+
+    fn set_size_attr(
+        &mut self,
+        env: &ConfigTypeEnv,
+        vars: &mut Vec<ObjExpr>,
+        attr_ast: AttributeAst,
+    ) -> ConfigResult<()> {
+        let mut errs = Errs::<ConfigError>::new();
+        let size =
+            errs.ok_or_default(Self::size_attr(env, vars, attr_ast.expr));
+        if self.size.is_none()
+            && let Some((end_span, _)) = self.end
+        {
+            errs.push(ConfigError::MutuallyExclusiveAttrs {
+                attribute_1: ConfigAttr::ChecksumEnd,
+                attribute_2: ConfigAttr::ChecksumSize,
+                attr_loc_1: env.make_loc(end_span),
+                attr_loc_2: env.make_loc(attr_ast.id.span),
+            });
+        }
+        self.size = Some((attr_ast.id.span, size));
+        errs.result()
     }
 
     fn sum_attr(
@@ -219,28 +275,40 @@ impl LinkChecksumAttrs {
 
 //===========================================================================//
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LinkExportAttrs {
     pub space: Option<Rc<str>>,
     pub addr: Option<ConfigVariableOr<Addr>>,
 }
 
 impl LinkExportAttrs {
-    pub(super) fn clone_with_overrides(&self, overrides: Self) -> Self {
-        Self {
-            space: self.space.clone().or(overrides.space),
-            addr: self.addr.or(overrides.addr),
-        }
-    }
-
     pub(super) fn build(
         env: &ConfigTypeEnv,
         vars: &mut Vec<ObjExpr>,
         entry_name: &Rc<str>,
         attrs_ast: Vec<AttributeAst>,
     ) -> (Self, Errs<ConfigError>) {
+        Self::default().apply_overrides(env, vars, entry_name, attrs_ast)
+    }
+
+    pub(super) fn with_overrides(
+        &self,
+        env: &ConfigTypeEnv,
+        vars: &mut Vec<ObjExpr>,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
+        self.clone().apply_overrides(env, vars, entry_name, attrs_ast)
+    }
+
+    fn apply_overrides(
+        mut self,
+        env: &ConfigTypeEnv,
+        vars: &mut Vec<ObjExpr>,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
-        let mut attrs = LinkExportAttrs::default();
         let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for attr_ast in attrs_ast {
             errs.also(declare_attr(
@@ -252,11 +320,11 @@ impl LinkExportAttrs {
             match &*attr_ast.id.name {
                 "addr" => {
                     let result = Self::addr_attr(env, vars, attr_ast.expr);
-                    attrs.addr = Some(errs.ok_or_default(result));
+                    self.addr = Some(errs.ok_or_default(result));
                 }
                 "space" => {
                     let result = Self::space_attr(env, attr_ast.expr);
-                    attrs.space = Some(errs.ok_or_default(result));
+                    self.space = Some(errs.ok_or_default(result));
                 }
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Export,
@@ -265,7 +333,7 @@ impl LinkExportAttrs {
                 }),
             }
         }
-        (attrs, errs)
+        (self, errs)
     }
 
     fn addr_attr(
@@ -313,7 +381,7 @@ impl LinkExportAttrs {
 
 //===========================================================================//
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LinkRegionAttrs {
     pub space: Option<Rc<str>>,
     pub start: Option<Addr>,
@@ -323,23 +391,30 @@ pub(super) struct LinkRegionAttrs {
 }
 
 impl LinkRegionAttrs {
-    pub(super) fn clone_with_overrides(&self, overrides: Self) -> Self {
-        Self {
-            space: self.space.clone().or(overrides.space),
-            start: self.start.or(overrides.start),
-            size: self.size.or(overrides.size),
-            fill: self.fill.or(overrides.fill),
-            kind: self.kind.or(overrides.kind),
-        }
-    }
-
     pub(super) fn build(
         env: &ConfigTypeEnv,
         entry_name: &Rc<str>,
         attrs_ast: Vec<AttributeAst>,
     ) -> (Self, Errs<ConfigError>) {
+        Self::default().apply_overrides(env, entry_name, attrs_ast)
+    }
+
+    pub(super) fn with_overrides(
+        &self,
+        env: &ConfigTypeEnv,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
+        self.clone().apply_overrides(env, entry_name, attrs_ast)
+    }
+
+    fn apply_overrides(
+        mut self,
+        env: &ConfigTypeEnv,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
-        let mut attrs = LinkRegionAttrs::default();
         let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for attr_ast in attrs_ast {
             errs.also(declare_attr(
@@ -351,23 +426,23 @@ impl LinkRegionAttrs {
             match &*attr_ast.id.name {
                 "fill" => {
                     let result = Self::fill_attr(env, attr_ast.expr);
-                    attrs.fill = Some(errs.ok_or_default(result));
+                    self.fill = Some(errs.ok_or_default(result));
                 }
                 "kind" => {
                     let result = Self::kind_attr(env, attr_ast.expr);
-                    attrs.kind = Some(errs.ok_or_default(result));
+                    self.kind = Some(errs.ok_or_default(result));
                 }
                 "size" => {
                     let result = Self::size_attr(env, attr_ast.expr);
-                    attrs.size = Some(errs.ok_or(result, Size::from(1u32)));
+                    self.size = Some(errs.ok_or(result, Size::from(1u32)));
                 }
                 "space" => {
                     let result = Self::space_attr(env, attr_ast.expr);
-                    attrs.space = Some(errs.ok_or_default(result));
+                    self.space = Some(errs.ok_or_default(result));
                 }
                 "start" => {
                     let result = Self::start_attr(env, attr_ast.expr);
-                    attrs.start = Some(errs.ok_or_default(result));
+                    self.start = Some(errs.ok_or_default(result));
                 }
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Region,
@@ -376,7 +451,7 @@ impl LinkRegionAttrs {
                 }),
             }
         }
-        (attrs, errs)
+        (self, errs)
     }
 
     fn fill_attr(env: &ConfigTypeEnv, expr_ast: ExprAst) -> ConfigResult<u8> {
@@ -447,35 +522,42 @@ impl LinkRegionAttrs {
 
 //===========================================================================//
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LinkSectionAttrs {
     pub region: Option<Rc<str>>,
     pub start: Option<Addr>,
-    pub size: Option<Size>,
+    pub size: Option<(SrcSpan, Size)>,
     pub align: Option<Align>,
     pub within: Option<Align>,
-    pub fill: Option<u8>,
+    pub fill: Option<(SrcSpan, u8)>,
+    pub mirror: Option<(SrcSpan, Rc<str>)>,
 }
 
 impl LinkSectionAttrs {
-    pub(super) fn clone_with_overrides(&self, overrides: Self) -> Self {
-        Self {
-            region: self.region.clone().or(overrides.region),
-            start: self.start.or(overrides.start),
-            size: self.size.or(overrides.size),
-            align: self.align.or(overrides.align),
-            within: self.within.or(overrides.within),
-            fill: self.fill.or(overrides.fill),
-        }
-    }
-
     pub(super) fn build(
         env: &ConfigTypeEnv,
         entry_name: &Rc<str>,
         attrs_ast: Vec<AttributeAst>,
     ) -> (Self, Errs<ConfigError>) {
+        Self::default().apply_overrides(env, entry_name, attrs_ast)
+    }
+
+    pub(super) fn with_overrides(
+        &self,
+        env: &ConfigTypeEnv,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
+        self.clone().apply_overrides(env, entry_name, attrs_ast)
+    }
+
+    fn apply_overrides(
+        mut self,
+        env: &ConfigTypeEnv,
+        entry_name: &Rc<str>,
+        attrs_ast: Vec<AttributeAst>,
+    ) -> (Self, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
-        let mut attrs = LinkSectionAttrs::default();
         let mut prev_attrs = HashMap::<Rc<str>, SrcSpan>::new();
         for attr_ast in attrs_ast {
             errs.also(declare_attr(
@@ -487,27 +569,22 @@ impl LinkSectionAttrs {
             match &*attr_ast.id.name {
                 "align" => {
                     let result = Self::align_attr(env, attr_ast.expr);
-                    attrs.align = Some(errs.ok_or_default(result));
+                    self.align = Some(errs.ok_or_default(result));
                 }
-                "fill" => {
-                    let result = Self::fill_attr(env, attr_ast.expr);
-                    attrs.fill = Some(errs.ok_or_default(result));
-                }
+                "fill" => errs.also(self.set_fill_attr(env, attr_ast)),
+                "mirror" => errs.also(self.set_mirror_attr(env, attr_ast)),
                 "region" => {
                     let result = Self::region_attr(env, attr_ast.expr);
-                    attrs.region = Some(errs.ok_or_default(result));
+                    self.region = Some(errs.ok_or_default(result));
                 }
-                "size" => {
-                    let result = Self::size_attr(env, attr_ast.expr);
-                    attrs.size = Some(errs.ok_or(result, Size::from(1u32)));
-                }
+                "size" => errs.also(self.set_size_attr(env, attr_ast)),
                 "start" => {
                     let result = Self::start_attr(env, attr_ast.expr);
-                    attrs.start = Some(errs.ok_or_default(result));
+                    self.start = Some(errs.ok_or_default(result));
                 }
                 "within" => {
                     let result = Self::within_attr(env, attr_ast.expr);
-                    attrs.within = Some(errs.ok_or(result, Align::MAX));
+                    self.within = Some(errs.ok_or(result, Align::MAX));
                 }
                 _ => errs.push(ConfigError::InvalidAttrName {
                     entry_kind: ConfigEntryKind::Section,
@@ -516,7 +593,78 @@ impl LinkSectionAttrs {
                 }),
             }
         }
-        (attrs, errs)
+        (self, errs)
+    }
+
+    fn set_fill_attr(
+        &mut self,
+        env: &ConfigTypeEnv,
+        attr_ast: AttributeAst,
+    ) -> ConfigResult<()> {
+        let mut errs = Errs::<ConfigError>::new();
+        let fill = errs.ok_or_default(Self::fill_attr(env, attr_ast.expr));
+        if self.fill.is_none()
+            && let Some((mirror_span, _)) = self.mirror
+        {
+            errs.push(ConfigError::MutuallyExclusiveAttrs {
+                attribute_1: ConfigAttr::SectionMirror,
+                attribute_2: ConfigAttr::SectionFill,
+                attr_loc_1: env.make_loc(mirror_span),
+                attr_loc_2: env.make_loc(attr_ast.id.span),
+            });
+        }
+        self.fill = Some((attr_ast.id.span, fill));
+        errs.result()
+    }
+
+    fn set_mirror_attr(
+        &mut self,
+        env: &ConfigTypeEnv,
+        attr_ast: AttributeAst,
+    ) -> ConfigResult<()> {
+        let mut errs = Errs::<ConfigError>::new();
+        let mirror = errs.ok_or_default(Self::mirror_attr(env, attr_ast.expr));
+        if self.mirror.is_none() {
+            if let Some((fill_span, _)) = self.fill {
+                errs.push(ConfigError::MutuallyExclusiveAttrs {
+                    attribute_1: ConfigAttr::SectionFill,
+                    attribute_2: ConfigAttr::SectionMirror,
+                    attr_loc_1: env.make_loc(fill_span),
+                    attr_loc_2: env.make_loc(attr_ast.id.span),
+                });
+            } else if let Some((size_span, _)) = self.size {
+                errs.push(ConfigError::MutuallyExclusiveAttrs {
+                    attribute_1: ConfigAttr::SectionSize,
+                    attribute_2: ConfigAttr::SectionMirror,
+                    attr_loc_1: env.make_loc(size_span),
+                    attr_loc_2: env.make_loc(attr_ast.id.span),
+                });
+            }
+        }
+        self.mirror = Some((attr_ast.id.span, mirror));
+        errs.result()
+    }
+
+    fn set_size_attr(
+        &mut self,
+        env: &ConfigTypeEnv,
+        attr_ast: AttributeAst,
+    ) -> ConfigResult<()> {
+        let mut errs = Errs::<ConfigError>::new();
+        let size =
+            errs.ok_or(Self::size_attr(env, attr_ast.expr), Size::from(1u32));
+        if self.fill.is_none()
+            && let Some((mirror_span, _)) = self.mirror
+        {
+            errs.push(ConfigError::MutuallyExclusiveAttrs {
+                attribute_1: ConfigAttr::SectionMirror,
+                attribute_2: ConfigAttr::SectionSize,
+                attr_loc_1: env.make_loc(mirror_span),
+                attr_loc_2: env.make_loc(attr_ast.id.span),
+            });
+        }
+        self.size = Some((attr_ast.id.span, size));
+        errs.result()
     }
 
     fn align_attr(
@@ -528,6 +676,18 @@ impl LinkSectionAttrs {
 
     fn fill_attr(env: &ConfigTypeEnv, expr_ast: ExprAst) -> ConfigResult<u8> {
         static_byte_attr(env, ConfigAttr::SectionFill, expr_ast)
+    }
+
+    fn mirror_attr(
+        env: &ConfigTypeEnv,
+        expr_ast: ExprAst,
+    ) -> ConfigResult<Rc<str>> {
+        static_entity_attr(
+            env,
+            ConfigAttr::SectionMirror,
+            expr_ast,
+            ENTITY_SECTION,
+        )
     }
 
     fn region_attr(

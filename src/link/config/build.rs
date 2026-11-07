@@ -111,12 +111,11 @@ impl<'a> ConfigBuilder<'a> {
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
         errs.also(self.declare_entry(ENTITY_ADDRSPACE, &entry.id));
-        let attrs = errs.with(LinkAddrspaceAttrs::build(
+        let attrs = errs.with(base_attrs.with_overrides(
             &self.env,
             &entry.id.name,
             entry.attrs,
         ));
-        let attrs = base_attrs.clone_with_overrides(attrs);
         if attrs.bits.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
@@ -158,13 +157,12 @@ impl<'a> ConfigBuilder<'a> {
         if self.env.get_export(&entry.id.name).is_none() {
             errs.also(self.import_symbol(entry.id.clone()));
         }
-        let attrs = errs.with(LinkChecksumAttrs::build(
+        let attrs = errs.with(base_attrs.with_overrides(
             &self.env,
             &mut self.config.variables,
             &entry.id.name,
             entry.attrs,
         ));
-        let attrs = base_attrs.clone_with_overrides(attrs);
         if attrs.sum.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
@@ -177,14 +175,8 @@ impl<'a> ConfigBuilder<'a> {
             (None, None) => ChecksumRange::From { start },
             (Some((_, end)), None) => ChecksumRange::FromTo { start, end },
             (None, Some((_, size))) => ChecksumRange::FromSize { start, size },
-            (Some((end_span, _)), Some((size_span, _))) => {
-                errs.push(ConfigError::MutuallyExclusiveAttrs {
-                    entry_loc: self.env.make_loc(entry.id.span),
-                    attribute_1: ConfigAttr::ChecksumSize,
-                    attribute_2: ConfigAttr::ChecksumEnd,
-                    attr_span_1: size_span,
-                    attr_span_2: end_span,
-                });
+            (Some(_), Some(_)) => {
+                // This is invalid; an error will have already been reported.
                 ChecksumRange::default()
             }
         };
@@ -236,13 +228,12 @@ impl<'a> ConfigBuilder<'a> {
             });
         }
 
-        let attrs = errs.with(LinkExportAttrs::build(
+        let attrs = errs.with(base_attrs.with_overrides(
             &self.env,
             &mut self.config.variables,
             &entry.id.name,
             entry.attrs,
         ));
-        let attrs = base_attrs.clone_with_overrides(attrs);
         if attrs.space.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
@@ -347,12 +338,11 @@ impl<'a> ConfigBuilder<'a> {
     ) -> (RegionConfig, Errs<ConfigError>) {
         let mut errs = Errs::<ConfigError>::new();
         errs.also(self.declare_entry(ENTITY_REGION, &entry.id));
-        let attrs = errs.with(LinkRegionAttrs::build(
+        let attrs = errs.with(base_attrs.with_overrides(
             &self.env,
             &entry.id.name,
             entry.attrs,
         ));
-        let attrs = base_attrs.clone_with_overrides(attrs);
         let addrspace_width = if let Some(space) = &attrs.space {
             self.config
                 .addrspaces
@@ -432,12 +422,11 @@ impl<'a> ConfigBuilder<'a> {
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
         errs.also(self.declare_entry(ENTITY_SECTION, &entry.id));
-        let attrs = errs.with(LinkSectionAttrs::build(
+        let attrs = errs.with(base_attrs.with_overrides(
             &self.env,
             &entry.id.name,
             entry.attrs,
         ));
-        let attrs = base_attrs.clone_with_overrides(attrs);
         if attrs.region.is_none() {
             errs.push(ConfigError::MissingAttr {
                 entry_name: entry.id.name.clone(),
@@ -450,10 +439,13 @@ impl<'a> ConfigBuilder<'a> {
             name_loc: self.env.make_loc(entry.id.span),
             region: attrs.region.unwrap_or_default(),
             start: attrs.start,
-            size: attrs.size,
+            size: attrs.size.map(|(_span, size)| size),
             align: attrs.align.unwrap_or_default(),
             within: attrs.within,
-            fill: attrs.fill,
+            fill: attrs.fill.map(|(_span, fill)| fill),
+            mirror: attrs
+                .mirror
+                .map(|(span, name)| (self.env.make_loc(span), name)),
         });
         errs.result()
     }

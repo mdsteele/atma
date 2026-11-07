@@ -12,6 +12,12 @@ use std::rc::Rc;
 
 //===========================================================================//
 
+/// The largest size of `LinkFragment::Fill` that we will convert into an
+/// inline `LinkFragment::Data` in order to change one byte.
+const FILL_TO_DATA_MAX_SIZE: u64 = 64;
+
+//===========================================================================//
+
 /// Represents a symbol in a linked binary.
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub struct BinarySymbol {
@@ -170,84 +176,71 @@ impl LinkedBinary {
 
     fn set_byte(&mut self, dest: u64, new_byte: u8) {
         debug_assert!(dest < self.size());
-        let fragment_index: usize =
+        let frag_index: usize =
             self.fragments.partition_point(|&(_, frag_end)| frag_end <= dest);
-        debug_assert!(fragment_index < self.fragments.len());
-        match self.fragments[fragment_index] {
-            (LinkFragment::Data { ref mut data }, frag_end) => {
-                debug_assert!(dest < frag_end);
+        debug_assert!(frag_index < self.fragments.len());
+        let frag_end = self.fragments[frag_index].1;
+        debug_assert!(dest < frag_end);
+        match self.fragments[frag_index].0 {
+            LinkFragment::Data { ref mut data } => {
                 debug_assert!(data.len() as u64 <= frag_end);
                 let frag_start = frag_end - data.len() as u64;
                 debug_assert!(dest >= frag_start);
-                data[(dest - frag_start) as usize] = new_byte;
+                let byte_index = (dest - frag_start) as usize;
+                if new_byte != data[byte_index] {
+                    Rc::make_mut(data)[byte_index] = new_byte;
+                }
             }
-            (LinkFragment::Fill { size, byte: fill_byte }, frag_end) => {
+            LinkFragment::Fill { size, byte: fill_byte } => {
                 if new_byte == fill_byte {
                     return;
                 }
-                debug_assert!(dest < frag_end);
                 debug_assert!(size <= frag_end);
                 let frag_start = frag_end - size;
                 debug_assert!(dest >= frag_start);
                 if size == 1 {
-                    self.fragments[fragment_index].0 =
-                        LinkFragment::Data { data: vec![new_byte] };
-                } else if dest == frag_start {
-                    if fragment_index > 0
-                        && let (
-                            LinkFragment::Data { ref mut data },
-                            ref mut data_end,
-                        ) = self.fragments[fragment_index - 1]
-                    {
-                        data.push(new_byte);
-                        *data_end += 1;
-                        self.fragments[fragment_index].0 =
-                            LinkFragment::Fill {
-                                size: size - 1,
-                                byte: fill_byte,
-                            };
+                    self.fragments[frag_index].0 =
+                        LinkFragment::Fill { size, byte: new_byte };
+                    return;
+                }
+                let (data_size, data_start) =
+                    if dest - frag_start < FILL_TO_DATA_MAX_SIZE {
+                        let data_size = size.min(FILL_TO_DATA_MAX_SIZE);
+                        let data_start = frag_start;
+                        (data_size, data_start)
+                    } else if frag_end - dest <= FILL_TO_DATA_MAX_SIZE {
+                        let data_size = FILL_TO_DATA_MAX_SIZE;
+                        let data_start = frag_end - data_size;
+                        (data_size, data_start)
                     } else {
-                        self.fragments[fragment_index].0 =
-                            LinkFragment::Fill {
-                                size: size - 1,
-                                byte: fill_byte,
-                            };
-                        self.fragments.insert(
-                            fragment_index,
-                            (
-                                LinkFragment::Data { data: vec![new_byte] },
-                                frag_start + 1,
-                            ),
-                        );
-                    }
-                } else {
-                    self.fragments[fragment_index] = (
-                        LinkFragment::Fill {
-                            size: dest - frag_start,
-                            byte: fill_byte,
-                        },
-                        dest,
-                    );
-                    self.fragments.insert(
-                        fragment_index + 1,
-                        (
-                            LinkFragment::Data { data: vec![new_byte] },
-                            dest + 1,
-                        ),
-                    );
-                    let remaining = frag_end - (dest + 1);
-                    if remaining > 0 {
-                        self.fragments.insert(
-                            fragment_index + 2,
-                            (
-                                LinkFragment::Fill {
-                                    size: remaining,
-                                    byte: fill_byte,
-                                },
-                                frag_end,
-                            ),
-                        );
-                    }
+                        let data_size = FILL_TO_DATA_MAX_SIZE;
+                        let data_start = dest - FILL_TO_DATA_MAX_SIZE / 2;
+                        (data_size, data_start)
+                    };
+                let mut data =
+                    vec![fill_byte; data_size as usize].into_boxed_slice();
+                data[(dest - data_start) as usize] = new_byte;
+                self.fragments[frag_index].0 =
+                    LinkFragment::Data { data: Rc::new(data) };
+                let data_end = data_start + data_size;
+                let following_size = frag_end - data_end;
+                if following_size > 0 {
+                    self.fragments[frag_index].1 -= following_size;
+                    let following_frag = LinkFragment::Fill {
+                        size: following_size,
+                        byte: fill_byte,
+                    };
+                    self.fragments
+                        .insert(frag_index + 1, (following_frag, frag_end));
+                }
+                let preceding_size = data_start - frag_start;
+                if preceding_size > 0 {
+                    let preceding_frag = LinkFragment::Fill {
+                        size: preceding_size,
+                        byte: fill_byte,
+                    };
+                    self.fragments
+                        .insert(frag_index, (preceding_frag, data_start));
                 }
             }
         }
@@ -330,9 +323,12 @@ enum LinkFragment {
     Data {
         /// The data to write.
         ///
-        /// This is a `Vec<u8>` rather than `Box<[u8]>` because it sometimes
-        /// needs to be resized when writing checksums into the linked binary.
-        data: Vec<u8>,
+        /// The slightly awkward double-indirected type here is to help avoid
+        /// having to copy the full chunk data in most cases.  The `Rc` layer
+        /// allows this data to be shared by multiple `LinkFragment`s (in cases
+        /// where a chunk is mirrored), and the `Box` layer allows the data to
+        /// have been moved into the `Rc` without making a copy.
+        data: Rc<Box<[u8]>>,
     },
     /// A span of the given size that should be filled with the given byte.
     Fill {
@@ -462,32 +458,32 @@ impl BinaryBuilder {
     }
 
     fn add_region(&mut self, region: &PositionedRegion) {
-        let region_end = self.total_size + region.binary_size;
-        for section in &region.sections {
-            if let Some(binary_offset) = section.binary_offset {
+        if let Some(region_binary_size) = region.binary_size {
+            let region_end = self.total_size + region_binary_size;
+            for section in &region.sections {
+                let binary_offset = section.binary_offset.unwrap();
                 self.fill_to(binary_offset, region.fill);
                 self.add_section(section);
             }
+            self.fill_to(region_end, region.fill);
         }
-        self.fill_to(region_end, region.fill);
     }
 
     fn add_section(&mut self, section: &PositionedSection) {
-        let section_end = self.total_size + section.binary_size;
+        let section_end = self.total_size + section.size;
         for chunk in &section.chunks {
-            if let Some(binary_offset) = chunk.binary_offset {
-                self.fill_to(binary_offset, section.fill);
-                self.add_chunk(chunk);
-            }
+            let binary_offset = chunk.binary_offset.unwrap();
+            self.fill_to(binary_offset, section.fill);
+            self.add_chunk(chunk);
         }
         self.fill_to(section_end, section.fill);
     }
 
     fn add_chunk(&mut self, chunk: &PositionedChunk) {
-        let chunk_end = self.total_size + chunk.binary_size;
-        let patched = &mut self.patched_files[chunk.id.object_index].chunks
+        let chunk_end = self.total_size + chunk.size;
+        let patched = &self.patched_files[chunk.id.object_index].chunks
             [chunk.id.chunk_index];
-        let data = Vec::from(std::mem::take(&mut patched.data));
+        let data = Rc::clone(&patched.data);
         self.total_size += data.len() as u64;
         self.fragments.push(LinkFragment::Data { data });
         self.fill_to(chunk_end, chunk.fill);
@@ -506,24 +502,27 @@ impl BinaryBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::{LinkFragment, LinkedBinary};
+    use super::{FILL_TO_DATA_MAX_SIZE, LinkFragment, LinkedBinary};
     use crate::link::ChecksumFormat;
-    use std::io::Cursor;
+    use std::rc::Rc;
+
+    fn link_fragment_data(data: Vec<u8>) -> LinkFragment {
+        LinkFragment::Data { data: Rc::new(data.into_boxed_slice()) }
+    }
 
     fn binary_from_fragments(fragments: Vec<LinkFragment>) -> LinkedBinary {
         LinkedBinary::new(fragments, Vec::new())
     }
 
     fn binary_to_vec(binary: &LinkedBinary) -> Vec<u8> {
-        let mut cursor = Cursor::new(Vec::<u8>::new());
-        binary.write_to(&mut cursor).unwrap();
-        cursor.into_inner()
+        let mut vec = Vec::<u8>::new();
+        binary.write_to(&mut vec).unwrap();
+        vec
     }
 
     #[test]
     fn calculate_data_fragment_checksum() {
-        let data = vec![0, 1, 2, 3, 4, 5, 6, 7];
-        let fragment = LinkFragment::Data { data };
+        let fragment = link_fragment_data(vec![0, 1, 2, 3, 4, 5, 6, 7]);
         assert_eq!(
             fragment.calculate_checksum(0, 8, ChecksumFormat::U8, 0),
             0x1c
@@ -572,21 +571,21 @@ mod tests {
         assert_eq!(binary_from_fragments(vec![]).size(), 0);
         let binary = binary_from_fragments(vec![
             LinkFragment::Fill { size: 3000, byte: 10 },
-            LinkFragment::Data { data: vec![1, 2, 3, 4] },
+            link_fragment_data(vec![1, 2, 3, 4]),
         ]);
         assert_eq!(binary.size(), 3004);
     }
 
     #[test]
-    fn binary_set_byte() {
+    fn binary_set_byte_within_datas_and_fills() {
         for index in 0..16 {
             let mut binary = binary_from_fragments(vec![
                 LinkFragment::Fill { size: 3, byte: 10 },
-                LinkFragment::Data { data: vec![1, 2, 3] },
+                link_fragment_data(vec![1, 2, 3]),
                 LinkFragment::Fill { size: 2, byte: 20 },
-                LinkFragment::Data { data: vec![4, 5, 6] },
+                link_fragment_data(vec![4, 5, 6]),
                 LinkFragment::Fill { size: 1, byte: 30 },
-                LinkFragment::Data { data: vec![7] },
+                link_fragment_data(vec![7]),
                 LinkFragment::Fill { size: 3, byte: 40 },
             ]);
             let mut expected =
@@ -594,6 +593,26 @@ mod tests {
             assert_eq!(binary_to_vec(&binary), expected);
             expected[index] = 99;
             binary.set_byte(index as u64, 99);
+            assert_eq!(binary_to_vec(&binary), expected);
+        }
+    }
+
+    #[test]
+    fn binary_set_byte_within_large_fill() {
+        let size = FILL_TO_DATA_MAX_SIZE * 3;
+        for offset in [
+            FILL_TO_DATA_MAX_SIZE / 4,        // near start
+            size / 2,                         // in the middle
+            size - FILL_TO_DATA_MAX_SIZE / 4, // near end
+        ] {
+            let mut binary = binary_from_fragments(vec![LinkFragment::Fill {
+                size,
+                byte: 0,
+            }]);
+            let mut expected = vec![0u8; size as usize];
+            assert_eq!(binary_to_vec(&binary), expected);
+            binary.set_byte(offset, 99);
+            expected[offset as usize] = 99;
             assert_eq!(binary_to_vec(&binary), expected);
         }
     }

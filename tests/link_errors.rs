@@ -50,6 +50,37 @@ fn link_errors(config_source: &str, asm_sources: &[&str]) -> Vec<LinkError> {
 //===========================================================================//
 
 #[test]
+fn chunk_in_mirror_section() {
+    let asm0 = r#"\
+    .SECTION "CODE"
+        .u8 0
+    .END
+    .SECTION "COPY"
+        .u8 1
+    .END
+    "#;
+    let config = r#"\
+    .ADDRSPACES {
+    CPU: bits=16
+    }
+    .REGIONS {
+    MAIN: space=CPU, start=$0000, size=$10000
+    }
+    .SECTIONS {
+    CODE: region=MAIN
+    COPY: region=MAIN, mirror=CODE
+    }
+    "#;
+    assert_matches!(link_errors(config, &[asm0]).as_slice(), [
+        LinkError::ChunkInMirrorSection{
+            section_name,
+            mirror_name,
+            ..
+        },
+    ] if &**section_name == "COPY" && &**mirror_name == "CODE");
+}
+
+#[test]
 fn chunk_section_does_not_exist() {
     let asm0 = r#"\
     .SECTION "CODE"
