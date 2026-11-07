@@ -39,6 +39,14 @@ pub(super) fn bang_addr_arg(pool: &mut RcPool) -> AsmMacroArgAst {
     ])
 }
 
+pub(super) fn par_addr_ens_arg(pool: &mut RcPool) -> AsmMacroArgAst {
+    macro_arg(vec![
+        token(TokenValue::ParenOpen),
+        pool.placeholder_token(PLACEHOLDER_ADDR),
+        token(TokenValue::ParenClose),
+    ])
+}
+
 pub(super) fn par_reg_ens_arg(pool: &mut RcPool, reg: Reg) -> AsmMacroArgAst {
     macro_arg(vec![
         token(TokenValue::ParenOpen),

@@ -1,10 +1,11 @@
 use super::addrmode::{
     AddrMode, PLACEHOLDER_ADDR, PLACEHOLDER_IMM, Reg, addr_arg,
-    par_reg_ens_arg, pound_imm_arg, reg_arg,
+    par_addr_ens_arg, par_reg_ens_arg, pound_imm_arg, reg_arg,
 };
 use super::pool::RcPool;
+use crate::expr::ExprFunc;
 use crate::parse::{
-    AsmIntType, AsmMacroArgAst, AsmRelType, AsmStmtAst, BinOpAst,
+    AsmIntType, AsmMacroArgAst, AsmRelType, AsmStmtAst, BinOpAst, UnOpAst,
 };
 
 //===========================================================================//
@@ -15,6 +16,24 @@ pub(super) const RES_SUPERFX: &[&str] = &[
     "R12", "R13", "R14", "R15",
 ];
 pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
+    ("ADC", &[0x3d, 0x50], SuperFx::Reg("R0")),
+    ("ADC", &[0x3d, 0x51], SuperFx::Reg("R1")),
+    ("ADC", &[0x3d, 0x52], SuperFx::Reg("R2")),
+    ("ADC", &[0x3d, 0x53], SuperFx::Reg("R3")),
+    ("ADC", &[0x3d, 0x54], SuperFx::Reg("R4")),
+    ("ADC", &[0x3d, 0x55], SuperFx::Reg("R5")),
+    ("ADC", &[0x3d, 0x56], SuperFx::Reg("R6")),
+    ("ADC", &[0x3d, 0x57], SuperFx::Reg("R7")),
+    ("ADC", &[0x3d, 0x58], SuperFx::Reg("R8")),
+    ("ADC", &[0x3d, 0x59], SuperFx::Reg("R9")),
+    ("ADC", &[0x3d, 0x5a], SuperFx::Reg("R10")),
+    ("ADC", &[0x3d, 0x5b], SuperFx::Reg("R11")),
+    ("ADC", &[0x3d, 0x5c], SuperFx::Reg("R12")),
+    ("ADC", &[0x3d, 0x5d], SuperFx::Reg("R13")),
+    ("ADC", &[0x3d, 0x5e], SuperFx::Reg("R14")),
+    ("ADC", &[0x3d, 0x5f], SuperFx::Reg("R15")),
+    ("ADC", &[0x3f], SuperFx::PoundImm(0x50, 0, 15)),
+    ("ADD", &[0x3e], SuperFx::PoundImm(0x50, 0, 15)),
     ("ADD", &[0x50], SuperFx::Reg("R0")),
     ("ADD", &[0x51], SuperFx::Reg("R1")),
     ("ADD", &[0x52], SuperFx::Reg("R2")),
@@ -34,6 +53,7 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("ALT1", &[0x3d], SuperFx::Implied),
     ("ALT2", &[0x3e], SuperFx::Implied),
     ("ALT3", &[0x3f], SuperFx::Implied),
+    ("AND", &[0x3e], SuperFx::PoundImm(0x70, 1, 15)),
     ("AND", &[0x71], SuperFx::Reg("R1")),
     ("AND", &[0x72], SuperFx::Reg("R2")),
     ("AND", &[0x73], SuperFx::Reg("R3")),
@@ -54,6 +74,22 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("BCS", &[0x0d], SuperFx::Relative8),
     ("BEQ", &[0x09], SuperFx::Relative8),
     ("BGE", &[0x06], SuperFx::Relative8),
+    ("BIC", &[0x3d, 0x71], SuperFx::Reg("R1")),
+    ("BIC", &[0x3d, 0x72], SuperFx::Reg("R2")),
+    ("BIC", &[0x3d, 0x73], SuperFx::Reg("R3")),
+    ("BIC", &[0x3d, 0x74], SuperFx::Reg("R4")),
+    ("BIC", &[0x3d, 0x75], SuperFx::Reg("R5")),
+    ("BIC", &[0x3d, 0x76], SuperFx::Reg("R6")),
+    ("BIC", &[0x3d, 0x77], SuperFx::Reg("R7")),
+    ("BIC", &[0x3d, 0x78], SuperFx::Reg("R8")),
+    ("BIC", &[0x3d, 0x79], SuperFx::Reg("R9")),
+    ("BIC", &[0x3d, 0x7a], SuperFx::Reg("R10")),
+    ("BIC", &[0x3d, 0x7b], SuperFx::Reg("R11")),
+    ("BIC", &[0x3d, 0x7c], SuperFx::Reg("R12")),
+    ("BIC", &[0x3d, 0x7d], SuperFx::Reg("R13")),
+    ("BIC", &[0x3d, 0x7e], SuperFx::Reg("R14")),
+    ("BIC", &[0x3d, 0x7f], SuperFx::Reg("R15")),
+    ("BIC", &[0x3f], SuperFx::PoundImm(0x70, 1, 15)),
     ("BLT", &[0x07], SuperFx::Relative8),
     ("BMI", &[0x0b], SuperFx::Relative8),
     ("BNE", &[0x08], SuperFx::Relative8),
@@ -62,6 +98,23 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("BVC", &[0x0e], SuperFx::Relative8),
     ("BVS", &[0x0f], SuperFx::Relative8),
     ("CACHE", &[0x02], SuperFx::Implied),
+    ("CMODE", &[0x3d, 0x4e], SuperFx::Implied),
+    ("CMP", &[0x3f, 0x60], SuperFx::Reg("R0")),
+    ("CMP", &[0x3f, 0x61], SuperFx::Reg("R1")),
+    ("CMP", &[0x3f, 0x62], SuperFx::Reg("R2")),
+    ("CMP", &[0x3f, 0x63], SuperFx::Reg("R3")),
+    ("CMP", &[0x3f, 0x64], SuperFx::Reg("R4")),
+    ("CMP", &[0x3f, 0x65], SuperFx::Reg("R5")),
+    ("CMP", &[0x3f, 0x66], SuperFx::Reg("R6")),
+    ("CMP", &[0x3f, 0x67], SuperFx::Reg("R7")),
+    ("CMP", &[0x3f, 0x68], SuperFx::Reg("R8")),
+    ("CMP", &[0x3f, 0x69], SuperFx::Reg("R9")),
+    ("CMP", &[0x3f, 0x6a], SuperFx::Reg("R10")),
+    ("CMP", &[0x3f, 0x6b], SuperFx::Reg("R11")),
+    ("CMP", &[0x3f, 0x6c], SuperFx::Reg("R12")),
+    ("CMP", &[0x3f, 0x6d], SuperFx::Reg("R13")),
+    ("CMP", &[0x3f, 0x6e], SuperFx::Reg("R14")),
+    ("CMP", &[0x3f, 0x6f], SuperFx::Reg("R15")),
     ("COLOR", &[0x4e], SuperFx::Implied),
     ("DEC", &[0xe0], SuperFx::Reg("R0")),
     ("DEC", &[0xe1], SuperFx::Reg("R1")),
@@ -78,6 +131,7 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("DEC", &[0xec], SuperFx::Reg("R12")),
     ("DEC", &[0xed], SuperFx::Reg("R13")),
     ("DEC", &[0xee], SuperFx::Reg("R14")),
+    ("DIV2", &[0x3d, 0x96], SuperFx::Implied),
     ("FMULT", &[0x9f], SuperFx::Implied),
     ("FROM", &[0xb0], SuperFx::Reg("R0")),
     ("FROM", &[0xb1], SuperFx::Reg("R1")),
@@ -96,6 +150,9 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("FROM", &[0xbe], SuperFx::Reg("R14")),
     ("FROM", &[0xbf], SuperFx::Reg("R15")),
     ("GETB", &[0xef], SuperFx::Implied),
+    ("GETBH", &[0x3d, 0xef], SuperFx::Implied),
+    ("GETBL", &[0x3e, 0xef], SuperFx::Implied),
+    ("GETBS", &[0x3f, 0xef], SuperFx::Implied),
     ("GETC", &[0xdf], SuperFx::Implied),
     ("HIB", &[0xc0], SuperFx::Implied),
     ("IBT", &[0xa0], SuperFx::RegCommaPoundImm8("R0")),
@@ -151,6 +208,18 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("JMP", &[0x9b], SuperFx::Reg("R11")),
     ("JMP", &[0x9c], SuperFx::Reg("R12")),
     ("JMP", &[0x9d], SuperFx::Reg("R13")),
+    ("LDB", &[0x3d, 0x40], SuperFx::ParRegEns("R0")),
+    ("LDB", &[0x3d, 0x41], SuperFx::ParRegEns("R1")),
+    ("LDB", &[0x3d, 0x42], SuperFx::ParRegEns("R2")),
+    ("LDB", &[0x3d, 0x43], SuperFx::ParRegEns("R3")),
+    ("LDB", &[0x3d, 0x44], SuperFx::ParRegEns("R4")),
+    ("LDB", &[0x3d, 0x45], SuperFx::ParRegEns("R5")),
+    ("LDB", &[0x3d, 0x46], SuperFx::ParRegEns("R6")),
+    ("LDB", &[0x3d, 0x47], SuperFx::ParRegEns("R7")),
+    ("LDB", &[0x3d, 0x48], SuperFx::ParRegEns("R8")),
+    ("LDB", &[0x3d, 0x49], SuperFx::ParRegEns("R9")),
+    ("LDB", &[0x3d, 0x4a], SuperFx::ParRegEns("R10")),
+    ("LDB", &[0x3d, 0x4b], SuperFx::ParRegEns("R11")),
     ("LDW", &[0x40], SuperFx::ParRegEns("R0")),
     ("LDW", &[0x41], SuperFx::ParRegEns("R1")),
     ("LDW", &[0x42], SuperFx::ParRegEns("R2")),
@@ -163,12 +232,54 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("LDW", &[0x49], SuperFx::ParRegEns("R9")),
     ("LDW", &[0x4a], SuperFx::ParRegEns("R10")),
     ("LDW", &[0x4b], SuperFx::ParRegEns("R11")),
-    ("LINK", &[], SuperFx::LinkPoundImm),
     ("LINK", &[], SuperFx::LinkRelative),
+    ("LINK", &[], SuperFx::PoundImm(0x90, 1, 4)),
+    ("LJMP", &[0x3d, 0x98], SuperFx::Reg("R8")),
+    ("LJMP", &[0x3d, 0x99], SuperFx::Reg("R9")),
+    ("LJMP", &[0x3d, 0x9a], SuperFx::Reg("R10")),
+    ("LJMP", &[0x3d, 0x9b], SuperFx::Reg("R11")),
+    ("LJMP", &[0x3d, 0x9c], SuperFx::Reg("R12")),
+    ("LJMP", &[0x3d, 0x9d], SuperFx::Reg("R13")),
+    ("LM", &[0x3d, 0xf0], SuperFx::RegCommaParAddr16Ens("R0")),
+    ("LM", &[0x3d, 0xf1], SuperFx::RegCommaParAddr16Ens("R1")),
+    ("LM", &[0x3d, 0xf2], SuperFx::RegCommaParAddr16Ens("R2")),
+    ("LM", &[0x3d, 0xf3], SuperFx::RegCommaParAddr16Ens("R3")),
+    ("LM", &[0x3d, 0xf4], SuperFx::RegCommaParAddr16Ens("R4")),
+    ("LM", &[0x3d, 0xf5], SuperFx::RegCommaParAddr16Ens("R5")),
+    ("LM", &[0x3d, 0xf6], SuperFx::RegCommaParAddr16Ens("R6")),
+    ("LM", &[0x3d, 0xf7], SuperFx::RegCommaParAddr16Ens("R7")),
+    ("LM", &[0x3d, 0xf8], SuperFx::RegCommaParAddr16Ens("R8")),
+    ("LM", &[0x3d, 0xf9], SuperFx::RegCommaParAddr16Ens("R9")),
+    ("LM", &[0x3d, 0xfa], SuperFx::RegCommaParAddr16Ens("R10")),
+    ("LM", &[0x3d, 0xfb], SuperFx::RegCommaParAddr16Ens("R11")),
+    ("LM", &[0x3d, 0xfc], SuperFx::RegCommaParAddr16Ens("R12")),
+    ("LM", &[0x3d, 0xfd], SuperFx::RegCommaParAddr16Ens("R13")),
+    ("LM", &[0x3d, 0xfe], SuperFx::RegCommaParAddr16Ens("R14")),
+    ("LM", &[0x3d, 0xff], SuperFx::RegCommaParAddr16Ens("R15")),
+    ("LMS", &[0x3d, 0xa0], SuperFx::RegCommaParAddr8Ens("R0")),
+    ("LMS", &[0x3d, 0xa1], SuperFx::RegCommaParAddr8Ens("R1")),
+    ("LMS", &[0x3d, 0xa2], SuperFx::RegCommaParAddr8Ens("R2")),
+    ("LMS", &[0x3d, 0xa3], SuperFx::RegCommaParAddr8Ens("R3")),
+    ("LMS", &[0x3d, 0xa4], SuperFx::RegCommaParAddr8Ens("R4")),
+    ("LMS", &[0x3d, 0xa5], SuperFx::RegCommaParAddr8Ens("R5")),
+    ("LMS", &[0x3d, 0xa6], SuperFx::RegCommaParAddr8Ens("R6")),
+    ("LMS", &[0x3d, 0xa7], SuperFx::RegCommaParAddr8Ens("R7")),
+    ("LMS", &[0x3d, 0xa8], SuperFx::RegCommaParAddr8Ens("R8")),
+    ("LMS", &[0x3d, 0xa9], SuperFx::RegCommaParAddr8Ens("R9")),
+    ("LMS", &[0x3d, 0xaa], SuperFx::RegCommaParAddr8Ens("R10")),
+    ("LMS", &[0x3d, 0xab], SuperFx::RegCommaParAddr8Ens("R11")),
+    ("LMS", &[0x3d, 0xac], SuperFx::RegCommaParAddr8Ens("R12")),
+    ("LMS", &[0x3d, 0xad], SuperFx::RegCommaParAddr8Ens("R13")),
+    ("LMS", &[0x3d, 0xae], SuperFx::RegCommaParAddr8Ens("R14")),
+    ("LMS", &[0x3d, 0xaf], SuperFx::RegCommaParAddr8Ens("R15")),
+    ("LMULT", &[0x3d, 0x9f], SuperFx::Implied),
     ("LOB", &[0x9e], SuperFx::Implied),
     ("LOOP", &[0x3c], SuperFx::Implied),
     ("LSR", &[0x03], SuperFx::Implied),
     ("MERGE", &[0x70], SuperFx::Implied),
+    // TODO: MOVE instructions
+    // TODO: MOVES instructions
+    ("MULT", &[0x3e], SuperFx::PoundImm(0x80, 0, 15)),
     ("MULT", &[0x80], SuperFx::Reg("R0")),
     ("MULT", &[0x81], SuperFx::Reg("R1")),
     ("MULT", &[0x82], SuperFx::Reg("R2")),
@@ -187,6 +298,7 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("MULT", &[0x8f], SuperFx::Reg("R15")),
     ("NOP", &[0x01], SuperFx::Implied),
     ("NOT", &[0x4f], SuperFx::Implied),
+    ("OR", &[0x3e], SuperFx::PoundImm(0xc0, 1, 15)),
     ("OR", &[0xc1], SuperFx::Reg("R1")),
     ("OR", &[0xc2], SuperFx::Reg("R2")),
     ("OR", &[0xc3], SuperFx::Reg("R3")),
@@ -203,10 +315,73 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("OR", &[0xce], SuperFx::Reg("R14")),
     ("OR", &[0xcf], SuperFx::Reg("R15")),
     ("PLOT", &[0x4c], SuperFx::Implied),
+    ("RAMB", &[0x3e, 0xdf], SuperFx::Implied),
     ("ROL", &[0x04], SuperFx::Implied),
+    ("ROMB", &[0x3f, 0xdf], SuperFx::Implied),
     ("ROR", &[0x97], SuperFx::Implied),
+    ("RPIX", &[0x3d, 0x4c], SuperFx::Implied),
+    ("SBC", &[0x3d, 0x60], SuperFx::Reg("R0")),
+    ("SBC", &[0x3d, 0x61], SuperFx::Reg("R1")),
+    ("SBC", &[0x3d, 0x62], SuperFx::Reg("R2")),
+    ("SBC", &[0x3d, 0x63], SuperFx::Reg("R3")),
+    ("SBC", &[0x3d, 0x64], SuperFx::Reg("R4")),
+    ("SBC", &[0x3d, 0x65], SuperFx::Reg("R5")),
+    ("SBC", &[0x3d, 0x66], SuperFx::Reg("R6")),
+    ("SBC", &[0x3d, 0x67], SuperFx::Reg("R7")),
+    ("SBC", &[0x3d, 0x68], SuperFx::Reg("R8")),
+    ("SBC", &[0x3d, 0x69], SuperFx::Reg("R9")),
+    ("SBC", &[0x3d, 0x6a], SuperFx::Reg("R10")),
+    ("SBC", &[0x3d, 0x6b], SuperFx::Reg("R11")),
+    ("SBC", &[0x3d, 0x6c], SuperFx::Reg("R12")),
+    ("SBC", &[0x3d, 0x6d], SuperFx::Reg("R13")),
+    ("SBC", &[0x3d, 0x6e], SuperFx::Reg("R14")),
+    ("SBC", &[0x3d, 0x6f], SuperFx::Reg("R15")),
     ("SBK", &[0x90], SuperFx::Implied),
     ("SEX", &[0x95], SuperFx::Implied),
+    ("SM", &[0x3e, 0xf0], SuperFx::ParAddr16EnsCommaReg("R0")),
+    ("SM", &[0x3e, 0xf1], SuperFx::ParAddr16EnsCommaReg("R1")),
+    ("SM", &[0x3e, 0xf2], SuperFx::ParAddr16EnsCommaReg("R2")),
+    ("SM", &[0x3e, 0xf3], SuperFx::ParAddr16EnsCommaReg("R3")),
+    ("SM", &[0x3e, 0xf4], SuperFx::ParAddr16EnsCommaReg("R4")),
+    ("SM", &[0x3e, 0xf5], SuperFx::ParAddr16EnsCommaReg("R5")),
+    ("SM", &[0x3e, 0xf6], SuperFx::ParAddr16EnsCommaReg("R6")),
+    ("SM", &[0x3e, 0xf7], SuperFx::ParAddr16EnsCommaReg("R7")),
+    ("SM", &[0x3e, 0xf8], SuperFx::ParAddr16EnsCommaReg("R8")),
+    ("SM", &[0x3e, 0xf9], SuperFx::ParAddr16EnsCommaReg("R9")),
+    ("SM", &[0x3e, 0xfa], SuperFx::ParAddr16EnsCommaReg("R10")),
+    ("SM", &[0x3e, 0xfb], SuperFx::ParAddr16EnsCommaReg("R11")),
+    ("SM", &[0x3e, 0xfc], SuperFx::ParAddr16EnsCommaReg("R12")),
+    ("SM", &[0x3e, 0xfd], SuperFx::ParAddr16EnsCommaReg("R13")),
+    ("SM", &[0x3e, 0xfe], SuperFx::ParAddr16EnsCommaReg("R14")),
+    ("SM", &[0x3e, 0xff], SuperFx::ParAddr16EnsCommaReg("R15")),
+    ("SMS", &[0x3e, 0xa0], SuperFx::ParAddr8EnsCommaReg("R0")),
+    ("SMS", &[0x3e, 0xa1], SuperFx::ParAddr8EnsCommaReg("R1")),
+    ("SMS", &[0x3e, 0xa2], SuperFx::ParAddr8EnsCommaReg("R2")),
+    ("SMS", &[0x3e, 0xa3], SuperFx::ParAddr8EnsCommaReg("R3")),
+    ("SMS", &[0x3e, 0xa4], SuperFx::ParAddr8EnsCommaReg("R4")),
+    ("SMS", &[0x3e, 0xa5], SuperFx::ParAddr8EnsCommaReg("R5")),
+    ("SMS", &[0x3e, 0xa6], SuperFx::ParAddr8EnsCommaReg("R6")),
+    ("SMS", &[0x3e, 0xa7], SuperFx::ParAddr8EnsCommaReg("R7")),
+    ("SMS", &[0x3e, 0xa8], SuperFx::ParAddr8EnsCommaReg("R8")),
+    ("SMS", &[0x3e, 0xa9], SuperFx::ParAddr8EnsCommaReg("R9")),
+    ("SMS", &[0x3e, 0xaa], SuperFx::ParAddr8EnsCommaReg("R10")),
+    ("SMS", &[0x3e, 0xab], SuperFx::ParAddr8EnsCommaReg("R11")),
+    ("SMS", &[0x3e, 0xac], SuperFx::ParAddr8EnsCommaReg("R12")),
+    ("SMS", &[0x3e, 0xad], SuperFx::ParAddr8EnsCommaReg("R13")),
+    ("SMS", &[0x3e, 0xae], SuperFx::ParAddr8EnsCommaReg("R14")),
+    ("SMS", &[0x3e, 0xaf], SuperFx::ParAddr8EnsCommaReg("R15")),
+    ("STB", &[0x3d, 0x30], SuperFx::ParRegEns("R0")),
+    ("STB", &[0x3d, 0x31], SuperFx::ParRegEns("R1")),
+    ("STB", &[0x3d, 0x32], SuperFx::ParRegEns("R2")),
+    ("STB", &[0x3d, 0x33], SuperFx::ParRegEns("R3")),
+    ("STB", &[0x3d, 0x34], SuperFx::ParRegEns("R4")),
+    ("STB", &[0x3d, 0x35], SuperFx::ParRegEns("R5")),
+    ("STB", &[0x3d, 0x36], SuperFx::ParRegEns("R6")),
+    ("STB", &[0x3d, 0x37], SuperFx::ParRegEns("R7")),
+    ("STB", &[0x3d, 0x38], SuperFx::ParRegEns("R8")),
+    ("STB", &[0x3d, 0x39], SuperFx::ParRegEns("R9")),
+    ("STB", &[0x3d, 0x3a], SuperFx::ParRegEns("R10")),
+    ("STB", &[0x3d, 0x3b], SuperFx::ParRegEns("R11")),
     ("STOP", &[0x00], SuperFx::Implied),
     ("STW", &[0x30], SuperFx::ParRegEns("R0")),
     ("STW", &[0x31], SuperFx::ParRegEns("R1")),
@@ -220,6 +395,7 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("STW", &[0x39], SuperFx::ParRegEns("R9")),
     ("STW", &[0x3a], SuperFx::ParRegEns("R10")),
     ("STW", &[0x3b], SuperFx::ParRegEns("R11")),
+    ("SUB", &[0x3e], SuperFx::PoundImm(0x60, 0, 15)),
     ("SUB", &[0x60], SuperFx::Reg("R0")),
     ("SUB", &[0x61], SuperFx::Reg("R1")),
     ("SUB", &[0x62], SuperFx::Reg("R2")),
@@ -253,6 +429,23 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("TO", &[0x1d], SuperFx::Reg("R13")),
     ("TO", &[0x1e], SuperFx::Reg("R14")),
     ("TO", &[0x1f], SuperFx::Reg("R15")),
+    ("UMULT", &[0x3d, 0x80], SuperFx::Reg("R0")),
+    ("UMULT", &[0x3d, 0x81], SuperFx::Reg("R1")),
+    ("UMULT", &[0x3d, 0x82], SuperFx::Reg("R2")),
+    ("UMULT", &[0x3d, 0x83], SuperFx::Reg("R3")),
+    ("UMULT", &[0x3d, 0x84], SuperFx::Reg("R4")),
+    ("UMULT", &[0x3d, 0x85], SuperFx::Reg("R5")),
+    ("UMULT", &[0x3d, 0x86], SuperFx::Reg("R6")),
+    ("UMULT", &[0x3d, 0x87], SuperFx::Reg("R7")),
+    ("UMULT", &[0x3d, 0x88], SuperFx::Reg("R8")),
+    ("UMULT", &[0x3d, 0x89], SuperFx::Reg("R9")),
+    ("UMULT", &[0x3d, 0x8a], SuperFx::Reg("R10")),
+    ("UMULT", &[0x3d, 0x8b], SuperFx::Reg("R11")),
+    ("UMULT", &[0x3d, 0x8c], SuperFx::Reg("R12")),
+    ("UMULT", &[0x3d, 0x8d], SuperFx::Reg("R13")),
+    ("UMULT", &[0x3d, 0x8e], SuperFx::Reg("R14")),
+    ("UMULT", &[0x3d, 0x8f], SuperFx::Reg("R15")),
+    ("UMULT", &[0x3f], SuperFx::PoundImm(0x80, 0, 15)),
     ("WITH", &[0x20], SuperFx::Reg("R0")),
     ("WITH", &[0x21], SuperFx::Reg("R1")),
     ("WITH", &[0x22], SuperFx::Reg("R2")),
@@ -269,6 +462,22 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
     ("WITH", &[0x2d], SuperFx::Reg("R13")),
     ("WITH", &[0x2e], SuperFx::Reg("R14")),
     ("WITH", &[0x2f], SuperFx::Reg("R15")),
+    ("XOR", &[0x3d, 0xc1], SuperFx::Reg("R1")),
+    ("XOR", &[0x3d, 0xc2], SuperFx::Reg("R2")),
+    ("XOR", &[0x3d, 0xc3], SuperFx::Reg("R3")),
+    ("XOR", &[0x3d, 0xc4], SuperFx::Reg("R4")),
+    ("XOR", &[0x3d, 0xc5], SuperFx::Reg("R5")),
+    ("XOR", &[0x3d, 0xc6], SuperFx::Reg("R6")),
+    ("XOR", &[0x3d, 0xc7], SuperFx::Reg("R7")),
+    ("XOR", &[0x3d, 0xc8], SuperFx::Reg("R8")),
+    ("XOR", &[0x3d, 0xc9], SuperFx::Reg("R9")),
+    ("XOR", &[0x3d, 0xca], SuperFx::Reg("R10")),
+    ("XOR", &[0x3d, 0xcb], SuperFx::Reg("R11")),
+    ("XOR", &[0x3d, 0xcc], SuperFx::Reg("R12")),
+    ("XOR", &[0x3d, 0xcd], SuperFx::Reg("R13")),
+    ("XOR", &[0x3d, 0xce], SuperFx::Reg("R14")),
+    ("XOR", &[0x3d, 0xcf], SuperFx::Reg("R15")),
+    ("XOR", &[0x3f], SuperFx::PoundImm(0xc0, 1, 15)),
 ];
 
 //===========================================================================//
@@ -277,18 +486,26 @@ pub(super) const MACROS_SUPERFX: &[(&str, &[u8], SuperFx)] = &[
 pub(super) enum SuperFx {
     /// FOO
     Implied,
-    /// LINK #imm
-    LinkPoundImm,
     /// LINK addr
     LinkRelative,
+    /// FOO (addr), R1
+    ParAddr8EnsCommaReg(Reg),
+    /// FOO (addr), R1
+    ParAddr16EnsCommaReg(Reg),
     /// FOO (reg)
     ParRegEns(Reg),
+    /// FOO #imm  ; (base, min, max)
+    PoundImm(u8, u8, u8),
     /// FOO reg
     Reg(Reg),
     /// FOO R1, #imm
     RegCommaPoundImm8(Reg),
     /// FOO R1, #imm
     RegCommaPoundImm16(Reg),
+    /// FOO R1, (addr)
+    RegCommaParAddr8Ens(Reg),
+    /// FOO R1, (addr)
+    RegCommaParAddr16Ens(Reg),
     /// FOO addr
     Relative8,
 }
@@ -297,12 +514,20 @@ impl AddrMode for SuperFx {
     fn macro_args(&self, pool: &mut RcPool) -> Vec<AsmMacroArgAst> {
         match *self {
             Self::Implied => vec![],
-            Self::LinkPoundImm => vec![pound_imm_arg(pool)],
             Self::LinkRelative | Self::Relative8 => {
                 vec![addr_arg(pool)]
             }
+            Self::ParAddr8EnsCommaReg(reg)
+            | Self::ParAddr16EnsCommaReg(reg) => {
+                vec![par_addr_ens_arg(pool), reg_arg(pool, reg)]
+            }
             Self::ParRegEns(reg) => vec![par_reg_ens_arg(pool, reg)],
+            Self::PoundImm(_, _, _) => vec![pound_imm_arg(pool)],
             Self::Reg(reg) => vec![reg_arg(pool, reg)],
+            Self::RegCommaParAddr8Ens(reg)
+            | Self::RegCommaParAddr16Ens(reg) => {
+                vec![reg_arg(pool, reg), par_addr_ens_arg(pool)]
+            }
             Self::RegCommaPoundImm8(reg) | Self::RegCommaPoundImm16(reg) => {
                 vec![reg_arg(pool, reg), pound_imm_arg(pool)]
             }
@@ -318,8 +543,29 @@ impl AddrMode for SuperFx {
             Self::Implied | Self::ParRegEns(_) | Self::Reg(_) => {
                 vec![pool.constant_bytes_stmt(prefix_bytes)]
             }
-            Self::LinkPoundImm => link_pound_imm_body(pool, PLACEHOLDER_IMM),
-            Self::LinkRelative => link_relative_body(pool, PLACEHOLDER_ADDR),
+            Self::ParAddr8EnsCommaReg(_) | Self::RegCommaParAddr8Ens(_) => {
+                vec![
+                    pool.constant_bytes_stmt(prefix_bytes),
+                    superfx_short_addr_stmt(pool),
+                ]
+            }
+            Self::ParAddr16EnsCommaReg(_) | Self::RegCommaParAddr16Ens(_) => {
+                vec![
+                    pool.constant_bytes_stmt(prefix_bytes),
+                    pool.placeholder_a16le(PLACEHOLDER_ADDR),
+                ]
+            }
+            Self::PoundImm(base, min, max) => superfx_pound_imm_body(
+                pool,
+                prefix_bytes,
+                PLACEHOLDER_IMM,
+                base,
+                min,
+                max,
+            ),
+            Self::LinkRelative => {
+                superfx_link_relative_body(pool, PLACEHOLDER_ADDR)
+            }
             Self::RegCommaPoundImm8(_) => {
                 vec![
                     pool.constant_bytes_stmt(prefix_bytes),
@@ -342,39 +588,7 @@ impl AddrMode for SuperFx {
 
 //===========================================================================//
 
-fn link_pound_imm_body(
-    pool: &mut RcPool,
-    placeholder: &'static str,
-) -> Vec<AsmStmtAst> {
-    // TODO: use a let statement to only eval the placeholder expression once
-    let opcode_expr = {
-        let lhs = pool.int_literal_expr(0x90);
-        let rhs = {
-            let pred = {
-                let lhs = {
-                    let lhs = pool.placeholder_expr(placeholder);
-                    let rhs = pool.int_literal_expr(1);
-                    pool.binop_expr(BinOpAst::CmpGe, lhs, rhs)
-                };
-                let rhs = {
-                    let lhs = pool.placeholder_expr(placeholder);
-                    let rhs = pool.int_literal_expr(4);
-                    pool.binop_expr(BinOpAst::CmpLe, lhs, rhs)
-                };
-                pool.binop_expr(BinOpAst::LogicAnd, lhs, rhs)
-            };
-            let ok = pool.placeholder_expr(placeholder);
-            let err = pool.error_expr(
-                "LINK immediate value must be in the range [1, 4]",
-            );
-            pool.ternary_expr(pred, ok, err)
-        };
-        pool.binop_expr(BinOpAst::Add, lhs, rhs)
-    };
-    vec![pool.int_data_stmt(AsmIntType::U8, opcode_expr)]
-}
-
-fn link_relative_body(
+fn superfx_link_relative_body(
     pool: &mut RcPool,
     placeholder: &'static str,
 ) -> Vec<AsmStmtAst> {
@@ -385,6 +599,62 @@ fn link_relative_body(
         pool.binop_expr(BinOpAst::Add, lhs, rhs)
     };
     vec![pool.rel_addr_stmt(AsmRelType::R16Link, dest_expr, base_expr)]
+}
+
+fn superfx_pound_imm_body(
+    pool: &mut RcPool,
+    prefix_bytes: &[u8],
+    placeholder: &'static str,
+    base: u8,
+    min: u8,
+    max: u8,
+) -> Vec<AsmStmtAst> {
+    // TODO: use a let statement to only eval the placeholder expression once
+    let opcode_expr = {
+        let lhs = pool.int_literal_expr(i32::from(base));
+        let rhs = {
+            let pred = {
+                let lhs = {
+                    let lhs = pool.placeholder_expr(placeholder);
+                    let rhs = pool.int_literal_expr(i32::from(min));
+                    pool.binop_expr(BinOpAst::CmpGe, lhs, rhs)
+                };
+                let rhs = {
+                    let lhs = pool.placeholder_expr(placeholder);
+                    let rhs = pool.int_literal_expr(i32::from(max));
+                    pool.binop_expr(BinOpAst::CmpLe, lhs, rhs)
+                };
+                pool.binop_expr(BinOpAst::LogicAnd, lhs, rhs)
+            };
+            let ok = pool.placeholder_expr(placeholder);
+            let err = pool.error_expr("immediate value out of range");
+            pool.ternary_expr(pred, ok, err)
+        };
+        pool.binop_expr(BinOpAst::Add, lhs, rhs)
+    };
+    if prefix_bytes.is_empty() {
+        vec![pool.int_data_stmt(AsmIntType::U8, opcode_expr)]
+    } else {
+        vec![
+            pool.constant_bytes_stmt(prefix_bytes),
+            pool.int_data_stmt(AsmIntType::U8, opcode_expr),
+        ]
+    }
+}
+
+fn superfx_short_addr_stmt(pool: &mut RcPool) -> AsmStmtAst {
+    let short_expr = {
+        let arg = {
+            let lhs = {
+                let arg = pool.placeholder_expr(PLACEHOLDER_ADDR);
+                pool.unop_expr(UnOpAst::AddrOf, arg)
+            };
+            let rhs = pool.int_literal_expr(2);
+            pool.tuple_literal_expr(vec![lhs, rhs])
+        };
+        pool.apply_expr(ExprFunc::Divx, arg)
+    };
+    pool.int_data_stmt(AsmIntType::U8, short_expr)
 }
 
 //===========================================================================//

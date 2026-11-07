@@ -1,8 +1,9 @@
 use super::addrmode::{
     AddrMode, PLACEHOLDER_ADDR, PLACEHOLDER_IMM, PLACEHOLDER_IMM2, Reg,
-    addr_arg, bang_addr_arg, macro_arg, pound_imm_arg, reg_arg, token,
+    addr_arg, bang_addr_arg, macro_arg, par_addr_ens_arg, pound_imm_arg,
+    reg_arg, token,
 };
-use super::mos6502::{Mos6502, par_addr_ens_arg};
+use super::mos6502::Mos6502;
 use super::pool::RcPool;
 use crate::lex::TokenValue;
 use crate::parse::{

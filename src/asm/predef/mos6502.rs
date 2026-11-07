@@ -1,6 +1,6 @@
 use super::addrmode::{
     AddrMode, PLACEHOLDER_ADDR, PLACEHOLDER_IMM, Reg, addr_arg, bang_addr_arg,
-    macro_arg, pound_imm_arg, reg_arg, token,
+    macro_arg, par_addr_ens_arg, pound_imm_arg, reg_arg, token,
 };
 use super::pool::RcPool;
 use crate::lex::TokenValue;
@@ -269,14 +269,6 @@ fn par_addr_comma_reg_ens_arg(pool: &mut RcPool, reg: Reg) -> AsmMacroArgAst {
         pool.placeholder_token(PLACEHOLDER_ADDR),
         token(TokenValue::Comma),
         pool.identifier_token(reg),
-        token(TokenValue::ParenClose),
-    ])
-}
-
-pub(super) fn par_addr_ens_arg(pool: &mut RcPool) -> AsmMacroArgAst {
-    macro_arg(vec![
-        token(TokenValue::ParenOpen),
-        pool.placeholder_token(PLACEHOLDER_ADDR),
         token(TokenValue::ParenClose),
     ])
 }

@@ -251,6 +251,13 @@ impl RcPool {
         }
     }
 
+    pub fn tuple_literal_expr(&mut self, items: Vec<ExprAst>) -> ExprAst {
+        ExprAst {
+            span: SrcSpan::INTERNAL,
+            node: ExprAstNode::TupleLiteral(items),
+        }
+    }
+
     pub fn unop_expr(&mut self, op: UnOpAst, arg: ExprAst) -> ExprAst {
         ExprAst {
             span: SrcSpan::INTERNAL,
