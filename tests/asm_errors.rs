@@ -622,7 +622,7 @@ fn relative_address_type_error() {
             expr_type: ExprType::Boolean,
             ..
         },
-    ] if valid_types == &[ExprType::Integer, ExprType::Label]);
+    ] if valid_types == &[ExprType::Label]);
 }
 
 #[test]

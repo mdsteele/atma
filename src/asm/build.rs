@@ -845,24 +845,7 @@ impl<'a> Assembler<'a> {
             (expr, ExprType::Label, Ok(value)) => {
                 (Some(expr), Some(value.unwrap_label()))
             }
-            // TODO: should we remove this case?
-            (expr, ExprType::Integer, Ok(value)) => {
-                if let Some(chunk_env) = self.env.current_chunk() {
-                    let label = ExprLabel::ChunkAbsolute {
-                        chunk_index: chunk_env.chunk_index(),
-                        address: value.unwrap_int(),
-                        provenance: None,
-                    };
-                    (Some(expr), Some(label))
-                } else {
-                    (Some(expr), None)
-                }
-            }
-            (
-                expr,
-                ExprType::Bottom | ExprType::Integer | ExprType::Label,
-                Err(reason),
-            ) => {
+            (expr, ExprType::Bottom | ExprType::Label, Err(reason)) => {
                 errs.also(self.env.check_for_inevitable_eval_error(&reason));
                 (Some(expr), None)
             }
@@ -872,7 +855,7 @@ impl<'a> Assembler<'a> {
                     component,
                     expr_loc: self.env.make_loc(expr_span),
                     expr_type,
-                    valid_types: vec![ExprType::Integer, ExprType::Label],
+                    valid_types: vec![ExprType::Label],
                 });
                 (None, None)
             }
