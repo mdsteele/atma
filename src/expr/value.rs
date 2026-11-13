@@ -1,5 +1,5 @@
 use super::func::ExprFunc;
-use super::label::ExprLabel;
+use super::label::{ExprLabel, ExprSymbolProvenance};
 use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::{BigInt, BigUint};
 use std::fmt;
@@ -328,34 +328,39 @@ impl BinaryIo for ExprValue {
             TAG_LABEL_ADDR_ABS => {
                 let space = Rc::<str>::read_from(decoder)?;
                 let address = BigInt::read_from(decoder)?;
+                let provenance =
+                    Option::<ExprSymbolProvenance>::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::AddrAbsolute {
                     space,
                     address,
+                    provenance,
                 }))
             }
             TAG_LABEL_CHUNK_ABS => {
                 let chunk_index = usize::read_from(decoder)?;
                 let address = BigInt::read_from(decoder)?;
+                let provenance =
+                    Option::<ExprSymbolProvenance>::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::ChunkAbsolute {
                     chunk_index,
                     address,
+                    provenance,
                 }))
             }
             TAG_LABEL_CHUNK_REL => {
                 let chunk_index = usize::read_from(decoder)?;
                 let offset = BigInt::read_from(decoder)?;
+                let provenance =
+                    Option::<ExprSymbolProvenance>::read_from(decoder)?;
                 Ok(ExprValue::Label(ExprLabel::ChunkRelative {
                     chunk_index,
                     offset,
+                    provenance,
                 }))
             }
             TAG_LABEL_SYMBOL_REL => {
-                let name = Rc::<str>::read_from(decoder)?;
-                let offset = BigInt::read_from(decoder)?;
-                Ok(ExprValue::Label(ExprLabel::SymbolRelative {
-                    name,
-                    offset,
-                }))
+                let provenance = ExprSymbolProvenance::read_from(decoder)?;
+                Ok(ExprValue::Label(ExprLabel::SymbolRelative { provenance }))
             }
             TAG_LIST => {
                 Ok(ExprValue::List(Rc::<[ExprValue]>::read_from(decoder)?))
@@ -392,31 +397,39 @@ impl BinaryIo for ExprValue {
                 TAG_INTEGER.write_to(encoder)?;
                 integer.write_to(encoder)
             }
-            ExprValue::Label(ExprLabel::AddrAbsolute { space, address }) => {
+            ExprValue::Label(ExprLabel::AddrAbsolute {
+                space,
+                address,
+                provenance,
+            }) => {
                 TAG_LABEL_ADDR_ABS.write_to(encoder)?;
                 space.write_to(encoder)?;
-                address.write_to(encoder)
+                address.write_to(encoder)?;
+                provenance.write_to(encoder)
             }
             ExprValue::Label(ExprLabel::ChunkAbsolute {
                 chunk_index,
                 address,
+                provenance,
             }) => {
                 TAG_LABEL_CHUNK_ABS.write_to(encoder)?;
                 chunk_index.write_to(encoder)?;
-                address.write_to(encoder)
+                address.write_to(encoder)?;
+                provenance.write_to(encoder)
             }
             ExprValue::Label(ExprLabel::ChunkRelative {
                 chunk_index,
                 offset,
+                provenance,
             }) => {
                 TAG_LABEL_CHUNK_REL.write_to(encoder)?;
                 chunk_index.write_to(encoder)?;
-                offset.write_to(encoder)
+                offset.write_to(encoder)?;
+                provenance.write_to(encoder)
             }
-            ExprValue::Label(ExprLabel::SymbolRelative { name, offset }) => {
+            ExprValue::Label(ExprLabel::SymbolRelative { provenance }) => {
                 TAG_LABEL_SYMBOL_REL.write_to(encoder)?;
-                name.write_to(encoder)?;
-                offset.write_to(encoder)
+                provenance.write_to(encoder)
             }
             ExprValue::List(list) => {
                 TAG_LIST.write_to(encoder)?;
@@ -518,7 +531,7 @@ fn comma_separate<T: fmt::Display>(
 
 #[cfg(test)]
 mod tests {
-    use super::{ExprLabel, ExprType, ExprValue};
+    use super::{ExprLabel, ExprSymbolProvenance, ExprType, ExprValue};
     use crate::obj::assert_round_trips;
     use num_bigint::BigInt;
     use std::rc::Rc;
@@ -619,8 +632,10 @@ mod tests {
     #[test]
     fn display_label_value() {
         let value = ExprValue::Label(ExprLabel::SymbolRelative {
-            name: Rc::from("Foo"),
-            offset: BigInt::from(0x20u32),
+            provenance: ExprSymbolProvenance {
+                symbol_name: Rc::from("Foo"),
+                offset: BigInt::from(0x20u32),
+            },
         });
         assert_eq!(value.to_string(), "Foo + $20");
     }

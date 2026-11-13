@@ -1,5 +1,7 @@
+use crate::obj::{BinaryIo, Decoder, Encoder};
 use num_bigint::{BigInt, Sign};
 use std::fmt;
+use std::io;
 use std::ops;
 use std::rc::Rc;
 
@@ -14,7 +16,11 @@ pub enum ExprLabel {
         space: Rc<str>,
         /// The memory address.
         address: BigInt,
-        // TODO: add optional symbol provenance
+        /// The symbol, plus offset, associated with this reference, if any.
+        /// This will be `None` if this reference has no association with any
+        /// symbol (e.g. if it was promoted from a `ChunkRelative` or
+        /// `ChunkAbsolute` reference that had no symbol provenance).
+        provenance: Option<ExprSymbolProvenance>,
     },
     /// A reference to an absolute address in the address space of a given
     /// chunk in the current object file.
@@ -23,7 +29,11 @@ pub enum ExprLabel {
         chunk_index: usize,
         /// The memory address.
         address: BigInt,
-        // TODO: add optional symbol provenance
+        /// The symbol, plus offset, associated with this reference, if any.
+        /// This will be `None` if this reference has no association with any
+        /// symbol (e.g. if it was created from a raw address via a unary `*`
+        /// operator).
+        provenance: Option<ExprSymbolProvenance>,
     },
     /// A reference to a memory location relative to the start of a given chunk
     /// in the current object file.
@@ -32,43 +42,71 @@ pub enum ExprLabel {
         chunk_index: usize,
         /// The byte offset from the start of the chunk.
         offset: BigInt,
-        // TODO: add optional symbol provenance
+        /// The symbol, plus offset, associated with this reference, if any.
+        /// This will be `None` if this reference has no association with any
+        /// symbol (e.g. if it's a `$<` reference).
+        provenance: Option<ExprSymbolProvenance>,
     },
     /// A reference to a memory location relative to a declared symbol.
     SymbolRelative {
-        /// The fully-qualified name of the symbol.
-        name: Rc<str>,
-        /// The byte offset from the symbol's address.
-        offset: BigInt,
+        /// The symbol, plus offset, associated with this reference.
+        provenance: ExprSymbolProvenance,
     },
 }
 
 impl ExprLabel {
+    /// Returns the symbol provenance, if any, for this label.
+    pub fn provenance(&self) -> Option<&ExprSymbolProvenance> {
+        match self {
+            Self::AddrAbsolute { provenance, .. } => provenance.as_ref(),
+            Self::ChunkAbsolute { provenance, .. } => provenance.as_ref(),
+            Self::ChunkRelative { provenance, .. } => provenance.as_ref(),
+            Self::SymbolRelative { provenance } => Some(provenance),
+        }
+    }
+
     pub(crate) fn into_absolute_address(self) -> Option<BigInt> {
         match self {
-            ExprLabel::AddrAbsolute { address, .. }
-            | ExprLabel::ChunkAbsolute { address, .. } => Some(address),
-            ExprLabel::ChunkRelative { .. }
-            | ExprLabel::SymbolRelative { .. } => None,
+            Self::AddrAbsolute { address, .. }
+            | Self::ChunkAbsolute { address, .. } => Some(address),
+            Self::ChunkRelative { .. } | Self::SymbolRelative { .. } => None,
         }
     }
 
     pub(crate) fn map_absolute_address<F>(self, func: F) -> Option<Self>
     where
-        F: FnOnce(BigInt) -> BigInt,
+        F: FnOnce(&BigInt) -> BigInt,
     {
         match self {
-            ExprLabel::AddrAbsolute { space, address } => {
-                Some(ExprLabel::AddrAbsolute { space, address: func(address) })
-            }
-            ExprLabel::ChunkAbsolute { chunk_index, address } => {
-                Some(ExprLabel::ChunkAbsolute {
-                    chunk_index,
-                    address: func(address),
+            Self::AddrAbsolute {
+                space,
+                address: old_addr,
+                provenance: old_prov,
+            } => {
+                let new_addr = func(&old_addr);
+                let new_prov =
+                    old_prov.map(|prov| prov + (&new_addr - &old_addr));
+                Some(Self::AddrAbsolute {
+                    space,
+                    address: new_addr,
+                    provenance: new_prov,
                 })
             }
-            ExprLabel::ChunkRelative { .. }
-            | ExprLabel::SymbolRelative { .. } => None,
+            Self::ChunkAbsolute {
+                chunk_index,
+                address: old_addr,
+                provenance: old_prov,
+            } => {
+                let new_addr = func(&old_addr);
+                let new_prov =
+                    old_prov.map(|prov| prov + (&new_addr - &old_addr));
+                Some(Self::ChunkAbsolute {
+                    chunk_index,
+                    address: new_addr,
+                    provenance: new_prov,
+                })
+            }
+            Self::ChunkRelative { .. } | Self::SymbolRelative { .. } => None,
         }
     }
 
@@ -78,13 +116,15 @@ impl ExprLabel {
     ) -> Result<BigInt, SubtractLabelsError> {
         match (self, rhs) {
             (
-                ExprLabel::AddrAbsolute {
+                Self::AddrAbsolute {
                     space: lhs_space,
                     address: lhs_addr,
+                    provenance: _,
                 },
-                ExprLabel::AddrAbsolute {
+                Self::AddrAbsolute {
                     space: rhs_space,
                     address: rhs_addr,
+                    provenance: _,
                 },
             ) => {
                 if lhs_space != rhs_space {
@@ -97,36 +137,37 @@ impl ExprLabel {
                 }
             }
             (
-                ExprLabel::ChunkAbsolute {
+                Self::ChunkAbsolute {
                     chunk_index: lhs_index,
                     address: lhs_addr,
+                    provenance: _,
                 },
-                ExprLabel::ChunkAbsolute {
+                Self::ChunkAbsolute {
                     chunk_index: rhs_index,
                     address: rhs_addr,
+                    provenance: _,
                 },
             ) if lhs_index == rhs_index => Ok(lhs_addr - rhs_addr),
             (
-                ExprLabel::ChunkRelative {
+                Self::ChunkRelative {
                     chunk_index: lhs_index,
                     offset: lhs_offset,
+                    provenance: _,
                 },
-                ExprLabel::ChunkRelative {
+                Self::ChunkRelative {
                     chunk_index: rhs_index,
                     offset: rhs_offset,
+                    provenance: _,
                 },
             ) if lhs_index == rhs_index => Ok(lhs_offset - rhs_offset),
-            (
-                ExprLabel::SymbolRelative {
-                    name: lhs_name,
-                    offset: lhs_offset,
-                },
-                ExprLabel::SymbolRelative {
-                    name: rhs_name,
-                    offset: rhs_offset,
-                },
-            ) if lhs_name == rhs_name => Ok(lhs_offset - rhs_offset),
-            _ => Err(SubtractLabelsError::Unresolved),
+            (lhs, rhs) => match (lhs.provenance(), rhs.provenance()) {
+                (Some(lhs_prov), Some(rhs_prov))
+                    if lhs_prov.symbol_name == rhs_prov.symbol_name =>
+                {
+                    Ok(&lhs_prov.offset - &rhs_prov.offset)
+                }
+                _ => Err(SubtractLabelsError::Unresolved),
+            },
         }
     }
 }
@@ -134,27 +175,32 @@ impl ExprLabel {
 impl fmt::Display for ExprLabel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExprLabel::AddrAbsolute { space, address } => {
-                write!(f, "{space} ${address:x}")
+            Self::AddrAbsolute { space, address, provenance } => {
+                write!(f, "{space} ${address:x}")?;
+                if let Some(prov) = provenance {
+                    write!(f, " ({prov})")?;
+                }
+                Ok(())
             }
-            ExprLabel::ChunkAbsolute { chunk_index, address } => {
-                write!(f, "Chunk#{chunk_index} ${address:x}")
+            Self::ChunkAbsolute { chunk_index, address, provenance } => {
+                write!(f, "Chunk#{chunk_index} ${address:x}")?;
+                if let Some(prov) = provenance {
+                    write!(f, " ({prov})")?;
+                }
+                Ok(())
             }
-            ExprLabel::ChunkRelative { chunk_index, offset } => {
+            Self::ChunkRelative { chunk_index, offset, provenance } => {
                 write!(f, "Chunk#{chunk_index}")?;
                 match offset.sign() {
-                    Sign::Plus | Sign::NoSign => write!(f, " + ${offset:x}"),
-                    Sign::Minus => write!(f, " - ${:x}", offset.magnitude()),
+                    Sign::Plus | Sign::NoSign => write!(f, " + ${offset:x}")?,
+                    Sign::Minus => write!(f, " - ${:x}", offset.magnitude())?,
                 }
-            }
-            ExprLabel::SymbolRelative { name, offset } => {
-                f.write_str(name)?;
-                match offset.sign() {
-                    Sign::Plus => write!(f, " + ${:x}", offset.magnitude()),
-                    Sign::Minus => write!(f, " - ${:x}", offset.magnitude()),
-                    Sign::NoSign => Ok(()),
+                if let Some(prov) = provenance {
+                    write!(f, " ({prov})")?;
                 }
+                Ok(())
             }
+            Self::SymbolRelative { provenance } => provenance.fmt(f),
         }
     }
 }
@@ -164,17 +210,32 @@ impl ops::Add<BigInt> for ExprLabel {
 
     fn add(self, rhs: BigInt) -> Self {
         match self {
-            Self::AddrAbsolute { space, address } => {
-                Self::AddrAbsolute { space, address: address + rhs }
+            Self::AddrAbsolute { space, mut address, provenance } => {
+                address += &rhs;
+                Self::AddrAbsolute {
+                    space,
+                    address,
+                    provenance: provenance.map(|p| p + rhs),
+                }
             }
-            Self::ChunkAbsolute { chunk_index, address } => {
-                Self::ChunkAbsolute { chunk_index, address: address + rhs }
+            Self::ChunkAbsolute { chunk_index, mut address, provenance } => {
+                address += &rhs;
+                Self::ChunkAbsolute {
+                    chunk_index,
+                    address,
+                    provenance: provenance.map(|p| p + rhs),
+                }
             }
-            Self::ChunkRelative { chunk_index, offset } => {
-                Self::ChunkRelative { chunk_index, offset: offset + rhs }
+            Self::ChunkRelative { chunk_index, mut offset, provenance } => {
+                offset += &rhs;
+                Self::ChunkRelative {
+                    chunk_index,
+                    offset,
+                    provenance: provenance.map(|p| p + rhs),
+                }
             }
-            Self::SymbolRelative { name, offset } => {
-                Self::SymbolRelative { name, offset: offset + rhs }
+            Self::SymbolRelative { provenance } => {
+                Self::SymbolRelative { provenance: provenance + rhs }
             }
         }
     }
@@ -185,6 +246,64 @@ impl ops::Sub<BigInt> for ExprLabel {
 
     fn sub(self, rhs: BigInt) -> Self {
         self + (-rhs)
+    }
+}
+
+//===========================================================================//
+
+/// Information about a memory location that is associated with a specific
+/// symbol.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct ExprSymbolProvenance {
+    /// The fully-qualified name of the symbol.
+    pub symbol_name: Rc<str>,
+    /// The byte offset from the symbol's address.
+    pub offset: BigInt,
+}
+
+impl fmt::Display for ExprSymbolProvenance {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.symbol_name)?;
+        match self.offset.sign() {
+            Sign::Plus => write!(f, " + ${:x}", self.offset.magnitude()),
+            Sign::Minus => write!(f, " - ${:x}", self.offset.magnitude()),
+            Sign::NoSign => Ok(()),
+        }
+    }
+}
+
+impl ops::Add<BigInt> for ExprSymbolProvenance {
+    type Output = Self;
+
+    fn add(mut self, rhs: BigInt) -> Self {
+        self.offset += rhs;
+        self
+    }
+}
+
+impl ops::Sub<BigInt> for ExprSymbolProvenance {
+    type Output = Self;
+
+    fn sub(self, rhs: BigInt) -> Self {
+        self + (-rhs)
+    }
+}
+
+impl BinaryIo for ExprSymbolProvenance {
+    fn read_from<R: io::BufRead>(
+        decoder: &mut Decoder<R>,
+    ) -> io::Result<Self> {
+        let symbol_name = Rc::<str>::read_from(decoder)?;
+        let offset = BigInt::read_from(decoder)?;
+        Ok(Self { symbol_name, offset })
+    }
+
+    fn write_to<W: io::Write>(
+        &self,
+        encoder: &mut Encoder<W>,
+    ) -> io::Result<()> {
+        self.symbol_name.write_to(encoder)?;
+        self.offset.write_to(encoder)
     }
 }
 

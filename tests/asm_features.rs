@@ -223,6 +223,33 @@ fn static_here_address() {
 }
 
 #[test]
+fn static_label_address() {
+    let source = r#"\
+    .SECTION "TEST", start=$10
+        .u8 1
+    Foo:
+        .u8 2
+        .a8 Foo
+    .END
+    "#;
+    assert_eq!(static_data(assemble(source)), vec![vec![0x01, 0x02, 0x11]]);
+}
+
+#[test]
+fn static_label_delta() {
+    let source = r#"\
+    .SECTION "TEST", start=$10
+    .LET Bar = Foo + 3
+        .u8 1
+    Foo:
+        .u8 2
+        .u8 Bar - Foo
+    .END
+    "#;
+    assert_eq!(static_data(assemble(source)), vec![vec![0x01, 0x02, 0x03]]);
+}
+
+#[test]
 fn string_data() {
     let source = r#"\
     .SECTION "TEST", fill=$ab

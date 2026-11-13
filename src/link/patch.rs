@@ -1,7 +1,7 @@
 use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::positioned::{PositionedBinary, PositionedSymbol};
-use super::types::{AbsoluteLabel, ChunkMetadata};
+use super::types::{AbsoluteAddr, ChunkMetadata, ResolvedLabel};
 use crate::addr::BitWidth;
 use crate::error::Errs;
 use crate::expr::{ExprType, ExprValue};
@@ -61,8 +61,7 @@ impl PatchedFile {
         internal_symbols: &HashMap<Rc<str>, PositionedSymbol>,
     ) -> LinkResult<PatchedFile> {
         let mut errs = Errs::<LinkError>::new();
-        let mut symbol_addrs =
-            HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
+        let mut symbol_addrs = HashMap::<Rc<str>, Option<AbsoluteAddr>>::new();
         for import in object_file.imports {
             let opt_absolute_label = external_symbols
                 .get(&import.full_name)
@@ -130,7 +129,7 @@ impl<'a> FilePatcher<'a> {
     pub fn new(
         chunk_metadata: &'a [ChunkMetadata],
         address_space_widths: &'a HashMap<Rc<str>, BitWidth>,
-        symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
+        symbol_addrs: HashMap<Rc<str>, Option<AbsoluteAddr>>,
     ) -> FilePatcher<'a> {
         FilePatcher {
             context: LinkSymbolContext {
@@ -209,18 +208,18 @@ impl<'a> FilePatcher<'a> {
         data: &mut [u8],
     ) -> LinkResult<()> {
         let bigint = if int_type.is_address() {
-            let absolute = self.eval_addr_expr(&expr)?;
+            let resolved = self.eval_addr_expr(&expr)?;
             let metadata = &self.context.chunk_metadata[chunk_index];
-            if absolute.space.name != metadata.start.space.name {
+            if resolved.absolute.space.name != metadata.start.space.name {
                 return Err(Errs::one(LinkError::LabelInWrongAddressSpace {
                     expr_loc: expr.loc,
-                    actual_address: absolute.address,
-                    address_width: absolute.space.bit_width,
-                    actual_space: absolute.space.name,
+                    actual_address: resolved.absolute.address,
+                    address_width: resolved.absolute.space.bit_width,
+                    actual_space: resolved.absolute.space.name,
                     required_space: metadata.start.space.name.clone(),
                 }));
             }
-            BigInt::from(absolute.address)
+            BigInt::from(resolved.absolute.address)
         } else {
             self.eval_int_expr(&expr)?
         };
@@ -239,7 +238,7 @@ impl<'a> FilePatcher<'a> {
         let lhs = errs.ok(self.eval_addr_expr(&lhs_expr));
         let rhs = errs.ok(self.eval_addr_expr(&rhs_expr));
         if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
-            if lhs.space.name != rhs.space.name {
+            if lhs.absolute.space.name != rhs.absolute.space.name {
                 errs.push(LinkError::Misc);
             } else {
                 errs.also(write_rel_patch(rel_type, lhs, rhs, start, data))
@@ -248,7 +247,7 @@ impl<'a> FilePatcher<'a> {
         errs.result()
     }
 
-    fn eval_addr_expr(&self, expr: &ObjExpr) -> LinkResult<AbsoluteLabel> {
+    fn eval_addr_expr(&self, expr: &ObjExpr) -> LinkResult<ResolvedLabel> {
         match self.eval_patch_expr(expr)? {
             ExprValue::Label(label) => self.context.resolve_label(&label),
             expr_value => Err(Errs::one(LinkError::PatchValueWrongType {
@@ -310,12 +309,13 @@ fn write_int_patch(
 
 fn write_rel_patch(
     rel_type: ObjPatchRelType,
-    lhs: AbsoluteLabel,
-    rhs: AbsoluteLabel,
+    lhs: ResolvedLabel,
+    rhs: ResolvedLabel,
     offset: usize,
     data: &mut [u8],
 ) -> LinkResult<()> {
-    let delta = BigInt::from(lhs.address) - BigInt::from(rhs.address);
+    let delta = BigInt::from(lhs.absolute.address)
+        - BigInt::from(rhs.absolute.address);
     match rel_type.delta_value_in_range(&delta) {
         Ok(delta) => {
             rel_type.write_delta_at(delta, offset, data);

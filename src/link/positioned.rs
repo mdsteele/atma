@@ -2,7 +2,7 @@ use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::config::{LinkConfig, RegionKind};
 use super::error::{LinkError, LinkResult};
 use super::place::try_place;
-use super::types::{AbsoluteLabel, AddressSpace, ChunkId, ChunkMetadata};
+use super::types::{AbsoluteAddr, AddressSpace, ChunkId, ChunkMetadata};
 use crate::addr::{Addr, BitWidth, Size};
 use crate::error::Errs;
 use crate::obj::{ObjFile, ObjSrcLoc};
@@ -16,7 +16,7 @@ use std::rc::Rc;
 /// Represents a symbol that has been positioned within its address space.
 pub(super) struct PositionedSymbol {
     /// The absolute address of the symbol.
-    pub absolute: AbsoluteLabel,
+    pub absolute: AbsoluteAddr,
     /// The source code location where the symbol name is declared.
     pub name_loc: ObjSrcLoc,
     /// The byte offset into the final binary for the symbol, or `None` if the
@@ -322,7 +322,7 @@ impl PositionedBinary {
                 let chunk_start = metadata.start.clone();
                 for symbol in chunk.symbols.iter() {
                     let positioned_symbol = PositionedSymbol {
-                        absolute: AbsoluteLabel {
+                        absolute: AbsoluteAddr {
                             space: chunk_start.space.clone(),
                             address: chunk_start.address + symbol.offset,
                         },
@@ -388,7 +388,7 @@ impl PositionedBinary {
                 for chunk in &section.chunks {
                     chunk_metadata.entry(chunk.id).or_insert_with(|| {
                         ChunkMetadata {
-                            start: AbsoluteLabel {
+                            start: AbsoluteAddr {
                                 space: region.space.clone(),
                                 address: chunk.start,
                             },
@@ -407,7 +407,7 @@ impl PositionedBinary {
         &mut self,
         name: &Rc<str>,
         name_loc: &ObjSrcLoc,
-        absolute: AbsoluteLabel,
+        absolute: AbsoluteAddr,
     ) -> LinkResult<()> {
         let collision = self.external_symbols.insert(
             name.clone(),

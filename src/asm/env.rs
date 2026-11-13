@@ -5,8 +5,8 @@ use crate::addr::{Addr, Offset, Size};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
-    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
-    make_global_builtin_values,
+    ExprStatic, ExprSymbolProvenance, ExprType, ExprTypeError, ExprTypeResult,
+    ExprUnOp, ExprValue, make_global_builtin_values,
 };
 use crate::obj::{
     ObjExpr, ObjExprOp, ObjPatch, ObjPatchData, ObjSrcContext, ObjSrcLoc,
@@ -186,8 +186,10 @@ impl AsmTypeEnv {
 
     fn declare_symbol(&mut self, id_ast: &IdentifierAst) -> AsmResult<()> {
         let label = ExprLabel::SymbolRelative {
-            name: self.current_scope().prefixed(&id_ast.name),
-            offset: BigInt::ZERO,
+            provenance: ExprSymbolProvenance {
+                symbol_name: self.current_scope().prefixed(&id_ast.name),
+                offset: BigInt::ZERO,
+            },
         };
         let value = AsmDeclValue::Static(ExprValue::Label(label));
         self.declare_fixed_value(id_ast, ExprType::Label, value)
@@ -330,13 +332,29 @@ impl AsmTypeEnv {
 
     pub fn append_chunk_symbol(
         &mut self,
-        name: Rc<str>,
-        loc: ObjSrcLoc,
+        id: IdentifierAst,
         exported: bool,
     ) -> AsmResult<()> {
+        let loc = self.make_loc(id.span);
         if let Some(chunk_env) = self.chunk_stack.last_mut() {
             // TODO: handle overflow
             let offset = Offset::try_from(chunk_env.total_size()).unwrap();
+            // Now that we know this symbol's chunk-relative address (or
+            // chunk-absolute, if we know the chunk's start address), refine
+            // its definition in the type environment from symbol-relative and
+            // apply symbol provenance.  This will allow more calculations to
+            // be static.
+            let scope = self.scope_stack.last_mut().unwrap();
+            let name = scope.prefixed(&id.name);
+            let decl = scope.decls.get_mut(&id.name).unwrap();
+            debug_assert_eq!(decl.kind, AsmDeclKind::Fixed);
+            debug_assert_eq!(decl.expr_type, ExprType::Label);
+            let provenance = ExprSymbolProvenance {
+                symbol_name: name.clone(),
+                offset: BigInt::ZERO,
+            };
+            let label = chunk_env.label_at_offset(offset, Some(provenance));
+            decl.value = AsmDeclValue::Static(ExprValue::Label(label));
             chunk_env.symbols.push(ObjSymbol { name, loc, exported, offset });
         }
         Ok(())
@@ -347,7 +365,7 @@ impl AsmTypeEnv {
             let exported = false;
             // TODO: handle overflow
             let offset = Offset::try_from(chunk_env.total_size()).unwrap();
-            let label = chunk_env.label_at_offset(offset);
+            let label = chunk_env.label_at_offset(offset, None);
             let scope_env = self.scope_stack.last_mut().unwrap();
             let name = scope_env.expand_anonymous_label(label);
             chunk_env.symbols.push(ObjSymbol { name, loc, exported, offset });
@@ -626,11 +644,11 @@ impl ExprEnv for AsmTypeEnv {
                     // TODO: handle overflow
                     let offset =
                         Offset::try_from(chunk_env.total_size()).unwrap();
-                    chunk_env.label_at_offset(offset)
+                    chunk_env.label_at_offset(offset, None)
                 }
                 HereLabelKind::ZoneStart => {
                     let offset = chunk_env.current_zone().start_offset;
-                    chunk_env.label_at_offset(offset)
+                    chunk_env.label_at_offset(offset, None)
                 }
             };
             let value = ExprValue::Label(label);
@@ -738,7 +756,11 @@ impl ExprEnv for AsmTypeEnv {
     ) -> ExprTypeResult<ExprLabel> {
         if let Some(chunk_env) = self.current_chunk() {
             let chunk_index = chunk_env.chunk_index();
-            Ok(ExprLabel::ChunkAbsolute { chunk_index, address })
+            Ok(ExprLabel::ChunkAbsolute {
+                chunk_index,
+                address,
+                provenance: None,
+            })
         } else {
             Err(Errs::one(ExprTypeError::WithAddrOutsideOfAnyAddrSpace {
                 op_span,
@@ -791,16 +813,22 @@ impl ChunkEnv {
         &self.zone_stack.last().unwrap().settings
     }
 
-    fn label_at_offset(&self, offset: Offset) -> ExprLabel {
+    fn label_at_offset(
+        &self,
+        offset: Offset,
+        provenance: Option<ExprSymbolProvenance>,
+    ) -> ExprLabel {
         if let Some(start) = self.start_addr {
             ExprLabel::ChunkAbsolute {
                 chunk_index: self.chunk_index,
                 address: BigInt::from(start) + BigInt::from(offset),
+                provenance,
             }
         } else {
             ExprLabel::ChunkRelative {
                 chunk_index: self.chunk_index,
                 offset: BigInt::from(offset),
+                provenance,
             }
         }
     }
@@ -1037,8 +1065,13 @@ impl AsmScopeEnv {
 
     fn declare_anonymous_label(&mut self) {
         let index = self.anonymous_labels.len();
-        let name = self.anonymous_label_full_name(index);
-        let label = ExprLabel::SymbolRelative { name, offset: BigInt::ZERO };
+        let symbol_name = self.anonymous_label_full_name(index);
+        let label = ExprLabel::SymbolRelative {
+            provenance: ExprSymbolProvenance {
+                symbol_name,
+                offset: BigInt::ZERO,
+            },
+        };
         self.anonymous_labels.push(label);
     }
 
@@ -1170,7 +1203,7 @@ struct AsmDecl {
 
 //===========================================================================//
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AsmDeclKind {
     /// A declaration that cannot be rebound or mutated.
     Fixed,

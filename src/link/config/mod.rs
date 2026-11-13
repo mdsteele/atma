@@ -11,7 +11,7 @@ use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::patch::PatchedFile;
 use super::positioned::PositionedBinary;
-use super::types::{AbsoluteLabel, AddressSpace};
+use super::types::{AbsoluteAddr, AddressSpace};
 use crate::addr::{Addr, Align, BitWidth, Range, Size};
 use crate::error::{Errs, SrcCache};
 use crate::expr::ExprValue;
@@ -104,10 +104,9 @@ impl LinkConfig {
     fn resolve_imports(
         &self,
         positioned_binary: &PositionedBinary,
-    ) -> (HashMap<Rc<str>, Option<AbsoluteLabel>>, Errs<LinkError>) {
+    ) -> (HashMap<Rc<str>, Option<AbsoluteAddr>>, Errs<LinkError>) {
         let mut errs = Errs::<LinkError>::new();
-        let mut symbol_addrs =
-            HashMap::<Rc<str>, Option<AbsoluteLabel>>::new();
+        let mut symbol_addrs = HashMap::<Rc<str>, Option<AbsoluteAddr>>::new();
         for import in &self.imports {
             let opt_absolute_label = positioned_binary
                 .external_symbols
@@ -126,7 +125,7 @@ impl LinkConfig {
 
     fn evaluate_variables(
         &self,
-        symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
+        symbol_addrs: HashMap<Rc<str>, Option<AbsoluteAddr>>,
         positioned_binary: &PositionedBinary,
         eval_env: &mut LinkEvalEnv,
     ) -> LinkResult<()> {
@@ -155,7 +154,7 @@ impl LinkConfig {
                     message: Rc::from("link export addr is not an integer"),
                 })),
             })?;
-        let absolute = AbsoluteLabel {
+        let absolute = AbsoluteAddr {
             space: AddressSpace {
                 name: export.space.clone(),
                 bit_width: positioned_binary.address_space_widths

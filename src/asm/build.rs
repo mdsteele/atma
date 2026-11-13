@@ -503,15 +503,13 @@ impl<'a> Assembler<'a> {
                 Ok(())
             }
             AsmLabelAst::Named { exported, id } => {
-                let full_name = self.env.current_scope().prefixed(&id.name);
-                let loc = self.env.make_loc(id.span);
                 if self.env.current_chunk().is_none() {
                     return Err(Errs::one(AsmError::DirectiveNotInSection {
                         directive: "label",
-                        loc,
+                        loc: self.env.make_loc(id.span),
                     }));
                 };
-                self.env.append_chunk_symbol(full_name, loc, exported)
+                self.env.append_chunk_symbol(id, exported)
             }
         }
     }
@@ -847,11 +845,13 @@ impl<'a> Assembler<'a> {
             (expr, ExprType::Label, Ok(value)) => {
                 (Some(expr), Some(value.unwrap_label()))
             }
+            // TODO: should we remove this case?
             (expr, ExprType::Integer, Ok(value)) => {
                 if let Some(chunk_env) = self.env.current_chunk() {
                     let label = ExprLabel::ChunkAbsolute {
                         chunk_index: chunk_env.chunk_index(),
                         address: value.unwrap_int(),
+                        provenance: None,
                     };
                     (Some(expr), Some(label))
                 } else {

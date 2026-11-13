@@ -1,7 +1,7 @@
 use super::config::ConfigVariableOr;
 use super::error::{LinkError, LinkResult};
-use super::types::{AbsoluteLabel, AddressSpace, ChunkMetadata};
-use crate::addr::{Addr, BitWidth};
+use super::types::{AbsoluteAddr, AddressSpace, ChunkMetadata, ResolvedLabel};
+use crate::addr::BitWidth;
 use crate::error::Errs;
 use crate::expr::{ExprEvalError, ExprFunc, ExprLabel, ExprValue};
 use crate::obj::{ObjExpr, ObjExprOp};
@@ -25,24 +25,27 @@ pub(super) struct LinkSymbolContext<'a> {
     /// or `None` if the symbol couldn't be resolved (e.g. because it's an
     /// imported symbol that was never exported from anywhere), in which case
     /// an error has already been reported.
-    pub symbol_addrs: HashMap<Rc<str>, Option<AbsoluteLabel>>,
+    pub symbol_addrs: HashMap<Rc<str>, Option<AbsoluteAddr>>,
 }
 
 impl<'a> LinkSymbolContext<'a> {
     pub fn resolve_label(
         &self,
         label: &ExprLabel,
-    ) -> LinkResult<AbsoluteLabel> {
+    ) -> LinkResult<ResolvedLabel> {
         match label {
-            ExprLabel::AddrAbsolute { space, address } => Ok(AbsoluteLabel {
-                space: AddressSpace {
+            ExprLabel::AddrAbsolute { space, address, provenance } => {
+                let address_space = AddressSpace {
                     name: space.clone(),
                     bit_width: self.address_space_widths[Rc::as_ref(space)],
-                },
-                address: Addr::wrap_bigint(address),
-            }),
-            &ExprLabel::ChunkAbsolute { chunk_index, ref address } => {
-                if chunk_index >= self.chunk_metadata.len() {
+                };
+                Ok(ResolvedLabel {
+                    absolute: AbsoluteAddr::new(address_space, address),
+                    provenance: provenance.clone(),
+                })
+            }
+            ExprLabel::ChunkAbsolute { chunk_index, address, provenance } => {
+                if *chunk_index >= self.chunk_metadata.len() {
                     // Reference to a chunk that doesn't exist in this object
                     // file.
                     return Err(Errs::one(
@@ -51,15 +54,15 @@ impl<'a> LinkSymbolContext<'a> {
                         },
                     ));
                 }
-                let metadata = &self.chunk_metadata[chunk_index];
-                let space = metadata.start.space.clone();
-                Ok(AbsoluteLabel {
-                    space,
-                    address: Addr::wrap_bigint(address),
+                let metadata = &self.chunk_metadata[*chunk_index];
+                let address_space = metadata.start.space.clone();
+                Ok(ResolvedLabel {
+                    absolute: AbsoluteAddr::new(address_space, address),
+                    provenance: provenance.clone(),
                 })
             }
-            &ExprLabel::ChunkRelative { chunk_index, ref offset } => {
-                if chunk_index >= self.chunk_metadata.len() {
+            ExprLabel::ChunkRelative { chunk_index, offset, provenance } => {
+                if *chunk_index >= self.chunk_metadata.len() {
                     // Reference to a chunk that doesn't exist in this object
                     // file.
                     return Err(Errs::one(
@@ -68,11 +71,15 @@ impl<'a> LinkSymbolContext<'a> {
                         },
                     ));
                 }
-                let metadata = &self.chunk_metadata[chunk_index];
+                let metadata = &self.chunk_metadata[*chunk_index];
                 let chunk_start = metadata.start.clone();
-                Ok(chunk_start.plus_offset(offset))
+                Ok(ResolvedLabel {
+                    absolute: chunk_start.plus_offset(offset),
+                    provenance: provenance.clone(),
+                })
             }
-            ExprLabel::SymbolRelative { name, offset } => {
+            ExprLabel::SymbolRelative { provenance } => {
+                let name = &provenance.symbol_name;
                 match self.symbol_addrs.get(name) {
                     None => {
                         // Reference to a symbol not declared in this object
@@ -91,7 +98,10 @@ impl<'a> LinkSymbolContext<'a> {
                         // returning an empty error list?
                         Err(Errs::new())
                     }
-                    Some(Some(symbol)) => Ok(symbol.plus_offset(offset)),
+                    Some(Some(absolute)) => Ok(ResolvedLabel {
+                        absolute: absolute.plus_offset(&provenance.offset),
+                        provenance: Some(provenance.clone()),
+                    }),
                 }
             }
         }
@@ -322,6 +332,7 @@ impl<'a> ExprEvaluator<'a> {
                     self.push_label(&ExprLabel::ChunkAbsolute {
                         chunk_index,
                         address,
+                        provenance: None,
                     })?;
                 }
             }
@@ -344,8 +355,9 @@ impl<'a> ExprEvaluator<'a> {
     fn push_label(&mut self, label: &ExprLabel) -> LinkResult<()> {
         let resolved = self.symbol_context.resolve_label(label)?;
         self.push_value(ExprValue::Label(ExprLabel::AddrAbsolute {
-            space: resolved.space.name,
-            address: BigInt::from(resolved.address),
+            space: resolved.absolute.space.name,
+            address: BigInt::from(resolved.absolute.address),
+            provenance: resolved.provenance,
         }));
         Ok(())
     }

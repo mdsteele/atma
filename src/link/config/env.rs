@@ -5,7 +5,8 @@ use crate::addr::Addr;
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
-    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
+    ExprStatic, ExprSymbolProvenance, ExprType, ExprTypeError, ExprTypeResult,
+    ExprUnOp, ExprValue,
 };
 use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc};
 use crate::parse::{ExprAst, HereLabelKind, IdentifierAst, LinkConfigAst};
@@ -99,6 +100,10 @@ impl ConfigTypeEnv {
             ExprValue::Label(ExprLabel::AddrAbsolute {
                 space,
                 address: BigInt::from(addr),
+                provenance: Some(ExprSymbolProvenance {
+                    symbol_name: id.name.clone(),
+                    offset: BigInt::ZERO,
+                }),
             })
         });
         self.add_declaration(id, ExprType::Label, address_value);
@@ -111,8 +116,10 @@ impl ConfigTypeEnv {
     pub fn add_import(&mut self, id: IdentifierAst) {
         self.imports.insert(id.name.clone(), self.make_loc(id.span));
         let label = ExprLabel::SymbolRelative {
-            name: id.name.clone(),
-            offset: BigInt::ZERO,
+            provenance: ExprSymbolProvenance {
+                symbol_name: id.name.clone(),
+                offset: BigInt::ZERO,
+            },
         };
         let value = ConfigVariableOr::Static(ExprValue::Label(label));
         self.add_declaration(id, ExprType::Label, value);

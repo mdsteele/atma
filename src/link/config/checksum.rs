@@ -140,12 +140,14 @@ fn resolve_range(
             // TODO: error details
             bigint.to_u64().ok_or_else(|| Errs::one(LinkError::Misc))
         }
-        ExprValue::Label(ExprLabel::SymbolRelative { name, offset }) => {
-            let binary_offset =
-                binary.get_symbol_offset(name).ok_or_else(|| {
+        ExprValue::Label(ExprLabel::SymbolRelative { provenance }) => {
+            let binary_offset = binary
+                .get_symbol_offset(&provenance.symbol_name)
+                .ok_or_else(|| {
                     Errs::one(LinkError::Misc) // TODO: error details
                 })?;
-            let binary_offset = BigInt::from(binary_offset) + offset;
+            let binary_offset =
+                BigInt::from(binary_offset) + &provenance.offset;
             binary_offset.to_u64().ok_or_else(|| Errs::one(LinkError::Misc))
         }
         ExprValue::Label(_label) => {

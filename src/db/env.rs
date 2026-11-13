@@ -3,8 +3,8 @@ use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
     ExprBinOp, ExprCompiler, ExprEnv, ExprLabel, ExprNotStaticReason,
-    ExprStatic, ExprType, ExprTypeError, ExprTypeResult, ExprUnOp, ExprValue,
-    make_global_builtin_values,
+    ExprStatic, ExprSymbolProvenance, ExprType, ExprTypeError, ExprTypeResult,
+    ExprUnOp, ExprValue, make_global_builtin_values,
 };
 use crate::parse::AdsModuleAst;
 use crate::parse::{ExprAst, HereLabelKind, IdentifierAst, SymbolTable};
@@ -432,7 +432,10 @@ fn collect_symbols(table: &SymbolTable) -> HashMap<Rc<str>, ExprLabel> {
             let label = ExprLabel::AddrAbsolute {
                 space: symbol.space.clone(),
                 address: BigInt::from(symbol.address),
-                // TODO: include symbol provenance
+                provenance: Some(ExprSymbolProvenance {
+                    symbol_name: symbol.name.clone(),
+                    offset: BigInt::ZERO,
+                }),
             };
             map.insert(symbol.name.clone(), label);
         }
