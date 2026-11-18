@@ -1,6 +1,8 @@
 use super::config::ConfigVariableOr;
 use super::error::{LinkError, LinkResult};
-use super::types::{AbsoluteAddr, AddressSpace, ChunkMetadata, ResolvedLabel};
+use super::types::{
+    AbsoluteAddr, AddressSpace, ChunkMetadata, ResolvedLabel, SectionMetadata,
+};
 use crate::addr::BitWidth;
 use crate::error::Errs;
 use crate::expr::{ExprEvalError, ExprFunc, ExprLabel, ExprValue};
@@ -20,6 +22,8 @@ pub(super) struct LinkSymbolContext<'a> {
     /// file, this will be metadata for the chunks in that object file; for a
     /// linker config file, this will be empty.
     pub chunk_metadata: &'a [ChunkMetadata],
+    /// Metadata for each section in the linker config.
+    pub section_metadata: &'a [SectionMetadata],
     /// For each symbol declared in this evaluation context, whether local or
     /// imported, this stores the address space and run address of the symbol,
     /// or `None` if the symbol couldn't be resolved (e.g. because it's an
@@ -290,6 +294,12 @@ impl<'a> ExprEvaluator<'a> {
                     self.push_label(label)?;
                 }
                 ObjExprOp::Push(value) => self.push_value(value.clone()),
+                &ObjExprOp::SectionSize(index) => {
+                    self.push_int(self.section_metadata(index)?.size);
+                }
+                &ObjExprOp::SectionStart(index) => {
+                    self.push_int(self.section_metadata(index)?.start);
+                }
                 &ObjExprOp::Skip(offset) => self.skip(offset)?,
                 &ObjExprOp::SkipIf(offset) => {
                     if self.pop_bool()? {
@@ -348,8 +358,22 @@ impl<'a> ExprEvaluator<'a> {
         Ok(value)
     }
 
+    fn section_metadata(&self, index: usize) -> LinkResult<&SectionMetadata> {
+        if index < self.symbol_context.section_metadata.len() {
+            Ok(&self.symbol_context.section_metadata[index])
+        } else {
+            Err(Errs::one(LinkError::MalformedPatchExpression {
+                message: Rc::from("section metadata index error"),
+            }))
+        }
+    }
+
     fn push_value(&mut self, value: ExprValue) {
         self.value_stack.push(value);
+    }
+
+    fn push_int<T: Into<BigInt>>(&mut self, value: T) {
+        self.push_value(ExprValue::Integer(value.into()));
     }
 
     fn push_label(&mut self, label: &ExprLabel) -> LinkResult<()> {

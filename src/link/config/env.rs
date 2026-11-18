@@ -76,13 +76,12 @@ impl ConfigTypeEnv {
 
     pub fn add_declaration(
         &mut self,
-        id: IdentifierAst,
+        name: Rc<str>,
+        id_loc: ObjSrcLoc,
         var_type: ExprType,
         value: ConfigVariableOr<ExprValue>,
     ) {
-        let id_loc = self.make_loc(id.span);
-        let decl = ConfigDecl { id_loc, var_type, value };
-        self.variables.insert(id.name, decl);
+        self.variables.insert(name, ConfigDecl { id_loc, var_type, value });
     }
 
     pub fn get_export(&self, name: &str) -> Option<ObjSrcLoc> {
@@ -95,7 +94,8 @@ impl ConfigTypeEnv {
         space: Rc<str>,
         address: ConfigVariableOr<Addr>,
     ) {
-        self.exports.insert(id.name.clone(), self.make_loc(id.span));
+        let loc = self.make_loc(id.span);
+        self.exports.insert(id.name.clone(), loc.clone());
         let address_value = address.map_static(|addr| {
             ExprValue::Label(ExprLabel::AddrAbsolute {
                 space,
@@ -106,7 +106,7 @@ impl ConfigTypeEnv {
                 }),
             })
         });
-        self.add_declaration(id, ExprType::Label, address_value);
+        self.add_declaration(id.name, loc, ExprType::Label, address_value);
     }
 
     pub fn get_import(&self, name: &str) -> Option<ObjSrcLoc> {
@@ -114,7 +114,8 @@ impl ConfigTypeEnv {
     }
 
     pub fn add_import(&mut self, id: IdentifierAst) {
-        self.imports.insert(id.name.clone(), self.make_loc(id.span));
+        let loc = self.make_loc(id.span);
+        self.imports.insert(id.name.clone(), loc.clone());
         let label = ExprLabel::SymbolRelative {
             provenance: ExprSymbolProvenance {
                 symbol_name: id.name.clone(),
@@ -122,7 +123,7 @@ impl ConfigTypeEnv {
             },
         };
         let value = ConfigVariableOr::Static(ExprValue::Label(label));
-        self.add_declaration(id, ExprType::Label, value);
+        self.add_declaration(id.name, loc, ExprType::Label, value);
     }
 
     pub fn typecheck_expression(

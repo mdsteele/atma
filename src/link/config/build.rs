@@ -13,11 +13,12 @@ use super::{
 use crate::addr::{Addr, Align, BitWidth, Range};
 use crate::error::{Errs, SrcCache};
 use crate::expr::{ExprType, ExprValue};
-use crate::obj::{ObjSrcContext, ObjSrcLoc, ObjSrcParent};
+use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc, ObjSrcParent};
 use crate::parse::{
     ExprAst, IdentifierAst, LinkBlockAst, LinkConfigAst, LinkDirectiveAst,
     LinkEntryAst,
 };
+use num_bigint::BigInt;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -312,7 +313,12 @@ impl<'a> ConfigBuilder<'a> {
                     ConfigVariableOr::Static(ExprValue::FALSE),
                 ),
             };
-        self.env.add_declaration(id_ast, expr_type, value);
+        self.env.add_declaration(
+            id_ast.name.clone(),
+            self.env.make_loc(id_ast.span),
+            expr_type,
+            value,
+        );
         errs.result()
     }
 
@@ -434,9 +440,47 @@ impl<'a> ConfigBuilder<'a> {
                 attribute: ConfigAttr::SectionRegion,
             });
         }
+        let section_index = self.config.sections.len();
+        let name_loc = self.env.make_loc(entry.id.span);
+        self.env.add_declaration(
+            Rc::from(format!("{}::%size", entry.id.name)),
+            name_loc.clone(),
+            ExprType::Integer,
+            match attrs.size {
+                Some((_span, size)) => {
+                    let value = ExprValue::Integer(BigInt::from(size));
+                    ConfigVariableOr::Static(value)
+                }
+                None => ConfigVariableOr::new_variable(
+                    &mut self.config.variables,
+                    ObjExpr {
+                        ops: vec![ObjExprOp::SectionSize(section_index)],
+                        loc: name_loc.clone(),
+                    },
+                ),
+            },
+        );
+        self.env.add_declaration(
+            Rc::from(format!("{}::%start", entry.id.name)),
+            name_loc.clone(),
+            ExprType::Integer,
+            match attrs.start {
+                Some(start) => {
+                    let value = ExprValue::Integer(BigInt::from(start));
+                    ConfigVariableOr::Static(value)
+                }
+                None => ConfigVariableOr::new_variable(
+                    &mut self.config.variables,
+                    ObjExpr {
+                        ops: vec![ObjExprOp::SectionStart(section_index)],
+                        loc: name_loc.clone(),
+                    },
+                ),
+            },
+        );
         self.config.sections.push(SectionConfig {
             name: entry.id.name,
-            name_loc: self.env.make_loc(entry.id.span),
+            name_loc,
             region: attrs.region.unwrap_or_default(),
             start: attrs.start,
             size: attrs.size.map(|(_span, size)| size),
@@ -511,7 +555,8 @@ impl<'a> ConfigBuilder<'a> {
         } else {
             let value = ExprValue::Entity(entry_id.name.clone());
             self.env.add_declaration(
-                entry_id.clone(),
+                entry_id.name.clone(),
+                self.env.make_loc(entry_id.span),
                 ExprType::Entity(Rc::from(entry_kind)),
                 ConfigVariableOr::Static(value),
             );

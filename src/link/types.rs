@@ -1,4 +1,4 @@
-use crate::addr::{Addr, BitWidth};
+use crate::addr::{Addr, BitWidth, Size};
 use crate::expr::ExprSymbolProvenance;
 use num_bigint::BigInt;
 use std::rc::Rc;
@@ -80,6 +80,15 @@ pub(super) struct ChunkMetadata {
     /// written, or `None` if this chunk will not be included in the final
     /// binary.
     pub binary_offset: Option<u64>,
+}
+
+//===========================================================================//
+
+pub(super) struct SectionMetadata {
+    /// The absolute starting address of the section within its address space.
+    pub start: Addr,
+    /// The total size of the section section, in bytes.
+    pub size: Size,
 }
 
 //===========================================================================//

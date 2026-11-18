@@ -1,7 +1,9 @@
 use super::error::{LinkError, LinkResult};
 use super::eval::{LinkEvalEnv, LinkSymbolContext};
 use super::positioned::{PositionedBinary, PositionedSymbol};
-use super::types::{AbsoluteAddr, ChunkMetadata, ResolvedLabel};
+use super::types::{
+    AbsoluteAddr, ChunkMetadata, ResolvedLabel, SectionMetadata,
+};
 use crate::addr::BitWidth;
 use crate::error::Errs;
 use crate::expr::{ExprType, ExprValue};
@@ -43,6 +45,7 @@ impl PatchedFile {
                 errs.ok(PatchedFile::patch(
                     file,
                     chunk_metadata,
+                    &positioned_binary.section_metadata,
                     &positioned_binary.address_space_widths,
                     &positioned_binary.external_symbols,
                     internal_symbols,
@@ -56,6 +59,7 @@ impl PatchedFile {
     fn patch(
         object_file: ObjFile,
         chunk_metadata: &[ChunkMetadata],
+        section_metadata: &[SectionMetadata],
         address_space_widths: &HashMap<Rc<str>, BitWidth>,
         external_symbols: &HashMap<Rc<str>, PositionedSymbol>,
         internal_symbols: &HashMap<Rc<str>, PositionedSymbol>,
@@ -85,11 +89,12 @@ impl PatchedFile {
             }
         }
 
-        let mut patcher = FilePatcher::new(
-            chunk_metadata,
+        let mut patcher = FilePatcher::new(LinkSymbolContext {
             address_space_widths,
+            chunk_metadata,
+            section_metadata,
             symbol_addrs,
-        );
+        });
         errs.also(patcher.evaluate_variables(object_file.variables));
         let mut patched_chunks = Vec::<PatchedChunk>::new();
         for chunk in object_file.chunks {
@@ -126,19 +131,8 @@ struct FilePatcher<'a> {
 }
 
 impl<'a> FilePatcher<'a> {
-    pub fn new(
-        chunk_metadata: &'a [ChunkMetadata],
-        address_space_widths: &'a HashMap<Rc<str>, BitWidth>,
-        symbol_addrs: HashMap<Rc<str>, Option<AbsoluteAddr>>,
-    ) -> FilePatcher<'a> {
-        FilePatcher {
-            context: LinkSymbolContext {
-                address_space_widths,
-                chunk_metadata,
-                symbol_addrs,
-            },
-            env: LinkEvalEnv::new(),
-        }
+    pub fn new(context: LinkSymbolContext<'a>) -> Self {
+        Self { context, env: LinkEvalEnv::new() }
     }
 
     pub fn evaluate_variables(

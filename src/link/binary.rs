@@ -470,7 +470,7 @@ impl BinaryBuilder {
     }
 
     fn add_section(&mut self, section: &PositionedSection) {
-        let section_end = self.total_size + section.size;
+        let section_end = self.total_size + section.size.into_u64();
         for chunk in &section.chunks {
             let binary_offset = chunk.binary_offset.unwrap();
             self.fill_to(binary_offset, section.fill);

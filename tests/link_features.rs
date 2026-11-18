@@ -101,4 +101,61 @@ fn mirrored_section() {
     );
 }
 
+#[test]
+fn non_static_export_addr_in_config() {
+    let asm = r#"
+    .IMPORT Bar
+    .SECTION "CODE"
+        .a8 Bar
+    .EXPORT Foo:
+        .u8 $44
+    .END
+    "#;
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16, fill=$99 \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=0, size=4 \\ }
+    .SECTIONS { \\ CODE: region=MAIN, start=1 \\ }
+    .IMPORT Foo
+    .EXPORTS { \\ Bar: space=CPU, addr=(&Foo + 1) \\ }
+    "#;
+    assert_eq!(
+        &binary_data(link_binary(config, &[asm])),
+        &[0x99, 0x03, 0x44, 0x99]
+    );
+}
+
+#[test]
+fn section_labels() {
+    let asm0 = r#"
+    .SECTION "CODE", align=4
+        .u8 $37
+        .u8 $42
+    .END
+    "#;
+    let asm1 = r#"
+    .IMPORT CodeStart
+    .IMPORT CodeEnd
+    .SECTION "ADDRS"
+        .a8 CodeStart
+        .a8 CodeEnd
+    .END
+    "#;
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16, fill=$ee \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=0, size=8 \\ }
+    .SECTIONS region=MAIN {
+      CODE:  ; alignment forced to 4 by chunk alignment
+      ADDRS: start=0
+    }
+    .EXPORTS space=CPU {
+      CodeStart: addr=CODE::%start
+      CodeEnd: addr=(CODE::%start + CODE::%size)
+    }
+    "#;
+    assert_eq!(
+        &binary_data(link_binary(config, &[asm0, asm1])),
+        &[0x04, 0x06, 0xee, 0xee, 0x37, 0x42, 0xee, 0xee]
+    );
+}
+
 //===========================================================================//

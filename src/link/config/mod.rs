@@ -133,6 +133,7 @@ impl LinkConfig {
         let symbol_context = LinkSymbolContext {
             address_space_widths: &positioned_binary.address_space_widths,
             chunk_metadata: &[], // a linker config has no chunks
+            section_metadata: &positioned_binary.section_metadata,
             symbol_addrs,
         };
         for expr in &self.variables {

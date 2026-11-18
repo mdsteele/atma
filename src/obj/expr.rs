@@ -15,12 +15,14 @@ const OP_LIST_INDEX: u8 = 0x04;
 const OP_MAKE_LIST: u8 = 0x05;
 const OP_MAKE_TUPLE: u8 = 0x06;
 const OP_PUSH: u8 = 0x07;
-const OP_SKIP: u8 = 0x08;
-const OP_SKIP_IF: u8 = 0x09;
-const OP_SKIP_UNLESS: u8 = 0x0a;
-const OP_TUPLE_ITEM: u8 = 0x0b;
-const OP_UNOP: u8 = 0x0c;
-const OP_WITH_ADDR: u8 = 0x0d;
+const OP_SECTION_SIZE: u8 = 0x08;
+const OP_SECTION_START: u8 = 0x09;
+const OP_SKIP: u8 = 0x0a;
+const OP_SKIP_IF: u8 = 0x0b;
+const OP_SKIP_UNLESS: u8 = 0x0c;
+const OP_TUPLE_ITEM: u8 = 0x0d;
+const OP_UNOP: u8 = 0x0e;
+const OP_WITH_ADDR: u8 = 0x0f;
 
 //===========================================================================//
 
@@ -150,6 +152,12 @@ pub(crate) enum ObjExprOp {
     MakeTuple(usize),
     /// Pushes a value onto the value stack.
     Push(ExprValue),
+    /// Pushes the size (in bytes) of the section with the given index onto the
+    /// value stack as an integer.
+    SectionSize(usize),
+    /// Pushes the start address of the section with the given index onto the
+    /// value stack as an integer.
+    SectionStart(usize),
     /// Skips past the specified number of operations.
     Skip(usize),
     /// Pops the top value from the value stack (which must be a boolean).  If
@@ -217,6 +225,12 @@ impl BinaryIo for ObjExprOp {
             OP_MAKE_LIST => Ok(Self::MakeList(usize::read_from(decoder)?)),
             OP_MAKE_TUPLE => Ok(Self::MakeTuple(usize::read_from(decoder)?)),
             OP_PUSH => Ok(Self::Push(ExprValue::read_from(decoder)?)),
+            OP_SECTION_SIZE => {
+                Ok(Self::SectionSize(usize::read_from(decoder)?))
+            }
+            OP_SECTION_START => {
+                Ok(Self::SectionStart(usize::read_from(decoder)?))
+            }
             OP_SKIP => Ok(Self::Skip(usize::read_from(decoder)?)),
             OP_SKIP_IF => Ok(Self::SkipIf(usize::read_from(decoder)?)),
             OP_SKIP_UNLESS => Ok(Self::SkipUnless(usize::read_from(decoder)?)),
@@ -282,6 +296,14 @@ impl BinaryIo for ObjExprOp {
             Self::Push(value) => {
                 OP_PUSH.write_to(encoder)?;
                 value.write_to(encoder)
+            }
+            Self::SectionSize(index) => {
+                OP_SECTION_SIZE.write_to(encoder)?;
+                index.write_to(encoder)
+            }
+            Self::SectionStart(index) => {
+                OP_SECTION_START.write_to(encoder)?;
+                index.write_to(encoder)
             }
             Self::Skip(offset) => {
                 OP_SKIP.write_to(encoder)?;
@@ -397,6 +419,8 @@ mod tests {
         assert_round_trips(ObjExprOp::Push(ExprValue::Integer(BigInt::from(
             12345u32,
         ))));
+        assert_round_trips(ObjExprOp::SectionSize(0));
+        assert_round_trips(ObjExprOp::SectionStart(2));
         assert_round_trips(ObjExprOp::Skip(1));
         assert_round_trips(ObjExprOp::Skip(17));
         assert_round_trips(ObjExprOp::SkipIf(2));

@@ -2,13 +2,15 @@ use super::arranged::{ArrangedChunk, ArrangedRegion, ArrangedSection};
 use super::config::{LinkConfig, RegionKind};
 use super::error::{LinkError, LinkResult};
 use super::place::try_place;
-use super::types::{AbsoluteAddr, AddressSpace, ChunkId, ChunkMetadata};
+use super::types::{
+    AbsoluteAddr, AddressSpace, ChunkId, ChunkMetadata, SectionMetadata,
+};
 use crate::addr::{Addr, BitWidth, Size};
 use crate::error::Errs;
 use crate::obj::{ObjFile, ObjSrcLoc};
 use rangemap::RangeInclusiveSet;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 //===========================================================================//
@@ -87,12 +89,16 @@ impl PositionedChunk {
 /// Represents a data section that has been positioned within its memory
 /// region.
 pub(super) struct PositionedSection {
+    /// The index of this section within the linker config.
+    pub index: usize,
     /// The offset into the final binary where this section's data should be
     /// written, or `None` if this section's region won't be included in the
     /// binary.
     pub binary_offset: Option<u64>,
+    /// The absolute starting address of this section within its address space.
+    pub start: Addr,
     /// The total size of this section, in bytes.
-    pub size: u64,
+    pub size: Size,
     /// The chunks in this section, sorted by their offsets within the binary.
     pub chunks: Vec<PositionedChunk>,
     /// Any padded portions of this section will be filled with this byte
@@ -136,8 +142,10 @@ impl PositionedSection {
             (chunks, section_fill)
         };
         PositionedSection {
+            index: section.index,
             binary_offset: section_binary_offset,
-            size: section.size.into_u64(),
+            start: section_start,
+            size: section.size,
             chunks,
             fill,
         }
@@ -290,6 +298,9 @@ pub(super) struct PositionedBinary {
     pub regions: Vec<PositionedRegion>,
     /// For each object file, metadata about each chunk in that object file.
     pub file_chunk_metadata: Vec<Vec<ChunkMetadata>>,
+    /// Metadata about each section, ordered by section index in the linker
+    /// config.
+    pub section_metadata: Vec<SectionMetadata>,
     /// The address of each external symbol across the binary.
     pub external_symbols: HashMap<Rc<str>, PositionedSymbol>,
     /// For each object file, the address of each internal symbol in that
@@ -306,6 +317,8 @@ impl PositionedBinary {
             PositionedRegion::position_all(config, object_files)?;
         let chunk_metadata =
             PositionedBinary::make_chunk_metadata(&positioned_regions);
+        let section_metadata =
+            PositionedBinary::make_section_metadata(&positioned_regions);
 
         let mut external_symbols = HashMap::<Rc<str>, PositionedSymbol>::new();
         let mut internal_symbols =
@@ -374,6 +387,7 @@ impl PositionedBinary {
                 .collect(),
             regions: positioned_regions,
             file_chunk_metadata,
+            section_metadata,
             external_symbols,
             internal_symbols,
         })
@@ -400,6 +414,22 @@ impl PositionedBinary {
             }
         }
         chunk_metadata
+    }
+
+    fn make_section_metadata(
+        positioned_regions: &[PositionedRegion],
+    ) -> Vec<SectionMetadata> {
+        let mut section_metadata = BTreeMap::<usize, SectionMetadata>::new();
+        for region in positioned_regions {
+            for section in &region.sections {
+                let metadata = SectionMetadata {
+                    start: section.start,
+                    size: section.size,
+                };
+                section_metadata.insert(section.index, metadata);
+            }
+        }
+        section_metadata.into_values().collect()
     }
 
     /// Adds an external symbol (with no offset within the binary).

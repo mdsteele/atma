@@ -44,6 +44,8 @@ impl ArrangedChunk {
 /// Represents a data section after all chunks have been arranged within the
 /// section.
 pub(super) struct ArrangedSection {
+    /// The index of this section within the linker config.
+    pub index: usize,
     /// The name of this section.
     pub name: Rc<str>,
     /// The linker config source code location where the section was
@@ -196,6 +198,7 @@ impl ArrangedSection {
             .unwrap_or(Size::ZERO)
             .max(section.size.unwrap_or(Size::ZERO));
         let arranged_section = ArrangedSection {
+            index: section_index_by_name[&section.name],
             name: section.name,
             name_loc: section.name_loc,
             region: section.region,
