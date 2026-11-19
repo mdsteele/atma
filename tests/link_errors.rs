@@ -1,5 +1,6 @@
 use atma::addr::{Addr, BitWidth};
 use atma::asm::assemble_source;
+use atma::expr::{ExprEvalError, ExprFuncEvalError};
 use atma::link::{LinkConfig, LinkError};
 use atma::obj::{ObjFile, ObjPatchIntType};
 use num_bigint::BigInt;
@@ -42,6 +43,33 @@ fn link_errors(config_source: &str, asm_sources: &[&str]) -> Vec<LinkError> {
 }
 
 //===========================================================================//
+
+#[test]
+fn assertion_failed() {
+    let asm0 = r#"
+    .SECTION "CODE"
+        .u8 0, 1
+    .EXPORT Foo:
+        .u8 2
+    .END
+    "#;
+    let config = r#"
+    .ADDRSPACES { \\ CPU: bits=16 \\ }
+    .REGIONS { \\ MAIN: space=CPU, start=$0000, size=$10000 \\ }
+    .SECTIONS { \\ CODE: region=MAIN, start=$100 \\ }
+    .IMPORT Foo
+    .ASSERT &Foo == $100, "&Foo is {:#x} instead of $100" %% &Foo
+    "#;
+    assert_matches!(link_errors(config, &[asm0]).as_slice(), [
+        LinkError::ExprEvalError{
+            context: _,
+            error: ExprEvalError::FuncEvalError {
+                arg_span: _,
+                error: ExprFuncEvalError::ErrorMessage(message),
+            },
+        },
+    ] if &**message == "&Foo is $102 instead of $100");
+}
 
 #[test]
 fn chunk_in_mirror_section() {

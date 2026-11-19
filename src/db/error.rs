@@ -97,13 +97,6 @@ pub enum AdsError {
         /// The source code location for the constant's declaration.
         decl_loc: AdsSrcLoc,
     },
-    /// An error message was specified using a non-string expression.
-    ErrorMessageTypeError {
-        /// The source code location for the non-string expression.
-        expr_loc: AdsSrcLoc,
-        /// The type of the expression.
-        expr_type: ExprType,
-    },
     /// An expression failed to typecheck.
     ExprTypeError {
         /// The context that the expression appeared within.
@@ -202,16 +195,6 @@ impl AdsError {
                     .with_label(decl_loc.primary(), label1)
                     .with_primary_label(label2)
                     .with_context(&*lvalue_loc.context)
-            }
-            Self::ErrorMessageTypeError { expr_loc, expr_type } => {
-                let message = format!(
-                    "error message must be of type {}, not {expr_type}",
-                    ExprType::String
-                );
-                let label = format!("this has type {expr_type}");
-                SourceError::new(expr_loc.primary(), message)
-                    .with_primary_label(label)
-                    .with_context(&*expr_loc.context)
             }
             Self::ExprTypeError { context, error } => {
                 error.to_source_error(&context.path).with_context(&*context)

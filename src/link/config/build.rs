@@ -11,12 +11,15 @@ use super::{
     SectionConfig,
 };
 use crate::addr::{Addr, Align, BitWidth, Range};
-use crate::error::{Errs, SrcCache};
-use crate::expr::{ExprType, ExprValue};
+use crate::error::{Errs, SrcCache, SrcSpan};
+use crate::expr::{
+    ExprEvalError, ExprFunc, ExprFuncEvalError, ExprNotStaticReason,
+    ExprStatic, ExprType, ExprTypeError, ExprValue,
+};
 use crate::obj::{ObjExpr, ObjExprOp, ObjSrcContext, ObjSrcLoc, ObjSrcParent};
 use crate::parse::{
-    ExprAst, IdentifierAst, LinkBlockAst, LinkConfigAst, LinkDirectiveAst,
-    LinkEntryAst,
+    ExprAst, IdentifierAst, LinkAssertAst, LinkBlockAst, LinkConfigAst,
+    LinkDirectiveAst, LinkEntryAst,
 };
 use num_bigint::BigInt;
 use std::path::Path;
@@ -75,6 +78,7 @@ impl<'a> ConfigBuilder<'a> {
             LinkDirectiveAst::Addrspaces(block) => {
                 self.visit_addrspaces_dir(block)
             }
+            LinkDirectiveAst::Assert(ast) => self.visit_assert_dir(ast),
             LinkDirectiveAst::Checksums(block) => {
                 self.visit_checksums_dir(block)
             }
@@ -130,6 +134,97 @@ impl<'a> ConfigBuilder<'a> {
             fill: attrs.fill.unwrap_or_default(),
         });
         errs.result()
+    }
+
+    fn visit_assert_dir(
+        &mut self,
+        assert_ast: LinkAssertAst,
+    ) -> ConfigResult<()> {
+        let (
+            (condition_expr, condition_static),
+            (message_span, message_expr, message_static),
+        ) = Errs::join_results(
+            self.typecheck_predicate(assert_ast.condition),
+            self.typecheck_assert_message(
+                assert_ast.directive_span,
+                assert_ast.message,
+            ),
+        )?;
+        let failure_expr = {
+            let mut expr = message_expr;
+            let func_value = ExprValue::from(ExprFunc::Error);
+            expr.ops.insert(0, ObjExprOp::Push(func_value));
+            expr.ops.push(ObjExprOp::Apply {
+                context: self.env.current_src_context(),
+                arg_span: message_span,
+            });
+            expr
+        };
+        let mut errs = Errs::<ConfigError>::new();
+        match condition_static {
+            Ok(ExprValue::Boolean(true)) => {
+                // The assertion condition statically succeeded.
+            }
+            Ok(_) => {
+                // The assertion condition statically failed.
+                match message_static {
+                    Ok(message_value) => {
+                        // Message is statically known, so we can report the
+                        // failed assertion right now.
+                        errs.push(ConfigError::StaticEvalError {
+                            context: self.env.current_src_context(),
+                            error: ExprEvalError::FuncEvalError {
+                                arg_span: message_span,
+                                error: ExprFuncEvalError::ErrorMessage(
+                                    message_value.unwrap_str(),
+                                ),
+                            },
+                        });
+                    }
+                    Err(reason) => {
+                        // Message is not statically known, so we have to wait
+                        // until link time to report the failed assertion.
+                        errs.also(
+                            self.env.check_for_inevitable_eval_error(&reason),
+                        );
+                        self.config.variables.push(failure_expr);
+                    }
+                }
+            }
+            Err(reason) => {
+                // The assertion condition can't be evaluated yet, so we have
+                // to wait until link time to check it.
+                errs.also(self.env.check_for_inevitable_eval_error(&reason));
+                let mut variable_expr = condition_expr;
+                let mut failure_ops = failure_expr.ops;
+                variable_expr.ops.push(ObjExprOp::SkipUnless(2));
+                variable_expr.ops.push(ObjExprOp::Push(ExprValue::from(true)));
+                variable_expr.ops.push(ObjExprOp::Skip(failure_ops.len()));
+                variable_expr.ops.append(&mut failure_ops);
+                self.config.variables.push(variable_expr);
+            }
+        }
+        errs.result()
+    }
+
+    fn typecheck_assert_message(
+        &self,
+        directive_span: SrcSpan,
+        opt_message_ast: Option<ExprAst>,
+    ) -> ConfigResult<(SrcSpan, ObjExpr, ExprStatic)> {
+        if let Some(message_ast) = opt_message_ast {
+            let message_span = message_ast.span;
+            let (expr, expr_static) =
+                self.typecheck_error_message(message_ast)?;
+            Ok((message_span, expr, expr_static))
+        } else {
+            let value = ExprValue::from("Assertion failed");
+            let expr = ObjExpr::constant(
+                value.clone(),
+                self.env.make_loc(directive_span),
+            );
+            Ok((directive_span, expr, Ok(value)))
+        }
     }
 
     fn visit_checksums_dir(
@@ -296,23 +391,20 @@ impl<'a> ConfigBuilder<'a> {
         expr_ast: ExprAst,
     ) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
-        let (expr_type, value) =
-            match errs.ok(self.env.typecheck_expression(expr_ast)) {
-                Some((_, expr_type, Ok(static_value))) => {
-                    (expr_type, ConfigVariableOr::Static(static_value))
-                }
-                Some((expr, expr_type, Err(_))) => (
-                    expr_type,
-                    ConfigVariableOr::new_variable(
-                        &mut self.config.variables,
-                        expr,
-                    ),
-                ),
-                None => (
-                    ExprType::Undefined,
-                    ConfigVariableOr::Static(ExprValue::FALSE),
-                ),
-            };
+        let (expr_type, value) = match errs.with(self.typecheck_expr(expr_ast))
+        {
+            (_, expr_type, Ok(static_value)) => {
+                (expr_type, ConfigVariableOr::Static(static_value))
+            }
+            (expr, expr_type, Err(reason)) => {
+                errs.also(self.env.check_for_inevitable_eval_error(&reason));
+                let variable = ConfigVariableOr::new_variable(
+                    &mut self.config.variables,
+                    expr,
+                );
+                (expr_type, variable)
+            }
+        };
         self.env.add_declaration(
             id_ast.name.clone(),
             self.env.make_loc(id_ast.span),
@@ -497,9 +589,9 @@ impl<'a> ConfigBuilder<'a> {
     fn visit_use_dir(&mut self, expr_ast: ExprAst) -> ConfigResult<()> {
         let mut errs = Errs::<ConfigError>::new();
         let expr_span = expr_ast.span;
-        match errs.ok(self.env.typecheck_expression(expr_ast)) {
-            None => {}
-            Some((_, ExprType::String, Ok(path_value))) => {
+        match errs.with(self.typecheck_expr(expr_ast)) {
+            (_, ExprType::Undefined, _) => {}
+            (_, ExprType::String, Ok(path_value)) => {
                 let path = self.joined_path(path_value.unwrap_str_ref());
                 match self.cache.fetch_or_get_cached_utf8(&path) {
                     Ok(source_code) => {
@@ -527,13 +619,12 @@ impl<'a> ConfigBuilder<'a> {
                     }
                 }
             }
-            Some((_, ExprType::String | ExprType::Bottom, Err(reason))) => {
-                errs.push(ConfigError::PathNotStatic {
+            (_, ExprType::String | ExprType::Bottom, Err(reason)) => errs
+                .push(ConfigError::PathNotStatic {
                     expr_loc: self.env.make_loc(expr_span),
                     reason,
-                })
-            }
-            Some((_, expr_type, _)) => errs.push(ConfigError::PathTypeError {
+                }),
+            (_, expr_type, _) => errs.push(ConfigError::PathTypeError {
                 expr_loc: self.env.make_loc(expr_span),
                 expr_type,
             }),
@@ -562,6 +653,65 @@ impl<'a> ConfigBuilder<'a> {
             );
             Ok(())
         }
+    }
+
+    pub fn typecheck_expr(
+        &self,
+        expr_ast: ExprAst,
+    ) -> ((ObjExpr, ExprType, ExprStatic), Errs<ConfigError>) {
+        let mut errs = Errs::<ConfigError>::new();
+        let expr_span = expr_ast.span;
+        let typechecked = errs
+            .ok(self.env.typecheck_expression(expr_ast))
+            .unwrap_or_else(|| {
+                let ops = vec![ObjExprOp::Push(ExprValue::FALSE)];
+                let loc = self.env.make_loc(expr_span);
+                let reason = ExprNotStaticReason::TypeError;
+                (ObjExpr { ops, loc }, ExprType::Undefined, Err(reason))
+            });
+        (typechecked, errs)
+    }
+
+    fn typecheck_error_message(
+        &self,
+        expr_ast: ExprAst,
+    ) -> ConfigResult<(ObjExpr, ExprStatic)> {
+        let mut errs = Errs::<ConfigError>::new();
+        let expr_span = expr_ast.span;
+        let (expr, expr_type, expr_static) =
+            errs.with(self.typecheck_expr(expr_ast));
+        if !expr_type.is_subtype_of(&ExprType::String) {
+            errs.push(ConfigError::ExprTypeError {
+                context: self.env.current_src_context(),
+                error: ExprTypeError::CannotUseTypeAsErrorMessage {
+                    expr_span,
+                    expr_type,
+                },
+            });
+        }
+        errs.result()?;
+        Ok((expr, expr_static))
+    }
+
+    fn typecheck_predicate(
+        &self,
+        expr_ast: ExprAst,
+    ) -> ConfigResult<(ObjExpr, ExprStatic)> {
+        let mut errs = Errs::<ConfigError>::new();
+        let expr_span = expr_ast.span;
+        let (expr, expr_type, expr_static) =
+            errs.with(self.typecheck_expr(expr_ast));
+        if !expr_type.is_subtype_of(&ExprType::Boolean) {
+            errs.push(ConfigError::ExprTypeError {
+                context: self.env.current_src_context(),
+                error: ExprTypeError::CannotUseTypeAsPredicate {
+                    expr_span,
+                    expr_type,
+                },
+            });
+        }
+        errs.result()?;
+        Ok((expr, expr_static))
     }
 
     /// Given a relative path appearing in the current source context (e.g. in

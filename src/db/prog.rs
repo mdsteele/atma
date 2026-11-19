@@ -560,9 +560,12 @@ impl<'a> AdsCompiler<'a> {
         let expr_span = expr_ast.span;
         let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
         if !expr_type.is_subtype_of(&ExprType::String) {
-            errs.push(AdsError::ErrorMessageTypeError {
-                expr_loc: self.make_loc(expr_span),
-                expr_type,
+            errs.push(AdsError::ExprTypeError {
+                context: self.env.current_src_context(),
+                error: ExprTypeError::CannotUseTypeAsErrorMessage {
+                    expr_span,
+                    expr_type,
+                },
             });
         }
         errs.result()

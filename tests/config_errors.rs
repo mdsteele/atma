@@ -1,6 +1,7 @@
 use atma::addr::{AlignTryFromError, BitWidth};
 use atma::expr::{
     ExprEvalError, ExprFuncEvalError, ExprNotStaticReason, ExprType,
+    ExprTypeError,
 };
 use atma::link::{ConfigAttr, ConfigEntryKind, ConfigError, LinkConfig};
 use num_bigint::BigInt;
@@ -21,6 +22,56 @@ fn config_errors(source: &str) -> Vec<ConfigError> {
 }
 
 //===========================================================================//
+
+#[test]
+fn assertion_condition_type_error() {
+    let source = r#"\
+    .ASSERT 42
+    "#;
+    assert_matches!(
+        config_errors(source).as_slice(),
+        [ConfigError::ExprTypeError {
+            context: _,
+            error: ExprTypeError::CannotUseTypeAsPredicate {
+                expr_span: _,
+                expr_type: ExprType::Integer,
+            },
+        }]
+    );
+}
+
+#[test]
+fn assertion_message_type_error() {
+    let source = r#"\
+    .ASSERT %true, 42
+    "#;
+    assert_matches!(
+        config_errors(source).as_slice(),
+        [ConfigError::ExprTypeError {
+            context: _,
+            error: ExprTypeError::CannotUseTypeAsErrorMessage {
+                expr_span: _,
+                expr_type: ExprType::Integer,
+            },
+        }]
+    );
+}
+
+#[test]
+fn assertion_statically_failed() {
+    let source = r#"\
+    .ASSERT %false
+    "#;
+    assert_matches!(config_errors(source).as_slice(), [
+        ConfigError::StaticEvalError{
+            context: _,
+            error: ExprEvalError::FuncEvalError {
+                arg_span: _,
+                error: ExprFuncEvalError::ErrorMessage(message),
+            },
+        },
+    ] if &**message == "Assertion failed");
+}
 
 #[test]
 fn attr_type_error() {

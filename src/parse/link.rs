@@ -7,6 +7,7 @@ use super::attr::AttributeAst;
 use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::IdentifierAst;
+use crate::error::SrcSpan;
 use crate::lex::TokenValue;
 use chumsky::{self, IterParser, Parser};
 
@@ -45,6 +46,8 @@ impl LinkConfigAst {
 pub enum LinkDirectiveAst {
     /// An `.ADDRSPACES` directive block.
     Addrspaces(LinkBlockAst),
+    /// An `.ASSERT` directive.
+    Assert(LinkAssertAst),
     /// A `.CHECKSUMS` directive block.
     Checksums(LinkBlockAst),
     /// An `.EXPORTS` directive block.
@@ -99,6 +102,7 @@ impl LinkDirectiveAst {
             .map(LinkDirectiveAst::Use);
         chumsky::prelude::choice((
             addrspaces_dir,
+            LinkAssertAst::parser().map(LinkDirectiveAst::Assert),
             checksums_dir,
             exports_dir,
             import_dir,
@@ -107,6 +111,40 @@ impl LinkDirectiveAst {
             sections_dir,
             use_dir,
         ))
+    }
+}
+
+//===========================================================================//
+
+/// The abstract syntax tree for an assertion in a linker configuration file.
+#[derive(Clone, Debug)]
+pub struct LinkAssertAst {
+    /// The location in the source code where the directive token appears.
+    pub directive_span: SrcSpan,
+    /// The boolean condition that is expected to be true.
+    pub condition: ExprAst,
+    /// An optional error message that should be emitted if the assertion
+    /// fails.
+    pub message: Option<ExprAst>,
+}
+
+impl LinkAssertAst {
+    pub(crate) const DIRECTIVE: &str = ".ASSERT";
+
+    fn parser<'a>() -> impl AtmaParser<'a, Self> {
+        directive(Self::DIRECTIVE)
+            .then(ExprAst::parser())
+            .then(
+                symbol(TokenValue::Comma)
+                    .ignore_then(ExprAst::parser())
+                    .or_not(),
+            )
+            .then_ignore(linebreak())
+            .map(|((directive_span, condition), message)| Self {
+                directive_span,
+                condition,
+                message,
+            })
     }
 }
 

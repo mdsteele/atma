@@ -141,6 +141,20 @@ impl ConfigTypeEnv {
         Ok((ObjExpr { ops, loc }, expr_type, expr_static))
     }
 
+    pub fn check_for_inevitable_eval_error(
+        &self,
+        reason: &ExprNotStaticReason,
+    ) -> ConfigResult<()> {
+        if let Some(error) = reason.inevitable_eval_error() {
+            Err(Errs::one(ConfigError::StaticEvalError {
+                context: self.current_src_context(),
+                error,
+            }))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn make_loc(&self, span: SrcSpan) -> ObjSrcLoc {
         ObjSrcLoc { span, context: self.current_src_context() }
     }

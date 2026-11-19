@@ -129,6 +129,14 @@ pub enum ExprTypeError {
         /// The required expression type for the template parameter.
         param_type: ExprType,
     },
+    /// Found an error message expression (e.g. for an assertion) with an
+    /// invalid type.
+    CannotUseTypeAsErrorMessage {
+        /// The source code span for the message expression.
+        expr_span: SrcSpan,
+        /// The expression type of the message expression.
+        expr_type: ExprType,
+    },
     /// Found a list or tuple indexing operation with an index expression of
     /// invalid type.
     CannotUseTypeAsIndex {
@@ -399,6 +407,15 @@ impl ExprTypeError {
                 SourceError::new(SrcLoc::new(path, op_span), message)
                     .with_label(SrcLoc::new(path, template_span), label1)
                     .with_label(SrcLoc::new(path, arg_span), label2)
+            }
+            Self::CannotUseTypeAsErrorMessage { expr_span, expr_type } => {
+                let message = format!(
+                    "error message must be of type {}, not {expr_type}",
+                    ExprType::String
+                );
+                let label = format!("this has type {expr_type}");
+                SourceError::new(SrcLoc::new(path, expr_span), message)
+                    .with_primary_label(label)
             }
             Self::CannotUseTypeAsIndex { index_span, index_type } => {
                 let message = format!("cannot use {index_type} as an index");

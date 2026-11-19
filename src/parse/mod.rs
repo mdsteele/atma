@@ -25,7 +25,9 @@ pub use attr::AttributeAst;
 pub use error::{ParseError, ParseResult};
 pub use expr::{BinOpAst, ExprAst, ExprAstNode, HereLabelKind, UnOpAst};
 pub use id::{CompoundIdAst, DeclarationKind, IdentifierAst, IdentifierKind};
-pub use link::{LinkBlockAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst};
+pub use link::{
+    LinkAssertAst, LinkBlockAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
+};
 pub use lvalue::{LValueAst, LValueAstNode};
 pub use symbols::{SymbolEntry, SymbolTable};
 
