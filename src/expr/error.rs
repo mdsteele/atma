@@ -256,6 +256,12 @@ pub enum ExprTypeError {
         /// The name of the identifier.
         name: Rc<str>,
     },
+    /// Tried to read the value of a wildcard expression (`_`), rather than
+    /// just assigning to it.
+    WildcardAsValue {
+        /// The source code span where the wildcard appears.
+        span: SrcSpan,
+    },
     /// Found a with-addr operator (unary `*`) outside of any context with a
     /// meaningful address space.
     WithAddrOutsideOfAnyAddrSpace {
@@ -541,6 +547,12 @@ impl ExprTypeError {
                 let label = "this identifier was never declared";
                 SourceError::new(SrcLoc::new(path, span), message)
                     .with_primary_label(label)
+            }
+            Self::WildcardAsValue { span } => {
+                let message = "wildcards can only appear on the left-hand \
+                               side of an assignment";
+                SourceError::new(SrcLoc::new(path, span), message)
+                    .with_primary_label("not allowed here")
             }
             Self::WithAddrOutsideOfAnyAddrSpace { op_span } => {
                 let message = "cannot make label from address outside of any \

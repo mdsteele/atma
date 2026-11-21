@@ -121,4 +121,13 @@ fn unknown_identifier() {
     ] if &**name == "foo");
 }
 
+#[test]
+fn wildcard_as_value() {
+    let source = "!_";
+    assert_matches!(
+        expr_errors(source).as_slice(),
+        [ExprTypeError::WildcardAsValue { span: _ }]
+    );
+}
+
 //===========================================================================//

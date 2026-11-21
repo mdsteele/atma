@@ -229,7 +229,8 @@ impl<'a> MacroBuilder<'a> {
             ExprAstNode::BoolLiteral(_)
             | ExprAstNode::HereLabel(_)
             | ExprAstNode::IntLiteral(_)
-            | ExprAstNode::StrLiteral(_) => {}
+            | ExprAstNode::StrLiteral(_)
+            | ExprAstNode::Wildcard => {}
             ExprAstNode::Identifier(compound) => {
                 errs.also(
                     self.scan_compound_id(
@@ -581,9 +582,9 @@ impl<'a> MacroSubstitution<'a> {
             MacroSubstitution::Expression(_, expr) => expr.clone(),
             MacroSubstitution::Identifier(_, id) => ExprAst {
                 span: id.span,
-                node: ExprAstNode::Identifier(CompoundIdAst {
-                    ids: vec![id.clone()],
-                }),
+                node: ExprAstNode::Identifier(CompoundIdAst::new(vec![
+                    id.clone(),
+                ])),
             },
         }
     }
@@ -722,7 +723,8 @@ impl<'a> MacroExpansion<'a> {
             ExprAstNode::BoolLiteral(_)
             | ExprAstNode::HereLabel(_)
             | ExprAstNode::IntLiteral(_)
-            | ExprAstNode::StrLiteral(_) => expression.clone(),
+            | ExprAstNode::StrLiteral(_)
+            | ExprAstNode::Wildcard => expression.clone(),
             ExprAstNode::Conditional(pred, lhs, rhs) => ExprAst {
                 span: expression.span,
                 node: ExprAstNode::Conditional(
@@ -799,13 +801,9 @@ impl<'a> MacroExpansion<'a> {
     }
 
     fn expand_compound_id(&self, compound: &CompoundIdAst) -> CompoundIdAst {
-        CompoundIdAst {
-            ids: compound
-                .ids
-                .iter()
-                .map(|id| self.expand_identifier(id))
-                .collect(),
-        }
+        CompoundIdAst::new(
+            compound.ids.iter().map(|id| self.expand_identifier(id)).collect(),
+        )
     }
 
     fn expand_identifier(&self, identifier: &IdentifierAst) -> IdentifierAst {

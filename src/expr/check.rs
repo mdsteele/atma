@@ -255,6 +255,12 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.tasks.push(Task::UnOp(unop_ast, arg_ast.span));
                 self.tasks.push(Task::Expr(*arg_ast));
             }
+            ExprAstNode::Wildcard => {
+                self.errs.push(ExprTypeError::WildcardAsValue {
+                    span: subexpr.span,
+                });
+                self.types.push(TYPE_ERROR);
+            }
         }
     }
 
@@ -468,9 +474,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
     }
 
     fn push_identifier(&mut self, span: SrcSpan, compound: CompoundIdAst) {
-        let names =
-            compound.ids.into_iter().map(|id| id.name).collect::<Vec<_>>();
-        let name = Rc::<str>::from(names.join("::"));
+        let name = compound.name;
         match self.errs.ok(self.env.typecheck_identifier(span, &name)) {
             Some((op, id_type, id_static)) => {
                 self.ops.push(op);

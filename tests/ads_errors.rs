@@ -127,4 +127,18 @@ fn unknown_variable() {
     ] if &**name == "foo");
 }
 
+#[test]
+fn wildcard_assign_op() {
+    let source = r#"\
+    set _ += 1
+    "#;
+    assert_matches!(
+        ads_errors(source).as_slice(),
+        [AdsError::ExprTypeError {
+            error: ExprTypeError::WildcardAsValue { span: _ },
+            ..
+        }]
+    );
+}
+
 //===========================================================================//

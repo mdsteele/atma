@@ -103,17 +103,35 @@ impl IdentifierAst {
 /// expression or lvalue.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompoundIdAst {
+    /// The location in the source code where this compound identifier appears.
+    pub span: SrcSpan,
     /// The individual identifiers in the compound identifier.
     pub ids: Vec<IdentifierAst>,
+    /// The combined name.
+    pub name: Rc<str>,
 }
 
 impl CompoundIdAst {
+    pub(crate) fn new(ids: Vec<IdentifierAst>) -> Self {
+        let first = ids.first().unwrap();
+        let last = ids.last().unwrap();
+        let span = first.span.merged_with(last.span);
+        let name = if ids.len() == 1 {
+            ids[0].name.clone()
+        } else {
+            let names =
+                ids.iter().map(|id| Rc::as_ref(&id.name)).collect::<Vec<_>>();
+            Rc::<str>::from(names.join("::"))
+        };
+        Self { span, ids, name }
+    }
+
     pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         IdentifierAst::parser()
             .separated_by(symbol(TokenValue::ColonColon))
             .at_least(1)
             .collect::<Vec<_>>()
-            .map(|ids| Self { ids })
+            .map(Self::new)
     }
 }
 

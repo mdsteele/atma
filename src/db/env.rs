@@ -233,8 +233,8 @@ impl<'a> AdsTypeEnv<'a> {
     }
 
     /// Adds a variable to the current scope that is internal to the compiler
-    /// (i.e. it has no associated declaration), and returns the frame
-    /// reference and frame-relative stack index for the new variable.
+    /// (i.e. it has no associated declaration), and returns the frame-relative
+    /// stack index for the new variable.
     pub fn add_internal_variable(&mut self) -> usize {
         self.current_scope_mut().add_internal_variable()
     }
@@ -464,14 +464,17 @@ mod tests {
 
     fn id_ast(name: &str, range: Range<usize>) -> ExprAst {
         let span = SrcSpan::from_byte_range(range);
+        let name = Rc::<str>::from(name);
         ExprAst {
             span,
             node: ExprAstNode::Identifier(CompoundIdAst {
+                span,
                 ids: vec![IdentifierAst {
                     span,
-                    name: Rc::from(name),
+                    name: name.clone(),
                     kind: IdentifierKind::Standard,
                 }],
+                name,
             }),
         }
     }

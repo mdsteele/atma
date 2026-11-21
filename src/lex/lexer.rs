@@ -115,6 +115,8 @@ enum TokenKind {
     And,
     #[token("&&")]
     AndAnd,
+    #[token("&=")]
+    AndEquals,
     #[token("<-")]
     ArrowLeft,
     #[token("->")]
@@ -145,6 +147,8 @@ enum TokenKind {
     Caret,
     #[token("^^")]
     CaretCaret,
+    #[token("^=")]
+    CaretEquals,
     #[token(":")]
     Colon,
     #[token("::")]
@@ -175,6 +179,8 @@ enum TokenKind {
     GreaterEquals,
     #[token(">>")]
     GreaterGreater,
+    #[token(">>=")]
+    GreaterGreaterEquals,
     #[token(">")]
     GreaterThan,
     #[regex(r"[A-Za-z][_A-Za-z0-9]*|_[_A-Za-z0-9]+")]
@@ -187,6 +193,8 @@ enum TokenKind {
     LessEquals,
     #[token("<<")]
     LessLess,
+    #[token("<<=")]
+    LessLessEquals,
     #[token("<")]
     LessThan,
     #[token("\\\\", double_backslash_callback)]
@@ -194,8 +202,12 @@ enum TokenKind {
     Linebreak,
     #[token("-")]
     Minus,
+    #[token("-=")]
+    MinusEquals,
     #[token("|")]
     Or,
+    #[token("|=")]
+    OrEquals,
     #[token("||")]
     OrOr,
     #[token(")")]
@@ -204,24 +216,36 @@ enum TokenKind {
     ParenOpen,
     #[token("%")]
     Percent,
+    #[token("%=")]
+    PercentEquals,
     #[token("%%")]
     PercentPercent,
     #[regex(r"%[A-Z][_A-Z0-9]*")]
     Placeholder,
     #[token("+")]
     Plus,
+    #[token("+=")]
+    PlusEquals,
     #[token("++")]
     PlusPlus,
+    #[token("++=")]
+    PlusPlusEquals,
     #[token("#")]
     Pound,
     #[token("?")]
     Question,
     #[token("/")]
     Slash,
+    #[token("/=")]
+    SlashEquals,
     #[token("*")]
     Star,
+    #[token("*=")]
+    StarEquals,
     #[token("**")]
     StarStar,
+    #[token("**=")]
+    StarStarEquals,
     #[regex("\"([^\"\\n\\\\]|\\\\.)*\"", string_literal_callback)]
     StrLiteral(Rc<str>),
     #[token("~")]
@@ -239,6 +263,7 @@ impl TokenKind {
         let token_value = match self {
             TokenKind::And => TokenValue::And,
             TokenKind::AndAnd => TokenValue::AndAnd,
+            TokenKind::AndEquals => TokenValue::AndEquals,
             TokenKind::ArrowLeft => TokenValue::ArrowLeft,
             TokenKind::ArrowRight => TokenValue::ArrowRight,
             TokenKind::Backslash => unreachable!(),
@@ -254,6 +279,7 @@ impl TokenKind {
             TokenKind::Builtin => TokenValue::Builtin(Rc::from(lexer.slice())),
             TokenKind::Caret => TokenValue::Caret,
             TokenKind::CaretCaret => TokenValue::CaretCaret,
+            TokenKind::CaretEquals => TokenValue::CaretEquals,
             TokenKind::Colon => TokenValue::Colon,
             TokenKind::ColonColon => TokenValue::ColonColon,
             TokenKind::Comma => TokenValue::Comma,
@@ -269,6 +295,9 @@ impl TokenKind {
             TokenKind::DollarUp => TokenValue::DollarUp,
             TokenKind::GreaterEquals => TokenValue::GreaterEquals,
             TokenKind::GreaterGreater => TokenValue::GreaterGreater,
+            TokenKind::GreaterGreaterEquals => {
+                TokenValue::GreaterGreaterEquals
+            }
             TokenKind::GreaterThan => TokenValue::GreaterThan,
             TokenKind::EqualsEquals => TokenValue::EqualsEquals,
             TokenKind::Equals => TokenValue::Equals,
@@ -278,25 +307,34 @@ impl TokenKind {
             TokenKind::IntLiteral(int) => TokenValue::IntLiteral(int),
             TokenKind::LessEquals => TokenValue::LessEquals,
             TokenKind::LessLess => TokenValue::LessLess,
+            TokenKind::LessLessEquals => TokenValue::LessLessEquals,
             TokenKind::LessThan => TokenValue::LessThan,
             TokenKind::Linebreak => TokenValue::Linebreak,
             TokenKind::Placeholder => {
                 TokenValue::Placeholder(Rc::from(lexer.slice()))
             }
             TokenKind::Minus => TokenValue::Minus,
+            TokenKind::MinusEquals => TokenValue::MinusEquals,
             TokenKind::Or => TokenValue::Or,
+            TokenKind::OrEquals => TokenValue::OrEquals,
             TokenKind::OrOr => TokenValue::OrOr,
             TokenKind::ParenClose => TokenValue::ParenClose,
             TokenKind::ParenOpen => TokenValue::ParenOpen,
             TokenKind::Percent => TokenValue::Percent,
+            TokenKind::PercentEquals => TokenValue::PercentEquals,
             TokenKind::PercentPercent => TokenValue::PercentPercent,
             TokenKind::Plus => TokenValue::Plus,
+            TokenKind::PlusEquals => TokenValue::PlusEquals,
             TokenKind::PlusPlus => TokenValue::PlusPlus,
+            TokenKind::PlusPlusEquals => TokenValue::PlusPlusEquals,
             TokenKind::Pound => TokenValue::Pound,
             TokenKind::Question => TokenValue::Question,
             TokenKind::Slash => TokenValue::Slash,
+            TokenKind::SlashEquals => TokenValue::SlashEquals,
             TokenKind::Star => TokenValue::Star,
+            TokenKind::StarEquals => TokenValue::StarEquals,
             TokenKind::StarStar => TokenValue::StarStar,
+            TokenKind::StarStarEquals => TokenValue::StarStarEquals,
             TokenKind::StrLiteral(string) => TokenValue::StrLiteral(string),
             TokenKind::Tilde => TokenValue::Tilde,
             TokenKind::Underscore => TokenValue::Underscore,

@@ -185,21 +185,27 @@ pub(crate) enum ExprBinOp {
 }
 
 impl ExprBinOp {
-    pub(super) fn typecheck(
+    pub(crate) fn typecheck(
         (op_span, op): (SrcSpan, BinOpAst),
         lhs_span: SrcSpan,
         lhs_type: ExprType,
         rhs_span: SrcSpan,
         rhs_type: ExprType,
-    ) -> ExprTypeResult<(ExprBinOp, ExprType)> {
-        // TODO: Allow one or both operands to have type `Bottom`, with result
-        // type `Bottom`, as long as the other operand has a valid type.
-        // (e.g. bottom & int is OK, but bottom & str is not OK.)
+    ) -> ExprTypeResult<(Self, ExprType)> {
         match (op, &lhs_type, &rhs_type) {
             // String interpolation and logical AND/OR and are special-cased in
             // `ExprCompiler`, and are never passed to this method.
             (BinOpAst::Interp, _, _) => unreachable!(),
             (BinOpAst::LogicAnd | BinOpAst::LogicOr, _, _) => unreachable!(),
+            // If either operand has an undefined type (due to a prior type
+            // error), then treat the result type as undefined without
+            // reporting any further error.
+            (_, ExprType::Undefined, _) | (_, _, ExprType::Undefined) => {
+                // It doesn't matter what operation we return here, because it
+                // will never be executed.
+                Ok((Self::CmpEq, ExprType::Undefined))
+            }
+            // The following combinations are well-defined.
             (BinOpAst::Add, ExprType::Integer, ExprType::Integer) => {
                 Ok((Self::Add, ExprType::Integer))
             }
@@ -332,6 +338,9 @@ impl ExprBinOp {
                 ExprType::Integer | ExprType::Bottom | ExprType::Label,
                 ExprType::Integer | ExprType::Bottom,
             ) => Ok((Self::Word, ExprType::Integer)),
+            // The following combinations are ambiguous: multiple result types
+            // are possible depending on which type each `Bottom` is standing
+            // in for:
             (BinOpAst::Add, ExprType::Bottom, ExprType::Bottom)
             | (BinOpAst::Add, ExprType::Integer, ExprType::Bottom)
             | (BinOpAst::Add, ExprType::Bottom, ExprType::Integer)
@@ -351,6 +360,7 @@ impl ExprBinOp {
                     rhs_type,
                 }))
             }
+            // Any other combination is invalid.
             _ => Err(Errs::one(ExprTypeError::CannotApplyBinaryOpToTypes {
                 op_span,
                 op,

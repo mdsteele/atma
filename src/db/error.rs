@@ -170,7 +170,7 @@ pub enum AdsError {
     /// Tried to assign an expression of one type to an lvalue of a different
     /// type.
     VariableTypeError {
-        /// The source code location for the right-hand expression.
+        /// The source code location for the expression to be assigned.
         expr_loc: AdsSrcLoc,
         /// The type of the expression.
         expr_type: ExprType,

@@ -10,8 +10,9 @@ use crate::expr::{
     ExprUnOp, ExprValue,
 };
 use crate::parse::{
-    AdsStmtAst, BreakpointAst, DeclarationKind, ExprAst, IdentifierAst,
-    LValueAst, LValueAstNode, SymbolTable,
+    AdsStmtAst, AssignOpAst, AssignOpKind, BreakpointAst, CompoundIdAst,
+    DeclarationKind, ExprAst, IdentifierAst, LValueAst, LValueAstNode,
+    SymbolTable,
 };
 use crate::system::SimSystem;
 use std::path::Path;
@@ -108,8 +109,8 @@ impl<'a> AdsCompiler<'a> {
             AdsStmtAst::RunUntil(breakpoint_ast) => {
                 self.compile_run_until_statement(breakpoint_ast, out)
             }
-            AdsStmtAst::Set(lvalue, expr_ast) => {
-                self.compile_set_statement(lvalue, expr_ast, out)
+            AdsStmtAst::Set(lvalue, op, expr_ast) => {
+                self.compile_set_statement(lvalue, op, expr_ast, out)
             }
             AdsStmtAst::Step => {
                 out.push(AdsInstruction::Step);
@@ -350,22 +351,32 @@ impl<'a> AdsCompiler<'a> {
     fn compile_set_statement(
         &mut self,
         lvalue_ast: LValueAst,
+        op_ast: AssignOpAst,
         expr_ast: ExprAst,
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         let mut errs = Errs::<AdsError>::new();
+        self.env.push_scope();
         let lvalue_span = lvalue_ast.span;
+        let mut lvalue_end_insts = Vec::<AdsInstruction>::new();
+        let lvalue_type = errs.with(self.compile_lvalue(
+            lvalue_ast,
+            op_ast,
+            out,
+            &mut lvalue_end_insts,
+        ));
         let expr_span = expr_ast.span;
         let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
-        let lvalue_type = errs.with(self.compile_lvalue(lvalue_ast, out));
-        if !expr_type.is_subtype_of(&lvalue_type) {
-            errs.push(AdsError::VariableTypeError {
-                expr_loc: self.make_loc(expr_span),
-                expr_type,
-                lvalue_loc: self.make_loc(lvalue_span),
-                lvalue_type,
-            });
-        }
+        errs.also(self.compile_assign_op(
+            lvalue_span,
+            lvalue_type,
+            op_ast,
+            expr_span,
+            expr_type,
+            out,
+        ));
+        out.append(&mut lvalue_end_insts);
+        self.env.pop_scope(out);
         errs.result()
     }
 
@@ -639,66 +650,163 @@ impl<'a> AdsCompiler<'a> {
         errs.result()
     }
 
-    fn compile_lvalue(
+    fn compile_assign_op(
         &self,
-        lvalue_ast: LValueAst,
+        lvalue_span: SrcSpan,
+        lvalue_type: ExprType,
+        op_ast: AssignOpAst,
+        expr_span: SrcSpan,
+        expr_type: ExprType,
         out: &mut Vec<AdsInstruction>,
+    ) -> AdsResult<()> {
+        let mut errs = Errs::<AdsError>::new();
+        let (result_span, result_type) = match op_ast.kind {
+            AssignOpKind::Equals => (expr_span, expr_type),
+            AssignOpKind::OpEquals(binop_kind) => {
+                let result_span = lvalue_span.merged_with(expr_span);
+                let context = self.env.current_src_context();
+                let result_type = match errs.ok(ExprBinOp::typecheck(
+                    (op_ast.span, binop_kind),
+                    lvalue_span,
+                    lvalue_type.clone(),
+                    expr_span,
+                    expr_type,
+                )
+                .map_err(|errs| {
+                    errs.map(|error| AdsError::ExprTypeError {
+                        context: context.clone(),
+                        error,
+                    })
+                })) {
+                    Some((binop, result_type)) => {
+                        out.push(AdsInstruction::BinOp {
+                            context,
+                            binop,
+                            op_span: op_ast.span,
+                            lhs_span: lvalue_span,
+                            rhs_span: expr_span,
+                        });
+                        result_type
+                    }
+                    None => ExprType::Undefined,
+                };
+                (result_span, result_type)
+            }
+        };
+        if !result_type.is_subtype_of(&lvalue_type) {
+            errs.push(AdsError::VariableTypeError {
+                expr_loc: self.make_loc(result_span),
+                expr_type: result_type,
+                lvalue_loc: self.make_loc(lvalue_span),
+                lvalue_type,
+            });
+        }
+        errs.result()
+    }
+
+    fn compile_lvalue(
+        &mut self,
+        lvalue_ast: LValueAst,
+        op_ast: AssignOpAst,
+        begin_out: &mut Vec<AdsInstruction>,
+        end_out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
         match lvalue_ast.node {
-            LValueAstNode::Memory(expr_ast) => {
-                self.compile_memory_lvalue(expr_ast, out)
-            }
-            LValueAstNode::Tuple(lvalue_asts) => {
-                self.compile_tuple_lvalue(lvalue_asts, out)
-            }
-            LValueAstNode::Variable(name) => {
-                self.compile_variable_lvalue(lvalue_ast.span, name, out)
-            }
+            LValueAstNode::Memory(expr_ast) => self
+                .compile_memory_lvalue(expr_ast, op_ast, begin_out, end_out),
+            LValueAstNode::Tuple(lvalue_asts) => self.compile_tuple_lvalue(
+                lvalue_asts,
+                op_ast,
+                begin_out,
+                end_out,
+            ),
+            LValueAstNode::Variable(compound) => self
+                .compile_variable_lvalue(compound, op_ast, begin_out, end_out),
             LValueAstNode::Wildcard => {
-                out.push(AdsInstruction::PopValue);
-                (ExprType::Undefined, Errs::new())
+                self.compile_wildcard_lvalue(lvalue_ast.span, op_ast, end_out)
             }
         }
     }
 
     fn compile_memory_lvalue(
-        &self,
+        &mut self,
         expr_ast: ExprAst,
-        out: &mut Vec<AdsInstruction>,
+        op_ast: AssignOpAst,
+        begin_out: &mut Vec<AdsInstruction>,
+        end_out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
-        errs.also(self.compile_address(expr_ast, out));
-        out.push(AdsInstruction::SetMemory);
+        let address_index = self.env.add_internal_variable();
+        errs.also(self.compile_address(expr_ast, begin_out));
+        match op_ast.kind {
+            AssignOpKind::Equals => {}
+            AssignOpKind::OpEquals(_) => {
+                begin_out.push(AdsInstruction::GetValue(
+                    AdsFrameRef(0),
+                    address_index,
+                ));
+                begin_out.push(AdsInstruction::GetMemory);
+            }
+        }
+        end_out.push(AdsInstruction::GetValue(AdsFrameRef(0), address_index));
+        end_out.push(AdsInstruction::SetMemory);
         (ExprType::Integer, errs)
     }
 
     fn compile_tuple_lvalue(
-        &self,
+        &mut self,
         lvalue_asts: Vec<LValueAst>,
-        out: &mut Vec<AdsInstruction>,
+        op_ast: AssignOpAst,
+        begin_out: &mut Vec<AdsInstruction>,
+        end_out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
-        out.push(AdsInstruction::ExpandTuple);
-        let mut types = Vec::<ExprType>::new();
-        for lvalue_ast in lvalue_asts.into_iter().rev() {
-            types.push(errs.with(self.compile_lvalue(lvalue_ast, out)));
+        let num_items = lvalue_asts.len();
+        let mut types = Vec::<ExprType>::with_capacity(num_items);
+        let mut ends = Vec::<Vec<AdsInstruction>>::with_capacity(num_items);
+        for lvalue_ast in lvalue_asts {
+            let mut end = Vec::<AdsInstruction>::new();
+            types.push(errs.with(
+                self.compile_lvalue(lvalue_ast, op_ast, begin_out, &mut end),
+            ));
+            ends.push(end);
         }
-        types.reverse();
+        match op_ast.kind {
+            AssignOpKind::Equals => {}
+            AssignOpKind::OpEquals(_) => {
+                begin_out.push(AdsInstruction::MakeTuple(num_items));
+            }
+        }
+        end_out.push(AdsInstruction::ExpandTuple);
+        for mut end in ends.into_iter().rev() {
+            end_out.append(&mut end);
+        }
         (ExprType::Tuple(Rc::from(types)), errs)
     }
 
     fn compile_variable_lvalue(
         &self,
-        id_span: SrcSpan,
-        id_name: Rc<str>,
-        out: &mut Vec<AdsInstruction>,
+        compound: CompoundIdAst,
+        op_ast: AssignOpAst,
+        begin_out: &mut Vec<AdsInstruction>,
+        end_out: &mut Vec<AdsInstruction>,
     ) -> (ExprType, Errs<AdsError>) {
-        match self.env.get_declaration(&id_name) {
+        let op_assign = match op_ast.kind {
+            AssignOpKind::Equals => false,
+            AssignOpKind::OpEquals(_) => true,
+        };
+        match self.env.get_declaration(&compound.name) {
             Some((
                 frame_ref,
                 decl @ AdsDecl { kind: AdsDeclKind::Variable, .. },
             )) => {
-                out.push(AdsInstruction::SetValue(
+                if op_assign {
+                    begin_out.push(AdsInstruction::GetValue(
+                        frame_ref,
+                        decl.stack_index,
+                    ));
+                }
+                end_out.push(AdsInstruction::SetValue(
                     frame_ref,
                     decl.stack_index,
                 ));
@@ -709,30 +817,59 @@ impl<'a> AdsCompiler<'a> {
                 decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. },
             )) => {
                 let error = AdsError::CannotModifyConstant {
-                    name: id_name,
-                    lvalue_loc: self.make_loc(id_span),
+                    name: compound.name,
+                    lvalue_loc: self.make_loc(compound.span),
                     decl_loc: self.make_loc(decl.id_span),
                 };
                 (decl.var_type.clone(), Errs::one(error))
             }
             None => {
                 for &reg in self.env.get_register_names() {
-                    if id_name.eq_ignore_ascii_case(reg) {
-                        out.push(AdsInstruction::SetRegister(reg));
+                    if compound.name.eq_ignore_ascii_case(reg) {
+                        if op_assign {
+                            begin_out.push(AdsInstruction::GetRegister(reg));
+                        }
+                        end_out.push(AdsInstruction::SetRegister(reg));
                         return (ExprType::Integer, Errs::new());
                     }
                 }
-                if id_name.eq_ignore_ascii_case("PC") {
-                    out.push(AdsInstruction::SetPc);
+                if compound.name.eq_ignore_ascii_case("PC") {
+                    if op_assign {
+                        begin_out.push(AdsInstruction::GetPc);
+                    }
+                    end_out.push(AdsInstruction::SetPc);
                     return (ExprType::Integer, Errs::new());
                 }
                 let error = AdsError::UnknownVariable {
-                    name: id_name,
-                    loc: self.make_loc(id_span),
+                    name: compound.name,
+                    loc: self.make_loc(compound.span),
                 };
                 (ExprType::Undefined, Errs::one(error))
             }
         }
+    }
+
+    fn compile_wildcard_lvalue(
+        &self,
+        wildcard_span: SrcSpan,
+        op_ast: AssignOpAst,
+        end_out: &mut Vec<AdsInstruction>,
+    ) -> (ExprType, Errs<AdsError>) {
+        let mut errs = Errs::<AdsError>::new();
+        match op_ast.kind {
+            AssignOpKind::Equals => {
+                end_out.push(AdsInstruction::PopValue);
+            }
+            AssignOpKind::OpEquals(_) => {
+                errs.push(AdsError::ExprTypeError {
+                    context: self.env.current_src_context(),
+                    error: ExprTypeError::WildcardAsValue {
+                        span: wildcard_span,
+                    },
+                });
+            }
+        }
+        (ExprType::Undefined, errs)
     }
 
     fn make_loc(&self, span: SrcSpan) -> AdsSrcLoc {

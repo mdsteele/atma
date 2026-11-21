@@ -67,6 +67,18 @@ impl ExprUnOp {
         arg_type: ExprType,
     ) -> ExprTypeResult<(Self, ExprType)> {
         match (op, arg_type) {
+            // `WithAddr` is special-cased in `ExprCompiler`, and is never
+            // passed to this method.
+            (UnOpAst::WithAddr, _) => unreachable!(),
+            // If the argument has an undefined type (due to a prior type
+            // error), then treat the result type as undefined without
+            // reporting any further error.
+            (_, ExprType::Undefined) => {
+                // It doesn't matter what operation we return here, because it
+                // will never be executed.
+                Ok((Self::Identity, ExprType::Undefined))
+            }
+            // The following combinations are well-defined.
             (UnOpAst::AddrOf, ExprType::Label | ExprType::Bottom) => {
                 Ok((Self::AddrOf, ExprType::Integer))
             }
@@ -85,9 +97,7 @@ impl ExprUnOp {
             (UnOpAst::Plus, ExprType::Integer | ExprType::Bottom) => {
                 Ok((Self::Identity, ExprType::Integer))
             }
-            // `WithAddr` is special-cased in `ExprCompiler`, and is never
-            // passed to this method.
-            (UnOpAst::WithAddr, _) => unreachable!(),
+            // Any other combination is invalid.
             (op, arg_type) => {
                 Err(Errs::one(ExprTypeError::CannotApplyUnaryOpToType {
                     op_span,

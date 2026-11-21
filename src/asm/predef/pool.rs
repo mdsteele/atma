@@ -31,9 +31,9 @@ impl RcPool {
             node: ExprAstNode::Apply(
                 Box::new(ExprAst {
                     span: SrcSpan::INTERNAL,
-                    node: ExprAstNode::Identifier(CompoundIdAst {
-                        ids: vec![self.builtin_id(func.name())],
-                    }),
+                    node: ExprAstNode::Identifier(CompoundIdAst::new(vec![
+                        self.builtin_id(func.name()),
+                    ])),
                 }),
                 Box::new(arg),
             ),
@@ -159,9 +159,9 @@ impl RcPool {
     pub fn placeholder_expr(&mut self, placeholder: &'static str) -> ExprAst {
         ExprAst {
             span: SrcSpan::INTERNAL,
-            node: ExprAstNode::Identifier(CompoundIdAst {
-                ids: vec![self.placeholder_id(placeholder)],
-            }),
+            node: ExprAstNode::Identifier(CompoundIdAst::new(vec![
+                self.placeholder_id(placeholder),
+            ])),
         }
     }
 

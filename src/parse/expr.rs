@@ -65,6 +65,7 @@ impl HereLabelKind {
 
 /// A unary operation on an expression in an abstract syntax tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// TODO: rename this to UnOpKind, and add UnOpAst with span/kind fields
 pub enum UnOpAst {
     /// Address of label.
     AddrOf,
@@ -102,6 +103,7 @@ impl UnOpAst {
 
 /// A binary operation between two expressions in an abstract syntax tree.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// TODO: rename this to BinOpKind, and add BinOpAst with span/kind fields
 pub enum BinOpAst {
     /// Addition.
     Add,
@@ -255,11 +257,7 @@ impl ExprAst {
                 ExprAst { span, node: ExprAstNode::HereLabel(kind) }
             });
             let identifier = CompoundIdAst::parser().map(|compound| ExprAst {
-                span: {
-                    let first = compound.ids.first().unwrap();
-                    let last = compound.ids.last().unwrap();
-                    first.span.merged_with(last.span)
-                },
+                span: compound.span,
                 node: ExprAstNode::Identifier(compound),
             });
 
@@ -276,6 +274,7 @@ impl ExprAst {
                 bool_literal(),
                 int_literal(),
                 str_literal(),
+                wildcard(),
             ))
             .labelled("subexpression");
 
@@ -563,6 +562,10 @@ pub enum ExprAstNode {
     TupleLiteral(Vec<ExprAst>),
     /// A unary operation on a subexpression.
     UnOp((SrcSpan, UnOpAst), Box<ExprAst>),
+    /// A wildcard (`_`) used as a subexpression.  This is always invalid
+    /// (wildcards can only be used on the left-hand side of assignments), but
+    /// this node kind is included to help provide a better error message.
+    Wildcard,
 }
 
 //===========================================================================//
@@ -612,6 +615,11 @@ fn str_literal<'a>() -> impl AtmaParser<'a, ExprAst> {
         .labelled("string literal")
 }
 
+fn wildcard<'a>() -> impl AtmaParser<'a, ExprAst> {
+    symbol(TokenValue::Underscore)
+        .map(|token| ExprAst { span: token.span, node: ExprAstNode::Wildcard })
+}
+
 //===========================================================================//
 
 #[cfg(test)]
@@ -647,6 +655,7 @@ mod tests {
             Ok(ExprAst {
                 span: SrcSpan::from_byte_range(0..8),
                 node: ExprAstNode::Identifier(CompoundIdAst {
+                    span: SrcSpan::from_byte_range(0..8),
                     ids: vec![
                         IdentifierAst {
                             span: SrcSpan::from_byte_range(0..3),
@@ -659,6 +668,7 @@ mod tests {
                             kind: IdentifierKind::Standard,
                         },
                     ],
+                    name: Rc::from("foo::bar"),
                 }),
             })
         );

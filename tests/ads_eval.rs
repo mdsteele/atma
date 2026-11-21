@@ -149,8 +149,10 @@ fn get_and_set_pc() {
       print pc
       set Pc = $20
       print pC
+      set PC *= 3
+      print PC
     "#;
-    assert_eq!(compile_and_run(source), "16\n32\n");
+    assert_eq!(compile_and_run(source), "16\n32\n96\n");
 }
 
 #[test]
@@ -168,15 +170,15 @@ fn tuple_lvalue() {
 #[test]
 fn memory_lvalue() {
     let source = r#"\
-      set [$00] = 37
-      set [$01] = 42
+      set ([$00], [$01]) = (37, 42)
       when read 0 {
         print DATA
       }
       step
+      set [$01] -= 1
       print [$01]
     "#;
-    assert_eq!(compile_and_run(source), "37\n42\n");
+    assert_eq!(compile_and_run(source), "37\n41\n");
 }
 
 //===========================================================================//
@@ -188,7 +190,7 @@ fn for_loop() {
       var sum = 0
       for value <- {1, 2, 3, 4} {
         print value
-        set sum = sum + value
+        set sum += value
       }
       print "sum={}" %% sum
     "#;

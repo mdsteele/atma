@@ -28,7 +28,7 @@ pub use id::{CompoundIdAst, DeclarationKind, IdentifierAst, IdentifierKind};
 pub use link::{
     LinkAssertAst, LinkBlockAst, LinkConfigAst, LinkDirectiveAst, LinkEntryAst,
 };
-pub use lvalue::{LValueAst, LValueAstNode};
+pub use lvalue::{AssignOpAst, AssignOpKind, LValueAst, LValueAstNode};
 pub use symbols::{SymbolEntry, SymbolTable};
 
 //===========================================================================//

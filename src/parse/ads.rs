@@ -6,7 +6,7 @@ use super::atom::{
 use super::error::ParseResult;
 use super::expr::ExprAst;
 use super::id::{DeclarationKind, IdentifierAst};
-use super::lvalue::LValueAst;
+use super::lvalue::{AssignOpAst, LValueAst};
 use crate::lex::{Token, TokenValue};
 use chumsky::{self, IterParser, Parser};
 
@@ -70,7 +70,7 @@ pub enum AdsStmtAst {
     /// Runs the simulated processor until the specified breakpoint is reached.
     RunUntil(BreakpointAst),
     /// Updates a variable.
-    Set(LValueAst, ExprAst),
+    Set(LValueAst, AssignOpAst, ExprAst),
     /// Steps the simulated processor forward by one instruction.
     Step,
     /// Loads another ADS source file.
@@ -239,10 +239,10 @@ fn run_until_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
 fn set_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {
     keyword("set")
         .ignore_then(LValueAst::parser())
-        .then_ignore(symbol(TokenValue::Equals))
+        .then(AssignOpAst::parser())
         .then(ExprAst::parser())
         .then_ignore(linebreak())
-        .map(|(id, expr)| AdsStmtAst::Set(id, expr))
+        .map(|((lvalue, op), expr)| AdsStmtAst::Set(lvalue, op, expr))
 }
 
 fn step_statement<'a>() -> impl AtmaParser<'a, AdsStmtAst> {

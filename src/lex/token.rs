@@ -12,6 +12,8 @@ pub enum TokenValue {
     And,
     /// A "`&&`" symbol.
     AndAnd,
+    /// A "`&=`" symbol.
+    AndEquals,
     /// A "`<-`" symbol.
     ArrowLeft,
     /// A "`->`" symbol.
@@ -38,6 +40,8 @@ pub enum TokenValue {
     Caret,
     /// A "`^^`" symbol.
     CaretCaret,
+    /// A "`^=`" symbol.
+    CaretEquals,
     /// A "`:`" symbol.
     Colon,
     /// A "`::`" symbol.
@@ -68,6 +72,8 @@ pub enum TokenValue {
     GreaterEquals,
     /// A "`>>`" symbol.
     GreaterGreater,
+    /// A "`>>=`" symbol.
+    GreaterGreaterEquals,
     /// A "`>`" symbol.
     GreaterThan,
     /// An identifier or keyword.
@@ -78,14 +84,20 @@ pub enum TokenValue {
     LessEquals,
     /// A "`<<`" symbol.
     LessLess,
+    /// A "`<<=`" symbol.
+    LessLessEquals,
     /// A "`<`" symbol.
     LessThan,
     /// A linebreak (that wasn't suppressed, e.g. by a backslash).
     Linebreak,
     /// A "`-`" symbol.
     Minus,
+    /// A "`-=`" symbol.
+    MinusEquals,
     /// A "`|`" symbol.
     Or,
+    /// A "`|=`" symbol.
+    OrEquals,
     /// A "`||`" symbol.
     OrOr,
     /// A "`)`" symbol.
@@ -94,24 +106,36 @@ pub enum TokenValue {
     ParenOpen,
     /// A "`%`" symbol.
     Percent,
+    /// A "`%=`" symbol.
+    PercentEquals,
     /// A "`%%`" symbol.
     PercentPercent,
     /// A placeholder in a macro definition.
     Placeholder(Rc<str>),
     /// A "`+`" symbol.
     Plus,
+    /// A "`+=`" symbol.
+    PlusEquals,
     /// A "`++`" symbol.
     PlusPlus,
+    /// A "`++=`" symbol.
+    PlusPlusEquals,
     /// A "`#`" symbol.
     Pound,
     /// A "`?`" symbol.
     Question,
     /// A "`/`" symbol.
     Slash,
+    /// A "`/=`" symbol.
+    SlashEquals,
     /// A "`*`" symbol.
     Star,
+    /// A "`*=`" symbol.
+    StarEquals,
     /// A "`**`" symbol.
     StarStar,
+    /// A "`**=`" symbol.
+    StarStarEquals,
     /// A string literal.
     StrLiteral(Rc<str>),
     /// A "`~`" symbol.
@@ -126,6 +150,7 @@ impl TokenValue {
         match &self {
             TokenValue::And => "`&`",
             TokenValue::AndAnd => "`&&`",
+            TokenValue::AndEquals => "`&=`",
             TokenValue::ArrowLeft => "`<-`",
             TokenValue::ArrowRight => "`->`",
             TokenValue::Bang => "`!`",
@@ -139,6 +164,7 @@ impl TokenValue {
             TokenValue::Builtin(_) => "builtin",
             TokenValue::Caret => "`^`",
             TokenValue::CaretCaret => "`^^`",
+            TokenValue::CaretEquals => "`^=`",
             TokenValue::Colon => "`:`",
             TokenValue::ColonColon => "`::`",
             TokenValue::Comma => "`,`",
@@ -154,28 +180,38 @@ impl TokenValue {
             TokenValue::Equals => "`=`",
             TokenValue::GreaterEquals => "`>=`",
             TokenValue::GreaterGreater => "`>>`",
+            TokenValue::GreaterGreaterEquals => "`>>=`",
             TokenValue::GreaterThan => "`>`",
             TokenValue::Identifier(_) => "identifier",
             TokenValue::IntLiteral(_) => "integer literal",
             TokenValue::LessEquals => "`<=`",
             TokenValue::LessLess => "`<<`",
+            TokenValue::LessLessEquals => "`<<=`",
             TokenValue::LessThan => "`<`",
             TokenValue::Linebreak => "linebreak",
             TokenValue::Minus => "`-`",
+            TokenValue::MinusEquals => "`-=`",
             TokenValue::Or => "`|`",
+            TokenValue::OrEquals => "`|=`",
             TokenValue::OrOr => "`||`",
             TokenValue::ParenClose => "`)`",
             TokenValue::ParenOpen => "`(`",
             TokenValue::Percent => "`%`",
+            TokenValue::PercentEquals => "`%=`",
             TokenValue::PercentPercent => "`%%`",
             TokenValue::Placeholder(_) => "placeholder",
             TokenValue::Plus => "`+`",
+            TokenValue::PlusEquals => "`+=`",
             TokenValue::PlusPlus => "`++`",
+            TokenValue::PlusPlusEquals => "`++=`",
             TokenValue::Pound => "`#`",
             TokenValue::Question => "`?`",
             TokenValue::Slash => "`/`",
+            TokenValue::SlashEquals => "`/=`",
             TokenValue::Star => "`*`",
+            TokenValue::StarEquals => "`*=`",
             TokenValue::StarStar => "`**`",
+            TokenValue::StarStarEquals => "`**=`",
             TokenValue::StrLiteral(_) => "string literal",
             TokenValue::Tilde => "`~`",
             TokenValue::Underscore => "`_`",
