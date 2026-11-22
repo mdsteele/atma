@@ -1,4 +1,4 @@
-use super::env::{AdsDecl, AdsDeclKind, AdsTypeEnv};
+use super::env::{AdsDeclKind, AdsTypeEnv, AdsVariableImmutableReason};
 use super::error::{
     AdsError, AdsResult, AdsSrcContext, AdsSrcLoc, AdsSrcParent,
 };
@@ -15,6 +15,7 @@ use crate::parse::{
     SymbolTable,
 };
 use crate::system::SimSystem;
+use num_bigint::BigInt;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -173,8 +174,8 @@ impl<'a> AdsCompiler<'a> {
         let (expr_type, expr_static) =
             errs.with(self.compile_expr(expr_ast, out));
         let kind = match kind {
-            DeclarationKind::Let => AdsDeclKind::Constant(expr_static),
-            DeclarationKind::Var => AdsDeclKind::Variable,
+            DeclarationKind::Let => AdsDeclKind::Immutable(expr_static),
+            DeclarationKind::Var => AdsDeclKind::Mutable,
         };
         self.env.add_declaration(kind, id, expr_type);
         errs.result()
@@ -201,7 +202,7 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         self.env.push_scope();
         // Set up sequence to iterate over:
-        let seq_index = self.env.add_internal_variable();
+        let seq_var = self.env.add_internal_variable();
         let expr_span = expr_ast.span;
         let var_type = match errs.with(self.compile_expr(expr_ast, out)).0 {
             ExprType::List(item_type) => Rc::unwrap_or_clone(item_type),
@@ -218,7 +219,7 @@ impl<'a> AdsCompiler<'a> {
             }
         };
         // Set up index of iteration:
-        let index_index = self.env.add_internal_variable();
+        let index_var = self.env.add_internal_variable();
         out.push(AdsInstruction::PushValue(ExprValue::ZERO));
         // Compile loop body:
         let mut do_stmts = Vec::<AdsInstruction>::new();
@@ -228,12 +229,11 @@ impl<'a> AdsCompiler<'a> {
                 span: id.span,
                 name: id.name.clone(),
             };
-            let decl_kind = AdsDeclKind::Constant(Err(reason));
+            let decl_kind = AdsDeclKind::Immutable(Err(reason));
             self.env.add_declaration(decl_kind, id, var_type);
-            do_stmts.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_index));
-            do_stmts
-                .push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
-            do_stmts.push(AdsInstruction::ListIndex {
+            do_stmts.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_var));
+            do_stmts.push(AdsInstruction::GetValue(AdsFrameRef(0), index_var));
+            do_stmts.push(AdsInstruction::GetListIndex {
                 context: self.env.current_src_context(),
                 list_span: SrcSpan::INTERNAL,
                 index_span: SrcSpan::INTERNAL,
@@ -246,7 +246,7 @@ impl<'a> AdsCompiler<'a> {
         out.push(AdsInstruction::Jump(do_stmts_len + 4));
         out.append(&mut do_stmts);
         // Add instructions to increment index of iteration:
-        out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_var));
         out.push(AdsInstruction::PushValue(ExprValue::ONE));
         out.push(AdsInstruction::BinOp {
             context: self.env.current_src_context(),
@@ -255,10 +255,10 @@ impl<'a> AdsCompiler<'a> {
             lhs_span: SrcSpan::INTERNAL,
             rhs_span: SrcSpan::INTERNAL,
         });
-        out.push(AdsInstruction::SetValue(AdsFrameRef(0), index_index));
+        out.push(AdsInstruction::SetValue(AdsFrameRef(0), index_var));
         // Add instructions to check index against sequence length:
-        out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_index));
-        out.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_index));
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), index_var));
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), seq_var));
         out.push(AdsInstruction::UnOp {
             context: self.env.current_src_context(),
             unop: ExprUnOp::Length,
@@ -332,17 +332,17 @@ impl<'a> AdsCompiler<'a> {
         out: &mut Vec<AdsInstruction>,
     ) -> AdsResult<()> {
         self.env.push_scope();
-        let is_done_index = self.env.add_internal_variable();
+        let is_done_var = self.env.add_internal_variable();
         out.push(AdsInstruction::PushValue(ExprValue::FALSE));
         let breakpoint_kind = self.compile_breakpoint(breakpoint_ast, out)?;
         self.env.add_handler();
         out.push(AdsInstruction::PushHandler(breakpoint_kind, 1));
         out.push(AdsInstruction::Jump(3));
         out.push(AdsInstruction::PushValue(ExprValue::TRUE));
-        out.push(AdsInstruction::SetValue(AdsFrameRef(1), is_done_index));
+        out.push(AdsInstruction::SetValue(AdsFrameRef(1), is_done_var));
         out.push(AdsInstruction::Return);
         out.push(AdsInstruction::Step);
-        out.push(AdsInstruction::GetValue(AdsFrameRef(0), is_done_index));
+        out.push(AdsInstruction::GetValue(AdsFrameRef(0), is_done_var));
         out.push(AdsInstruction::BranchUnless(-3));
         self.env.pop_scope(out);
         Ok(())
@@ -358,13 +358,20 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         self.env.push_scope();
         let lvalue_span = lvalue_ast.span;
-        let mut lvalue_end_insts = Vec::<AdsInstruction>::new();
+        let mut read_insts = Vec::<AdsInstruction>::new();
+        let mut write_insts = Vec::<AdsInstruction>::new();
         let lvalue_type = errs.with(self.compile_lvalue(
             lvalue_ast,
-            op_ast,
-            out,
-            &mut lvalue_end_insts,
+            &mut LValueSink {
+                setup_out: out,
+                read_out: match op_ast.kind {
+                    AssignOpKind::Equals => None,
+                    AssignOpKind::OpEquals(_) => Some(&mut read_insts),
+                },
+                write_out: &mut write_insts,
+            },
         ));
+        out.extend(read_insts);
         let expr_span = expr_ast.span;
         let (expr_type, _) = errs.with(self.compile_expr(expr_ast, out));
         errs.also(self.compile_assign_op(
@@ -375,7 +382,7 @@ impl<'a> AdsCompiler<'a> {
             expr_type,
             out,
         ));
-        out.append(&mut lvalue_end_insts);
+        out.extend(write_insts);
         self.env.pop_scope(out);
         errs.result()
     }
@@ -707,23 +714,27 @@ impl<'a> AdsCompiler<'a> {
     fn compile_lvalue(
         &mut self,
         lvalue_ast: LValueAst,
-        op_ast: AssignOpAst,
-        begin_out: &mut Vec<AdsInstruction>,
-        end_out: &mut Vec<AdsInstruction>,
+        sink: &mut LValueSink,
     ) -> (ExprType, Errs<AdsError>) {
         match lvalue_ast.node {
-            LValueAstNode::Memory(expr_ast) => self
-                .compile_memory_lvalue(expr_ast, op_ast, begin_out, end_out),
-            LValueAstNode::Tuple(lvalue_asts) => self.compile_tuple_lvalue(
-                lvalue_asts,
-                op_ast,
-                begin_out,
-                end_out,
-            ),
-            LValueAstNode::Variable(compound) => self
-                .compile_variable_lvalue(compound, op_ast, begin_out, end_out),
+            LValueAstNode::Index(base_ast, bracket_span, index_ast) => self
+                .compile_index_lvalue(
+                    *base_ast,
+                    bracket_span,
+                    index_ast,
+                    sink,
+                ),
+            LValueAstNode::Memory(expr_ast) => {
+                self.compile_memory_lvalue(expr_ast, sink)
+            }
+            LValueAstNode::Tuple(item_asts) => {
+                self.compile_tuple_lvalue(item_asts, sink)
+            }
+            LValueAstNode::Variable(compound) => {
+                self.compile_variable_lvalue(compound, sink)
+            }
             LValueAstNode::Wildcard => {
-                self.compile_wildcard_lvalue(lvalue_ast.span, op_ast, end_out)
+                self.compile_wildcard_lvalue(lvalue_ast.span, sink)
             }
         }
     }
@@ -731,144 +742,234 @@ impl<'a> AdsCompiler<'a> {
     fn compile_memory_lvalue(
         &mut self,
         expr_ast: ExprAst,
-        op_ast: AssignOpAst,
-        begin_out: &mut Vec<AdsInstruction>,
-        end_out: &mut Vec<AdsInstruction>,
+        sink: &mut LValueSink,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
-        let address_index = self.env.add_internal_variable();
-        errs.also(self.compile_address(expr_ast, begin_out));
-        match op_ast.kind {
-            AssignOpKind::Equals => {}
-            AssignOpKind::OpEquals(_) => {
-                begin_out.push(AdsInstruction::GetValue(
-                    AdsFrameRef(0),
-                    address_index,
-                ));
-                begin_out.push(AdsInstruction::GetMemory);
-            }
+        let frame = AdsFrameRef(0);
+        let addr_var = self.env.add_internal_variable();
+        errs.also(self.compile_address(expr_ast, sink.setup_out));
+        if let Some(read_out) = &mut sink.read_out {
+            read_out.push(AdsInstruction::GetValue(frame, addr_var));
+            read_out.push(AdsInstruction::GetMemory);
         }
-        end_out.push(AdsInstruction::GetValue(AdsFrameRef(0), address_index));
-        end_out.push(AdsInstruction::SetMemory);
+        sink.write_out.push(AdsInstruction::GetValue(frame, addr_var));
+        sink.write_out.push(AdsInstruction::SetMemory);
         (ExprType::Integer, errs)
     }
 
     fn compile_tuple_lvalue(
         &mut self,
         lvalue_asts: Vec<LValueAst>,
-        op_ast: AssignOpAst,
-        begin_out: &mut Vec<AdsInstruction>,
-        end_out: &mut Vec<AdsInstruction>,
+        sink: &mut LValueSink,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
         let num_items = lvalue_asts.len();
         let mut types = Vec::<ExprType>::with_capacity(num_items);
-        let mut ends = Vec::<Vec<AdsInstruction>>::with_capacity(num_items);
+        let mut writes = Vec::<Vec<AdsInstruction>>::with_capacity(num_items);
         for lvalue_ast in lvalue_asts {
-            let mut end = Vec::<AdsInstruction>::new();
-            types.push(errs.with(
-                self.compile_lvalue(lvalue_ast, op_ast, begin_out, &mut end),
-            ));
-            ends.push(end);
+            let mut write = Vec::<AdsInstruction>::new();
+            let mut sub = LValueSink {
+                setup_out: sink.setup_out,
+                read_out: match &mut sink.read_out {
+                    None => None,
+                    Some(read_out) => Some(read_out),
+                },
+                write_out: &mut write,
+            };
+            types.push(errs.with(self.compile_lvalue(lvalue_ast, &mut sub)));
+            writes.push(write);
         }
-        match op_ast.kind {
-            AssignOpKind::Equals => {}
-            AssignOpKind::OpEquals(_) => {
-                begin_out.push(AdsInstruction::MakeTuple(num_items));
-            }
+        if let Some(read_out) = &mut sink.read_out {
+            read_out.push(AdsInstruction::MakeTuple(num_items));
         }
-        end_out.push(AdsInstruction::ExpandTuple);
-        for mut end in ends.into_iter().rev() {
-            end_out.append(&mut end);
+        sink.write_out.push(AdsInstruction::ExpandTuple);
+        for write in writes.into_iter().rev() {
+            sink.write_out.extend(write);
         }
         (ExprType::Tuple(Rc::from(types)), errs)
+    }
+
+    fn compile_index_lvalue(
+        &mut self,
+        seq_ast: LValueAst,
+        bracket_span: SrcSpan,
+        index_ast: ExprAst,
+        sink: &mut LValueSink,
+    ) -> (ExprType, Errs<AdsError>) {
+        let mut errs = Errs::<AdsError>::new();
+        // Compile sequence lvalue:
+        let seq_span = seq_ast.span;
+        let mut read_seq = Vec::<AdsInstruction>::new();
+        let mut write_seq = Vec::<AdsInstruction>::new();
+        let seq_type = {
+            let mut sub = LValueSink {
+                setup_out: sink.setup_out,
+                read_out: Some(&mut read_seq),
+                write_out: &mut write_seq,
+            };
+            errs.with(self.compile_lvalue(seq_ast, &mut sub))
+        };
+        let seq_var = self.env.add_internal_variable();
+        sink.setup_out.extend(read_seq);
+        let frame = AdsFrameRef(0);
+        if let Some(read_out) = &mut sink.read_out {
+            read_out.push(AdsInstruction::GetValue(frame, seq_var));
+        }
+        sink.write_out.push(AdsInstruction::GetValue(frame, seq_var));
+        // Compile index expression:
+        let index_span = index_ast.span;
+        let mut read_index = Vec::<AdsInstruction>::new();
+        let (index_type, index_static) =
+            errs.with(self.compile_expr(index_ast, &mut read_index));
+        // Compile indexing operation:
+        let item_type = match (seq_type, index_type) {
+            (ExprType::Undefined, _) | (_, ExprType::Undefined) => {
+                ExprType::Undefined
+            }
+            (ExprType::List(item_type), ExprType::Integer)
+            | (ExprType::List(item_type), ExprType::Bottom) => {
+                let index_var = self.env.add_internal_variable();
+                sink.setup_out.extend(read_index);
+                if let Some(read_out) = &mut sink.read_out {
+                    read_out.push(AdsInstruction::GetValue(frame, index_var));
+                    read_out.push(AdsInstruction::GetListIndex {
+                        context: self.env.current_src_context(),
+                        list_span: seq_span,
+                        index_span,
+                    });
+                }
+                sink.write_out
+                    .push(AdsInstruction::GetValue(frame, index_var));
+                sink.write_out.push(AdsInstruction::SetListIndex {
+                    context: self.env.current_src_context(),
+                    list_span: seq_span,
+                    index_span,
+                });
+                Rc::unwrap_or_clone(item_type)
+            }
+            (ExprType::Tuple(item_types), ExprType::Integer)
+            | (ExprType::Tuple(item_types), ExprType::Bottom) => {
+                match index_static {
+                    Ok(index) => {
+                        let index = index.unwrap_int();
+                        if index < BigInt::ZERO
+                            || index >= BigInt::from(item_types.len())
+                        {
+                            errs.push(AdsError::ExprTypeError {
+                                context: self.env.current_src_context(),
+                                error: ExprTypeError::TupleIndexOutOfRange {
+                                    tuple_span: seq_span,
+                                    item_types,
+                                    index_span,
+                                    index_value: index,
+                                },
+                            });
+                            ExprType::Undefined
+                        } else {
+                            let index = usize::try_from(index).unwrap();
+                            let item_type = item_types[index].clone();
+                            if let Some(read_out) = &mut sink.read_out {
+                                read_out
+                                    .push(AdsInstruction::GetTupleItem(index));
+                            }
+                            sink.write_out
+                                .push(AdsInstruction::SetTupleItem(index));
+                            item_type
+                        }
+                    }
+                    Err(reason) => {
+                        errs.push(AdsError::ExprTypeError {
+                            context: self.env.current_src_context(),
+                            error: ExprTypeError::TupleIndexNotStatic {
+                                index_span,
+                                reason,
+                            },
+                        });
+                        ExprType::Undefined
+                    }
+                }
+            }
+            (ExprType::List(_), index_type)
+            | (ExprType::Tuple(_), index_type) => {
+                errs.push(AdsError::ExprTypeError {
+                    context: self.env.current_src_context(),
+                    error: ExprTypeError::CannotUseTypeAsIndex {
+                        index_span,
+                        index_type,
+                    },
+                });
+                ExprType::Undefined
+            }
+            (indexed_type, _) => {
+                errs.push(AdsError::ExprTypeError {
+                    context: self.env.current_src_context(),
+                    error: ExprTypeError::CannotIndexIntoType {
+                        bracket_span,
+                        indexed_span: seq_span,
+                        indexed_type,
+                    },
+                });
+                ExprType::Undefined
+            }
+        };
+        sink.write_out.extend(write_seq);
+        (item_type, errs)
     }
 
     fn compile_variable_lvalue(
         &self,
         compound: CompoundIdAst,
-        op_ast: AssignOpAst,
-        begin_out: &mut Vec<AdsInstruction>,
-        end_out: &mut Vec<AdsInstruction>,
+        sink: &mut LValueSink,
     ) -> (ExprType, Errs<AdsError>) {
-        let op_assign = match op_ast.kind {
-            AssignOpKind::Equals => false,
-            AssignOpKind::OpEquals(_) => true,
+        let mut errs = Errs::<AdsError>::new();
+        let Some(variable) = self.env.get_variable(&compound.name) else {
+            errs.push(AdsError::UnknownVariable {
+                name: compound.name,
+                loc: self.make_loc(compound.span),
+            });
+            return (ExprType::Undefined, errs);
         };
-        match self.env.get_declaration(&compound.name) {
-            Some((
-                frame_ref,
-                decl @ AdsDecl { kind: AdsDeclKind::Variable, .. },
-            )) => {
-                if op_assign {
-                    begin_out.push(AdsInstruction::GetValue(
-                        frame_ref,
-                        decl.stack_index,
-                    ));
-                }
-                end_out.push(AdsInstruction::SetValue(
-                    frame_ref,
-                    decl.stack_index,
-                ));
-                (decl.var_type.clone(), Errs::new())
-            }
-            Some((
-                _,
-                decl @ AdsDecl { kind: AdsDeclKind::Constant(_), .. },
-            )) => {
-                let error = AdsError::CannotModifyConstant {
+        if let Some(read_out) = &mut sink.read_out {
+            read_out.push(variable.getter_instruction());
+        }
+        match variable.setter_instruction() {
+            Ok(inst) => sink.write_out.push(inst),
+            Err(AdsVariableImmutableReason::Builtin) => {
+                errs.push(AdsError::CannotMutateBuiltin {
                     name: compound.name,
                     lvalue_loc: self.make_loc(compound.span),
-                    decl_loc: self.make_loc(decl.id_span),
-                };
-                (decl.var_type.clone(), Errs::one(error))
+                });
             }
-            None => {
-                for &reg in self.env.get_register_names() {
-                    if compound.name.eq_ignore_ascii_case(reg) {
-                        if op_assign {
-                            begin_out.push(AdsInstruction::GetRegister(reg));
-                        }
-                        end_out.push(AdsInstruction::SetRegister(reg));
-                        return (ExprType::Integer, Errs::new());
-                    }
-                }
-                if compound.name.eq_ignore_ascii_case("PC") {
-                    if op_assign {
-                        begin_out.push(AdsInstruction::GetPc);
-                    }
-                    end_out.push(AdsInstruction::SetPc);
-                    return (ExprType::Integer, Errs::new());
-                }
-                let error = AdsError::UnknownVariable {
+            Err(AdsVariableImmutableReason::DeclaredImmutable(decl_loc)) => {
+                errs.push(AdsError::CannotMutateImmutableVariable {
                     name: compound.name,
-                    loc: self.make_loc(compound.span),
-                };
-                (ExprType::Undefined, Errs::one(error))
+                    lvalue_loc: self.make_loc(compound.span),
+                    decl_loc,
+                });
+            }
+            Err(AdsVariableImmutableReason::Symbol) => {
+                errs.push(AdsError::CannotMutateSymbol {
+                    name: compound.name,
+                    lvalue_loc: self.make_loc(compound.span),
+                });
             }
         }
+        (variable.expr_type(), errs)
     }
 
     fn compile_wildcard_lvalue(
         &self,
         wildcard_span: SrcSpan,
-        op_ast: AssignOpAst,
-        end_out: &mut Vec<AdsInstruction>,
+        sink: &mut LValueSink,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
-        match op_ast.kind {
-            AssignOpKind::Equals => {
-                end_out.push(AdsInstruction::PopValue);
-            }
-            AssignOpKind::OpEquals(_) => {
-                errs.push(AdsError::ExprTypeError {
-                    context: self.env.current_src_context(),
-                    error: ExprTypeError::WildcardAsValue {
-                        span: wildcard_span,
-                    },
-                });
-            }
+        if sink.read_out.is_some() {
+            errs.push(AdsError::ExprTypeError {
+                context: self.env.current_src_context(),
+                error: ExprTypeError::WildcardAsValue { span: wildcard_span },
+            });
         }
+        sink.write_out.push(AdsInstruction::PopValue);
         (ExprType::Undefined, errs)
     }
 
@@ -891,6 +992,14 @@ impl<'a> AdsCompiler<'a> {
             }
         }
     }
+}
+
+//===========================================================================//
+
+struct LValueSink<'a> {
+    setup_out: &'a mut Vec<AdsInstruction>,
+    read_out: Option<&'a mut Vec<AdsInstruction>>,
+    write_out: &'a mut Vec<AdsInstruction>,
 }
 
 //===========================================================================//

@@ -92,17 +92,24 @@ pub struct LValueAst {
 impl LValueAst {
     pub(super) fn parser<'a>() -> impl AtmaParser<'a, Self> {
         chumsky::prelude::recursive(|lvalue| {
-            let memory = chumsky::prelude::group((
+            let bracketed_expr = chumsky::prelude::group((
                 symbol(TokenValue::BracketOpen),
                 ExprAst::parser(),
                 symbol(TokenValue::BracketClose),
             ))
             .map(
-                |(open, expr, close): (Token, ExprAst, Token)| LValueAst {
-                    span: open.span.merged_with(close.span),
-                    node: LValueAstNode::Memory(expr),
+                |(open, expr, close): (Token, ExprAst, Token)| {
+                    (open.span.merged_with(close.span), expr)
                 },
             );
+            let memory = bracketed_expr
+                .clone()
+                .map(|(span, expr)| LValueAst {
+                    span,
+                    node: LValueAstNode::Memory(expr),
+                })
+                .contextual()
+                .configure(|_, lang| matches!(lang, Language::Debugger));
             let tuple = chumsky::prelude::group((
                 symbol(TokenValue::ParenOpen),
                 lvalue
@@ -126,14 +133,18 @@ impl LValueAst {
             let wildcard = symbol(TokenValue::Underscore).map(|token| {
                 LValueAst { span: token.span, node: LValueAstNode::Wildcard }
             });
-            chumsky::prelude::choice((
-                memory
-                    .contextual()
-                    .configure(|_, lang| matches!(lang, Language::Debugger)),
-                tuple,
-                variable,
-                wildcard,
-            ))
+            chumsky::prelude::choice((memory, tuple, variable, wildcard))
+                .foldl(
+                    bracketed_expr.repeated(),
+                    |seq_lvalue, (bracket_span, index_expr)| LValueAst {
+                        span: seq_lvalue.span.merged_with(bracket_span),
+                        node: LValueAstNode::Index(
+                            Box::new(seq_lvalue),
+                            bracket_span,
+                            index_expr,
+                        ),
+                    },
+                )
         })
     }
 }
@@ -143,6 +154,8 @@ impl LValueAst {
 /// One node in the abstract syntax tree for an L-value.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LValueAstNode {
+    /// Assign to an index within a list or tuple.
+    Index(Box<LValueAst>, SrcSpan, ExprAst),
     /// Assign to one byte of memory in the simulated memory bus, at the
     /// address given by the specified expression.  These will only parse when
     /// the `Language` is `Debugger`.
@@ -152,7 +165,6 @@ pub enum LValueAstNode {
     /// Assign to a variable (or to a simulated processor register or PC, in
     /// debugger scripts).
     Variable(CompoundIdAst),
-    // TODO: Allow list/tuple index assignment as an lvalue node
     /// Ignore the expression.
     ///
     /// This is primarily useful when used as one element of a `Tuple` L-value.

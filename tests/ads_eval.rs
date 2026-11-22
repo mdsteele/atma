@@ -156,15 +156,35 @@ fn get_and_set_pc() {
 }
 
 #[test]
-fn tuple_lvalue() {
+fn index_lvalue_with_list() {
     let source = r#"\
-      var integer = 0
-      var list = {0}
-      let tuple = (1, "2", {3, 4})
-      set (integer, _, list) = tuple
-      print (integer, list)
+      var list = {0, 1, 2}
+      set list[1] = 3
+      print list
     "#;
-    assert_eq!(compile_and_run(source), "(1, {3, 4})\n");
+    assert_eq!(compile_and_run(source), "{0, 3, 2}\n");
+}
+
+#[test]
+fn index_lvalue_with_list_of_lists() {
+    let source = r#"\
+      var list = {{0}, {1, 2}, {3, 4, 5}}
+      set list[0] = {6}
+      set list[2][1] = 7
+      print list
+    "#;
+    assert_eq!(compile_and_run(source), "{{6}, {1, 2}, {3, 7, 5}}\n");
+}
+
+#[test]
+fn index_lvalue_with_tuple() {
+    let source = r#"\
+      var tuple = (42, %true, "foo")
+      set tuple[2] = "bar"
+      set tuple[1] = %false
+      print tuple
+    "#;
+    assert_eq!(compile_and_run(source), "(42, %false, \"bar\")\n");
 }
 
 #[test]
@@ -179,6 +199,45 @@ fn memory_lvalue() {
       print [$01]
     "#;
     assert_eq!(compile_and_run(source), "37\n41\n");
+}
+
+#[test]
+fn tuple_lvalue() {
+    let source = r#"\
+      var integer = 0
+      var list = {0}
+      let tuple = (1, "2", {3, 4})
+      set (integer, _, list) = tuple
+      print (integer, list)
+    "#;
+    assert_eq!(compile_and_run(source), "(1, {3, 4})\n");
+}
+
+#[test]
+fn tuple_lvalue_indexed() {
+    let source = r#"\
+      var foo = 0
+      var bar = 2
+      set (foo, bar)[1] = 3  ; this is weird, but permitted
+      print (foo, bar)
+    "#;
+    assert_eq!(compile_and_run(source), "(0, 3)\n");
+}
+
+#[test]
+fn mixed_lvalue() {
+    let source = r#"\
+      var foo = {(0, {}), (1, {10}), (2, {20, 21})}
+      var bar = 0
+      set (_, (bar, [$07]), foo[2][1][0]) = ("6", (7, 8), 9)
+      print foo
+      print bar
+      print [$07]
+    "#;
+    assert_eq!(
+        compile_and_run(source),
+        "{(0, {}), (1, {10}), (2, {9, 21})}\n7\n8\n"
+    );
 }
 
 //===========================================================================//

@@ -30,13 +30,23 @@ fn ads_errors(source: &str) -> Vec<AdsError> {
 //===========================================================================//
 
 #[test]
-fn cannot_modify_constant() {
+fn cannot_mutate_builtin() {
+    let source = r#"\
+    set %divx = %divf
+    "#;
+    assert_matches!(ads_errors(source).as_slice(), [
+        AdsError::CannotMutateBuiltin { name, .. },
+    ] if &**name == "%divx");
+}
+
+#[test]
+fn cannot_mutate_immutable_variable() {
     let source = r#"\
     let foo = 1
     set foo = 2
     "#;
     assert_matches!(ads_errors(source).as_slice(), [
-        AdsError::CannotModifyConstant { name, .. },
+        AdsError::CannotMutateImmutableVariable { name, .. },
     ] if &**name == "foo");
 }
 

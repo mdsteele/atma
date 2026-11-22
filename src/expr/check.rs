@@ -532,13 +532,6 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                 self.ops.push(self.env.list_index_op(lhs_span, rhs_span));
                 self.types.push((item_type, Err(reason)));
             }
-            (ExprType::List(_), rhs_type) => {
-                self.errs.push(ExprTypeError::CannotUseTypeAsIndex {
-                    index_span: rhs_span,
-                    index_type: rhs_type,
-                });
-                self.types.push(TYPE_ERROR);
-            }
             (ExprType::Tuple(item_types), ExprType::Integer)
             | (ExprType::Tuple(item_types), ExprType::Bottom) => {
                 match rhs_static {
@@ -586,7 +579,7 @@ impl<'a, E: ExprEnv> ExprCompiler<'a, E> {
                     }
                 }
             }
-            (ExprType::Tuple(_), rhs_type) => {
+            (ExprType::List(_), rhs_type) | (ExprType::Tuple(_), rhs_type) => {
                 self.errs.push(ExprTypeError::CannotUseTypeAsIndex {
                     index_span: rhs_span,
                     index_type: rhs_type,

@@ -88,14 +88,28 @@ pub type AdsResult<T> = Result<T, Errs<AdsError>>;
 /// An error encountered while compiling ADS code.
 #[derive(Debug)]
 pub enum AdsError {
-    /// Tried to modify a constant.
-    CannotModifyConstant {
-        /// The name of the constant.
+    /// Tried to mutate a built-in value.
+    CannotMutateBuiltin {
+        /// The name of the builtin.
         name: Rc<str>,
-        /// The source code location where the constant was used as an lvalue.
+        /// The source code location where the builtin was used as an lvalue.
         lvalue_loc: AdsSrcLoc,
-        /// The source code location for the constant's declaration.
+    },
+    /// Tried to mutate an immutable variable.
+    CannotMutateImmutableVariable {
+        /// The name of the variable.
+        name: Rc<str>,
+        /// The source code location where the variable was used as an lvalue.
+        lvalue_loc: AdsSrcLoc,
+        /// The source code location for the variable's declaration.
         decl_loc: AdsSrcLoc,
+    },
+    /// Tried to mutate a symbol from the symbol table.
+    CannotMutateSymbol {
+        /// The name of the symbol.
+        name: Rc<str>,
+        /// The source code location where the symbol was used as an lvalue.
+        lvalue_loc: AdsSrcLoc,
     },
     /// An expression failed to typecheck.
     ExprTypeError {
@@ -185,15 +199,35 @@ impl AdsError {
     /// Converts the error into a `SourceError`.
     pub fn to_source_error(self) -> SourceError {
         match self {
-            Self::CannotModifyConstant { name, lvalue_loc, decl_loc } => {
-                let message =
-                    format!("cannot change value of constant `{name}`");
+            Self::CannotMutateBuiltin { name, lvalue_loc } => {
+                let message = "cannot change value of a builtin";
+                let label = format!("cannot set value of `{name}` here");
+                SourceError::new(lvalue_loc.primary(), message)
+                    .with_primary_label(label)
+                    .with_context(&*lvalue_loc.context)
+            }
+            Self::CannotMutateImmutableVariable {
+                name,
+                lvalue_loc,
+                decl_loc,
+            } => {
+                let message = "cannot change value of an immutable variable";
                 let label1 =
-                    format!("`{name}` was declared as a constant here");
+                    format!("`{name}` was declared as immutable here");
                 let label2 = format!("cannot set value of `{name}` here");
+                let note = "To declare a mutable variable, use `var` instead \
+                            of `let`";
                 SourceError::new(lvalue_loc.primary(), message)
                     .with_label(decl_loc.primary(), label1)
                     .with_primary_label(label2)
+                    .with_note(note)
+                    .with_context(&*lvalue_loc.context)
+            }
+            Self::CannotMutateSymbol { name, lvalue_loc } => {
+                let message = "cannot change value of a symbol table entry";
+                let label = format!("cannot set value of `{name}` here");
+                SourceError::new(lvalue_loc.primary(), message)
+                    .with_primary_label(label)
                     .with_context(&*lvalue_loc.context)
             }
             Self::ExprTypeError { context, error } => {

@@ -55,6 +55,21 @@ pub(crate) enum AdsInstruction {
     /// pushes its elements onto the stack in order, such that the last element
     /// of the tuple ends up as the top element on the stack.
     ExpandTuple,
+    /// Pops the top two values from the value stack, and uses the topmost
+    /// value (which must be an integer) as an index into the
+    /// second-from-the-top value (which must be a list), then pushes that list
+    /// element back onto the stack. If the index value is out of range, an ADS
+    /// runtime error will occur.
+    GetListIndex {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The span of byte offsets within the context where the list
+        /// subexpression appeared.
+        list_span: SrcSpan,
+        /// The span of byte offsets within the context where the index
+        /// subexpression appeared.
+        index_span: SrcSpan,
+    },
     /// Pops the top value from the value stack (which must be an integer or
     /// label), then reads a byte from the simulated processor's memory bus at
     /// that address, and pushes that byte onto the value stack.
@@ -65,6 +80,10 @@ pub(crate) enum AdsInstruction {
     /// Pushes the integer value of the specified register in the simulated
     /// processsor onto the stack.
     GetRegister(&'static str),
+    /// Pops the top value from the value stack (which must be a tuple), gets
+    /// the specified item from that tuple, then pushes that item onto the
+    /// value stack.
+    GetTupleItem(usize),
     /// Copies the value at the specified offset from the start of the
     /// specified frame in the call stack, and pushes the copied value onto the
     /// stack.
@@ -73,21 +92,6 @@ pub(crate) enum AdsInstruction {
     /// specified template, and pushes the resulting string onto the value
     /// stack.
     Interpolate(Template),
-    /// Pops the top two values from the value stack, and uses the topmost
-    /// value (which must be an integer) as an index into the
-    /// second-from-the-top value (which must be a list), then pushes that list
-    /// element back onto the stack. If the index value is out of range, an ADS
-    /// runtime error will occur.
-    ListIndex {
-        /// The source code context in which the operation appeared.
-        context: Rc<AdsSrcContext>,
-        /// The span of byte offsets within the context where the list
-        /// subexpression appeared.
-        list_span: SrcSpan,
-        /// The span of byte offsets within the context where the index
-        /// subexpression appeared.
-        index_span: SrcSpan,
-    },
     /// Adds the given offset to the ADS program counter.
     Jump(isize),
     /// Pops the specified number of values from the value stack (which must
@@ -119,6 +123,22 @@ pub(crate) enum AdsInstruction {
     PushValue(ExprValue),
     /// Returns from the current breakpoint handler.
     Return,
+    /// Pops the top three values from the value stack, and uses the topmost
+    /// value (which must be an integer) as an index into the
+    /// second-from-the-top value (which must be a list), then replaces that
+    /// list element with the third-from-the-top-value before pushing the list
+    /// back onto the stack. If the index value is out of range, an ADS runtime
+    /// error will occur.
+    SetListIndex {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The span of byte offsets within the context where the list
+        /// subexpression appeared.
+        list_span: SrcSpan,
+        /// The span of byte offsets within the context where the index
+        /// subexpression appeared.
+        index_span: SrcSpan,
+    },
     /// Pops the top two values from the value stack, then writes a byte to the
     /// simulated processor's memory bus, using the topmost value (which must
     /// be an integer or label) as the address, and the second-from-the-top
@@ -134,15 +154,15 @@ pub(crate) enum AdsInstruction {
     /// the value of the specified register in the simulated processsor to the
     /// popped value.
     SetRegister(&'static str),
+    /// Pops the top two values from the value stack, and replaces the
+    /// specified item in the topmost value (which must be a tuple) with the
+    /// second-from-the-top value before pushing the tuple back onto the stack.
+    SetTupleItem(usize),
     /// Pops a value from the value stack, then sets the value at the specified
     /// offset from the start of the specified call frame to the popped value.
     SetValue(AdsFrameRef, usize),
     /// Advances the simulated processor by one instruction.
     Step,
-    /// Pops the top value from the value stack (which must be a tuple), gets
-    /// the specified item from that tuple, then pushes that item onto the
-    /// value stack.
-    TupleItem(usize),
     /// Pops the top value from the value stack, evaluates the specified unary
     /// operation using that value, then pushes the result onto the value
     /// stack.
@@ -194,7 +214,7 @@ impl ExprOp for AdsInstruction {
     }
 
     fn tuple_item(index: usize) -> Self {
-        Self::TupleItem(index)
+        Self::GetTupleItem(index)
     }
 }
 

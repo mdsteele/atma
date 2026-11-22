@@ -146,6 +146,28 @@ impl<W: Write> AdsEnvironment<W> {
                 let values = self.value_stack.pop().unwrap().unwrap_tuple();
                 self.value_stack.extend(values.iter().cloned());
             }
+            AdsInstruction::GetListIndex {
+                context,
+                list_span,
+                index_span,
+            } => {
+                debug_assert!(self.value_stack.len() >= 2);
+                let index = self.value_stack.pop().unwrap().unwrap_int();
+                let list = self.value_stack.pop().unwrap().unwrap_list();
+                if index < BigInt::ZERO || index >= BigInt::from(list.len()) {
+                    return Err(AdsRuntimeError::ExprEvalError {
+                        context: context.clone(),
+                        error: ExprEvalError::ListIndexOutOfBounds {
+                            list_span: *list_span,
+                            list_length: list.len(),
+                            index_span: *index_span,
+                            index_value: index,
+                        },
+                    });
+                }
+                let item = list[usize::try_from(index).unwrap()].clone();
+                self.value_stack.push(item);
+            }
             AdsInstruction::GetMemory => {
                 let addr = self.pop_address_value();
                 let data = self.system.peek_byte(addr);
@@ -159,6 +181,10 @@ impl<W: Write> AdsEnvironment<W> {
                 let value = self.system.get_register(name).unwrap();
                 self.value_stack.push(ExprValue::Integer(BigInt::from(value)));
             }
+            &AdsInstruction::GetTupleItem(index) => {
+                let tuple = self.value_stack.pop().unwrap().unwrap_tuple();
+                self.value_stack.push(tuple[index].clone());
+            }
             &AdsInstruction::GetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
                 let value = self.value_stack[start + index].clone();
@@ -171,24 +197,6 @@ impl<W: Write> AdsEnvironment<W> {
             }
             AdsInstruction::Jump(offset) => {
                 return self.jump(*offset);
-            }
-            AdsInstruction::ListIndex { context, list_span, index_span } => {
-                debug_assert!(self.value_stack.len() >= 2);
-                let rhs = self.value_stack.pop().unwrap().unwrap_int();
-                let lhs = self.value_stack.pop().unwrap().unwrap_list();
-                if rhs < BigInt::ZERO || rhs >= BigInt::from(lhs.len()) {
-                    return Err(AdsRuntimeError::ExprEvalError {
-                        context: context.clone(),
-                        error: ExprEvalError::ListIndexOutOfBounds {
-                            list_span: *list_span,
-                            list_length: lhs.len(),
-                            index_span: *index_span,
-                            index_value: rhs,
-                        },
-                    });
-                }
-                let item = lhs[usize::try_from(rhs).unwrap()].clone();
-                self.value_stack.push(item);
             }
             &AdsInstruction::MakeList(num_items) => {
                 debug_assert!(self.value_stack.len() >= num_items);
@@ -242,6 +250,30 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::PushValue(value) => {
                 self.value_stack.push(value.clone());
             }
+            AdsInstruction::SetListIndex {
+                context,
+                list_span,
+                index_span,
+            } => {
+                debug_assert!(self.value_stack.len() >= 3);
+                let index = self.value_stack.pop().unwrap().unwrap_int();
+                let mut list = self.value_stack.pop().unwrap().unwrap_list();
+                let item = self.value_stack.pop().unwrap();
+                if index < BigInt::ZERO || index >= BigInt::from(list.len()) {
+                    return Err(AdsRuntimeError::ExprEvalError {
+                        context: context.clone(),
+                        error: ExprEvalError::ListIndexOutOfBounds {
+                            list_span: *list_span,
+                            list_length: list.len(),
+                            index_span: *index_span,
+                            index_value: index,
+                        },
+                    });
+                }
+                let index = usize::try_from(index).unwrap();
+                Rc::make_mut(&mut list)[index] = item;
+                self.value_stack.push(ExprValue::List(list));
+            }
             AdsInstruction::SetMemory => {
                 let addr = self.pop_address_value();
                 let data = self.value_stack.pop().unwrap().unwrap_int();
@@ -258,6 +290,12 @@ impl<W: Write> AdsEnvironment<W> {
             &AdsInstruction::SetRegister(name) => {
                 let value = self.pop_u32_value();
                 self.system.set_register(name, value);
+            }
+            &AdsInstruction::SetTupleItem(index) => {
+                let mut tuple = self.value_stack.pop().unwrap().unwrap_tuple();
+                let item = self.value_stack.pop().unwrap();
+                Rc::make_mut(&mut tuple)[index] = item;
+                self.value_stack.push(ExprValue::Tuple(tuple));
             }
             &AdsInstruction::SetValue(frame_ref, index) => {
                 let start = self.frame_start(frame_ref);
@@ -278,11 +316,6 @@ impl<W: Write> AdsEnvironment<W> {
                     return Ok(self.step_processor());
                 }
                 return Ok(false);
-            }
-            &AdsInstruction::TupleItem(index) => {
-                let items = self.value_stack.pop().unwrap().unwrap_tuple();
-                debug_assert!(index < items.len());
-                self.value_stack.push(items[index].clone());
             }
             AdsInstruction::UnOp { context, unop, op_span, arg_span } => {
                 debug_assert!(!self.value_stack.is_empty());

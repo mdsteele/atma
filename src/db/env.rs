@@ -1,4 +1,4 @@
-use super::error::{AdsError, AdsResult, AdsSrcContext};
+use super::error::{AdsError, AdsResult, AdsSrcContext, AdsSrcLoc};
 use super::inst::{AdsFrameRef, AdsInstruction};
 use crate::error::{Errs, SrcSpan};
 use crate::expr::{
@@ -16,17 +16,103 @@ use std::rc::Rc;
 //===========================================================================//
 
 pub(super) enum AdsDeclKind {
-    Constant(ExprStatic),
-    Variable,
+    Immutable(ExprStatic),
+    Mutable,
 }
 
 //===========================================================================//
 
-pub(super) struct AdsDecl {
+struct AdsDecl {
     pub kind: AdsDeclKind,
-    pub id_span: SrcSpan,
+    pub id_loc: AdsSrcLoc,
     pub var_type: ExprType,
     pub stack_index: usize,
+}
+
+//===========================================================================//
+
+pub(super) enum AdsVariableImmutableReason {
+    /// The variable is a builtin (which cannot be mutated).
+    Builtin,
+    /// The variable is a local that was declared immutable with `let`.
+    DeclaredImmutable(AdsSrcLoc),
+    /// The variable is a symbol table entry (which cannot be mutated).
+    Symbol,
+}
+
+//===========================================================================//
+
+pub(super) struct AdsVariable<'a>(AdsVarKind<'a>);
+
+enum AdsVarKind<'a> {
+    Builtin(&'a (ExprValue, ExprType)),
+    Declared(AdsFrameRef, &'a AdsDecl),
+    Pc,
+    Register(&'static str),
+    Symbol(&'a ExprLabel),
+}
+
+impl<'a> AdsVariable<'a> {
+    pub fn getter_instruction(&self) -> AdsInstruction {
+        match self.0 {
+            AdsVarKind::Builtin((value, _)) => {
+                AdsInstruction::PushValue(value.clone())
+            }
+            AdsVarKind::Declared(frame_ref, decl) => {
+                AdsInstruction::GetValue(frame_ref, decl.stack_index)
+            }
+            AdsVarKind::Pc => AdsInstruction::GetPc,
+            AdsVarKind::Register(reg) => AdsInstruction::GetRegister(reg),
+            AdsVarKind::Symbol(label) => {
+                AdsInstruction::PushValue(ExprValue::Label(label.clone()))
+            }
+        }
+    }
+
+    pub fn setter_instruction(
+        &self,
+    ) -> Result<AdsInstruction, AdsVariableImmutableReason> {
+        match self.0 {
+            AdsVarKind::Builtin(_) => Err(AdsVariableImmutableReason::Builtin),
+            AdsVarKind::Declared(frame_ref, decl) => match &decl.kind {
+                AdsDeclKind::Immutable(_) => {
+                    Err(AdsVariableImmutableReason::DeclaredImmutable(
+                        decl.id_loc.clone(),
+                    ))
+                }
+                AdsDeclKind::Mutable => {
+                    Ok(AdsInstruction::SetValue(frame_ref, decl.stack_index))
+                }
+            },
+            AdsVarKind::Pc => Ok(AdsInstruction::SetPc),
+            AdsVarKind::Register(reg) => Ok(AdsInstruction::SetRegister(reg)),
+            AdsVarKind::Symbol(_) => Err(AdsVariableImmutableReason::Symbol),
+        }
+    }
+
+    pub fn expr_type(&self) -> ExprType {
+        match self.0 {
+            AdsVarKind::Builtin((_, expr_type)) => expr_type.clone(),
+            AdsVarKind::Declared(_, decl) => decl.var_type.clone(),
+            AdsVarKind::Pc | AdsVarKind::Register(_) => ExprType::Integer,
+            AdsVarKind::Symbol(_) => ExprType::Label,
+        }
+    }
+
+    pub fn expr_static(&self, span: SrcSpan, name: &Rc<str>) -> ExprStatic {
+        match self.0 {
+            AdsVarKind::Builtin((value, _)) => Ok(value.clone()),
+            AdsVarKind::Declared(_, decl)
+                if let AdsDeclKind::Immutable(expr_static) = &decl.kind =>
+            {
+                expr_static.clone()
+            }
+            AdsVarKind::Symbol(label) => Ok(ExprValue::Label(label.clone())),
+            _ => {
+                Err(ExprNotStaticReason::Variable { span, name: name.clone() })
+            }
+        }
+    }
 }
 
 //===========================================================================//
@@ -68,13 +154,14 @@ impl AdsScope {
 
     fn add_declaration(
         &mut self,
+        context: Rc<AdsSrcContext>,
         kind: AdsDeclKind,
         id: IdentifierAst,
         var_type: ExprType,
     ) {
-        let id_span = id.span;
+        let id_loc = AdsSrcLoc { context, span: id.span };
         let stack_index = self.frame_end();
-        let decl = AdsDecl { kind, id_span, var_type, stack_index };
+        let decl = AdsDecl { kind, id_loc, var_type, stack_index };
         self.variables.insert(id.name, decl);
         self.num_variables += 1;
     }
@@ -245,13 +332,11 @@ impl<'a> AdsTypeEnv<'a> {
         id: IdentifierAst,
         expr_type: ExprType,
     ) {
-        self.current_scope_mut().add_declaration(kind, id, expr_type);
+        let context = self.current_src_context();
+        self.current_scope_mut().add_declaration(context, kind, id, expr_type);
     }
 
-    pub fn get_declaration(
-        &self,
-        id: &str,
-    ) -> Option<(AdsFrameRef, &AdsDecl)> {
+    fn get_declaration(&self, id: &str) -> Option<(AdsFrameRef, &AdsDecl)> {
         for (frame_index, frame) in self.frame_stack.iter().rev().enumerate() {
             for scope in frame.iter().rev() {
                 if let Some(decl) = scope.get_declaration(id) {
@@ -278,6 +363,27 @@ impl<'a> AdsTypeEnv<'a> {
     /// current scope.
     pub fn get_register_names(&self) -> &'static [&'static str] {
         self.system.register_names(&self.current_scope().proc_name)
+    }
+
+    pub fn get_variable(&self, name: &Rc<str>) -> Option<AdsVariable<'_>> {
+        if let Some((frame_ref, decl)) = self.get_declaration(name) {
+            return Some(AdsVariable(AdsVarKind::Declared(frame_ref, decl)));
+        }
+        for &register in self.get_register_names() {
+            if name.eq_ignore_ascii_case(register) {
+                return Some(AdsVariable(AdsVarKind::Register(register)));
+            }
+        }
+        if name.eq_ignore_ascii_case("PC") {
+            return Some(AdsVariable(AdsVarKind::Pc));
+        }
+        if let Some(label) = self.symbols.get(name) {
+            return Some(AdsVariable(AdsVarKind::Symbol(label)));
+        }
+        if let Some(builtin) = self.builtins.get(name) {
+            return Some(AdsVariable(AdsVarKind::Builtin(builtin)));
+        }
+        None
     }
 
     pub fn typecheck_expression(
@@ -310,52 +416,17 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         span: SrcSpan,
         name: &Rc<str>,
     ) -> ExprTypeResult<(Self::Op, ExprType, ExprStatic)> {
-        if let Some((frame_ref, decl)) = self.get_declaration(name) {
-            let op = AdsInstruction::GetValue(frame_ref, decl.stack_index);
-            let expr_type = decl.var_type.clone();
-            let expr_static = match &decl.kind {
-                AdsDeclKind::Constant(expr_static) => expr_static.clone(),
-                AdsDeclKind::Variable => Err(ExprNotStaticReason::Variable {
-                    span,
-                    name: name.clone(),
-                }),
-            };
-            return Ok((op, expr_type, expr_static));
-        }
-        for &register in self.get_register_names() {
-            if name.eq_ignore_ascii_case(register) {
-                let op = AdsInstruction::GetRegister(register);
-                let expr_static = Err(ExprNotStaticReason::Variable {
-                    span,
-                    name: name.clone(),
-                });
-                return Ok((op, ExprType::Integer, expr_static));
-            }
-        }
-        if name.eq_ignore_ascii_case("PC") {
-            let expr_static = Err(ExprNotStaticReason::Variable {
+        if let Some(variable) = self.get_variable(name) {
+            let op = variable.getter_instruction();
+            let expr_type = variable.expr_type();
+            let expr_static = variable.expr_static(span, name);
+            Ok((op, expr_type, expr_static))
+        } else {
+            Err(Errs::one(ExprTypeError::UnknownIdentifier {
                 span,
                 name: name.clone(),
-            });
-            return Ok((
-                AdsInstruction::GetPc,
-                ExprType::Integer,
-                expr_static,
-            ));
+            }))
         }
-        if let Some(label) = self.symbols.get(name) {
-            let value = ExprValue::Label(label.clone());
-            let op = AdsInstruction::PushValue(value.clone());
-            return Ok((op, ExprType::Label, Ok(value)));
-        }
-        if let Some((value, expr_type)) = self.builtins.get(name) {
-            let op = AdsInstruction::PushValue(value.clone());
-            return Ok((op, expr_type.clone(), Ok(value.clone())));
-        }
-        Err(Errs::one(ExprTypeError::UnknownIdentifier {
-            span,
-            name: name.clone(),
-        }))
     }
 
     fn apply_function_op(
@@ -387,7 +458,7 @@ impl<'a> ExprEnv for AdsTypeEnv<'a> {
         list_span: SrcSpan,
         index_span: SrcSpan,
     ) -> Self::Op {
-        AdsInstruction::ListIndex {
+        AdsInstruction::GetListIndex {
             context: self.current_src_context(),
             list_span,
             index_span,
@@ -496,7 +567,7 @@ mod tests {
         let symbols = SymbolTable::default();
         let mut env = AdsTypeEnv::new(Rc::from("input"), &system, &symbols);
         env.add_declaration(
-            AdsDeclKind::Constant(Err(ExprNotStaticReason::Phantom)),
+            AdsDeclKind::Immutable(Err(ExprNotStaticReason::Phantom)),
             IdentifierAst {
                 span: SrcSpan::from_byte_range(1..4),
                 name: Rc::from("foo"),
