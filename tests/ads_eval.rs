@@ -214,6 +214,16 @@ fn tuple_lvalue() {
 }
 
 #[test]
+fn tuple_lvalue_aliased() {
+    let source = r#"\
+      var foo = 0
+      set (foo, foo, foo) = (1, 2, 3)
+      print foo
+    "#;
+    assert_eq!(compile_and_run(source), "3\n");
+}
+
+#[test]
 fn tuple_lvalue_indexed() {
     let source = r#"\
       var foo = 0

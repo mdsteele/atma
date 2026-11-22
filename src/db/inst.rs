@@ -52,9 +52,9 @@ pub(crate) enum AdsInstruction {
     /// Exits the program successfully.
     Exit,
     /// Pops the top value from the value stack (which must be a tuple), and
-    /// pushes its elements onto the stack in order, such that the last element
-    /// of the tuple ends up as the top element on the stack.
-    ExpandTuple,
+    /// pushes its elements onto the stack in reverse order, such that the
+    /// first element of the tuple ends up as the top element on the stack.
+    ExpandTupleRev,
     /// Pops the top two values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then pushes that list

@@ -763,28 +763,14 @@ impl<'a> AdsCompiler<'a> {
         sink: &mut LValueSink,
     ) -> (ExprType, Errs<AdsError>) {
         let mut errs = Errs::<AdsError>::new();
+        sink.write_out.push(AdsInstruction::ExpandTupleRev);
         let num_items = lvalue_asts.len();
         let mut types = Vec::<ExprType>::with_capacity(num_items);
-        let mut writes = Vec::<Vec<AdsInstruction>>::with_capacity(num_items);
         for lvalue_ast in lvalue_asts {
-            let mut write = Vec::<AdsInstruction>::new();
-            let mut sub = LValueSink {
-                setup_out: sink.setup_out,
-                read_out: match &mut sink.read_out {
-                    None => None,
-                    Some(read_out) => Some(read_out),
-                },
-                write_out: &mut write,
-            };
-            types.push(errs.with(self.compile_lvalue(lvalue_ast, &mut sub)));
-            writes.push(write);
+            types.push(errs.with(self.compile_lvalue(lvalue_ast, sink)));
         }
         if let Some(read_out) = &mut sink.read_out {
             read_out.push(AdsInstruction::MakeTuple(num_items));
-        }
-        sink.write_out.push(AdsInstruction::ExpandTuple);
-        for write in writes.into_iter().rev() {
-            sink.write_out.extend(write);
         }
         (ExprType::Tuple(Rc::from(types)), errs)
     }

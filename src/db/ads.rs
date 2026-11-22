@@ -142,9 +142,9 @@ impl<W: Write> AdsEnvironment<W> {
                 });
             }
             AdsInstruction::Exit => return Ok(true),
-            AdsInstruction::ExpandTuple => {
+            AdsInstruction::ExpandTupleRev => {
                 let values = self.value_stack.pop().unwrap().unwrap_tuple();
-                self.value_stack.extend(values.iter().cloned());
+                self.value_stack.extend(values.iter().rev().cloned());
             }
             AdsInstruction::GetListIndex {
                 context,
