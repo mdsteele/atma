@@ -397,6 +397,7 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
         match errs.ok(self.env.typecheck_expression(expr_ast)) {
+            None | Some((_, ExprType::Undefined, _)) => {}
             Some((_, ExprType::String, Ok(path_value))) => {
                 let path = self.joined_path(path_value.unwrap_str_ref());
                 match self.cache.fetch_or_get_cached_utf8(&path) {
@@ -448,7 +449,6 @@ impl<'a> AdsCompiler<'a> {
                     expr_type,
                 });
             }
-            None => {}
         }
         errs.result()
     }
@@ -519,6 +519,7 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         let expr_span = expr_ast.span;
         match errs.ok(self.env.typecheck_expression(expr_ast)) {
+            None | Some((_, ExprType::Undefined, _)) => {}
             Some((_, ExprType::String, Ok(proc_value))) => {
                 let proc_name = proc_value.unwrap_str();
                 if self.env.contains_processor(&proc_name) {
@@ -550,7 +551,6 @@ impl<'a> AdsCompiler<'a> {
                     expr_type,
                 });
             }
-            None => {}
         }
         errs.result()
     }

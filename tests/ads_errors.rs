@@ -54,6 +54,17 @@ fn cannot_mutate_immutable_variable() {
 fn expr_type_error() {
     let source = r#"\
     let foo = {1, 2, 3}#[0]
+    ;;; There should be no additional errors for expressions using `foo`.
+    assert foo
+    error foo
+    for x <- foo { \\ }
+    if foo { \\ }
+    let bar = &foo
+    print foo
+    run until at foo
+    use foo
+    while foo { \\ }
+    with foo { \\ }
     "#;
     assert_matches!(
         ads_errors(source).as_slice(),
