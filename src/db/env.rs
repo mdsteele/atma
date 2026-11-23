@@ -69,6 +69,22 @@ impl<'a> AdsVariable<'a> {
         }
     }
 
+    pub fn taker_instruction(&self) -> AdsInstruction {
+        match self.0 {
+            AdsVarKind::Builtin((value, _)) => {
+                AdsInstruction::PushValue(value.clone())
+            }
+            AdsVarKind::Declared(frame_ref, decl) => {
+                AdsInstruction::TakeValue(frame_ref, decl.stack_index)
+            }
+            AdsVarKind::Pc => AdsInstruction::GetPc,
+            AdsVarKind::Register(reg) => AdsInstruction::GetRegister(reg),
+            AdsVarKind::Symbol(label) => {
+                AdsInstruction::PushValue(ExprValue::Label(label.clone()))
+            }
+        }
+    }
+
     pub fn setter_instruction(
         &self,
     ) -> Result<AdsInstruction, AdsVariableImmutableReason> {

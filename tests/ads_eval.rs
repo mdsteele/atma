@@ -214,13 +214,55 @@ fn tuple_lvalue() {
 }
 
 #[test]
-fn tuple_lvalue_aliased() {
+fn tuple_lvalue_with_aliased_memory() {
+    let source = r#"\
+      set [$00] = 0
+      set [$01] = 7
+      set [$02] = 9
+      set ([$00], [$00], [[$00]]) = (1, 2, 3)
+      print ([$00], [$01], [$02])
+    "#;
+    assert_eq!(compile_and_run(source), "(2, 7, 3)\n");
+}
+
+#[test]
+fn tuple_lvalue_with_aliased_variable() {
     let source = r#"\
       var foo = 0
       set (foo, foo, foo) = (1, 2, 3)
       print foo
     "#;
     assert_eq!(compile_and_run(source), "3\n");
+}
+
+#[test]
+fn tuple_lvalue_with_aliased_indexed_list() {
+    let source = r#"\
+      var foo = {0, 1, 2, 3}
+      set (foo[1], foo[2]) = (4, 5)
+      print foo
+    "#;
+    assert_eq!(compile_and_run(source), "{0, 4, 5, 3}\n");
+}
+
+#[test]
+fn tuple_lvalue_with_aliased_indexed_tuple() {
+    let source = r#"\
+      var foo = (%false, 1, "2", {3})
+      set (foo[1], foo[2]) = (4, "5")
+      print foo
+    "#;
+    assert_eq!(compile_and_run(source), "(%false, 4, \"5\", {3})\n");
+}
+
+#[test]
+fn tuple_lvalue_with_aliased_indexed_list_of_tuples() {
+    let source = r#"\
+      var foo = {(0, 1), (2, 3), (4, 5)}
+      set (foo[1][0], foo[2][1], foo[1][1]) = (6, 7, 8)
+      print foo
+    "#;
+    assert_eq!(compile_and_run(source), "{(0, 1), (6, 8), (4, 7)}\n");
 }
 
 #[test]

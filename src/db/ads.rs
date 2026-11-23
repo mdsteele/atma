@@ -250,6 +250,23 @@ impl<W: Write> AdsEnvironment<W> {
             AdsInstruction::PushValue(value) => {
                 self.value_stack.push(value.clone());
             }
+            AdsInstruction::Return => {
+                self.pc = self.call_stack.pop().unwrap().return_address;
+                if self.system.is_mid_instruction() {
+                    return Ok(self.step_processor());
+                }
+                return Ok(false);
+            }
+            &AdsInstruction::RotateValues(count, by) => {
+                debug_assert!(self.value_stack.len() >= count);
+                let start = self.value_stack.len() - count;
+                let slice = &mut self.value_stack[start..];
+                if by < 0 {
+                    slice.rotate_left(0usize.strict_sub_signed(by));
+                } else {
+                    slice.rotate_right(0usize.strict_add_signed(by));
+                }
+            }
             AdsInstruction::SetListIndex {
                 context,
                 list_span,
@@ -310,12 +327,50 @@ impl<W: Write> AdsEnvironment<W> {
                 self.pc += 1;
                 return Ok(self.step_processor());
             }
-            AdsInstruction::Return => {
-                self.pc = self.call_stack.pop().unwrap().return_address;
-                if self.system.is_mid_instruction() {
-                    return Ok(self.step_processor());
+            AdsInstruction::TakeListIndex {
+                context,
+                list_span,
+                index_span,
+            } => {
+                debug_assert!(self.value_stack.len() >= 2);
+                let index = self.value_stack.pop().unwrap().unwrap_int();
+                let mut list = self.value_stack.pop().unwrap().unwrap_list();
+                if index < BigInt::ZERO || index >= BigInt::from(list.len()) {
+                    return Err(AdsRuntimeError::ExprEvalError {
+                        context: context.clone(),
+                        error: ExprEvalError::ListIndexOutOfBounds {
+                            list_span: *list_span,
+                            list_length: list.len(),
+                            index_span: *index_span,
+                            index_value: index,
+                        },
+                    });
                 }
-                return Ok(false);
+                let item = std::mem::replace(
+                    &mut Rc::make_mut(&mut list)
+                        [usize::try_from(&index).unwrap()],
+                    ExprValue::FALSE,
+                );
+                self.value_stack.push(item);
+                self.value_stack.push(ExprValue::List(list));
+                self.value_stack.push(ExprValue::Integer(index));
+            }
+            &AdsInstruction::TakeTupleItem(index) => {
+                let mut tuple = self.value_stack.pop().unwrap().unwrap_tuple();
+                let item = std::mem::replace(
+                    &mut Rc::make_mut(&mut tuple)[index],
+                    ExprValue::FALSE,
+                );
+                self.value_stack.push(item);
+                self.value_stack.push(ExprValue::Tuple(tuple));
+            }
+            &AdsInstruction::TakeValue(frame_ref, index) => {
+                let start = self.frame_start(frame_ref);
+                let value = std::mem::replace(
+                    &mut self.value_stack[start + index],
+                    ExprValue::FALSE,
+                );
+                self.value_stack.push(value);
             }
             AdsInstruction::UnOp { context, unop, op_span, arg_span } => {
                 debug_assert!(!self.value_stack.is_empty());

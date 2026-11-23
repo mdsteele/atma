@@ -123,6 +123,9 @@ pub(crate) enum AdsInstruction {
     PushValue(ExprValue),
     /// Returns from the current breakpoint handler.
     Return,
+    /// Rotates the top N values of the value stack by M positions to the right
+    /// (or to the left if M is negative).
+    RotateValues(usize, isize),
     /// Pops the top three values from the value stack, and uses the topmost
     /// value (which must be an integer) as an index into the
     /// second-from-the-top value (which must be a list), then replaces that
@@ -163,6 +166,31 @@ pub(crate) enum AdsInstruction {
     SetValue(AdsFrameRef, usize),
     /// Advances the simulated processor by one instruction.
     Step,
+    /// Pops the top two values from the value stack, and uses the topmost
+    /// value (which must be an integer) as an index into the
+    /// second-from-the-top value (which must be a list).  Replaces the item at
+    /// that index with a placeholder value, then pushes the taken item, the
+    /// modified sequence, and the index back onto the stack. If the index
+    /// value is out of range, an ADS runtime error will occur.
+    TakeListIndex {
+        /// The source code context in which the operation appeared.
+        context: Rc<AdsSrcContext>,
+        /// The span of byte offsets within the context where the list
+        /// subexpression appeared.
+        list_span: SrcSpan,
+        /// The span of byte offsets within the context where the index
+        /// subexpression appeared.
+        index_span: SrcSpan,
+    },
+    /// Pops the top value from the value stack (which must be a tuple),
+    /// replaces the specified item from that tuple with a placeholder value,
+    /// then pushes the taken item and the modified tuple back onto the value
+    /// stack.
+    TakeTupleItem(usize),
+    /// Re[laces the value at the specified offset from the start of the
+    /// specified frame in the call stack with a placeholder value, and pushes
+    /// the taken value onto the stack.
+    TakeValue(AdsFrameRef, usize),
     /// Pops the top value from the value stack, evaluates the specified unary
     /// operation using that value, then pushes the result onto the value
     /// stack.
