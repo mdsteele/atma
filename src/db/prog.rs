@@ -795,21 +795,8 @@ impl<'a> AdsCompiler<'a> {
         let mut errs = Errs::<AdsError>::new();
         // Compile sequence lvalue:
         let seq_span = seq_ast.span;
-        let mut read_seq = Vec::<AdsInstruction>::new();
-        let mut write_seq = Vec::<AdsInstruction>::new();
-        let seq_type = {
-            let mut sub = LValueSink {
-                setup_out: sink.setup_out,
-                read_out: match &mut sink.read_out {
-                    LValueRead::Copy(_) => LValueRead::Copy(&mut read_seq),
-                    LValueRead::Take(_) | LValueRead::None => {
-                        LValueRead::Take(&mut read_seq)
-                    }
-                },
-                write_out: &mut write_seq,
-            };
-            errs.with(self.compile_lvalue(seq_ast, &mut sub))
-        };
+        let (seq_type, read_seq, write_seq) =
+            errs.with(self.compile_index_lvalue_sequence(seq_ast, sink));
         // Compile index expression:
         let index_span = index_ast.span;
         let mut read_index = Vec::<AdsInstruction>::new();
@@ -822,59 +809,10 @@ impl<'a> AdsCompiler<'a> {
             }
             (ExprType::List(item_type), ExprType::Integer)
             | (ExprType::List(item_type), ExprType::Bottom) => {
-                match &mut sink.read_out {
-                    LValueRead::Copy(copy_out) => {
-                        let seq_var = self.env.add_internal_variable();
-                        sink.setup_out.extend(read_seq);
-                        let index_var = self.env.add_internal_variable();
-                        sink.setup_out.extend(read_index);
-                        let frame = AdsFrameRef(0);
-                        copy_out
-                            .push(AdsInstruction::GetValue(frame, seq_var));
-                        copy_out
-                            .push(AdsInstruction::GetValue(frame, index_var));
-                        copy_out.push(AdsInstruction::GetListIndex {
-                            context: self.env.current_src_context(),
-                            list_span: seq_span,
-                            index_span,
-                        });
-                        sink.write_out
-                            .push(AdsInstruction::GetValue(frame, seq_var));
-                        sink.write_out
-                            .push(AdsInstruction::GetValue(frame, index_var));
-                        // now stack is ...new_item, seq, index
-                    }
-                    LValueRead::Take(take_out) => {
-                        take_out.extend(read_seq);
-                        take_out.extend(read_index);
-                        // now stack is ...value, seq, index
-                        take_out.push(AdsInstruction::TakeListIndex {
-                            context: self.env.current_src_context(),
-                            list_span: seq_span,
-                            index_span,
-                        });
-                        // now stack is ...value, old_item, seq, index
-                        take_out.push(AdsInstruction::RotateValues(4, 2));
-                        // now stack is ...seq, index, value, old_item
-                        // ...
-                        // now stack is ...seq, index, new_item
-                        sink.write_out
-                            .push(AdsInstruction::RotateValues(3, 1));
-                        // now stack is ...new_item, seq, index
-                    }
-                    LValueRead::None => {
-                        sink.write_out.extend(read_seq);
-                        sink.write_out.extend(read_index);
-                        // now stack is ...new_item, seq, index
-                    }
-                }
-                // now stack is ...new_item, seq, index
-                sink.write_out.push(AdsInstruction::SetListIndex {
-                    context: self.env.current_src_context(),
-                    list_span: seq_span,
-                    index_span,
-                });
-                sink.write_out.extend(write_seq);
+                self.compile_index_lvalue_for_list(
+                    seq_span, read_seq, write_seq, index_span, read_index,
+                    sink,
+                );
                 Rc::unwrap_or_clone(item_type)
             }
             (ExprType::Tuple(item_types), ExprType::Integer)
@@ -882,9 +820,15 @@ impl<'a> AdsCompiler<'a> {
                 match index_static {
                     Ok(index) => {
                         let index = index.unwrap_int();
-                        if index < BigInt::ZERO
-                            || index >= BigInt::from(item_types.len())
+                        if index >= BigInt::ZERO
+                            && index < BigInt::from(item_types.len())
                         {
+                            let index = usize::try_from(index).unwrap();
+                            self.compile_index_lvalue_for_tuple(
+                                read_seq, write_seq, index, sink,
+                            );
+                            item_types[index].clone()
+                        } else {
                             errs.push(AdsError::ExprTypeError {
                                 context: self.env.current_src_context(),
                                 error: ExprTypeError::TupleIndexOutOfRange {
@@ -895,53 +839,6 @@ impl<'a> AdsCompiler<'a> {
                                 },
                             });
                             ExprType::Undefined
-                        } else {
-                            let index = usize::try_from(index).unwrap();
-                            let item_type = item_types[index].clone();
-                            match &mut sink.read_out {
-                                LValueRead::Copy(copy_out) => {
-                                    let seq_var =
-                                        self.env.add_internal_variable();
-                                    sink.setup_out.extend(read_seq);
-                                    let frame = AdsFrameRef(0);
-                                    copy_out.push(AdsInstruction::GetValue(
-                                        frame, seq_var,
-                                    ));
-                                    copy_out.push(
-                                        AdsInstruction::GetTupleItem(index),
-                                    );
-                                    sink.write_out.push(
-                                        AdsInstruction::GetValue(
-                                            frame, seq_var,
-                                        ),
-                                    );
-                                }
-                                LValueRead::Take(take_out) => {
-                                    take_out.extend(read_seq);
-                                    // now stack is ...value, seq
-                                    take_out.push(
-                                        AdsInstruction::TakeTupleItem(index),
-                                    );
-                                    // now stack is ...value, old_item, seq
-                                    take_out.push(
-                                        AdsInstruction::RotateValues(3, 1),
-                                    );
-                                    // now stack is ...seq, value, old_item
-                                    //...
-                                    // now stack is ...seq, new_item
-                                    sink.write_out.push(
-                                        AdsInstruction::RotateValues(2, 1),
-                                    );
-                                    // now stack is ...new_item, seq
-                                }
-                                LValueRead::None => {
-                                    sink.write_out.extend(read_seq);
-                                }
-                            }
-                            sink.write_out
-                                .push(AdsInstruction::SetTupleItem(index));
-                            sink.write_out.extend(write_seq);
-                            item_type
                         }
                     }
                     Err(reason) => {
@@ -980,6 +877,127 @@ impl<'a> AdsCompiler<'a> {
             }
         };
         (item_type, errs)
+    }
+
+    fn compile_index_lvalue_sequence(
+        &mut self,
+        seq_ast: LValueAst,
+        sink: &mut LValueSink,
+    ) -> ((ExprType, Vec<AdsInstruction>, Vec<AdsInstruction>), Errs<AdsError>)
+    {
+        let mut errs = Errs::<AdsError>::new();
+        let mut read_seq = Vec::<AdsInstruction>::new();
+        let mut write_seq = Vec::<AdsInstruction>::new();
+        let seq_type = {
+            let mut sub = LValueSink {
+                setup_out: sink.setup_out,
+                read_out: match &mut sink.read_out {
+                    LValueRead::Copy(_) => LValueRead::Copy(&mut read_seq),
+                    LValueRead::Take(_) | LValueRead::None => {
+                        LValueRead::Take(&mut read_seq)
+                    }
+                },
+                write_out: &mut write_seq,
+            };
+            errs.with(self.compile_lvalue(seq_ast, &mut sub))
+        };
+        ((seq_type, read_seq, write_seq), errs)
+    }
+
+    fn compile_index_lvalue_for_list(
+        &mut self,
+        seq_span: SrcSpan,
+        read_seq: Vec<AdsInstruction>,
+        write_seq: Vec<AdsInstruction>,
+        index_span: SrcSpan,
+        read_index: Vec<AdsInstruction>,
+        sink: &mut LValueSink,
+    ) {
+        match &mut sink.read_out {
+            LValueRead::Copy(copy_out) => {
+                let seq_var = self.env.add_internal_variable();
+                sink.setup_out.extend(read_seq);
+                let index_var = self.env.add_internal_variable();
+                sink.setup_out.extend(read_index);
+                let frame = AdsFrameRef(0);
+                copy_out.push(AdsInstruction::GetValue(frame, seq_var));
+                copy_out.push(AdsInstruction::GetValue(frame, index_var));
+                copy_out.push(AdsInstruction::GetListIndex {
+                    context: self.env.current_src_context(),
+                    list_span: seq_span,
+                    index_span,
+                });
+                sink.write_out.push(AdsInstruction::GetValue(frame, seq_var));
+                sink.write_out
+                    .push(AdsInstruction::GetValue(frame, index_var));
+                // now stack is ...new_item, seq, index
+            }
+            LValueRead::Take(take_out) => {
+                take_out.extend(read_seq);
+                take_out.extend(read_index);
+                // now stack is ...value, seq, index
+                take_out.push(AdsInstruction::TakeListIndex {
+                    context: self.env.current_src_context(),
+                    list_span: seq_span,
+                    index_span,
+                });
+                // now stack is ...value, old_item, seq, index
+                take_out.push(AdsInstruction::RotateValues(4, 2));
+                // now stack is ...seq, index, value, old_item
+                // ...
+                // now stack is ...seq, index, new_item
+                sink.write_out.push(AdsInstruction::RotateValues(3, 1));
+                // now stack is ...new_item, seq, index
+            }
+            LValueRead::None => {
+                sink.write_out.extend(read_seq);
+                sink.write_out.extend(read_index);
+                // now stack is ...new_item, seq, index
+            }
+        }
+        // now stack is ...new_item, seq, index
+        sink.write_out.push(AdsInstruction::SetListIndex {
+            context: self.env.current_src_context(),
+            list_span: seq_span,
+            index_span,
+        });
+        sink.write_out.extend(write_seq);
+    }
+
+    fn compile_index_lvalue_for_tuple(
+        &mut self,
+        read_seq: Vec<AdsInstruction>,
+        write_seq: Vec<AdsInstruction>,
+        index: usize,
+        sink: &mut LValueSink,
+    ) {
+        match &mut sink.read_out {
+            LValueRead::Copy(copy_out) => {
+                let seq_var = self.env.add_internal_variable();
+                sink.setup_out.extend(read_seq);
+                let frame = AdsFrameRef(0);
+                copy_out.push(AdsInstruction::GetValue(frame, seq_var));
+                copy_out.push(AdsInstruction::GetTupleItem(index));
+                sink.write_out.push(AdsInstruction::GetValue(frame, seq_var));
+            }
+            LValueRead::Take(take_out) => {
+                take_out.extend(read_seq);
+                // now stack is ...value, seq
+                take_out.push(AdsInstruction::TakeTupleItem(index));
+                // now stack is ...value, old_item, seq
+                take_out.push(AdsInstruction::RotateValues(3, 1));
+                // now stack is ...seq, value, old_item
+                //...
+                // now stack is ...seq, new_item
+                sink.write_out.push(AdsInstruction::RotateValues(2, 1));
+                // now stack is ...new_item, seq
+            }
+            LValueRead::None => {
+                sink.write_out.extend(read_seq);
+            }
+        }
+        sink.write_out.push(AdsInstruction::SetTupleItem(index));
+        sink.write_out.extend(write_seq);
     }
 
     fn compile_variable_lvalue(
